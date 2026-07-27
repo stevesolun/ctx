@@ -13,17 +13,18 @@ itself decides when a skill's content is injected into the prompt
 based on user intent + the skill's `description` match. ctx is an
 **observer**, not a driver. Its claim is:
 
-1. **Observe** — `PostToolUse` hook fires `context_monitor.py` on
+1. **Observe** — `PostToolUse` fires the packaged context-monitor hook on
    every tool call. When a tool call's content matches a skill-name
    signal, the event is recorded.
 2. **Suggest** — unmatched signals accumulate in
-   `~/.claude/pending-skills.json`. `skill_suggest.py` surfaces them
+   `~/.claude/pending-skills.json`. The bundle-orchestrator hook surfaces them
    into Claude's context as `hookSpecificOutput.additionalContext`,
    so Claude raises them to the user on next response.
 3. **Record** — when Claude actually uses a skill (via its own load
    mechanism), the event lands in `~/.claude/skill-events.jsonl` as
    `{"event": "load", "skill": "<slug>", ...}`.
-4. **Score** — the `Stop` hook runs `quality_on_session_end.py`,
+4. **Score** — the `Stop` hook runs the lifecycle hook's
+   `quality-on-session-end` command,
    which recomputes the sidecar for every slug with new events. The
    telemetry signal reflects the load within seconds.
 
@@ -32,9 +33,9 @@ with no gap**. This playbook tests each.
 
 ## Prerequisites
 
-- `claude-ctx` 0.5.0-rc6 installed (`pip install claude-ctx`).
-- `~/.claude/skill-wiki/` present and graph pre-built
-  (`graphify-out/graph.json` has 2,253 nodes / 454K edges).
+- The current `claude-ctx` checkout installed (`pip install -e .`).
+- `~/.claude/skill-wiki/` present with a pre-built
+  `graphify-out/graph.json`.
 - `~/.claude/settings.json` has the PostToolUse + Stop hooks wired.
 - Baseline snapshot of `~/.claude/skill-events.jsonl` (line count).
 - Baseline snapshot of 3 sidecars (`python-patterns`, `fastapi-pro`,
@@ -44,28 +45,33 @@ with no gap**. This playbook tests each.
 
 ### 1. Hook registration
 - [ ] `settings.json` `PostToolUse` contains
-      `context_monitor.py --from-stdin`.
+      `python -m ctx.adapters.claude_code.hooks.context_monitor --from-stdin`.
 - [ ] `settings.json` `PostToolUse` contains
-      `skill_add_detector.py --from-stdin`.
-- [ ] `settings.json` `PostToolUse` contains `skill_suggest.py`.
+      `python -m skill_add_detector --from-stdin`.
 - [ ] `settings.json` `PostToolUse` contains
-      `backup_on_change.py` under an `Edit|Write|MultiEdit` matcher.
-- [ ] `settings.json` `Stop` contains `usage_tracker.py --sync`.
-- [ ] `settings.json` `Stop` contains `quality_on_session_end.py`.
-- [ ] All hook commands use `--from-stdin` (no
-      `$CLAUDE_TOOL_INPUT`/`$CLAUDE_TOOL_NAME` argv interpolation).
+      `python -m ctx.adapters.claude_code.hooks.bundle_orchestrator`.
+- [ ] `settings.json` `PostToolUse` contains
+      `python -m ctx.adapters.claude_code.hooks.lifecycle_hooks backup-on-change`
+      under an `Edit|Write|MultiEdit` matcher.
+- [ ] `settings.json` `Stop` contains `python -m usage_tracker --sync`.
+- [ ] `settings.json` `Stop` contains
+      `python -m ctx.adapters.claude_code.hooks.lifecycle_hooks quality-on-session-end`.
+- [ ] Tool payloads are read from stdin; no hook command interpolates
+      `$CLAUDE_TOOL_INPUT` or `$CLAUDE_TOOL_NAME` into argv.
 
-### 2. Observe — context_monitor detects a known signal
-- [ ] Feed `context_monitor.py --from-stdin` a synthetic tool-use
+### 2. Observe — context monitor detects a known signal
+- [ ] Feed
+      `python -m ctx.adapters.claude_code.hooks.context_monitor --from-stdin`
+      a synthetic tool-use
       event whose `tool_input.file_path` contains `fastapi`.
 - [ ] Before: read `~/.claude/pending-skills.json` line count (or
       its `unmatched_signals` array length).
 - [ ] After: length grew OR `graph_suggestions` changed.
-- [ ] Repeat with `stripe`, `postgres`, `pci` — all three now in
-      `KEYWORD_SIGNALS` as of rc5.
+- [ ] Repeat with `stripe`, `postgres`, `pci` — all three are in
+      `KEYWORD_SIGNALS`.
 
-### 3. Suggest — skill_suggest surfaces pending skills
-- [ ] Run `skill_suggest.py` with no args.
+### 3. Suggest — bundle orchestrator surfaces pending entities
+- [ ] Run `python -m ctx.adapters.claude_code.hooks.bundle_orchestrator`.
 - [ ] Stdout is a valid JSON object with
       `hookSpecificOutput.hookEventName == "PostToolUse"` and
       `additionalContext` referencing at least one candidate skill
@@ -81,7 +87,11 @@ with no gap**. This playbook tests each.
 
 ### 5. Score — sidecar refreshes on session end
 - [ ] Save sidecar `fastapi-pro.json` copy → `/tmp/baseline/`.
-- [ ] Run `python hooks/quality_on_session_end.py`.
+- [ ] Set `SID` to the test session ID, then run:
+      ```bash
+      echo "{\"session_id\":\"$SID\"}" \
+        | python -m ctx.adapters.claude_code.hooks.lifecycle_hooks quality-on-session-end
+      ```
 - [ ] Stdout should include `fastapi-pro` in the "recomputed" list
       (only slugs with new events should be touched).
 - [ ] Compare `~/.claude/skill-quality/fastapi-pro.json` mtime —
@@ -94,8 +104,8 @@ with no gap**. This playbook tests each.
 - [ ] From the moment the synthetic load event is written to
       skill-events.jsonl, how many seconds until
       `ctx-skill-quality explain fastapi-pro` reflects it?
-      - Required: **< 30 seconds** with `quality_on_session_end.py`
-        fired manually.
+      - Required: **< 30 seconds** with the lifecycle hook's
+        `quality-on-session-end` command fired manually.
       - Stretch: **< 5 seconds** if the Stop hook fires on session
         close.
 - [ ] Record the measured latency.

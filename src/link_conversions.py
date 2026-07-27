@@ -13,9 +13,14 @@ Scans ~/.claude/skill-wiki/converted/ for all converted skill directories and:
   3. Updates index.md with any new skill entries
   4. Appends a summary entry to log.md
   5. Generates converted-index.md listing all converted skills
+
+The wiki root must already be a real directory, and checked wiki paths must not
+contain symlinks. Physical page updates are atomic; installed wiki packs receive
+matching overlay writes.
 """
 
 import argparse
+import os
 import re
 import sys
 from dataclasses import dataclass, field
@@ -23,8 +28,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ctx.core.wiki.wiki_packs import load_merged_wiki_pages, write_active_wiki_overlay_pack
-from ctx_config import cfg
 from ctx.core.wiki.wiki_utils import get_field as _find_field
+from ctx.utils._fs_utils import (
+    ensure_secure_directory,
+    reject_symlink_path,
+    safe_atomic_write_text,
+)
+from ctx_config import cfg
 
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -63,6 +73,9 @@ def _read_wiki_page(wiki: Path, relpath: str) -> str | None:
     """Read a wiki page from active packs when installed, else from disk."""
     packs_dir = wiki / "wiki-packs"
     path = wiki / relpath
+    reject_symlink_path(wiki)
+    reject_symlink_path(packs_dir)
+    reject_symlink_path(path)
     if packs_dir.is_dir():
         pages = load_merged_wiki_pages(packs_dir)
         if relpath in pages:
@@ -79,9 +92,11 @@ def _write_wiki_page(wiki: Path, relpath: str, content: str) -> None:
     """Write a wiki page, mirroring into overlay packs when installed."""
     packs_dir = wiki / "wiki-packs"
     path = wiki / relpath
+    reject_symlink_path(wiki)
+    reject_symlink_path(packs_dir)
+    reject_symlink_path(path)
     if path.exists() or not packs_dir.is_dir():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        safe_atomic_write_text(path, content, encoding="utf-8")
     if packs_dir.is_dir():
         write_active_wiki_overlay_pack(
             packs_dir=packs_dir,
@@ -381,13 +396,19 @@ def generate_converted_index(wiki: Path, skills: list[ConvertedSkill]) -> None:
 def run(wiki: Path, skills_dir: Path) -> ProcessResult:
     """Main processing loop."""
     result = ProcessResult()
-
-    if not wiki.is_dir():
-        result.errors.append(f"Wiki directory not found: {wiki}")
-        return result
-
     entities_dir = wiki / "entities" / "skills"
-    entities_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        for guarded_path in (wiki, entities_dir, wiki / "converted", wiki / "wiki-packs"):
+            reject_symlink_path(guarded_path)
+        if not wiki.is_dir():
+            result.errors.append(f"Wiki directory not found: {wiki}")
+            return result
+        ensure_secure_directory(entities_dir)
+        reject_symlink_path(entities_dir)
+    except (OSError, RuntimeError, ValueError) as exc:
+        result.errors.append(f"Wiki path rejected: {exc}")
+        return result
 
     converted_skills = scan_converted(wiki)
     if not converted_skills:
@@ -448,7 +469,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    wiki = Path(args.wiki).expanduser().resolve()
+    wiki = Path(os.path.abspath(Path(args.wiki).expanduser()))
     skills_dir = Path(args.skills_dir).expanduser().resolve()
 
     print(f"Wiki:       {wiki}")

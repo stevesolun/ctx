@@ -1,0 +1,6 @@
+# Linux x86_64 / CPython 3.12 wheels used by the ubuntu-latest policy gate.
+# Refresh by downloading exact wheels and replacing both version and SHA-256.
+packaging==26.2 \
+    --hash=sha256:5fc45236b9446107ff2415ce77c807cee2862cb6fac22b8a73826d0693b0980e
+PyYAML==6.0.3 \
+    --hash=sha256:ba1cc08a7ccde2d2ec775841541641e4548226580ab850948cbfda66a1befcdc

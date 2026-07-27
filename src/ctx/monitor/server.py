@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from ctx.monitor import routes
+from ctx.monitor.security import origin_matches_http_host as _origin_matches_http_host
 
 
 class MonitorServer(ThreadingHTTPServer):
@@ -66,6 +67,7 @@ class MonitorHandlerDeps:
         [BaseHTTPRequestHandler, str, Mapping[str, Any], str],
         None,
     ]
+    origin_matches_http_host: Callable[[str, str], bool] = _origin_matches_http_host
 
 
 def server_shutdown_requested(server: Any) -> bool:
@@ -88,12 +90,13 @@ def build_monitor_handler(deps: MonitorHandlerDeps) -> type[BaseHTTPRequestHandl
         # CSRF defense. Dashboard mutation endpoints require same-origin POSTs
         # plus a per-process token injected into the served dashboard page.
         def _same_origin(self) -> bool:
-            request_host = deps.request_host_name(self.headers.get("Host", ""))
+            host_header = self.headers.get("Host", "")
+            request_host = deps.request_host_name(host_header)
             if not deps.host_allows_mutations(request_host):
                 return False
             origin = self.headers.get("Origin") or ""
             if origin:
-                return deps.origin_host_name(origin) == request_host
+                return deps.origin_matches_http_host(origin, host_header)
             # No Origin header (curl, direct tool calls) is acceptable only
             # when the mutation token below is also present.
             return True

@@ -1,6 +1,9 @@
 # Babysitter orchestration — runs, state, and local SDK install
 .a5c/
 
+# OMX team orchestration state and transient context snapshots
+.omx/
+
 # Python
 __pycache__/
 *.py[cod]

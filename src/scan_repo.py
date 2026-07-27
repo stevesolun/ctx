@@ -679,30 +679,59 @@ def _profile_recommendation_query(profile: dict) -> str:
 
 def _shared_recommendations(profile: dict) -> list[dict[str, Any]] | None:
     """Return shared recommender rows, or None when no graph is available."""
-    from ctx.core.graph.resolve_graph import load_graph  # noqa: PLC0415
-    from ctx.core.resolve.recommendations import (  # noqa: PLC0415
-        query_to_tags,
-        recommend_by_tags,
-    )
+    from ctx import recommend_bundle  # noqa: PLC0415
     from ctx_config import cfg  # noqa: PLC0415
 
-    graph_path = cfg.wiki_dir / "graphify-out" / "graph.json"
-    graph = load_graph(graph_path)
-    if graph.number_of_nodes() == 0:
+    graph_path = Path(cfg.wiki_dir) / "graphify-out" / "graph.json"
+    if not graph_path.is_file() and not (graph_path.parent / "packs").is_dir():
         return None
     query = _profile_recommendation_query(profile)
-    tags = query_to_tags(query)
-    if not tags:
+    if not query:
         return []
-    return recommend_by_tags(
-        graph,
-        tags,
-        top_n=max(1, min(int(cfg.recommendation_top_k), 5)),
-        query=query,
-        entity_types=("skill", "agent", "mcp-server"),
-        min_normalized_score=cfg.recommendation_min_normalized_score,
-        use_semantic_query=True,
-    )
+    languages = [
+        str(item["name"])
+        for item in profile.get("languages", [])
+        if isinstance(item, dict) and item.get("name")
+    ]
+    testing = [
+        str(item["name"])
+        for item in profile.get("testing", [])
+        if isinstance(item, dict) and item.get("name")
+    ]
+    query_specs: list[tuple[str, str | None]] = [(query, languages[0] if languages else None)]
+    for detected_language in languages:
+        testing_query = " ".join((detected_language, *(testing or ["testing"])))
+        query_specs.extend(
+            [
+                (testing_query, detected_language),
+                (f"ctx {testing_query}", detected_language),
+            ]
+        )
+    if languages:
+        query_specs.append((f"{languages[0]} reviewer", languages[0]))
+
+    top_k = max(1, min(int(cfg.recommendation_top_k), 5))
+    results: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for focused_query, language_hint in dict.fromkeys(query_specs):
+        rows = recommend_bundle(
+            focused_query,
+            top_k=top_k,
+            local_code_task=True,
+            no_api_keys=True,
+            language=language_hint,
+        )
+        for row in rows:
+            if row.get("installable") is not True or row.get("load_status") != "local-wiki":
+                continue
+            key = (str(row.get("type") or ""), str(row.get("name") or ""))
+            if key in seen:
+                continue
+            seen.add(key)
+            results.append(row)
+            if len(results) >= top_k:
+                return results
+    return results
 
 
 def _row_reason(row: dict[str, Any]) -> str:

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import re
 from typing import Any
 
+import yaml
+
+import scripts.ci_no_test_policy as ci_no_test_policy
 from scripts.ci_classifier import classify_paths, main
-from scripts.ci_no_test_policy import evaluate_policy, is_release_metadata_only
+from scripts.ci_no_test_policy import PolicyResult, evaluate_policy, is_release_metadata_only
 from scripts.ci_required import REQUIRED_JOBS, failed_required_jobs
 
 
@@ -27,6 +31,65 @@ def _required_needs(
     return needs
 
 
+def _dependabot_result(path: str, before: str, after: str) -> PolicyResult:
+    return evaluate_policy(
+        [path],
+        (),
+        {path: "diff contents are not trusted for this exemption"},
+        actor="dependabot[bot]",
+        blobs_by_file={path: (before, after)},
+    )
+
+
+def _pyproject_blob(
+    *,
+    dependency: str = "example>=1,<3",
+    optional: str = "pytest>=8",
+    build: str = "setuptools>=77",
+    version: str = "1.0.0",
+) -> str:
+    return (
+        "[build-system]\n"
+        f"requires = [{json.dumps(build)}]\n"
+        'build-backend = "setuptools.build_meta"\n\n'
+        "[project]\n"
+        'name = "example"\n'
+        f'version = "{version}"\n'
+        f"dependencies = [{json.dumps(dependency)}]\n\n"
+        "[project.optional-dependencies]\n"
+        f"dev = [{json.dumps(optional)}]\n"
+    )
+
+
+def _workflow_blob(
+    *,
+    checkout_ref: str = "v4",
+    setup_ref: str = "v5.1.0",
+    env_value: str = "stable",
+    fetch_depth: int = 0,
+    reverse_steps: bool = False,
+) -> str:
+    checkout = (
+        "      - name: Checkout\n"
+        f"        uses: actions/checkout@{checkout_ref}\n"
+        "        with:\n"
+        f"          fetch-depth: {fetch_depth}\n"
+    )
+    setup = f"      - name: Setup Python\n        uses: actions/setup-python@{setup_ref}\n"
+    steps = setup + checkout if reverse_steps else checkout + setup
+    return (
+        "name: Tests\n"
+        "on: [push]\n"
+        "jobs:\n"
+        "  test:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    env:\n"
+        f"      NOTE: {json.dumps(env_value)}\n"
+        "    steps:\n"
+        f"{steps}"
+    )
+
+
 def test_docs_only_classification() -> None:
     flags = classify_paths(["README.md", "docs/install.md", "graph/README.md"])
 
@@ -42,6 +105,7 @@ def test_docs_only_classification() -> None:
         "similarity_changed": False,
         "source_changed": False,
         "telemetry_changed": False,
+        "windows_changed": False,
     }
 
 
@@ -52,6 +116,33 @@ def test_docs_tooling_changes_are_docs_only() -> None:
     assert flags["docs_changed"] is True
     assert flags["graph_only"] is False
     assert flags["source_changed"] is False
+
+
+def test_security_gate_configs_trigger_ci_lanes() -> None:
+    for path in (
+        ".github/codeql/codeql-config.yml",
+        ".github/dependabot.yml",
+        ".github/pip-audit-ignore.txt",
+        ".github/requirements-no-test-policy.txt",
+    ):
+        flags = classify_paths([path])
+
+        assert flags["ci_changed"] is True
+        assert flags["docs_only"] is False
+        assert flags["package_changed"] is True
+        assert flags["source_changed"] is True
+
+
+def test_pip_audit_policy_has_no_active_blanket_exemptions() -> None:
+    policy_path = Path(".github/pip-audit-ignore.txt")
+
+    assert policy_path.is_file()
+    active_entries = [
+        line.split("#", maxsplit=1)[0].strip()
+        for line in policy_path.read_text(encoding="utf-8").splitlines()
+        if line.split("#", maxsplit=1)[0].strip()
+    ]
+    assert active_entries == []
 
 
 def test_qa_feature_status_tracker_is_docs_only() -> None:
@@ -174,6 +265,13 @@ def test_source_change_marks_source_and_package() -> None:
     assert flags["docs_only"] is False
 
 
+def test_reproducible_build_script_marks_package_changed() -> None:
+    flags = classify_paths(["scripts/build_reproducible_dist.py"])
+
+    assert flags["package_changed"] is True
+    assert flags["source_changed"] is True
+
+
 def test_workflow_change_fails_open_for_future_gates() -> None:
     flags = classify_paths([".github/workflows/test.yml"])
 
@@ -183,6 +281,7 @@ def test_workflow_change_fails_open_for_future_gates() -> None:
     assert flags["similarity_changed"] is True
     assert flags["source_changed"] is True
     assert flags["telemetry_changed"] is True
+    assert flags["windows_changed"] is True
     assert flags["docs_changed"] is False
     assert flags["docs_only"] is False
 
@@ -214,6 +313,89 @@ def test_no_test_policy_covers_ci_package_contract_files() -> None:
     assert "python -m ruff format --check src hooks scripts" in workflow
     assert "release metadata-only changes" in workflow
     assert "no-tests-needed label" in workflow
+    assert "PR_ACTOR: ${{ github.actor }}" in workflow
+    assert "PR_LABELS_JSON: ${{ toJson(github.event.pull_request.labels.*.name) }}" in workflow
+    assert '--labels-json "$PR_LABELS_JSON"' in workflow
+    assert '--actor "$PR_ACTOR"' in workflow
+    assert "--require-hashes" in workflow
+    assert "--only-binary=:all:" in workflow
+    assert "-r .github/requirements-no-test-policy.txt" in workflow
+    assert "cache-dependency-path: .github/requirements-no-test-policy.txt" in workflow
+    assert "packaging>=" not in workflow
+    assert "PyYAML>=" not in workflow
+
+
+def test_no_test_policy_dependencies_are_exact_and_hash_locked() -> None:
+    lock_path = Path(".github/requirements-no-test-policy.txt")
+    lock = lock_path.read_text(encoding="utf-8")
+    records = ci_no_test_policy._requirements_records(lock)
+
+    assert records is not None
+    dependencies: dict[str, tuple[str, ...]] = {}
+    for _wrapper, spec, hashes in records:
+        if spec is None:
+            continue
+        requirement = ci_no_test_policy.Requirement(spec)
+        specifiers = tuple(requirement.specifier)
+        assert len(specifiers) == 1
+        assert specifiers[0].operator == "=="
+        assert hashes
+        assert all(re.fullmatch(r"[0-9a-f]{64}", digest) for digest in hashes)
+        dependencies[requirement.name] = hashes
+    assert set(dependencies) == {"packaging", "PyYAML"}
+
+
+def test_no_test_policy_runs_for_every_pull_request() -> None:
+    workflow = Path(".github/workflows/test.yml").read_text(encoding="utf-8")
+    policy_job = workflow.split("\n  no-test-no-merge:\n", maxsplit=1)[1].split(
+        "\n  ci-required:", maxsplit=1
+    )[0]
+
+    assert "if: ${{ github.event_name == 'pull_request' }}" in policy_job
+    assert "docs_only" not in policy_job
+    assert "graph_only" not in policy_job
+    policy_shell = policy_job.split("        run: |\n", maxsplit=1)[1]
+    assert "${{" not in policy_shell
+    assert "LABELS='" not in policy_shell
+
+
+def test_ci_required_requires_no_test_policy_success_on_every_pr() -> None:
+    workflow = Path(".github/workflows/test.yml").read_text(encoding="utf-8")
+    required_job = workflow.split("\n  ci-required:\n", maxsplit=1)[1]
+
+    assert "NO_TEST_NO_MERGE_RESULT: ${{ needs.no-test-no-merge.result }}" in required_job
+    assert (
+        'if [[ "$EVENT_NAME" == "pull_request" && '
+        '"$NO_TEST_NO_MERGE_RESULT" != "success" ]]' in required_job
+    )
+    assert "::error::no-test-no-merge must pass on every pull request" in required_job
+
+
+def test_dependabot_groups_weekly_python_and_action_updates() -> None:
+    config = yaml.safe_load(Path(".github/dependabot.yml").read_text(encoding="utf-8"))
+    updates = {entry["package-ecosystem"]: entry for entry in config["updates"]}
+
+    assert config["version"] == 2
+    assert set(updates) == {"pip", "github-actions"}
+    for ecosystem, group_name in (
+        ("pip", "python-dependencies"),
+        ("github-actions", "github-actions"),
+    ):
+        update = updates[ecosystem]
+        if ecosystem == "pip":
+            assert update["directories"] == ["/", "/.github"]
+            assert "directory" not in update
+        else:
+            assert update["directory"] == "/"
+            assert "directories" not in update
+        assert update["schedule"] == {
+            "interval": "weekly",
+            "day": "monday",
+            "time": "06:00",
+            "timezone": "Etc/UTC",
+        }
+        assert update["open-pull-requests-limit"] == 2
+        assert update["groups"] == {group_name: {"patterns": ["*"]}}
 
 
 def test_no_test_policy_treats_all_workflows_as_contract_files() -> None:
@@ -290,7 +472,7 @@ def test_similarity_gate_caches_and_predownloads_real_model() -> None:
     workflow = Path(".github/workflows/test.yml").read_text(encoding="utf-8")
 
     assert "actions/cache@v4" not in workflow
-    assert "actions/cache@v5" in workflow
+    assert "actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0" in workflow
     assert "Cache MiniLM model" in workflow
     assert "hf-sentence-transformers-all-MiniLM-L6-v2-v1" in workflow
     assert "Pre-download MiniLM model" in workflow
@@ -320,7 +502,8 @@ def test_publish_static_gate_uses_canonical_python_target() -> None:
     workflow = Path(".github/workflows/publish.yml").read_text(encoding="utf-8")
     setup_match = re.search(
         r"- name: Set up Python\n"
-        r"\s+uses: actions/setup-python@v6\n"
+        r"\s+uses: actions/setup-python@"
+        r"ece7cb06caefa5fff74198d8649806c4678c61a1 # v6\.3\.0\n"
         r"\s+with:\n"
         r'\s+python-version: "([^"]+)"',
         workflow,
@@ -544,6 +727,580 @@ def test_no_test_policy_rejects_pyproject_dependency_change_without_tests() -> N
     assert result.passed is False
 
 
+def test_no_test_policy_exempts_dependabot_python_version_updates() -> None:
+    before = _pyproject_blob(
+        dependency=("hnswlib>=0.8,<0.9; platform_python_implementation == 'CPython'"),
+    )
+    after = _pyproject_blob(
+        dependency=("hnswlib>=0.9,<1; platform_python_implementation == 'CPython'"),
+        optional="pytest>=8.4",
+        build="setuptools>=80",
+    )
+
+    result = _dependabot_result("pyproject.toml", before, after)
+
+    assert result.passed is True
+    assert result.message == "Policy exempted for Dependabot dependency version updates."
+    assert result.contract_files == ("pyproject.toml",)
+
+
+def test_no_test_policy_exempts_strict_requirements_version_updates() -> None:
+    before = "# docs\nmkdocs==1.6.0  # renderer\npytest>=8\n"
+    after = "# docs\nmkdocs==1.6.1  # renderer\npytest>=8.4\n"
+
+    result = _dependabot_result("requirements-docs.txt", before, after)
+
+    assert result.passed is True
+
+
+def test_no_test_policy_exempts_hashed_requirement_version_updates() -> None:
+    before = (
+        "packaging==26.1 \\\n"
+        f"    --hash=sha256:{'a' * 64}\n"
+        "PyYAML==6.0.3 \\\n"
+        f"    --hash=sha256:{'b' * 64}\n"
+    )
+    after = before.replace("packaging==26.1", "packaging==26.2").replace(
+        "a" * 64,
+        "c" * 64,
+    )
+
+    result = _dependabot_result(
+        ".github/requirements-no-test-policy.txt",
+        before,
+        after,
+    )
+
+    assert result.passed is True
+
+
+def test_no_test_policy_exempts_regenerated_hash_cardinality() -> None:
+    before = f"packaging==26.1 \\\n    --hash=sha256:{'a' * 64}\n"
+    after = f"packaging==26.2 \\\n    --hash=sha256:{'b' * 64} \\\n    --hash=sha256:{'c' * 64}\n"
+
+    result = _dependabot_result(
+        ".github/requirements-no-test-policy.txt",
+        before,
+        after,
+    )
+
+    assert result.passed is True
+
+
+def test_no_test_policy_rejects_unsafe_hashed_requirement_updates() -> None:
+    old_hash = "a" * 64
+    new_hash = "b" * 64
+    before = f"packaging==26.1 \\\n    --hash=sha256:{old_hash}\n"
+    cases = (
+        f"packaging==26.1 \\\n    --hash=sha256:{new_hash}\n",
+        f"packaging==26.2 \\\n    --hash=sha256:{old_hash}\n",
+        "packaging==26.2 \\\n    --hash=sha256:not-a-digest\n",
+        "packaging==26.2 \\\n    --trusted-host example.test\n",
+    )
+
+    for after in cases:
+        result = _dependabot_result(
+            ".github/requirements-no-test-policy.txt",
+            before,
+            after,
+        )
+        assert result.passed is False
+
+
+def test_no_test_policy_rejects_reordered_unchanged_hash_set() -> None:
+    before = f"packaging==26.1 \\\n    --hash=sha256:{'a' * 64} \\\n    --hash=sha256:{'b' * 64}\n"
+    after = f"packaging==26.2 \\\n    --hash=sha256:{'b' * 64} \\\n    --hash=sha256:{'a' * 64}\n"
+
+    result = _dependabot_result(
+        ".github/requirements-no-test-policy.txt",
+        before,
+        after,
+    )
+
+    assert result.passed is False
+
+
+def test_no_test_policy_preserves_unchanged_pyproject_direct_source_identity() -> None:
+    direct_source = "example @ https://example.test/example-v1.whl"
+    before = _pyproject_blob(dependency=direct_source)
+    after = _pyproject_blob(dependency=direct_source, optional="pytest>=8.4")
+
+    assert _dependabot_result("pyproject.toml", before, after).passed is True
+
+
+def test_no_test_policy_exempts_dependabot_action_ref_updates() -> None:
+    path = ".github/workflows/test.yml"
+    result = _dependabot_result(
+        path,
+        _workflow_blob(),
+        _workflow_blob(checkout_ref="v5", setup_ref="v6.0.1"),
+    )
+
+    assert result.passed is True
+    assert result.message == "Policy exempted for Dependabot dependency version updates."
+
+
+def test_no_test_policy_exempts_dependabot_immutable_action_sha_updates() -> None:
+    path = ".github/workflows/test.yml"
+    old_sha = "a" * 40
+    new_sha = "b" * 40
+
+    result = _dependabot_result(
+        path,
+        _workflow_blob(checkout_ref=old_sha),
+        _workflow_blob(checkout_ref=new_sha),
+    )
+
+    assert result.passed is True
+
+
+def test_no_test_policy_exempts_composite_action_step_ref_updates() -> None:
+    path = ".github/actions/setup/action.yml"
+    before = "name: Setup\nruns:\n  using: composite\n  steps:\n    - uses: actions/cache@v4\n"
+    after = before.replace("actions/cache@v4", "actions/cache@v5")
+
+    assert _dependabot_result(path, before, after).passed is True
+
+
+def test_no_test_policy_exempts_multiple_structurally_valid_dependency_files() -> None:
+    files = ("pyproject.toml", ".github/workflows/test.yml")
+    blobs = {
+        "pyproject.toml": (
+            _pyproject_blob(),
+            _pyproject_blob(dependency="example>=2,<4"),
+        ),
+        ".github/workflows/test.yml": (
+            _workflow_blob(),
+            _workflow_blob(checkout_ref="v5"),
+        ),
+    }
+
+    result = evaluate_policy(
+        files,
+        (),
+        {path: "ignored" for path in files},
+        actor="dependabot[bot]",
+        blobs_by_file=blobs,
+    )
+
+    assert result.passed is True
+
+
+def test_no_test_policy_rejects_pyproject_non_dependency_or_location_changes() -> None:
+    before = _pyproject_blob()
+    cases = (
+        _pyproject_blob(dependency="example>=2,<4", version="1.0.1"),
+        _pyproject_blob(dependency="pytest>=9", optional="example>=2,<4"),
+        _pyproject_blob().replace(
+            'dependencies = ["example>=1,<3"]',
+            'dependencies = ["example>=2,<4", "added>=1"]',
+        ),
+    )
+
+    for after in cases:
+        assert _dependabot_result("pyproject.toml", before, after).passed is False
+
+
+def test_no_test_policy_rejects_dependency_identity_and_direct_source_changes() -> None:
+    cases = (
+        (
+            _pyproject_blob(dependency="example>=1"),
+            _pyproject_blob(dependency="different>=2"),
+        ),
+        (
+            _pyproject_blob(dependency="example[http]>=1"),
+            _pyproject_blob(dependency="example[https]>=2"),
+        ),
+        (
+            _pyproject_blob(dependency="example>=1; platform_system == 'Linux'"),
+            _pyproject_blob(dependency="example>=2; platform_system == 'linux'"),
+        ),
+        (
+            _pyproject_blob(dependency="example @ https://example.test/example-v1.whl"),
+            _pyproject_blob(dependency="example @ https://example.test/example-v2.whl"),
+        ),
+    )
+
+    for before, after in cases:
+        assert _dependabot_result("pyproject.toml", before, after).passed is False
+
+
+def test_no_test_policy_rejects_provable_or_ambiguous_dependency_downgrades() -> None:
+    cases = (
+        ("example>=2", "example>=1"),
+        ("example<4", "example<3"),
+        ("example==2", "example==1"),
+        ("example~=2.4", "example~=2.3"),
+        ("example>=2,<4", "example>=3,<3"),
+        ("example>=2", "example==3"),
+        ("example!=1", "example!=2"),
+    )
+
+    for old_requirement, new_requirement in cases:
+        result = _dependabot_result(
+            "pyproject.toml",
+            _pyproject_blob(dependency=old_requirement),
+            _pyproject_blob(dependency=new_requirement),
+        )
+        assert result.passed is False
+
+
+def test_no_test_policy_rejects_unsatisfiable_dependency_ranges() -> None:
+    cases = (
+        ("example>=1,<2", "example>=3,<2.5"),
+        ("example>1,<2", "example>2,<2"),
+        ("example~=2.4,<3", "example~=3.0,<3"),
+    )
+
+    for before, after in cases:
+        result = _dependabot_result(
+            "pyproject.toml",
+            _pyproject_blob(dependency=before),
+            _pyproject_blob(dependency=after),
+        )
+        assert result.passed is False
+
+
+def test_no_test_policy_rejects_requirements_directives_urls_and_moves() -> None:
+    cases = (
+        (
+            "-r base.txt\nmkdocs==1.6.0\n",
+            "-r base.txt\nmkdocs==1.6.1\n",
+        ),
+        (
+            "example @ https://example.test/example.whl\nmkdocs==1.6.0\n",
+            "example @ https://example.test/example.whl\nmkdocs==1.6.1\n",
+        ),
+        (
+            "# docs\nmkdocs==1.6.0\n",
+            "# changed\nmkdocs==1.6.1\n",
+        ),
+        (
+            "mkdocs==1.6.0\npytest>=8\n",
+            "pytest>=9\nmkdocs==1.6.1\n",
+        ),
+        (
+            "mkdocs==1.6.0\n",
+            "mkdocs==1.6.1\npytest>=8\n",
+        ),
+    )
+
+    for before, after in cases:
+        result = _dependabot_result("requirements-docs.txt", before, after)
+        assert result.passed is False
+
+
+def test_no_test_policy_rejects_requirements_downgrades() -> None:
+    for before, after in (
+        ("mkdocs>=2\n", "mkdocs>=1\n"),
+        ("mkdocs<4\n", "mkdocs<3\n"),
+        ("mkdocs==2\n", "mkdocs==1\n"),
+    ):
+        assert _dependabot_result("constraints-ci.txt", before, after).passed is False
+
+
+def test_no_test_policy_rejects_workflow_env_moves_and_logic_changes() -> None:
+    path = ".github/workflows/test.yml"
+    cases = (
+        (
+            _workflow_blob(env_value="uses: actions/checkout@v4"),
+            _workflow_blob(
+                checkout_ref="v5",
+                env_value="uses: actions/checkout@v5",
+            ),
+        ),
+        (
+            _workflow_blob(),
+            _workflow_blob(
+                checkout_ref="v5",
+                setup_ref="v6.0.1",
+                reverse_steps=True,
+            ),
+        ),
+        (
+            _workflow_blob(),
+            _workflow_blob(checkout_ref="v5", fetch_depth=1),
+        ),
+        (
+            _workflow_blob(),
+            _workflow_blob(checkout_ref="v5").replace("on: [push]", "true: [push]"),
+        ),
+        (
+            _workflow_blob(),
+            _workflow_blob(checkout_ref="v5").replace(
+                "name: Tests\n",
+                "name: Hidden\nname: Tests\n",
+            ),
+        ),
+    )
+
+    for before, after in cases:
+        assert _dependabot_result(path, before, after).passed is False
+
+
+def test_no_test_policy_rejects_job_level_uses_updates() -> None:
+    path = ".github/workflows/reusable.yml"
+    before = (
+        "name: Reuse\n"
+        "on: [push]\n"
+        "jobs:\n"
+        "  call:\n"
+        "    uses: owner/repo/.github/workflows/build.yml@v1\n"
+    )
+    after = before.replace("@v1", "@v2")
+
+    assert _dependabot_result(path, before, after).passed is False
+
+
+def test_no_test_policy_rejects_unsafe_or_downgraded_action_refs() -> None:
+    path = ".github/workflows/test.yml"
+    cases = (
+        ("v4", "main"),
+        ("main", "v5"),
+        ("release-v4", "v5"),
+        ("v5", "v4"),
+        ("v5.2", "v5.1"),
+        ("v5.2", "v6.0.1"),
+        ("v4", "abc123"),
+        ("a" * 40, "v5"),
+        ("v4", "v5-beta"),
+        ("v04", "v05"),
+    )
+
+    for old_ref, new_ref in cases:
+        result = _dependabot_result(
+            path,
+            _workflow_blob(checkout_ref=old_ref),
+            _workflow_blob(checkout_ref=new_ref),
+        )
+        assert result.passed is False
+
+
+def test_no_test_policy_rejects_changed_action_identity() -> None:
+    path = ".github/workflows/test.yml"
+    before = _workflow_blob()
+    after = _workflow_blob(checkout_ref="v5").replace(
+        "actions/checkout@v5",
+        "evil/checkout@v5",
+    )
+
+    assert _dependabot_result(path, before, after).passed is False
+
+
+def test_no_test_policy_dependabot_exemption_fails_closed_without_blobs() -> None:
+    path = "pyproject.toml"
+    result = evaluate_policy(
+        [path],
+        (),
+        {path: '-dependencies = ["example>=1"]\n+dependencies = ["example>=2"]\n'},
+        actor="dependabot[bot]",
+    )
+
+    assert result.passed is False
+    assert result.message == "Dependabot changed files beyond dependency version updates."
+
+
+def test_no_test_policy_main_loads_base_and_head_blobs(monkeypatch: Any) -> None:
+    path = "pyproject.toml"
+    calls: list[tuple[str, str, tuple[str, ...]]] = []
+
+    monkeypatch.setattr(
+        ci_no_test_policy,
+        "_changed_files",
+        lambda base, head: (path,),
+    )
+    monkeypatch.setattr(
+        ci_no_test_policy,
+        "_diffs_by_file",
+        lambda base, head, files: {path: "ignored"},
+    )
+
+    def load_blobs(
+        base: str,
+        head: str,
+        files: tuple[str, ...],
+    ) -> dict[str, tuple[str, str]]:
+        calls.append((base, head, files))
+        return {
+            path: (
+                _pyproject_blob(),
+                _pyproject_blob(dependency="example>=2,<4"),
+            )
+        }
+
+    monkeypatch.setattr(ci_no_test_policy, "_blobs_by_file", load_blobs)
+
+    assert (
+        ci_no_test_policy.main(
+            [
+                "--base",
+                "base-sha",
+                "--head",
+                "head-sha",
+                "--actor",
+                "dependabot[bot]",
+            ]
+        )
+        == 0
+    )
+    assert calls == [("base-sha", "head-sha", (path,))]
+
+
+def test_no_test_policy_rejects_human_dependency_updates_without_tests() -> None:
+    cases = (
+        (
+            "pyproject.toml",
+            '-    "pytest>=8",\n+    "pytest>=8.4",\n',
+        ),
+        (
+            "requirements-docs.txt",
+            "-mkdocs==1.6.0\n+mkdocs==1.6.1\n",
+        ),
+        (
+            ".github/workflows/test.yml",
+            "-        uses: actions/checkout@v4\n+        uses: actions/checkout@v5\n",
+        ),
+    )
+
+    for path, diff_text in cases:
+        result = evaluate_policy([path], (), {path: diff_text}, actor="stevesolun")
+
+        assert result.passed is False
+        assert result.message == "Contract files changed without accompanying tests."
+
+
+def test_no_test_policy_requires_exact_dependabot_actor() -> None:
+    path = "pyproject.toml"
+    diff_text = '-    "pytest>=8",\n+    "pytest>=8.4",\n'
+
+    for actor in ("dependabot", "dependabot[bot] ", "renovate[bot]", ""):
+        result = evaluate_policy([path], (), {path: diff_text}, actor=actor)
+
+        assert result.passed is False
+
+
+def test_no_test_policy_rejects_dependabot_non_version_changes() -> None:
+    cases = (
+        {"src/ctx/api.py": ("ENABLED = False\n", "ENABLED = True\n")},
+        {
+            ".github/workflows/test.yml": (
+                _workflow_blob(),
+                _workflow_blob(env_value="changed"),
+            )
+        },
+        {
+            ".github/workflows/test.yml": (
+                _workflow_blob(),
+                _workflow_blob(checkout_ref="v5").replace(
+                    "actions/checkout@v5",
+                    "evil/checkout@v5",
+                ),
+            )
+        },
+        {
+            ".github/workflows/test.yml": (
+                _workflow_blob(),
+                _workflow_blob(checkout_ref="v5", fetch_depth=1),
+            )
+        },
+        {"pyproject.toml": (_pyproject_blob(), _pyproject_blob(version="1.0.1"))},
+        {
+            "pyproject.toml": (
+                _pyproject_blob().replace(
+                    'version = "1.0.0"',
+                    'version = "1.0.0"\nrequires-python = ">=3.11"',
+                ),
+                _pyproject_blob().replace(
+                    'version = "1.0.0"',
+                    'version = "1.0.0"\nrequires-python = ">=3.12"',
+                ),
+            )
+        },
+        {
+            "pyproject.toml": (
+                _pyproject_blob(),
+                _pyproject_blob(dependency="different-package>=8.4"),
+            )
+        },
+        {
+            "pyproject.toml": (
+                _pyproject_blob(dependency="pytest[a]>=8"),
+                _pyproject_blob(dependency="pytest[b]>=8.4"),
+            )
+        },
+        {
+            "pyproject.toml": (
+                _pyproject_blob(
+                    dependency="hnswlib>=0.8; python_version < '3.13'",
+                ),
+                _pyproject_blob(
+                    dependency="hnswlib>=0.9; python_version < '3.14'",
+                ),
+            )
+        },
+        {
+            "pyproject.toml": (
+                _pyproject_blob(),
+                _pyproject_blob().replace(
+                    'dependencies = ["example>=1,<3"]',
+                    'dependencies = ["example>=1,<3", "new-dependency>=1"]',
+                ),
+            )
+        },
+        {
+            "pyproject.toml": (
+                _pyproject_blob(),
+                _pyproject_blob(dependency="example>=2,<4"),
+            ),
+            "src/ctx/api.py": ("ENABLED = False\n", "ENABLED = True\n"),
+        },
+    )
+
+    for blobs in cases:
+        result = evaluate_policy(
+            blobs,
+            (),
+            {path: "ignored" for path in blobs},
+            actor="dependabot[bot]",
+            blobs_by_file=blobs,
+        )
+
+        assert result.passed is False
+        assert result.message == "Dependabot changed files beyond dependency version updates."
+
+
+def test_no_test_policy_does_not_allow_dependabot_logic_changes_via_other_exemptions() -> None:
+    files = ["src/ctx/api.py", "src/tests/test_api.py"]
+    diffs = {
+        "src/ctx/api.py": "-ENABLED = False\n+ENABLED = True\n",
+        "src/tests/test_api.py": "+def test_enabled():\n+    assert True\n",
+    }
+
+    result = evaluate_policy(
+        files,
+        ("no-tests-needed",),
+        diffs,
+        actor="dependabot[bot]",
+    )
+
+    assert result.passed is False
+    assert result.test_files == ("src/tests/test_api.py",)
+
+
+def test_no_test_policy_treats_dependency_policy_as_contract() -> None:
+    for path in (
+        ".github/codeql/codeql-config.yml",
+        ".github/codeql/custom-queries/example.ql",
+        ".github/dependabot.yml",
+        ".github/pip-audit-ignore.txt",
+        ".github/requirements-no-test-policy.txt",
+    ):
+        result = evaluate_policy([path], (), {path: "+policy change\n"})
+
+        assert result.passed is False
+        assert result.contract_files == (path,)
+
+
 def test_ci_required_expected_jobs_match_workflow_needs() -> None:
     lines = Path(".github/workflows/test.yml").read_text(encoding="utf-8").splitlines()
     jobs: set[str] = set()
@@ -574,6 +1331,23 @@ def test_browser_security_paths_are_classified() -> None:
 
     assert flags["browser_changed"] is True
     assert flags["source_changed"] is True
+
+
+def test_windows_high_risk_paths_are_classified_selectively() -> None:
+    for path in (
+        "src/import_designdotmd_skills.py",
+        "src/import_mattpocock_skills.py",
+        "src/import_strix_skills.py",
+        "src/tests/test_import_designdotmd_skills.py",
+        "src/tests/test_import_mattpocock_skills.py",
+        "src/tests/test_import_strix_skills.py",
+        "scripts/ci_classifier.py",
+        "scripts/ci_required.py",
+        ".github/workflows/test.yml",
+    ):
+        assert classify_paths([path])["windows_changed"] is True
+
+    assert classify_paths(["src/ctx/api.py"])["windows_changed"] is False
 
 
 def test_similarity_paths_are_classified() -> None:
@@ -682,6 +1456,118 @@ def test_ci_required_rejects_full_matrix_skip_on_ci_changed_pr() -> None:
     }
 
 
+def test_ci_required_allows_targeted_windows_skip_on_unrelated_pr() -> None:
+    needs = _required_needs(
+        classify={
+            "result": "success",
+            "outputs": {"windows_changed": "false"},
+        },
+        **{"windows-high-risk": {"result": "skipped"}},
+    )
+
+    assert failed_required_jobs(needs, event_name="pull_request") == {}
+    assert failed_required_jobs(needs, event_name="push") == {
+        "windows-high-risk": "skipped",
+    }
+
+
+def test_ci_required_rejects_targeted_windows_skip_on_high_risk_pr() -> None:
+    needs = _required_needs(
+        classify={
+            "result": "success",
+            "outputs": {"windows_changed": "true"},
+        },
+        **{"windows-high-risk": {"result": "skipped"}},
+    )
+
+    assert failed_required_jobs(needs, event_name="pull_request") == {
+        "windows-high-risk": "skipped",
+    }
+
+
+def test_ci_required_rejects_windows_skip_for_missing_or_malformed_output() -> None:
+    for outputs in ({}, {"windows_changed": "unknown"}):
+        needs = _required_needs(
+            classify={"result": "success", "outputs": outputs},
+            **{"windows-high-risk": {"result": "skipped"}},
+        )
+
+        assert failed_required_jobs(needs, event_name="pull_request") == {
+            "windows-high-risk": "skipped",
+        }
+
+
+def test_ci_required_allows_package_skips_when_classifier_says_unchanged() -> None:
+    needs = _required_needs(
+        classify={
+            "result": "success",
+            "outputs": {"package_changed": "false"},
+        },
+        **{
+            "package-build": {"result": "skipped"},
+            "package-smoke": {"result": "skipped"},
+        },
+    )
+
+    assert failed_required_jobs(needs, event_name="pull_request") == {}
+
+
+def test_ci_required_rejects_package_skips_when_classifier_says_changed() -> None:
+    needs = _required_needs(
+        classify={
+            "result": "success",
+            "outputs": {"package_changed": "true"},
+        },
+        **{
+            "package-build": {"result": "skipped"},
+            "package-smoke": {"result": "skipped"},
+        },
+    )
+
+    assert failed_required_jobs(needs, event_name="pull_request") == {
+        "package-build": "skipped",
+        "package-smoke": "skipped",
+    }
+
+
+def test_ci_required_rejects_package_skips_for_missing_or_malformed_output() -> None:
+    for outputs in (
+        {},
+        {"package_changed": "unknown"},
+        {"package_changed": False},
+    ):
+        needs = _required_needs(
+            classify={"result": "success", "outputs": outputs},
+            **{
+                "package-build": {"result": "skipped"},
+                "package-smoke": {"result": "skipped"},
+            },
+        )
+
+        assert failed_required_jobs(needs, event_name="pull_request") == {
+            "package-build": "skipped",
+            "package-smoke": "skipped",
+        }
+
+
+def test_ci_required_rejects_package_skips_on_push() -> None:
+    needs = _required_needs(
+        classify={
+            "result": "success",
+            "outputs": {"package_changed": "false"},
+        },
+        **{
+            "package-build": {"result": "skipped"},
+            "package-smoke": {"result": "skipped"},
+        },
+    )
+
+    assert failed_required_jobs(needs, event_name="push") == {
+        "package-build": "skipped",
+        "package-smoke": "skipped",
+    }
+
+
 def test_ci_required_allows_heavy_jobs_to_skip_on_docs_only_pr() -> None:
     needs = _required_needs(
         classify={
@@ -691,6 +1577,7 @@ def test_ci_required_allows_heavy_jobs_to_skip_on_docs_only_pr() -> None:
                 "docs_changed": "true",
                 "docs_only": "true",
                 "graph_artifact_changed": "false",
+                "package_changed": "false",
             },
         },
         **{
@@ -703,12 +1590,12 @@ def test_ci_required_allows_heavy_jobs_to_skip_on_docs_only_pr() -> None:
             "package-smoke": {"result": "skipped"},
             "similarity-integration": {"result": "skipped"},
             "clean-host-contract": {"result": "skipped"},
-            "no-test-no-merge": {"result": "skipped"},
             "browser-security": {"result": "skipped"},
             "test": {"result": "skipped"},
         },
     )
 
+    assert needs["no-test-no-merge"]["result"] == "success"
     assert failed_required_jobs(needs, event_name="pull_request") == {}
 
 
@@ -736,6 +1623,7 @@ def test_ci_required_allows_heavy_jobs_to_skip_on_graph_only_pr() -> None:
                 "docs_only": "false",
                 "graph_artifact_changed": "true",
                 "graph_only": "true",
+                "package_changed": "false",
             },
         },
         **{
@@ -748,12 +1636,12 @@ def test_ci_required_allows_heavy_jobs_to_skip_on_graph_only_pr() -> None:
             "package-smoke": {"result": "skipped"},
             "similarity-integration": {"result": "skipped"},
             "clean-host-contract": {"result": "skipped"},
-            "no-test-no-merge": {"result": "skipped"},
             "browser-security": {"result": "skipped"},
             "test": {"result": "skipped"},
         },
     )
 
+    assert needs["no-test-no-merge"]["result"] == "success"
     assert failed_required_jobs(needs, event_name="pull_request") == {}
 
 
@@ -948,3 +1836,19 @@ def test_workflow_runs_full_pytest_matrix_for_ci_changed_prs() -> None:
 
     assert "needs: classify" in pytest_job
     assert "needs.classify.outputs.ci_changed == 'true'" in pytest_job
+
+
+def test_workflow_runs_targeted_windows_high_risk_importer_gate() -> None:
+    workflow = Path(".github/workflows/test.yml").read_text(encoding="utf-8")
+    windows_job = workflow.split("\n  windows-high-risk:\n", maxsplit=1)[1].split(
+        "\n  contract-compat:", maxsplit=1
+    )[0]
+
+    assert "windows_changed: ${{ steps.classify.outputs.windows_changed }}" in workflow
+    assert "needs.classify.outputs.windows_changed == 'true'" in windows_job
+    assert "runs-on: windows-latest" in windows_job
+    assert 'python-version: "3.12"' in windows_job
+    assert "src/tests/test_import_designdotmd_skills.py" in windows_job
+    assert "src/tests/test_import_mattpocock_skills.py" in windows_job
+    assert "src/tests/test_import_strix_skills.py" in windows_job
+    assert "matrix:" not in windows_job

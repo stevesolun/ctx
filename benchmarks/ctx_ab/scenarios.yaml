@@ -1,0 +1,233 @@
+version: 1
+scenarios:
+  - id: click-echo-json
+    benchmark_class: trivial
+    repo_url: https://github.com/pallets/click.git
+    commit: 333c28d79cd982990ee98eef61ec20ab1a4f38ba
+    language: python
+    query: implement and review a small public Python Click output helper with focused tests
+    task: |
+      Add a public `click.echo_json(value, file=None, *, sort_keys=True,
+      ensure_ascii=False)` helper. It must serialize one JSON value with
+      `json.dumps`, write it through Click's existing `echo` behavior, emit exactly
+      one trailing newline, preserve Unicode by default, support disabling key
+      sorting, and remain exported from the top-level `click` package. Do not catch
+      serialization errors.
+    test_path: tests/test_ctx_benchmark_echo_json.py
+    test_body: |
+      from io import StringIO
+
+      import click
+      import pytest
+
+
+      def test_echo_json_is_public_sorted_unicode_output():
+          output = StringIO()
+          click.echo_json({"z": 1, "mark": "\u2713"}, file=output)
+          assert output.getvalue() == '{"mark": "\u2713", "z": 1}\n'
+
+
+      def test_echo_json_can_preserve_insertion_order():
+          output = StringIO()
+          click.echo_json({"z": 1, "a": 2}, file=output, sort_keys=False)
+          assert output.getvalue() == '{"z": 1, "a": 2}\n'
+
+
+      def test_echo_json_preserves_json_type_errors():
+          with pytest.raises(TypeError):
+              click.echo_json(object(), file=StringIO())
+
+
+      def test_echo_json_can_escape_unicode_explicitly():
+          output = StringIO()
+          click.echo_json({"mark": "\u2713"}, file=output, ensure_ascii=True)
+          assert output.getvalue() == '{"mark": "\\u2713"}\n'
+
+
+      def test_echo_json_options_are_keyword_only():
+          with pytest.raises(TypeError):
+              click.echo_json({}, StringIO(), False)
+    verify:
+      - "{python}"
+      - -m
+      - pytest
+      - -q
+      - tests/test_ctx_benchmark_echo_json.py
+    expected_test_count: 5
+    regression_verify:
+      - ["{python}", -m, pytest, -q, tests/test_utils/test_echo.py]
+    red_failure_contains: "AttributeError: echo_json"
+    allowed_changes:
+      - src/click/__init__.py
+      - src/click/utils.py
+    reference_patch: |
+      diff --git a/src/click/__init__.py b/src/click/__init__.py
+      --- a/src/click/__init__.py
+      +++ b/src/click/__init__.py
+      @@ -57,6 +57,7 @@ from .types import Tuple as Tuple
+       from .types import UNPROCESSED as UNPROCESSED
+       from .types import UUID as UUID
+       from .utils import echo as echo
+      +from .utils import echo_json as echo_json
+       from .utils import format_filename as format_filename
+       from .utils import get_app_dir as get_app_dir
+       from .utils import open_file as open_file
+      diff --git a/src/click/utils.py b/src/click/utils.py
+      --- a/src/click/utils.py
+      +++ b/src/click/utils.py
+      @@ -2,5 +2,6 @@ from __future__ import annotations
+
+       import collections.abc as cabc
+      +import json
+       import os
+       import re
+       import sys
+      @@ -346,5 +347,16 @@ def echo(
+           file.flush()
+
+
+      +def echo_json(
+      +    value: object,
+      +    file: t.IO[t.Any] | None = None,
+      +    *,
+      +    sort_keys: bool = True,
+      +    ensure_ascii: bool = False,
+      +) -> None:
+      +    """Serialize one JSON value and write it through :func:`echo`."""
+      +    echo(json.dumps(value, sort_keys=sort_keys, ensure_ascii=ensure_ascii), file=file)
+      +
+      +
+       def _get_binary_stream(name: t.Literal["stdin", "stdout", "stderr"]) -> t.BinaryIO:
+           """Returns a system stream for byte processing.
+
+    ctx_context:
+      - type: skill
+        slug: click-public-api-feature
+        title: Click Public API Feature
+        tags: [python, click, feature, testing, output]
+        body: |
+          For a small Click public helper, first locate the existing output utility
+          and the top-level re-export list. Reuse `echo` rather than duplicating its
+          stream and newline behavior. Keep serialization errors visible. Run the
+          focused test, then inspect the public import and final diff.
+      - type: agent
+        slug: python-feature-reviewer
+        title: Python Feature Reviewer
+        tags: [python, review, testing, api]
+        body: |
+          Review the implementation against every stated behavior. Check signature,
+          public export, Unicode handling, key-order control, exception boundaries,
+          test ownership, and `git diff --check`. Request only corrections required
+          by the task or repository conventions.
+      - type: mcp-server
+        slug: ctx-wiki
+        title: ctx Wiki MCP
+        tags: [python, click, output, review, feature, testing, context, recommendation]
+        body: |
+          Local ctx graph and wiki lookup for the benchmark's selected skill and
+          reviewer context. It requires no API key or external service.
+
+  - id: requests-json-or
+    benchmark_class: trivial
+    repo_url: https://github.com/psf/requests.git
+    commit: f361ead047be5cb873174218582f7d8b9fcd9f49
+    language: python
+    query: implement and review a small Requests Response JSON fallback API with tests
+    task: |
+      Add `Response.json_or(default, **kwargs)`. It must return the same parsed value
+      as `Response.json(**kwargs)` for valid JSON, including JSON `null`; return the
+      exact `default` object only when Requests raises its public `JSONDecodeError`;
+      forward decoder keyword arguments; and avoid swallowing unrelated exceptions.
+    test_path: tests/test_ctx_benchmark_json_or.py
+    test_body: |
+      import pytest
+      from requests import Response
+
+
+      def response_with(body):
+          response = Response()
+          response.status_code = 200
+          response.encoding = "utf-8"
+          response._content = body
+          return response
+
+
+      def test_json_or_returns_valid_values_and_forwards_kwargs():
+          assert response_with(b'{"value": 7}').json_or({"fallback": True}) == {"value": 7}
+          assert response_with(b'{"value": 7}').json_or(None, parse_int=str) == {"value": "7"}
+          assert response_with(b"null").json_or({"fallback": True}) is None
+          assert response_with(b"false").json_or({"fallback": True}) is False
+
+
+      def test_json_or_returns_the_exact_default_for_invalid_json():
+          fallback = {"fallback": True}
+          assert response_with(b"not-json").json_or(fallback) is fallback
+
+
+      def test_json_or_does_not_swallow_unrelated_errors():
+          class ExplodingResponse(Response):
+              def json(self, **kwargs):
+                  raise RuntimeError("unrelated")
+
+          with pytest.raises(RuntimeError, match="unrelated"):
+              ExplodingResponse().json_or(None)
+    verify:
+      - "{python}"
+      - -m
+      - pytest
+      - -q
+      - tests/test_ctx_benchmark_json_or.py
+    expected_test_count: 3
+    regression_verify:
+      -
+        - "{python}"
+        - -m
+        - pytest
+        - -q
+        - tests/test_requests.py::test_json_decode_errors_are_serializable_deserializable
+    red_failure_contains: "has no attribute 'json_or'"
+    allowed_changes:
+      - src/requests/models.py
+    reference_patch: |
+      diff --git a/src/requests/models.py b/src/requests/models.py
+      --- a/src/requests/models.py
+      +++ b/src/requests/models.py
+      @@ -1123,6 +1123,12 @@ class Response:
+                   # This aliases json.JSONDecodeError and simplejson.JSONDecodeError
+                   raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+
+      +    def json_or(self, default: Any, **kwargs: Any) -> Any:
+      +        try:
+      +            return self.json(**kwargs)
+      +        except RequestsJSONDecodeError:
+      +            return default
+      +
+           @property
+           def links(self) -> dict[str, dict[str, str]]:
+               """Returns the parsed header links of the response, if any."""
+    ctx_context:
+      - type: skill
+        slug: requests-response-feature
+        title: Requests Response Feature
+        tags: [python, requests, json, feature, testing]
+        body: |
+          Extend `Response` beside its existing JSON method and delegate to that
+          method so encoding and decoder keyword behavior stay centralized. Catch
+          only Requests' public JSON decode exception. Test valid objects, JSON null,
+          keyword forwarding, and identity of the fallback object.
+      - type: agent
+        slug: python-exception-reviewer
+        title: Python Exception Boundary Reviewer
+        tags: [python, requests, response, review, exceptions, json, fallback, api, testing]
+        body: |
+          Review for an exact exception boundary and API consistency. Confirm valid
+          falsey JSON is not confused with failure, kwargs are forwarded unchanged,
+          unrelated failures propagate, benchmark tests remain untouched, and the
+          focused test plus diff check pass.
+      - type: mcp-server
+        slug: ctx-wiki
+        title: ctx Wiki MCP
+        tags: [python, requests, response, json, fallback, api, testing, context, recommendation]
+        body: |
+          Local ctx graph and wiki lookup for the benchmark's selected skill and
+          reviewer context. It requires no API key or external service.

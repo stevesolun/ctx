@@ -23,6 +23,8 @@ MCP servers):
         local_code_task=None,
         no_api_keys=None,
         language=None,
+        session_id=None,
+        rejection_mode="use",
     )
         Free-text → top-K cross-type bundle (skill + agent + MCP).
         Tokenizes the query into tags, walks the graph, suppresses
@@ -32,7 +34,14 @@ MCP servers):
         hints can hide unavailable, external-service, generic-planning, or
         wrong-language rows unless include_unavailable opts them back in.
 
-    ctx__recommend_related(selected, rejected=None, max_hops=2, top_n=5)
+    ctx__recommend_related(
+        selected,
+        rejected=None,
+        max_hops=2,
+        top_n=5,
+        session_id=None,
+        rejection_mode="use",
+    )
         Selected/rejected recommendation IDs → graph-related rows.
         Excludes selected, rejected, unavailable, and deprecated nodes.
 
@@ -47,13 +56,15 @@ MCP servers):
 
     ctx__wiki_get(slug)
         Fetch a single entity page by slug — returns its full
-        frontmatter + body for the model to reason about.
+        frontmatter plus at most 8,000 UTF-8 bytes of body text.
 
 Load/unload/use tools are explicit lifecycle records, not filesystem
-auto-installs. The host remains responsible for asking the user and
-deciding how to place selected entities into context. Per-entity
-token usage is recorded only when the host supplies explicit
-``ctx__mark_entity_used.token_usage`` attribution.
+auto-installs. Model-visible load/unload tools record advisory requests
+only. The host remains responsible for asking the user, applying verified
+activation grants through ``RuntimeLifecycleStore``, and deciding how to
+place selected entities into context. Per-entity token usage is recorded
+only when the host supplies explicit ``ctx__mark_entity_used.token_usage``
+attribution.
 
 Hosts that need a narrower permission surface can construct
 ``CtxCoreToolbox`` with ``allowed_tool_names`` and ``allowed_entity_types``.
@@ -84,6 +95,7 @@ from ctx.core.entity_types import (
     normalize_entity_type,
 )
 from ctx.telemetry import hash_identifier, record_event, record_exception, telemetry_span
+from ctx.utils._fs_utils import reject_symlink_path, secure_directory
 
 
 _logger = logging.getLogger(__name__)
@@ -95,6 +107,8 @@ _logger = logging.getLogger(__name__)
 # anything else falls back to its normal tool_executor.
 _NAMESPACE = f"ctx{TOOL_SEPARATOR}"
 _FILE_SIGNATURE_SAMPLE_BYTES = 64 * 1024
+_WIKI_GET_BODY_MAX_BYTES = 8_000
+_RECOMMENDATION_QUERY_MAX_CHARS = 4_096
 _RECOMMENDATION_ENTITY_TYPE_ALIASES = {
     "agent": "agent",
     "harness": "harness",
@@ -114,6 +128,7 @@ _RELATED_BLOCKED_STATUSES = {
 }
 _REMOTE_SKILL_LOAD_STATUSES = {"available", "remote-cataloged"}
 _DEFAULT_BASELINE_CONTEXT = ("mcp-server:codex-cli",)
+_REJECTION_MODES = frozenset({"use", "replace", "ignore"})
 _LOCAL_CODE_QUERY_MARKERS = (
     "local files",
     "local repo",
@@ -122,12 +137,45 @@ _LOCAL_CODE_QUERY_MARKERS = (
     "feature implementation",
     "codex cli",
 )
-_NO_API_KEY_QUERY_MARKERS = (
-    "no api keys",
-    "no local api keys",
-    "without api keys",
-    "no external api",
+_NO_API_KEY_CONSTRAINT_RE = re.compile(
+    r"\b(?:"
+    r"(?:no|without(?:\s+(?:an?|any))?)\s+(?:local\s+)?api(?:[\s-]+)keys?"
+    r"|(?:no|without)\s+external\s+apis?"
+    r")\b",
+    re.IGNORECASE,
 )
+_API_KEY_OBSERVATION_AUXILIARIES = frozenset(
+    {
+        "are",
+        "be",
+        "been",
+        "being",
+        "can",
+        "could",
+        "get",
+        "gets",
+        "got",
+        "is",
+        "may",
+        "might",
+        "must",
+        "should",
+        "was",
+        "were",
+        "will",
+        "would",
+    }
+)
+_API_KEY_OBSERVATION_TOKEN_RE = re.compile(
+    r"^(?:"
+    r"expos(?:e|es|ed|ing|ure)"
+    r"|leak(?:s|ed|ing|age)?"
+    r"|log(?:s|ged|ging)?"
+    r"|print(?:s|ed|ing)?"
+    r"|stor(?:e|es|ed|ing|age)"
+    r")$"
+)
+_API_KEY_OBSERVATION_MODIFIERS = frozenset({"ever", "never", "not"})
 _EXTERNAL_SERVICE_TOKENS = {
     "anthropic",
     "aws",
@@ -178,7 +226,8 @@ _RESPONSE_FORMAT_PROPERTY = {
 FileSignature = tuple[int, int, str]
 PackSignature = tuple[tuple[str, FileSignature | None], ...]
 GraphSignature = tuple[FileSignature | None, FileSignature | None, PackSignature]
-PageSignature = tuple[int, int, int, PackSignature]
+RuntimePageSignature = tuple[tuple[str, bool], ...]
+PageSignature = tuple[int, int, int, PackSignature, RuntimePageSignature]
 
 
 def _response_format_from_args(args: Mapping[str, Any]) -> str:
@@ -369,9 +418,9 @@ class CtxCoreToolbox:
     pay the cost. First call to ``dispatch`` or ``tool_definitions``
     warms the relevant cache.
 
-    The toolbox is stateless after initialisation — calls are
-    independent and safe to parallelise (the MCP router already
-    serialises per-server anyway).
+    Recommendation calls are independent unless a host binds or supplies
+    a session id. Session-bound calls persist canonical rejection feedback
+    in the lifecycle store so later recommendations do not repeat it.
     """
 
     def __init__(
@@ -381,6 +430,7 @@ class CtxCoreToolbox:
         graph_path: Path | None = None,
         lifecycle_dir: Path | None = None,
         bound_session_id: str | None = None,
+        recommendation_session_id: str | None = None,
         allowed_tool_names: Iterable[str] | None = None,
         allowed_entity_types: Iterable[str] | None = None,
     ) -> None:
@@ -388,6 +438,7 @@ class CtxCoreToolbox:
         self._graph_path = graph_path
         self._lifecycle = RuntimeLifecycleStore(lifecycle_dir)
         self._bound_session_id = str(bound_session_id or "").strip() or None
+        self._recommendation_bound_session_id = str(recommendation_session_id or "").strip() or None
         self._allowed_tool_names = _normalise_allowed_tool_names(allowed_tool_names)
         self._allowed_entity_types = _normalise_allowed_entity_types(allowed_entity_types)
         self._graph: Any | None = None  # networkx.Graph
@@ -417,6 +468,7 @@ class CtxCoreToolbox:
                         "query": {
                             "type": "string",
                             "description": "Free-text description of the task or stack.",
+                            "maxLength": _RECOMMENDATION_QUERY_MAX_CHARS,
                         },
                         "top_k": {
                             "type": "integer",
@@ -457,8 +509,25 @@ class CtxCoreToolbox:
                         },
                         "active_context": {
                             "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Already active ctx entity IDs or names to keep out of load suggestions.",
+                            "items": {
+                                "anyOf": [
+                                    {"type": "string"},
+                                    {
+                                        "type": "object",
+                                        "properties": {
+                                            "id": {"type": "string"},
+                                            "load_status": {"type": "string"},
+                                            "stale": {"type": "boolean"},
+                                            "unload_candidate": {"type": "boolean"},
+                                        },
+                                        "required": ["id"],
+                                    },
+                                ]
+                            },
+                            "description": (
+                                "Active ctx IDs, optionally with explicit applied/stale "
+                                "state used for keep, unload, and replace guidance."
+                            ),
                         },
                         "baseline_context": {
                             "type": "array",
@@ -613,8 +682,9 @@ class CtxCoreToolbox:
                 name=f"{_NAMESPACE}wiki_get",
                 description=(
                     "Fetch a single wiki entity page by slug. Returns "
-                    "the full frontmatter (as a dict), body text, and "
-                    "wiki-relative path. "
+                    "the full frontmatter (as a dict), wiki-relative path, "
+                    "and up to 8,000 UTF-8 bytes of body text. Body byte "
+                    "counts and truncation status are included in the response. "
                     "Use after recommend_bundle / wiki_search to read "
                     "the detail of a specific candidate."
                 ),
@@ -720,6 +790,28 @@ class CtxCoreToolbox:
                 },
             ),
         ]
+        for definition in definitions:
+            if definition.name not in {
+                f"{_NAMESPACE}recommend_bundle",
+                f"{_NAMESPACE}recommend_related",
+            }:
+                continue
+            properties = definition.parameters["properties"]
+            properties["rejection_mode"] = {
+                "type": "string",
+                "enum": sorted(_REJECTION_MODES),
+                "description": (
+                    "use merges session memory (default); replace overwrites it, "
+                    "including clearing with an empty rejected list; ignore is call-local."
+                ),
+            }
+            if self._bound_session_id is None and self._recommendation_bound_session_id is None:
+                properties["session_id"] = {
+                    "type": "string",
+                    "description": (
+                        "Optional host session id used only for rejection memory correlation."
+                    ),
+                }
         definitions.extend(_lifecycle_tool_definitions(self._bound_session_id))
         definitions = [td for td in definitions if self.allows(td.name)]
         return definitions
@@ -745,6 +837,8 @@ class CtxCoreToolbox:
         )
         event_payload = _safe_tool_payload(local_name, args)
         session_id = str(args.get("session_id") or "").strip() or self._bound_session_id
+        if session_id is None and local_name in {"recommend_bundle", "recommend_related"}:
+            session_id = self._recommendation_bound_session_id
 
         with telemetry_span():
             try:
@@ -814,12 +908,60 @@ class CtxCoreToolbox:
             return tool_name in self._allowed_tool_names
         return tool_name not in _LOOP_PROVISION_TOOL_NAMES
 
+    def recommendation_rejections(
+        self,
+        rejected: list[str] | None = None,
+        *,
+        session_id: str | None = None,
+        rejection_mode: str = "use",
+    ) -> list[str]:
+        """Resolve explicit and remembered rejections for first-party adapters."""
+        explicit = _recommendation_selection_values(rejected or [])
+        index_path = self._recommendation_index_path()
+        if index_path is not None:
+            indexed = _canonical_index_recommendation_map(index_path, explicit)
+            if indexed is not None:
+                aliases, node_count = indexed
+                if node_count == 0:
+                    return explicit
+                return self._recommendation_rejections(
+                    None,
+                    {
+                        "rejected": explicit,
+                        "session_id": session_id,
+                        "rejection_mode": rejection_mode,
+                    },
+                    canonical_map=aliases,
+                )
+
+        graph = self._ensure_graph()
+        if graph.number_of_nodes() == 0:
+            return explicit
+        return self._recommendation_rejections(
+            graph,
+            {
+                "rejected": explicit,
+                "session_id": session_id,
+                "rejection_mode": rejection_mode,
+            },
+        )
+
     # ── Individual dispatchers ──────────────────────────────────────────
 
     def _dispatch_recommend(self, args: dict[str, Any]) -> str:
         query = str(args.get("query", "")).strip()
         if not query:
             return json.dumps({"error": "query must be non-empty", "results": []})
+        if len(query) > _RECOMMENDATION_QUERY_MAX_CHARS:
+            return json.dumps(
+                {
+                    "error": (
+                        "query is too long; maximum length is "
+                        f"{_RECOMMENDATION_QUERY_MAX_CHARS} characters"
+                    ),
+                    "results": [],
+                }
+            )
         from ctx_config import cfg  # noqa: PLC0415
 
         top_k = _clamp_int(
@@ -835,15 +977,6 @@ class CtxCoreToolbox:
             return json.dumps(
                 {
                     "error": "query produced no usable tags",
-                    "results": [],
-                }
-            )
-
-        graph = self._ensure_graph()
-        if graph.number_of_nodes() == 0:
-            return json.dumps(
-                {
-                    "error": "knowledge graph not available; run ctx-wiki-graphify",
                     "results": [],
                 }
             )
@@ -865,29 +998,106 @@ class CtxCoreToolbox:
                 _response_format_from_args(args),
             )
         selected = _selection_values_from_args(args, "selected")
-        rejected = _selection_values_from_args(args, "rejected")
-        active_context = _selection_values_from_args(args, "active_context")
+        explicit_rejected = _selection_values_from_args(args, "rejected")
+        active_context_raw = args.get("active_context") or []
+        active_context = (
+            _recommendation_selection_values(active_context_raw)
+            if isinstance(active_context_raw, list)
+            else []
+        )
         include_baseline = bool(_optional_bool(args.get("include_baseline_context")) or False)
         baseline_context = _selection_values_from_args(args, "baseline_context")
         if not baseline_context and not include_baseline:
             baseline_context = list(_DEFAULT_BASELINE_CONTEXT)
-        excluded = _recommendation_selection_keys(
-            selected + rejected + active_context + ([] if include_baseline else baseline_context)
-        )
         recommendation_context = _recommendation_context_from_args(query, args)
-        raw_top_n = min(50, top_k + len(excluded) + 25)
-        raw = recommend_by_tags(
-            graph,
-            tags,
-            top_n=raw_top_n,
-            query=query,
-            entity_types=entity_types,
-            min_normalized_score=cfg.recommendation_min_normalized_score,
-            use_semantic_query=use_semantic_query,
-            semantic_cache_dir=semantic_cache_dir,
-        )
-        results: list[dict[str, Any]] = []
         wiki_dir = self._wiki_dir_resolved()
+        external_catalog_path = self._external_catalog_path()
+
+        graph: Any | None = None
+        indexed_aliases: dict[str, str] | None = None
+        raw: list[dict[str, Any]] | None = None
+        rejected: list[str] = []
+        excluded: set[str] = set()
+        if not use_semantic_query:
+            index_path = self._recommendation_index_path()
+            if index_path is not None:
+                alias_values = selected + explicit_rejected + active_context + baseline_context
+                indexed = _canonical_index_recommendation_map(index_path, alias_values)
+                if indexed is not None and indexed[1] > 0:
+                    indexed_aliases = indexed[0]
+                    rejected = self._recommendation_rejections(
+                        None,
+                        args,
+                        canonical_map=indexed_aliases,
+                    )
+                    policy_aliases = _canonical_index_recommendation_map(
+                        index_path,
+                        selected + rejected + active_context + baseline_context,
+                    )
+                    if policy_aliases is not None:
+                        indexed_aliases = policy_aliases[0]
+                        excluded = _recommendation_selection_keys(
+                            selected
+                            + rejected
+                            + active_context
+                            + ([] if include_baseline else baseline_context)
+                        )
+                        from ctx.core.resolve.recommendations import (  # noqa: PLC0415
+                            recommend_by_tags_indexed,
+                        )
+
+                        indexed_result = recommend_by_tags_indexed(
+                            index_path,
+                            tags,
+                            top_n=top_k,
+                            query=query,
+                            entity_types=entity_types,
+                            min_normalized_score=cfg.recommendation_min_normalized_score,
+                            external_catalog_path=external_catalog_path,
+                            candidate_filter=lambda row: _recommendation_candidate_allowed(
+                                row,
+                                wiki_dir=wiki_dir,
+                                excluded=excluded,
+                                context=recommendation_context,
+                            ),
+                        )
+                        if indexed_result is not None and indexed_result[1] > 0:
+                            raw = indexed_result[0]
+
+        if raw is None:
+            graph = self._ensure_graph()
+            if graph.number_of_nodes() == 0:
+                return json.dumps(
+                    {
+                        "error": "knowledge graph not available; run ctx-wiki-graphify",
+                        "results": [],
+                    }
+                )
+            indexed_aliases = None
+            rejected = self._recommendation_rejections(graph, args)
+            excluded = _recommendation_selection_keys(
+                selected
+                + rejected
+                + active_context
+                + ([] if include_baseline else baseline_context)
+            )
+            raw = recommend_by_tags(
+                graph,
+                tags,
+                top_n=top_k,
+                query=query,
+                entity_types=entity_types,
+                min_normalized_score=cfg.recommendation_min_normalized_score,
+                use_semantic_query=use_semantic_query,
+                semantic_cache_dir=semantic_cache_dir,
+                candidate_filter=lambda row: _recommendation_candidate_allowed(
+                    row,
+                    wiki_dir=wiki_dir,
+                    excluded=excluded,
+                    context=recommendation_context,
+                ),
+            )
+        results: list[dict[str, Any]] = []
         for r in raw:
             row = _with_recommendation_selection_metadata(
                 _base_recommendation_row(r, wiki_dir=wiki_dir)
@@ -905,16 +1115,33 @@ class CtxCoreToolbox:
                 break
         model_provider = _optional_str(args.get("model_provider"))
         model = _optional_str(args.get("model"))
-        companion_harnesses = (
-            _recommend_companion_harnesses(
+        companion_harnesses: list[dict[str, Any]] = []
+        if (model_provider or model) and self._entity_type_allowed("harness"):
+            harness_exclusions = [
+                value
+                for value in selected + rejected + active_context + baseline_context
+                if _recommendation_selection_parts(value)[0] in {None, "harness"}
+            ]
+            harness_top_k = (
+                min(50, top_k + len(harness_exclusions) + 5) if harness_exclusions else top_k
+            )
+            for row in _recommend_companion_harnesses(
                 query,
-                top_k=top_k,
+                top_k=harness_top_k,
                 model_provider=model_provider,
                 model=model,
-            )
-            if (model_provider or model) and self._entity_type_allowed("harness")
-            else []
-        )
+            ):
+                candidate_keys = _recommendation_selection_keys(
+                    [
+                        f"harness:{row.get('name')}",
+                        str(row.get("name") or ""),
+                    ]
+                )
+                if candidate_keys & excluded:
+                    continue
+                companion_harnesses.append(row)
+                if len(companion_harnesses) >= top_k:
+                    break
         return _encode_response(
             {
                 "query": query,
@@ -927,8 +1154,15 @@ class CtxCoreToolbox:
                 },
                 "context_policy": _recommendation_context_policy(
                     baseline_context=baseline_context,
-                    active_context=active_context,
+                    active_context=(
+                        active_context_raw
+                        if isinstance(active_context_raw, list)
+                        else active_context
+                    ),
+                    rejected_context=rejected,
                     results=results,
+                    graph=graph,
+                    aliases=indexed_aliases,
                 ),
                 "results": results,
                 "companion_harnesses": companion_harnesses,
@@ -949,11 +1183,6 @@ class CtxCoreToolbox:
                 }
             )
 
-        rejected_raw = args.get("rejected") or []
-        rejected = (
-            _recommendation_selection_values(rejected_raw) if isinstance(rejected_raw, list) else []
-        )
-        excluded = _recommendation_selection_keys(selected + rejected)
         max_hops = _clamp_int(args.get("max_hops"), default=2, lo=1, hi=4)
         top_n = _clamp_int(args.get("top_n"), default=5, lo=1, hi=50)
 
@@ -966,6 +1195,8 @@ class CtxCoreToolbox:
                 }
             )
 
+        rejected = self._recommendation_rejections(graph, args)
+        excluded = _recommendation_selection_keys(selected + rejected)
         seed_ids = _recommendation_selection_node_ids(graph, selected)
         raw = _resolve_related_recommendation_rows(
             graph,
@@ -1152,6 +1383,17 @@ class CtxCoreToolbox:
                     _response_format_from_args(args),
                 )
 
+        if "skill" in candidate_entity_types:
+            converted_path = _safe_converted_skill_path(wiki, slug)
+            if converted_path is not None:
+                return self._serialise_page(
+                    converted_path,
+                    "skill",
+                    _wiki_entity_link(slug, "skill"),
+                    _response_format_from_args(args),
+                    slug=slug,
+                )
+
         return json.dumps(
             {
                 "error": f"no entity page found for slug {slug!r}",
@@ -1261,8 +1503,8 @@ class CtxCoreToolbox:
                     security_scan=(
                         _dict_arg(args.get("security_scan")) if "security_scan" in args else None
                     ),
-                    selected=_optional_bool(args.get("selected")),
-                    selection_source=str(args.get("selection_source") or "") or None,
+                    selected=False,
+                    selection_source="unknown",
                     source_context=_dict_arg(args.get("source_context")),
                 )
             elif name == "mark_entity_used":
@@ -1333,18 +1575,81 @@ class CtxCoreToolbox:
             raise ValueError("session_id is required")
         return supplied
 
+    def _recommendation_session_id(self, args: Mapping[str, Any]) -> str | None:
+        supplied = str(args.get("session_id") or "").strip()
+        bound = self._bound_session_id or self._recommendation_bound_session_id
+        if bound is not None:
+            if supplied and supplied != bound:
+                raise ValueError("session_id is host-bound and cannot be overridden")
+            return bound
+        return supplied or None
+
+    def _recommendation_rejections(
+        self,
+        graph: Any | None,
+        args: Mapping[str, Any],
+        *,
+        canonical_map: Mapping[str, str] | None = None,
+    ) -> list[str]:
+        mode = str(args.get("rejection_mode") or "use").strip().lower()
+        if mode not in _REJECTION_MODES:
+            raise ValueError("rejection_mode must be one of " + ", ".join(sorted(_REJECTION_MODES)))
+        raw = args.get("rejected") or []
+        explicit = _recommendation_selection_values(raw) if isinstance(raw, list) else []
+        session_id = self._recommendation_session_id(args)
+        if session_id is None or mode == "ignore":
+            return explicit
+
+        canonical: list[str] = []
+        if explicit:
+            if graph is not None:
+                canonical.extend(_canonical_graph_recommendation_ids(graph, explicit))
+            elif canonical_map is not None:
+                canonical.extend(_canonical_recommendation_ids(explicit, canonical_map))
+            canonical.extend(
+                _canonical_external_catalog_recommendation_ids(
+                    self._external_catalog_path(),
+                    explicit,
+                )
+            )
+            canonical = _recommendation_selection_values(canonical)
+        if mode == "replace":
+            stored = self._lifecycle.remember_recommendation_rejections(
+                session_id=session_id,
+                rejected=canonical,
+            )
+        elif canonical:
+            stored = self._lifecycle.remember_recommendation_rejections(
+                session_id=session_id,
+                rejected=canonical,
+                merge=True,
+            )
+        else:
+            stored = self._lifecycle.recommendation_rejections(session_id=session_id)
+        return _recommendation_selection_values(stored + explicit)
+
     def _serialise_page(
         self,
         path: Path,
         entity_type: str,
         wikilink: str,
         response_format: str,
+        *,
+        slug: str | None = None,
     ) -> str:
         try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError as exc:
+            with secure_directory(path.parent) as directory:
+                text = directory.read_text(path.name, encoding="utf-8", errors="replace")
+        except (OSError, ValueError) as exc:
             return json.dumps({"error": f"could not read {path}: {exc}"})
-        return self._serialise_page_text(path, text, entity_type, wikilink, response_format)
+        return self._serialise_page_text(
+            path,
+            text,
+            entity_type,
+            wikilink,
+            response_format,
+            slug=slug,
+        )
 
     def _serialise_page_text(
         self,
@@ -1353,23 +1658,54 @@ class CtxCoreToolbox:
         entity_type: str,
         wikilink: str,
         response_format: str,
+        *,
+        slug: str | None = None,
     ) -> str:
         from ctx.core.wiki.wiki_utils import parse_frontmatter_and_body  # noqa: PLC0415
 
+        page_slug = slug or path.stem
         fm, body = parse_frontmatter_and_body(text)
+        encoded_body = body.encode("utf-8")
+        body_bytes = len(encoded_body)
+        body_truncated = body_bytes > _WIKI_GET_BODY_MAX_BYTES
+        if body_truncated:
+            body = encoded_body[:_WIKI_GET_BODY_MAX_BYTES].decode(
+                "utf-8",
+                errors="ignore",
+            )
+        body_returned_bytes = len(body.encode("utf-8"))
         return _encode_response(
             {
-                "slug": path.stem,
+                "slug": page_slug,
                 "entity_type": entity_type,
                 "wikilink": wikilink,
-                "path": _wiki_entity_relpath(entity_type, path.stem),
+                "path": _wiki_entity_relpath(entity_type, page_slug),
                 "frontmatter": fm,
                 "body": body,
+                "body_truncated": body_truncated,
+                "body_bytes": body_bytes,
+                "body_returned_bytes": body_returned_bytes,
+                "body_limit_bytes": _WIKI_GET_BODY_MAX_BYTES,
             },
             response_format,
         )
 
     # ── Lazy caches ─────────────────────────────────────────────────────
+
+    def _recommendation_index_path(self) -> Path | None:
+        graph_path = self._graph_file_path()
+        if graph_path is None:
+            return None
+        index_path = graph_path.parent / "graph-store.sqlite3"
+        if _recommendation_index_is_fresh(index_path, graph_path):
+            return index_path
+        return None
+
+    def _external_catalog_path(self) -> Path | None:
+        graph_path = self._graph_file_path()
+        if graph_path is None:
+            return None
+        return graph_path.parent.parent / "external-catalogs" / "skills-sh" / "catalog.json"
 
     def _ensure_graph(self) -> Any:
         graph_path = self._graph_file_path()
@@ -1470,6 +1806,21 @@ def _wiki_get_candidates(
     ]
 
 
+def _safe_converted_skill_path(wiki: Path, slug: str) -> Path | None:
+    converted_root = wiki / "converted"
+    candidate = converted_root / slug / "SKILL.md"
+    try:
+        reject_symlink_path(candidate)
+        wiki_root = wiki.resolve(strict=True)
+        resolved_root = converted_root.resolve(strict=True)
+        resolved_root.relative_to(wiki_root)
+        resolved_candidate = candidate.resolve(strict=True)
+        resolved_candidate.relative_to(resolved_root)
+    except (OSError, ValueError):
+        return None
+    return resolved_candidate if resolved_candidate.is_file() else None
+
+
 def _normalise_allowed_tool_names(
     tool_names: Iterable[str] | None,
 ) -> frozenset[str] | None:
@@ -1528,6 +1879,12 @@ def _graph_source_available(path: Path) -> bool:
     return path.is_file() or (path.parent / "packs").is_dir()
 
 
+def _recommendation_index_is_fresh(index_path: Path, graph_path: Path) -> bool:
+    from ctx.core.graph.graph_store import graph_store_is_fresh  # noqa: PLC0415
+
+    return graph_store_is_fresh(index_path, graph_path.parent)
+
+
 def _graph_pack_signature(graph_path: Path) -> PackSignature:
     return _pack_dir_signature(graph_path.parent / "packs")
 
@@ -1579,7 +1936,15 @@ def _wiki_pages_signature(wiki: Path) -> PageSignature:
             count += 1
             newest = max(newest, stat.st_mtime_ns)
             total_size += stat.st_size
-    return count, newest, total_size, _pack_dir_signature(wiki / "wiki-packs")
+    from ctx.core.wiki.wiki_query import _runtime_availability_page_signature  # noqa: PLC0415
+
+    return (
+        count,
+        newest,
+        total_size,
+        _pack_dir_signature(wiki / "wiki-packs"),
+        _runtime_availability_page_signature(wiki),
+    )
 
 
 def _semantic_cache_signature(
@@ -1776,9 +2141,15 @@ def _is_local_loadable_skill_row(row: Mapping[str, Any]) -> bool:
 
 
 def _is_loadable_recommendation_row(row: Mapping[str, Any]) -> bool:
-    if not row.get("installable"):
+    if row.get("installable") is not True or row.get("external", False) is not False:
         return False
-    if str(row.get("type") or "").strip() == "skill":
+    raw_type = row.get("type")
+    if not isinstance(raw_type, str):
+        return False
+    entity_type = raw_type.strip().lower()
+    if entity_type not in RECOMMENDABLE_ENTITY_TYPES:
+        return False
+    if entity_type == "skill":
         return _is_local_loadable_skill_row(row)
     return True
 
@@ -1793,9 +2164,7 @@ def _recommendation_context_from_args(query: str, args: Mapping[str, Any]) -> di
     include_unavailable = bool(_optional_bool(args.get("include_unavailable")) or False)
     return {
         "no_api_keys": (
-            no_api_keys
-            if no_api_keys is not None
-            else any(marker in query_lower for marker in _NO_API_KEY_QUERY_MARKERS)
+            no_api_keys if no_api_keys is not None else _infer_no_api_keys_constraint(query)
         ),
         "local_code_task": (
             local_code_task
@@ -1805,6 +2174,51 @@ def _recommendation_context_from_args(query: str, args: Mapping[str, Any]) -> di
         "language": language,
         "include_unavailable": include_unavailable,
     }
+
+
+def _infer_no_api_keys_constraint(query: str) -> bool:
+    """Infer a keyless runtime constraint without treating privacy prose as one."""
+    for match in _NO_API_KEY_CONSTRAINT_RE.finditer(query):
+        if not _is_api_key_observation_tail(query[match.end() :]):
+            return True
+    return False
+
+
+def _is_api_key_observation_tail(value: str) -> bool:
+    tokens = re.findall(r"[a-z]+", value.lower())[:8]
+    if not tokens:
+        return False
+    if _API_KEY_OBSERVATION_TOKEN_RE.fullmatch(tokens[0]):
+        return True
+    if tokens[0] not in _API_KEY_OBSERVATION_AUXILIARIES:
+        return False
+    for token in tokens[1:]:
+        if _API_KEY_OBSERVATION_TOKEN_RE.fullmatch(token):
+            return True
+        if (
+            token in _API_KEY_OBSERVATION_AUXILIARIES
+            or token in _API_KEY_OBSERVATION_MODIFIERS
+            or token.endswith("ly")
+        ):
+            continue
+        return False
+    return False
+
+
+def _recommendation_candidate_allowed(
+    row: Mapping[str, Any],
+    *,
+    wiki_dir: Path | None,
+    excluded: set[str],
+    context: Mapping[str, Any],
+) -> bool:
+    candidate = _base_recommendation_row(row, wiki_dir=wiki_dir)
+    candidate_keys = _recommendation_selection_keys(
+        [_recommendation_identity(candidate), str(candidate.get("name") or "")]
+    )
+    return not (candidate_keys & excluded) and (
+        _recommendation_context_skip_reason(candidate, context) is None
+    )
 
 
 def _normalize_language_hint(value: str | None) -> str | None:
@@ -1911,18 +2325,108 @@ def _recommendation_text_tokens(value: str) -> list[str]:
 def _recommendation_context_policy(
     *,
     baseline_context: list[str],
-    active_context: list[str],
+    active_context: list[Any],
     results: list[dict[str, Any]],
+    rejected_context: list[str] | None = None,
+    graph: Any | None = None,
+    aliases: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
-    keep = _recommendation_selection_values(baseline_context + active_context)
+    rejected_values = rejected_context or []
+    resolved_aliases = _recommendation_policy_aliases(
+        graph,
+        baseline_context + rejected_values + _recommendation_selection_values(active_context),
+        results,
+        aliases=aliases,
+    )
+    baseline = _policy_context_values(
+        baseline_context,
+        resolved_aliases,
+        retain_unknown_bare=True,
+    )
+    rejected = _policy_context_values(
+        rejected_values,
+        resolved_aliases,
+        retain_unknown_bare=False,
+    )
+    active, actionable_active = _policy_active_context(active_context, resolved_aliases)
+    action_reasons = _active_context_action_reasons(
+        baseline_context=baseline,
+        active_context=actionable_active,
+        rejected_context=rejected,
+    )
+    action_keys = _recommendation_selection_keys(list(action_reasons))
+    keep = [
+        value
+        for value in _recommendation_selection_values(baseline + active)
+        if _recommendation_selection_key(value) not in action_keys
+    ]
+    keep_keys = _recommendation_selection_keys(keep)
+    loadable = [
+        row
+        for row in results
+        if _is_loadable_recommendation_row(row)
+        and not (_recommendation_selection_keys([str(row.get("id") or "")]) & keep_keys)
+    ]
+    initial = next(
+        (row for row in loadable if str(row.get("type") or "").strip().lower() == "skill"),
+        None,
+    )
+    initial_id = str(initial["id"]) if initial is not None else None
+    unload_candidates = [
+        value for value in active if _recommendation_selection_key(value) in action_keys
+    ]
+    replacements: list[dict[str, str]] = []
+    if initial_id is not None and unload_candidates:
+        replaced = unload_candidates.pop(0)
+        replacements.append(
+            {
+                "unload": replaced,
+                "load": initial_id,
+                "reason": action_reasons[_recommendation_selection_key(replaced)],
+            }
+        )
     return {
-        "baseline": baseline_context,
+        "baseline": baseline,
         "keep": keep,
-        "load": [row["id"] for row in results if _is_loadable_recommendation_row(row)],
+        "load": [initial_id] if initial_id is not None and not replacements else [],
+        "deferred": [row["id"] for row in loadable if row["id"] != initial_id],
         "manual": [row["id"] for row in results if not _is_loadable_recommendation_row(row)],
-        "unload": [],
-        "replace": [],
+        "unload": unload_candidates,
+        "replace": replacements,
     }
+
+
+def _active_context_action_reasons(
+    *,
+    baseline_context: list[str],
+    active_context: list[Any],
+    rejected_context: list[str],
+) -> dict[str, str]:
+    baseline_keys = _recommendation_selection_keys(baseline_context)
+    rejected_keys = _recommendation_selection_keys(rejected_context)
+    reasons: dict[str, str] = {}
+    for raw in active_context:
+        values = _recommendation_selection_values([raw])
+        if not values:
+            continue
+        value = values[0]
+        key = _recommendation_selection_key(value)
+        if key in baseline_keys:
+            continue
+        if key in rejected_keys:
+            reasons[key] = "active context was explicitly rejected in this session"
+            continue
+        if isinstance(raw, Mapping) and _is_stale_applied_context(raw):
+            reasons[key] = "host marked applied context as stale"
+    return reasons
+
+
+def _is_stale_applied_context(raw: Mapping[str, Any]) -> bool:
+    load_status = str(raw.get("load_status") or "").strip().lower()
+    applied = raw.get("applied") is True or load_status in {"active", "applied", "loaded"}
+    state = str(raw.get("status") or "").strip().lower()
+    stale = raw.get("stale") is True or raw.get("unload_candidate") is True or state == "stale"
+    return applied and stale
 
 
 def _recommendation_tags(row: Mapping[str, Any]) -> list[str]:
@@ -2035,6 +2539,185 @@ def _recommendation_selection_parts(value: str) -> tuple[str | None, str]:
     if entity_type is None or not name:
         return None, item
     return entity_type, name
+
+
+def _canonical_graph_recommendation_ids(graph: Any, values: list[str]) -> list[str]:
+    return _canonical_recommendation_ids(
+        values,
+        _canonical_graph_recommendation_map(graph, values),
+    )
+
+
+def _canonical_external_catalog_recommendation_ids(
+    catalog_path: Path | None,
+    values: list[str],
+) -> list[str]:
+    from ctx.core.resolve.recommendations import (  # noqa: PLC0415
+        resolve_external_catalog_ids,
+    )
+
+    typed_ids = [
+        f"{entity_type}:{name}"
+        for value in _recommendation_selection_values(values)
+        for entity_type, name in [_recommendation_selection_parts(value)]
+        if entity_type is not None
+    ]
+    resolved = resolve_external_catalog_ids(
+        catalog_path,
+        typed_ids=typed_ids,
+        allowed_entity_types=tuple(dict.fromkeys(_RECOMMENDATION_ENTITY_TYPE_ALIASES.values())),
+    )
+    return _canonical_recommendation_ids(typed_ids, resolved)
+
+
+def _canonical_recommendation_ids(
+    values: list[str],
+    resolved: Mapping[str, str],
+) -> list[str]:
+    return _recommendation_selection_values(
+        [
+            resolved[_recommendation_selection_key(value)]
+            for value in _recommendation_selection_values(values)
+            if _recommendation_selection_key(value) in resolved
+        ]
+    )
+
+
+def _canonical_graph_recommendation_map(graph: Any, values: list[str]) -> dict[str, str]:
+    canonical_nodes = {
+        str(node_id).lower(): str(node_id)
+        for node_id in graph.nodes
+        if _recommendation_selection_parts(str(node_id))[0] is not None
+    }
+    labels: dict[str, list[str]] = {}
+    for node_id, data in graph.nodes(data=True):
+        canonical = canonical_nodes.get(str(node_id).lower())
+        if canonical is None:
+            continue
+        label = str(data.get("label") or data.get("name") or "").strip().lower()
+        if label:
+            labels.setdefault(label, []).append(canonical)
+
+    resolved: dict[str, str] = {}
+    for value in _recommendation_selection_values(values):
+        entity_type, name = _recommendation_selection_parts(value)
+        if entity_type is not None:
+            candidate = canonical_nodes.get(f"{entity_type}:{name}".lower())
+        else:
+            matches = labels.get(name.lower(), [])
+            candidate = matches[0] if len(matches) == 1 else None
+        if candidate is not None:
+            resolved[_recommendation_selection_key(value)] = candidate
+    return resolved
+
+
+def _canonical_index_recommendation_map(
+    index_path: Path,
+    values: list[str],
+) -> tuple[dict[str, str], int] | None:
+    from ctx.core.resolve.recommendations import (  # noqa: PLC0415
+        resolve_recommendation_aliases_indexed,
+    )
+
+    normalized = _recommendation_selection_values(values)
+    typed_ids: list[str] = []
+    bare_labels: list[str] = []
+    for value in normalized:
+        entity_type, name = _recommendation_selection_parts(value)
+        if entity_type is None:
+            bare_labels.append(name)
+        else:
+            typed_ids.append(f"{entity_type}:{name}")
+    indexed = resolve_recommendation_aliases_indexed(
+        index_path,
+        typed_ids=typed_ids,
+        bare_labels=bare_labels,
+        allowed_entity_types=tuple(dict.fromkeys(_RECOMMENDATION_ENTITY_TYPE_ALIASES.values())),
+    )
+    if indexed is None:
+        return None
+    matches, node_count = indexed
+    resolved: dict[str, str] = {}
+    for value in normalized:
+        entity_type, name = _recommendation_selection_parts(value)
+        lookup = f"{entity_type}:{name}".lower() if entity_type is not None else name.lower()
+        candidate = matches.get(lookup)
+        if candidate is not None:
+            resolved[_recommendation_selection_key(value)] = candidate
+    return resolved, node_count
+
+
+def _recommendation_policy_aliases(
+    graph: Any | None,
+    values: list[str],
+    results: list[dict[str, Any]],
+    *,
+    aliases: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    if aliases is not None:
+        return dict(aliases)
+    bare_values = [
+        value
+        for value in _recommendation_selection_values(values)
+        if _recommendation_selection_parts(value)[0] is None
+    ]
+    if graph is not None:
+        return _canonical_graph_recommendation_map(graph, bare_values)
+
+    candidates: dict[str, set[str]] = {}
+    for value in _recommendation_selection_values(
+        values + [str(row.get("id") or "") for row in results]
+    ):
+        entity_type, name = _recommendation_selection_parts(value)
+        if entity_type is not None:
+            candidates.setdefault(name.lower(), set()).add(f"{entity_type}:{name}")
+    inferred = {
+        name: next(iter(matches)) for name, matches in candidates.items() if len(matches) == 1
+    }
+    return inferred
+
+
+def _policy_context_values(
+    values: list[str],
+    aliases: Mapping[str, str],
+    *,
+    retain_unknown_bare: bool,
+) -> list[str]:
+    resolved: list[str] = []
+    for value in _recommendation_selection_values(values):
+        entity_type, _ = _recommendation_selection_parts(value)
+        canonical = aliases.get(_recommendation_selection_key(value))
+        if entity_type is not None:
+            resolved.append(canonical or value)
+        elif canonical is not None or retain_unknown_bare:
+            resolved.append(canonical or value)
+    return _recommendation_selection_values(resolved)
+
+
+def _policy_active_context(
+    values: list[Any],
+    aliases: Mapping[str, str],
+) -> tuple[list[str], list[Any]]:
+    active: list[str] = []
+    actionable: list[Any] = []
+    for raw in values:
+        selected = _recommendation_selection_values([raw])
+        if not selected:
+            continue
+        value = selected[0]
+        entity_type, _ = _recommendation_selection_parts(value)
+        canonical = aliases.get(_recommendation_selection_key(value))
+        resolved = canonical or value
+        active.append(resolved)
+        if entity_type is None and canonical is None:
+            continue
+        if isinstance(raw, Mapping):
+            normalized = dict(raw)
+            normalized["id"] = resolved
+            actionable.append(normalized)
+        else:
+            actionable.append(resolved)
+    return _recommendation_selection_values(active), actionable
 
 
 def _recommendation_selection_node_ids(graph: Any, values: list[str]) -> set[str]:
@@ -2240,8 +2923,9 @@ def _lifecycle_tool_definitions(
         ToolDefinition(
             name=f"{_NAMESPACE}load_entity",
             description=(
-                "Record that the host/user chose to load a recommended skill, "
-                "agent, MCP server, or harness into the current session."
+                "Request that the host consider loading a recommended skill, "
+                "agent, MCP server, or harness. This is advisory and does not "
+                "prove selection or apply activation."
             ),
             parameters={
                 "type": "object",
@@ -2250,21 +2934,6 @@ def _lifecycle_tool_definitions(
                     "entity_type": entity_type,
                     "slug": slug,
                     "reason": {"type": "string"},
-                    "selected": {
-                        "type": "boolean",
-                        "description": (
-                            "True when the entity was explicitly selected from "
-                            "ctx recommendations. Defaults to true for user loads."
-                        ),
-                    },
-                    "selection_source": {
-                        "type": "string",
-                        "enum": ["user", "system", "host", "unknown"],
-                        "description": (
-                            "Who selected or activated the entity: user, system, "
-                            "host, or unknown. Default user."
-                        ),
-                    },
                     "source_context": {
                         "type": "object",
                         "description": (
@@ -2309,8 +2978,12 @@ def _lifecycle_tool_definitions(
                                 "enum": ["exact", "estimated", "unavailable"],
                             },
                             "input_tokens": {"type": "integer", "minimum": 0},
+                            "cached_input_tokens": {"type": "integer", "minimum": 0},
+                            "cache_write_input_tokens": {"type": "integer", "minimum": 0},
+                            "uncached_input_tokens": {"type": "integer", "minimum": 0},
                             "output_tokens": {"type": "integer", "minimum": 0},
                             "total_tokens": {"type": "integer", "minimum": 0},
+                            "tokens_reported": {"type": "boolean"},
                             "cost_usd": {"type": "number", "minimum": 0},
                             "attribution_reason": {"type": "string"},
                             "provider": {"type": "string"},

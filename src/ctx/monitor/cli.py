@@ -7,6 +7,8 @@ import secrets
 import socket
 from typing import Callable, Protocol
 
+from ctx.monitor.security import host_allows_mutations
+
 
 class ServingServer(Protocol):
     """Minimal server interface used by the blocking monitor loop."""
@@ -78,10 +80,19 @@ def main(
     sp.add_argument(
         "--host",
         default="127.0.0.1",
-        help="Host to bind (default: 127.0.0.1; use 0.0.0.0 to expose; be careful)",
+        help="Host to bind (default: 127.0.0.1)",
+    )
+    sp.add_argument(
+        "--allow-non-loopback",
+        action="store_true",
+        help="Explicitly allow a token-protected, read-only non-loopback bind",
     )
 
     args = parser.parse_args(argv)
     if args.cmd == "serve":
+        if not host_allows_mutations(args.host) and not args.allow_non_loopback:
+            parser.error(
+                "non-loopback --host requires explicit --allow-non-loopback",
+            )
         serve_func(host=args.host, port=args.port)
     return 0

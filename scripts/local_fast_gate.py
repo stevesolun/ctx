@@ -125,7 +125,24 @@ def _worktree_safe_check(check: Check) -> Check:
         "scripts/ci_preflight.py" if _same_path_arg(arg, ci_preflight) else arg
         for arg in check.argv
     )
+    if check.name == "unit-linux equivalent":
+        try:
+            workers_index = argv.index("-n") + 1
+        except ValueError:
+            pass
+        else:
+            if workers_index < len(argv) and argv[workers_index] == "auto":
+                argv = (
+                    *argv[:workers_index],
+                    str(_local_xdist_workers()),
+                    *argv[workers_index + 1 :],
+                )
     return Check(check.name, argv, check.env)
+
+
+def _local_xdist_workers() -> int:
+    cpu_count = os.cpu_count() or 2
+    return max(1, min(4, cpu_count // 4))
 
 
 def _same_path_arg(arg: str, expected: Path) -> bool:
@@ -292,7 +309,7 @@ def print_dry_run(lanes: list[Lane]) -> None:
 
 def _default_jobs() -> int:
     cpu_count = os.cpu_count() or 2
-    return max(1, min(cpu_count, len(LANE_ORDER)))
+    return max(1, min((cpu_count + 1) // 2, len(LANE_ORDER)))
 
 
 def main(argv: list[str] | None = None) -> int:

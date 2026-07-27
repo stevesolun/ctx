@@ -74,7 +74,7 @@ def render_home(
         "<a href='/skills'>browse &rarr;</a></div>"
         + "<div class='card'><div class='muted' style='font-size:0.8rem;'>Wiki entities</div>"
         f"<div style='font-size:1.6rem; font-weight:600;'>{format_count(wiki_stats['total'])}</div>"
-        f"<span class='muted' style='font-size:0.75rem;'>{html.escape(wiki_detail)}</span></div>"
+        f"<span class='muted' style='font-size:0.75rem;'>{wiki_detail}</span></div>"
         + "<div class='card'><div class='muted' style='font-size:0.8rem;'>Knowledge graph</div>"
         f"<div style='font-size:1.6rem; font-weight:600;'>{format_count(graph_stats['nodes'])}</div>"
         f"<span class='muted' style='font-size:0.75rem;'>{format_count(graph_stats['edges'])} edges</span>"
@@ -118,8 +118,8 @@ def render_home(
         "});"
         "})();"
         "</script>"
-        "<div style='display:grid; grid-template-columns:2fr 1fr; gap:1rem;'>"
-        f"<div class='card'><strong>Recent sessions</strong> ({format_count(len(sessions))} total)"
+        "<div class='responsive-split-grid'>"
+        f"<div class='card table-scroll'><strong>Recent sessions</strong> ({format_count(len(sessions))} total)"
         + (
             "<table><tr><th>Session</th><th>Last seen</th><th>Load</th>"
             "<th>Unload</th><th>Agents</th><th>Scores</th></tr>" + "".join(rows) + "</table>"
@@ -130,7 +130,7 @@ def render_home(
             )
         )
         + "</div>"
-        "<div class='card'><strong>Latest audit events</strong>"
+        "<div class='card table-scroll'><strong>Latest audit events</strong>"
         + (
             "<table><tr><th>Time</th><th>Event</th><th>Subject</th></tr>" + audit_rows + "</table>"
             if recent_audit

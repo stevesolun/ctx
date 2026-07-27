@@ -18,19 +18,26 @@ once the full H1-H7 stack is proven on a live model.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
+import subprocess
 import sys
 import time
 import types
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
+from ctx import __version__
 import ctx.adapters.generic.runtime_lifecycle as runtime_lifecycle
+import ctx.adapters.generic.tools.mcp_router as mcp_router_module
 import ctx.cli.run as run_cli
 import ctx.telemetry as telemetry
+from ctx.adapters.generic.adaptive_runtime import SelectedSkill
+from ctx.adapters.generic.evaluator import EvaluationLoopResult
+from ctx.adapters.generic.loop import LoopResult, ProviderFailure
 from ctx.cli.run import (
     _apply_mcp_env_overlays,
     _compile_tool_policy,
@@ -40,8 +47,19 @@ from ctx.cli.run import (
     _split_mcp_invocation,
     main,
 )
-from ctx.adapters.generic.providers import ToolCall, Usage
+from ctx.adapters.generic.providers import ToolCall, ToolDefinition, Usage
 from ctx.telemetry import read_events, record_event as real_record_event
+
+
+_MCP_FIXTURE = Path(__file__).parent / "fixtures" / "fake_mcp_server.py"
+
+
+def test_version_flag(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["--version"])
+
+    assert exc_info.value.code == 0
+    assert capsys.readouterr().out == f"ctx {__version__}\n"
 
 
 # ── Fixture: fake litellm so --provider ollama (no key) works ───────────────
@@ -75,7 +93,10 @@ def fake_litellm(monkeypatch: pytest.MonkeyPatch):
     return fake
 
 
-def _tool_call_completion(name: str) -> dict[str, Any]:
+def _tool_call_completion(
+    name: str,
+    arguments: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     return {
         "choices": [
             {
@@ -85,7 +106,10 @@ def _tool_call_completion(name: str) -> dict[str, Any]:
                         {
                             "id": "call-1",
                             "type": "function",
-                            "function": {"name": name, "arguments": "{}"},
+                            "function": {
+                                "name": name,
+                                "arguments": json.dumps(arguments or {}),
+                            },
                         }
                     ],
                 },
@@ -94,6 +118,10 @@ def _tool_call_completion(name: str) -> dict[str, Any]:
         ],
         "usage": {"prompt_tokens": 5, "completion_tokens": 1},
     }
+
+
+def _submitted_tool_names(call: dict[str, Any]) -> set[str]:
+    return {item["function"]["name"] for item in call.get("tools", [])}
 
 
 def _enable_real_telemetry(
@@ -274,6 +302,28 @@ class TestToolPolicy:
     def test_empty_patterns_disable_policy(self) -> None:
         assert _compile_tool_policy([], []) is None
 
+    def test_adaptive_mcp_grants_require_namespaced_patterns(self) -> None:
+        configs = [_parse_mcp_spec("alpha:ignored"), _parse_mcp_spec("beta:ignored")]
+
+        assert run_cli._adaptive_mcp_server_names(configs, ("alpha*",)) == ()
+        assert run_cli._adaptive_mcp_server_names(configs, ("*",)) == (
+            "alpha",
+            "beta",
+        )
+        assert run_cli._adaptive_mcp_server_names(configs, (), ("*",)) == ()
+        assert run_cli._adaptive_mcp_server_names(
+            configs,
+            ("ctx__*", "alpha__read*"),
+        ) == ("alpha",)
+        assert (
+            run_cli._adaptive_mcp_server_names(
+                configs,
+                ("alpha__*",),
+                ("alpha__*",),
+            )
+            == ()
+        )
+
 
 class TestRunCommand:
     def _write_model_profile(self, root: Path, data: dict[str, Any]) -> None:
@@ -367,6 +417,287 @@ class TestRunCommand:
         capsys.readouterr()
         assert router_session_ids == ["mcp-run"]
         assert calls == ["start", "list_tools", "stop"]
+
+    def test_adaptive_mcp_is_one_turn_and_policy_bounded(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        lifecycle_dir = tmp_path / "runtime"
+        monkeypatch.setenv("CTX_RUNTIME_LIFECYCLE_DIR", str(lifecycle_dir))
+        events: list[tuple[str, Any]] = []
+        routers: list[Any] = []
+
+        class FakeRouter:
+            def __init__(
+                self,
+                configs: list[Any],
+                *,
+                session_id: str | None = None,
+                lazy: bool = False,
+            ) -> None:
+                assert len(configs) == 2 and session_id == "bounded-mcp"
+                assert lazy is True
+                self.lazy = lazy
+                self.active: tuple[str, ...] = ()
+                routers.append(self)
+
+            def start(self) -> None:
+                events.append(("start", self.active))
+
+            def stop(self) -> None:
+                assert self.active == ()
+                events.append(("stop", self.active))
+
+            @property
+            def server_names(self) -> list[str]:
+                return sorted(self.active)
+
+            def list_tools(self) -> list[ToolDefinition]:
+                assert self.active == ()
+                events.append(("list_tools", self.active))
+                return []
+
+            def activate(
+                self,
+                server_names: tuple[str, ...],
+                *,
+                capability_epoch: int | None = None,
+            ) -> list[ToolDefinition]:
+                assert self.active == ()
+                assert capability_epoch == 1
+                self.active = tuple(server_names)
+                events.append(("activate", self.active))
+                return [
+                    ToolDefinition(name="server__read", description="read", parameters={}),
+                    ToolDefinition(name="server__write", description="write", parameters={}),
+                ]
+
+            def deactivate(self, server_names: tuple[str, ...]) -> None:
+                assert tuple(server_names) == self.active
+                events.append(("deactivate", self.active))
+                self.active = ()
+
+            def call(self, name: str, arguments: dict[str, Any]) -> str:
+                assert self.active == ("server",)
+                assert name == "server__read"
+                events.append(("call", name))
+                return "bounded result"
+
+        def completion(**kwargs: Any) -> dict[str, Any]:
+            fake_litellm._calls.append(kwargs)
+            events.append(("provider", tuple(sorted(_submitted_tool_names(kwargs)))))
+            if len(fake_litellm._calls) == 1:
+                return _tool_call_completion("server__read")
+            assert routers[0].active == ()
+            return {
+                "choices": [
+                    {
+                        "message": {"content": "done", "tool_calls": None},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 1},
+            }
+
+        fake_litellm.completion = completion
+        monkeypatch.setattr(run_cli, "McpRouter", FakeRouter)
+        monkeypatch.setattr(
+            run_cli.AdaptiveRuntimeController,
+            "from_task",
+            classmethod(lambda cls, *_args, **_kwargs: cls(None)),
+        )
+
+        exit_code = main(
+            [
+                "run",
+                "--model",
+                "ollama/llama3",
+                "--task",
+                "say hi",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "bounded-mcp",
+                "--mcp",
+                "server:ignored-command",
+                "--mcp",
+                "other:ignored-command",
+                "--allow-tool",
+                "server__read",
+                "--quiet",
+            ]
+        )
+
+        assert exit_code == 0
+        assert [_submitted_tool_names(call) for call in fake_litellm._calls] == [
+            {"server__read"},
+            set(),
+        ]
+        assert events == [
+            ("start", ()),
+            ("list_tools", ()),
+            ("activate", ("server",)),
+            ("provider", ("server__read",)),
+            ("call", "server__read"),
+            ("deactivate", ("server",)),
+            ("provider", ()),
+            ("stop", ()),
+        ]
+        metadata = run_cli.load_session("bounded-mcp", sessions_dir=tmp_path).metadata
+        assert metadata["ctx_adaptive"]["enabled"] is True
+        assert metadata["ctx_adaptive"]["mcp_configured_count"] == 2
+        assert metadata["ctx_adaptive"]["mcp_activated_count"] == 1
+        assert metadata["ctx_adaptive"]["mcp_fetched_tool_count"] == 2
+        assert metadata["ctx_adaptive"]["mcp_submitted_tool_count"] == 1
+        assert metadata["ctx_adaptive"]["mcp_submitted_schema_bytes"] > 0
+        assert metadata["ctx_adaptive"]["mcp_estimated_schema_tokens"] > 0
+        assert metadata["ctx_adaptive"]["mcp_schema_submission_attempted"] is True
+        lifecycle_events = [
+            json.loads(line)
+            for line in (lifecycle_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        mcp_events = [
+            event for event in lifecycle_events if event.get("entity_type") == "mcp-server"
+        ]
+        assert [(event["action"], event["slug"]) for event in mcp_events] == [
+            ("load_requested", "server"),
+            ("load_applied", "server"),
+            ("used", "server"),
+            ("unload_applied", "server"),
+        ]
+
+    def test_adaptive_mcp_real_process_stays_lazy_with_ctx_subgroup(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        procs: list[subprocess.Popen[bytes]] = []
+        real_popen = mcp_router_module.subprocess.Popen
+
+        def capture_popen(*args: Any, **kwargs: Any) -> subprocess.Popen[bytes]:
+            proc = real_popen(*args, **kwargs)
+            procs.append(proc)
+            return proc
+
+        def completion(**kwargs: Any) -> dict[str, Any]:
+            fake_litellm._calls.append(kwargs)
+            if len(fake_litellm._calls) == 1:
+                return _tool_call_completion("live__echo", {"text": "real"})
+            return {
+                "choices": [
+                    {
+                        "message": {"content": "done", "tool_calls": None},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 1},
+            }
+
+        monkeypatch.setattr(mcp_router_module.subprocess, "Popen", capture_popen)
+        monkeypatch.setattr(
+            run_cli.AdaptiveRuntimeController,
+            "from_task",
+            classmethod(lambda cls, *_args, **_kwargs: cls(None)),
+        )
+        fake_litellm.completion = completion
+
+        exit_code = main(
+            [
+                "run",
+                "--model",
+                "ollama/x",
+                "--task",
+                "use one live tool",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "real-lazy-mcp",
+                "--mcp",
+                f"live:{sys.executable} {_MCP_FIXTURE}",
+                "--mcp",
+                "other:definitely-not-a-real-command",
+                "--allow-tool",
+                "ctx__recommend_bundle",
+                "--allow-tool",
+                "live__echo",
+                "--quiet",
+            ]
+        )
+
+        assert exit_code == 0
+        assert [_submitted_tool_names(call) for call in fake_litellm._calls] == [
+            {"ctx__recommend_bundle", "live__echo"},
+            set(),
+        ]
+        assert len(procs) == 1
+        procs[0].wait(timeout=2.0)
+        assert procs[0].poll() is not None
+        metadata = run_cli.load_session("real-lazy-mcp", sessions_dir=tmp_path).metadata
+        assert metadata["ctx_adaptive"]["mcp_fetched_tool_count"] >= 2
+        assert metadata["ctx_adaptive"]["mcp_submitted_tool_count"] == 1
+        assert metadata["ctx_adaptive"]["mcp_schema_submission_attempted"] is True
+
+    def test_adaptive_mcp_policy_denial_is_not_recorded_as_use(self, tmp_path: Path) -> None:
+        class FakeRouter:
+            def activate(
+                self,
+                server_names: tuple[str, ...],
+                *,
+                capability_epoch: int | None = None,
+            ) -> list[ToolDefinition]:
+                assert capability_epoch == 1
+                return []
+
+            def deactivate(self, server_names: tuple[str, ...]) -> None:
+                pass
+
+        lifecycle_dir = tmp_path / "runtime"
+        lifecycle = run_cli.RuntimeLifecycleStore(root=lifecycle_dir)
+        controller = run_cli._AdaptiveMcpController(
+            run_cli.AdaptiveRuntimeController(None),
+            router=cast(Any, FakeRouter()),
+            server_names=("server",),
+            configured_count=1,
+            lifecycle=lifecycle,
+            session_id="denied-mcp",
+            allow_patterns=("server__read",),
+            deny_patterns=(),
+        )
+        preparation = controller.prepare_turn(
+            1,
+            (),
+            (),
+            deadline_monotonic=None,
+            cancel_event=None,
+        )
+        controller.activate_turn(1, preparation.capability_epoch)
+        controller.on_tool_result(
+            1,
+            preparation.capability_epoch,
+            ToolCall(id="denied", name="server__hidden", arguments={}),
+            "",
+            "policy: capability was not advertised",
+        )
+        controller.on_tool_result(
+            1,
+            preparation.capability_epoch,
+            ToolCall(id="malformed", name="server__read", arguments={}),
+            "",
+            "invalid tool call arguments: malformed JSON",
+        )
+        controller.close_turn(1, preparation.capability_epoch, "tool_denied")
+
+        events = [
+            json.loads(line)
+            for line in (lifecycle_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        assert [event["action"] for event in events] == [
+            "load_applied",
+            "unload_applied",
+        ]
 
     def test_run_uses_ctx_init_model_profile_when_model_omitted(
         self,
@@ -661,6 +992,8 @@ class TestRunCommand:
                 "call denied tool",
                 "--sessions-dir",
                 str(tmp_path),
+                "--ctx-tool-surface",
+                "minimal",
                 "--deny-tool",
                 "ctx__wiki_get",
                 "--json",
@@ -671,6 +1004,7 @@ class TestRunCommand:
         assert exit_code == 2
         assert payload["stop_reason"] == "tool_denied"
         assert "matched deny pattern" in payload["detail"]
+        assert _submitted_tool_names(fake_litellm._calls[0]) == {"ctx__recommend_bundle"}
 
     @pytest.mark.parametrize(
         "stop_reason,final_message,detail",
@@ -724,8 +1058,12 @@ class TestRunCommand:
         assert payload["final_message"] == final_message
         assert payload["detail"] == detail
         assert payload["usage"] == {
+            "tokens_reported": True,
             "input_tokens": 5,
             "output_tokens": 1,
+            "total_tokens": 6,
+            "cached_input_tokens": None,
+            "uncached_input_tokens": None,
             "cost_usd": None,
         }
 
@@ -774,10 +1112,166 @@ class TestRunCommand:
         assert payload["stop_reason"] == "provider_timeout"
         assert payload["detail"] == "provider call timed out after 0.010s"
         assert payload["usage"] == {
-            "input_tokens": 0,
-            "output_tokens": 0,
+            "tokens_reported": False,
+            "input_tokens": None,
+            "output_tokens": None,
+            "total_tokens": None,
+            "cached_input_tokens": None,
+            "uncached_input_tokens": None,
             "cost_usd": None,
         }
+
+    def test_provider_error_is_valid_json_without_traceback(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        telemetry_path = _enable_real_telemetry(monkeypatch, tmp_path)
+
+        def completion(**kwargs: Any) -> None:
+            fake_litellm._calls.append(kwargs)
+            print("provider diagnostic")
+            raise RuntimeError("provider unavailable authorization=sk-abcdefghijklmnopqrstuvwxyz")
+
+        fake_litellm.completion = completion
+        exit_code = main(
+            [
+                "run",
+                "--model",
+                "ollama/x",
+                "--task",
+                "provider error",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "provider-error-json",
+                "--no-ctx-tools",
+                "--json",
+                "--quiet",
+            ]
+        )
+
+        captured = capsys.readouterr()
+        payload = json.loads(captured.out)
+        assert exit_code == 2
+        assert captured.err == "provider diagnostic\n"
+        assert payload["stop_reason"] == "provider_error"
+        assert payload["detail"] == (
+            "provider raised RuntimeError: provider unavailable authorization=[redacted]"
+        )
+        session_raw = (tmp_path / "provider-error-json.jsonl").read_text(encoding="utf-8")
+        assert "sk-abcdefghijklmnopqrstuvwxyz" not in session_raw
+        assert "sk-abcdefghijklmnopqrstuvwxyz" not in captured.out
+        cli_events = [
+            event
+            for event in read_events(telemetry_path, trusted_root=tmp_path)
+            if event.event_name == "ctx.cli.run"
+        ]
+        assert [event.payload["ctx.run.phase"] for event in cli_events] == [
+            "started",
+            "finished",
+        ]
+        finished = cli_events[-1]
+        assert finished.payload["ctx.exception.message_hash"].startswith("sha256:")
+        assert finished.payload["ctx.exception.stack_hash"].startswith("sha256:")
+        assert finished.payload["ctx.exception.escaped"] is False
+
+    def test_resume_provider_error_is_valid_json_without_traceback(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        assert (
+            main(
+                [
+                    "run",
+                    "--model",
+                    "ollama/x",
+                    "--task",
+                    "initial",
+                    "--sessions-dir",
+                    str(tmp_path),
+                    "--session-id",
+                    "resume-provider-error-json",
+                    "--no-ctx-tools",
+                    "--quiet",
+                ]
+            )
+            == 0
+        )
+        capsys.readouterr()
+
+        def completion(**kwargs: Any) -> None:
+            fake_litellm._calls.append(kwargs)
+            print("resume provider diagnostic")
+            raise RuntimeError("resume provider unavailable")
+
+        fake_litellm.completion = completion
+        exit_code = main(
+            [
+                "resume",
+                "resume-provider-error-json",
+                "--task",
+                "retry",
+                "--sessions-dir",
+                str(tmp_path),
+                "--json",
+                "--quiet",
+            ]
+        )
+
+        captured = capsys.readouterr()
+        payload = json.loads(captured.out)
+        assert exit_code == 2
+        assert captured.err == "resume provider diagnostic\n"
+        assert payload["stop_reason"] == "provider_error"
+        assert payload["detail"] == "provider raised RuntimeError: resume provider unavailable"
+
+    def test_unrelated_exception_after_provider_stop_is_not_swallowed(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        del fake_litellm
+        provider_error = RuntimeError("provider unavailable")
+
+        def fail_after_provider_stop(*_args: Any, **kwargs: Any) -> None:
+            observer = kwargs["observer"]
+            result = LoopResult(
+                stop_reason="provider_error",
+                final_message="",
+                iterations=1,
+                usage=Usage(tokens_reported=False),
+                messages=(),
+                detail="provider raised RuntimeError: provider unavailable",
+            )
+            observer.on_stop(result)
+            observer.on_provider_failure(ProviderFailure(provider_error, result))
+            raise RuntimeError("cleanup failed")
+
+        monkeypatch.setattr(run_cli, "run_loop", fail_after_provider_stop)
+
+        with pytest.raises(RuntimeError, match="cleanup failed"):
+            main(
+                [
+                    "run",
+                    "--model",
+                    "ollama/x",
+                    "--task",
+                    "provider error",
+                    "--sessions-dir",
+                    str(tmp_path),
+                    "--session-id",
+                    "provider-error-cleanup",
+                    "--no-ctx-tools",
+                    "--json",
+                    "--quiet",
+                ]
+            )
 
     def test_json_output(
         self,
@@ -809,11 +1303,40 @@ class TestRunCommand:
             "scope": "session",
             "attribution": "unavailable",
             "attribution_reason": run_cli._SESSION_USAGE_ATTRIBUTION_REASON,
+            "tokens_reported": True,
             "input_tokens": 5,
             "output_tokens": 3,
             "total_tokens": 8,
+            "cached_input_tokens": None,
+            "uncached_input_tokens": None,
             "cost_usd": None,
         }
+
+    def test_usage_telemetry_exposes_cached_and_uncached_tokens(self) -> None:
+        result = types.SimpleNamespace(
+            stop_reason="completed",
+            iterations=1,
+            usage=Usage(
+                input_tokens=10,
+                output_tokens=3,
+                cost_usd=0.01,
+                cached_input_tokens=6,
+            ),
+        )
+
+        payload = run_cli._loop_result_payload(result)
+
+        assert payload["ctx.usage.tokens_reported"] is True
+        assert payload["ctx.usage.total_tokens"] == 13
+        assert payload["ctx.usage.cached_input_tokens"] == 6
+        assert payload["ctx.usage.uncached_input_tokens"] == 4
+        assert payload["ctx.usage.cost_present"] is True
+
+        invalid_cache = run_cli._usage_token_fields(
+            Usage(input_tokens=5, output_tokens=1, cached_input_tokens=8)
+        )
+        assert invalid_cache["cached_input_tokens"] == 8
+        assert invalid_cache["uncached_input_tokens"] is None
 
     def test_model_required(
         self,
@@ -930,6 +1453,455 @@ class TestRunCommand:
         # Check the call passed tools=None (or no tools).
         first_call = fake_litellm._calls[0]
         assert "tools" not in first_call  # loop passes None → omitted
+        assert "ctx__" not in first_call["messages"][0]["content"]
+
+    def test_non_ctx_allow_pattern_removes_ctx_prompt_and_schemas(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+    ) -> None:
+        exit_code = main(
+            [
+                "run",
+                "--model",
+                "ollama/x",
+                "--task",
+                "use only an attached server",
+                "--sessions-dir",
+                str(tmp_path),
+                "--allow-tool",
+                "server__*",
+                "--quiet",
+            ]
+        )
+
+        assert exit_code == 0
+        first_call = fake_litellm._calls[0]
+        assert "tools" not in first_call
+        assert "ctx__" not in first_call["messages"][0]["content"]
+
+    def test_ctx_tools_default_to_adaptive_host_surface(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            run_cli.AdaptiveRuntimeController,
+            "from_task",
+            classmethod(lambda cls, *_args, **_kwargs: cls(None)),
+        )
+
+        exit_code = main(
+            [
+                "run",
+                "--model",
+                "ollama/x",
+                "--task",
+                "use ctx only if needed",
+                "--sessions-dir",
+                str(tmp_path),
+                "--quiet",
+            ]
+        )
+
+        assert exit_code == 0
+        assert len(fake_litellm._calls) == 1
+        call = fake_litellm._calls[0]
+        assert _submitted_tool_names(call) == set()
+        assert "ctx__" not in call["messages"][0]["content"]
+        metadata = json.loads(next((tmp_path.glob("*.jsonl"))).read_text().splitlines()[0])
+        assert metadata["ctx_tool_surface"] == "adaptive"
+        assert metadata["ctx_tool_names"] == []
+        assert metadata["ctx_adaptive"]["enabled"] is True
+
+    def test_adaptive_stays_zero_schema_when_secure_reads_unavailable(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            "ctx.adapters.generic.adaptive_runtime.secure_skill_reads_available",
+            lambda: False,
+        )
+
+        exit_code = main(
+            [
+                "run",
+                "--model",
+                "ollama/x",
+                "--task",
+                "use ctx",
+                "--sessions-dir",
+                str(tmp_path),
+                "--quiet",
+            ]
+        )
+
+        assert exit_code == 0
+        assert _submitted_tool_names(fake_litellm._calls[0]) == set()
+        metadata = json.loads(next(tmp_path.glob("*.jsonl")).read_text().splitlines()[0])
+        assert metadata["ctx_tool_surface"] == "adaptive"
+        assert metadata["ctx_adaptive"]["enabled"] is True
+        assert metadata["ctx_adaptive"]["skill_selected"] is False
+
+    def test_adaptive_skill_is_request_only_and_not_persisted(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        body = "EPHEMERAL-CLI-SKILL-BODY"
+        selected = SelectedSkill(
+            name="focused-skill",
+            content=body,
+            content_sha256=hashlib.sha256(body.encode()).hexdigest(),
+            content_bytes=len(body.encode()),
+            score=42.0,
+            matched_terms=("focused",),
+        )
+        monkeypatch.setattr(
+            run_cli.AdaptiveRuntimeController,
+            "from_task",
+            classmethod(lambda cls, *_args, **_kwargs: cls(selected, selection_duration_ms=1.5)),
+        )
+
+        exit_code = main(
+            [
+                "run",
+                "--model",
+                "ollama/x",
+                "--task",
+                "use focused guidance",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "adaptive-ephemeral",
+                "--quiet",
+            ]
+        )
+
+        assert exit_code == 0
+        call = fake_litellm._calls[0]
+        assert _submitted_tool_names(call) == set()
+        assert body in "\n".join(message["content"] for message in call["messages"])
+        session_text = (tmp_path / "adaptive-ephemeral.jsonl").read_text(encoding="utf-8")
+        assert body not in session_text
+        metadata = run_cli.load_session(
+            "adaptive-ephemeral",
+            sessions_dir=tmp_path,
+        ).metadata
+        assert metadata["ctx_adaptive"]["selected_context_bytes"] > len(body.encode())
+        assert (
+            metadata["ctx_adaptive"]["submitted_context_bytes"]
+            == metadata["ctx_adaptive"]["selected_context_bytes"]
+        )
+        assert metadata["ctx_adaptive"]["estimated_selected_context_tokens"] > 0
+        assert metadata["ctx_adaptive"]["skill_hash"]
+
+    def test_evaluator_reports_complete_usage(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        final = LoopResult(
+            stop_reason="completed",
+            final_message="done",
+            iterations=1,
+            usage=Usage(input_tokens=5, output_tokens=10),
+            messages=(),
+        )
+        monkeypatch.setattr(
+            run_cli,
+            "run_with_evaluation",
+            lambda **_kwargs: EvaluationLoopResult(
+                final=final,
+                rounds=(),
+                plan=None,
+                contract=None,
+                total_usage=Usage(input_tokens=12, output_tokens=21),
+            ),
+        )
+
+        exit_code = main(
+            [
+                "run",
+                "--model",
+                "ollama/x",
+                "--task",
+                "evaluate usage",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "evaluator-usage",
+                "--no-ctx-tools",
+                "--evaluator",
+                "--json",
+                "--quiet",
+            ]
+        )
+
+        payload = json.loads(capsys.readouterr().out)
+        assert exit_code == 0
+        assert payload["usage"] == {
+            "tokens_reported": True,
+            "input_tokens": 12,
+            "output_tokens": 21,
+            "total_tokens": 33,
+            "cached_input_tokens": None,
+            "uncached_input_tokens": None,
+            "cost_usd": None,
+        }
+        state = run_cli.load_session("evaluator-usage", sessions_dir=tmp_path)
+        assert state.usage == Usage(input_tokens=12, output_tokens=21)
+        events = [json.loads(line) for line in state.path.read_text().splitlines()]
+        stop_events = [event for event in events if event["type"] == "stop"]
+        assert len(stop_events) == 1
+        assert stop_events[0]["usage"]["input_tokens"] == 12
+        assert stop_events[0]["usage"]["output_tokens"] == 21
+
+    def test_evaluator_failure_persists_one_stop_with_completed_round_usage(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        partial = LoopResult(
+            stop_reason="completed",
+            final_message="partial answer",
+            iterations=2,
+            usage=Usage(input_tokens=5, output_tokens=10),
+            messages=(),
+        )
+
+        def fail_after_generator(**kwargs: Any) -> None:
+            kwargs["observer"].on_stop(partial)
+            raise RuntimeError("private evaluator failure")
+
+        monkeypatch.setattr(run_cli, "run_with_evaluation", fail_after_generator)
+
+        with pytest.raises(RuntimeError, match="private evaluator failure"):
+            main(
+                [
+                    "run",
+                    "--model",
+                    "ollama/x",
+                    "--task",
+                    "evaluate failure",
+                    "--sessions-dir",
+                    str(tmp_path),
+                    "--session-id",
+                    "evaluator-failure",
+                    "--no-ctx-tools",
+                    "--evaluator",
+                    "--quiet",
+                ]
+            )
+
+        state = run_cli.load_session("evaluator-failure", sessions_dir=tmp_path)
+        assert state.stopped is True
+        assert state.stop_reason == "provider_error"
+        assert state.usage == Usage(input_tokens=5, output_tokens=10)
+        assert state.metadata["ctx_usage"] == {
+            "complete": False,
+            "scope": "completed_generator_rounds",
+        }
+        events = [json.loads(line) for line in state.path.read_text().splitlines()]
+        stop_events = [event for event in events if event["type"] == "stop"]
+        assert len(stop_events) == 1
+        assert stop_events[0]["detail"] == ("evaluator orchestration failed: RuntimeError")
+        assert "private evaluator failure" not in state.path.read_text(encoding="utf-8")
+
+    def test_cleanup_metadata_error_does_not_mask_evaluator_failure(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        def fail_evaluator(**_kwargs: Any) -> None:
+            raise RuntimeError("primary evaluator failure")
+
+        def fail_session_config(
+            _store: run_cli.SessionStore,
+            _config: dict[str, Any],
+        ) -> None:
+            raise KeyError("cleanup exploded")
+
+        monkeypatch.setattr(run_cli, "run_with_evaluation", fail_evaluator)
+        monkeypatch.setattr(
+            run_cli.SessionStore,
+            "write_session_config",
+            fail_session_config,
+        )
+
+        with pytest.raises(RuntimeError, match="primary evaluator failure"):
+            main(
+                [
+                    "run",
+                    "--model",
+                    "ollama/x",
+                    "--task",
+                    "evaluate cleanup",
+                    "--sessions-dir",
+                    str(tmp_path),
+                    "--session-id",
+                    "evaluator-cleanup-failure",
+                    "--no-ctx-tools",
+                    "--evaluator",
+                    "--quiet",
+                ]
+            )
+
+    def test_explicit_minimal_surface_keeps_bootstrap_tools_on_every_iteration(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+    ) -> None:
+        def completion(**kwargs: Any) -> dict[str, Any]:
+            fake_litellm._calls.append(kwargs)
+            if len(fake_litellm._calls) == 1:
+                return _tool_call_completion("ctx__wiki_get")
+            return {
+                "choices": [
+                    {
+                        "message": {"content": "done", "tool_calls": None},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 1},
+            }
+
+        fake_litellm.completion = completion
+        exit_code = main(
+            [
+                "run",
+                "--model",
+                "ollama/x",
+                "--task",
+                "use ctx only if needed",
+                "--sessions-dir",
+                str(tmp_path),
+                "--ctx-tool-surface",
+                "minimal",
+                "--quiet",
+            ]
+        )
+
+        assert exit_code == 0
+        assert len(fake_litellm._calls) == 2
+        assert all(
+            _submitted_tool_names(call) == {"ctx__recommend_bundle", "ctx__wiki_get"}
+            for call in fake_litellm._calls
+        )
+        prompt = fake_litellm._calls[0]["messages"][0]["content"]
+        assert "ctx__recommend_bundle" in prompt
+        assert "ctx__wiki_get" in prompt
+        assert "ctx runtime session id:" not in prompt
+        assert "ctx__mark_entity_used" not in prompt
+
+    def test_allow_tool_submits_and_executes_only_selected_ctx_schema(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        lifecycle_dir = tmp_path / "runtime"
+        monkeypatch.setenv("CTX_RUNTIME_LIFECYCLE_DIR", str(lifecycle_dir))
+
+        def completion(**kwargs: Any) -> dict[str, Any]:
+            fake_litellm._calls.append(kwargs)
+            if len(fake_litellm._calls) == 1:
+                return _tool_call_completion(
+                    "ctx__mark_entity_used",
+                    {
+                        "entity_type": "skill",
+                        "slug": "focused-skill",
+                        "evidence": "used in focused test",
+                    },
+                )
+            return {
+                "choices": [
+                    {
+                        "message": {"content": "done", "tool_calls": None},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 1},
+            }
+
+        fake_litellm.completion = completion
+        exit_code = main(
+            [
+                "run",
+                "--model",
+                "ollama/x",
+                "--task",
+                "use the selected skill",
+                "--sessions-dir",
+                str(tmp_path / "sessions"),
+                "--session-id",
+                "selected-schema",
+                "--allow-tool",
+                "ctx__mark_entity_used",
+                "--quiet",
+            ]
+        )
+
+        assert exit_code == 0
+        assert all(
+            _submitted_tool_names(call) == {"ctx__mark_entity_used"} for call in fake_litellm._calls
+        )
+        events = [
+            json.loads(line)
+            for line in (lifecycle_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        assert "used" in [event["action"] for event in events]
+        prompt = fake_litellm._calls[0]["messages"][0]["content"]
+        assert "ctx__mark_entity_used.token_usage" in prompt
+        assert "ctx__recommend_bundle" not in prompt
+        assert "ctx__wiki_get" not in prompt
+        assert "ctx__load_entity" not in prompt
+        assert "ctx__unload_entity" not in prompt
+
+    def test_full_ctx_tool_surface_preserves_previous_schema_inventory(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+    ) -> None:
+        main(
+            [
+                "run",
+                "--model",
+                "ollama/x",
+                "--task",
+                "use full ctx tooling",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "full-schema",
+                "--ctx-tool-surface",
+                "full",
+                "--quiet",
+            ]
+        )
+
+        expected = {
+            definition.name
+            for definition in run_cli.CtxCoreToolbox(
+                bound_session_id="full-schema"
+            ).tool_definitions()
+        }
+        submitted = _submitted_tool_names(fake_litellm._calls[0])
+        assert submitted == expected
+        assert len(submitted) == 13
+        metadata = json.loads(
+            (tmp_path / "full-schema.jsonl").read_text(encoding="utf-8").splitlines()[0]
+        )
+        assert metadata["ctx_tool_surface"] == "full"
+        assert set(metadata["ctx_tool_names"]) == expected
 
     def test_system_prompt_override(
         self,
@@ -1007,6 +1979,8 @@ class TestRunCommand:
                 str(tmp_path / "sessions"),
                 "--session-id",
                 "lifecycle-run",
+                "--ctx-tool-surface",
+                "full",
                 "--quiet",
             ]
         )
@@ -1425,6 +2399,163 @@ class TestResumeCommand:
         )
         assert stop_count == 2
 
+    def test_legacy_session_without_surface_resumes_full_tool_inventory(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+    ) -> None:
+        (tmp_path / "legacy-surface.jsonl").write_text(
+            json.dumps(
+                {
+                    "type": "session_start",
+                    "ts": "t",
+                    "session_id": "legacy-surface",
+                    "task": "old",
+                    "model": "ollama/x",
+                    "ctx_tools_enabled": True,
+                    "system_prompt": run_cli._LEGACY_DEFAULT_SYSTEM_PROMPT,
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        exit_code = main(
+            [
+                "resume",
+                "legacy-surface",
+                "--task",
+                "follow-up",
+                "--sessions-dir",
+                str(tmp_path),
+                "--quiet",
+            ]
+        )
+
+        assert exit_code == 0
+        assert len(_submitted_tool_names(fake_litellm._calls[-1])) == 13
+
+    def test_exact_legacy_prompt_does_not_advertise_filtered_ctx_tools(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+    ) -> None:
+        legacy_prompt = (
+            run_cli._LEGACY_DEFAULT_SYSTEM_PROMPT.rstrip()
+            + "\n\nctx runtime session id: legacy-filtered\n"
+            + "Use this exact session_id when calling ctx lifecycle tools. "
+            + "Record ctx__load_entity and ctx__mark_entity_used when relevant.\n"
+        )
+        (tmp_path / "legacy-filtered.jsonl").write_text(
+            json.dumps(
+                {
+                    "type": "session_start",
+                    "ts": "t",
+                    "session_id": "legacy-filtered",
+                    "task": "old",
+                    "model": "ollama/x",
+                    "ctx_tools_enabled": True,
+                    "system_prompt": legacy_prompt,
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        exit_code = main(
+            [
+                "resume",
+                "legacy-filtered",
+                "--task",
+                "follow-up",
+                "--sessions-dir",
+                str(tmp_path),
+                "--allow-tool",
+                "server__*",
+                "--quiet",
+            ]
+        )
+
+        assert exit_code == 0
+        call = fake_litellm._calls[-1]
+        assert "tools" not in call
+        assert "ctx__" not in call["messages"][0]["content"]
+
+    def test_resume_surface_override_rewrites_prompt_and_persists(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        main(
+            [
+                "run",
+                "--model",
+                "ollama/x",
+                "--task",
+                "first",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "surface-resume",
+                "--ctx-tool-surface",
+                "full",
+                "--quiet",
+            ]
+        )
+        capsys.readouterr()
+        fake_litellm._calls.clear()
+
+        main(
+            [
+                "resume",
+                "surface-resume",
+                "--task",
+                "switch to minimal",
+                "--sessions-dir",
+                str(tmp_path),
+                "--ctx-tool-surface",
+                "minimal",
+                "--quiet",
+            ]
+        )
+        capsys.readouterr()
+        explicit_call = fake_litellm._calls[-1]
+        assert _submitted_tool_names(explicit_call) == {
+            "ctx__recommend_bundle",
+            "ctx__wiki_get",
+        }
+        prompt = explicit_call["messages"][0]["content"]
+        assert "ctx__recommend_bundle" in prompt
+        assert "ctx__wiki_get" in prompt
+        assert "ctx__load_entity" not in prompt
+        assert "ctx__mark_entity_used" not in prompt
+        assert "ctx__unload_entity" not in prompt
+
+        fake_litellm._calls.clear()
+        main(
+            [
+                "resume",
+                "surface-resume",
+                "--task",
+                "inherit minimal",
+                "--sessions-dir",
+                str(tmp_path),
+                "--quiet",
+            ]
+        )
+        capsys.readouterr()
+        assert _submitted_tool_names(fake_litellm._calls[-1]) == {
+            "ctx__recommend_bundle",
+            "ctx__wiki_get",
+        }
+        events = [
+            json.loads(line)
+            for line in (tmp_path / "surface-resume.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        config_events = [event for event in events if event["type"] == "session_config"]
+        assert [event["ctx_tool_surface"] for event in config_events] == ["minimal", "minimal"]
+
     def test_resume_records_runtime_lifecycle_events(
         self,
         fake_litellm: Any,
@@ -1452,6 +2583,8 @@ class TestResumeCommand:
                 str(sessions_dir),
                 "--session-id",
                 "lifecycle-resume",
+                "--ctx-tool-surface",
+                "full",
                 "--quiet",
             ]
         )
@@ -1972,6 +3105,155 @@ class TestResumeCommand:
         assert router_session_ids == ["restore-mcp"]
         assert "restoring MCP server danger" in captured.err
         assert calls == ["start", "list_tools", "stop"]
+
+    def test_adaptive_resume_activates_only_selected_recorded_mcp(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        calls: list[str] = []
+
+        class FakeRouter:
+            def __init__(
+                self,
+                configs: list[Any],
+                *,
+                session_id: str | None = None,
+                lazy: bool = False,
+            ) -> None:
+                assert len(configs) == 2
+                assert session_id == "adaptive-resume-mcp"
+                assert lazy is True
+                self.lazy = lazy
+                self.active: tuple[str, ...] = ()
+
+            @property
+            def server_names(self) -> list[str]:
+                return sorted(self.active)
+
+            def start(self) -> None:
+                calls.append("start")
+
+            def stop(self) -> None:
+                calls.append("stop")
+
+            def list_tools(self) -> list[Any]:
+                assert self.active == ()
+                calls.append("list_tools")
+                return []
+
+            def activate(
+                self,
+                server_names: tuple[str, ...],
+                *,
+                capability_epoch: int | None = None,
+            ) -> list[ToolDefinition]:
+                assert server_names == ("danger",)
+                assert capability_epoch == 1
+                self.active = server_names
+                calls.append("activate:danger")
+                return [
+                    ToolDefinition(name="danger__read", description="read", parameters={}),
+                    ToolDefinition(name="danger__write", description="write", parameters={}),
+                ]
+
+            def deactivate(self, server_names: tuple[str, ...]) -> None:
+                assert server_names == self.active
+                calls.append("deactivate:danger")
+                self.active = ()
+
+            def call(self, name: str, arguments: dict[str, Any]) -> str:
+                assert self.active == ("danger",)
+                assert name == "danger__read"
+                calls.append("call:danger__read")
+                return "restored result"
+
+        (tmp_path / "adaptive-resume-mcp.jsonl").write_text(
+            json.dumps(
+                {
+                    "type": "session_start",
+                    "ts": "t",
+                    "session_id": "adaptive-resume-mcp",
+                    "task": "old",
+                    "model": "ollama/x",
+                    "ctx_tools_enabled": True,
+                    "ctx_tool_surface": "adaptive",
+                    "mcp": [
+                        {
+                            "name": "danger",
+                            "command": "definitely-not-a-real-mcp-command",
+                            "args": [],
+                            "credential_env": [],
+                        },
+                        {
+                            "name": "other",
+                            "command": "also-not-a-real-mcp-command",
+                            "args": [],
+                            "credential_env": [],
+                        },
+                    ],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(run_cli, "McpRouter", FakeRouter)
+        monkeypatch.setattr(
+            run_cli.AdaptiveRuntimeController,
+            "from_task",
+            classmethod(lambda cls, *_args, **_kwargs: cls(None)),
+        )
+
+        def completion(**kwargs: Any) -> dict[str, Any]:
+            fake_litellm._calls.append(kwargs)
+            if len(fake_litellm._calls) == 1:
+                return _tool_call_completion("danger__read")
+            return {
+                "choices": [
+                    {
+                        "message": {"content": "done", "tool_calls": None},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 1},
+            }
+
+        fake_litellm.completion = completion
+
+        exit_code = main(
+            [
+                "resume",
+                "adaptive-resume-mcp",
+                "--task",
+                "follow-up",
+                "--sessions-dir",
+                str(tmp_path),
+                "--restore-session-mcp",
+                "--allow-tool",
+                "ctx__recommend_bundle",
+                "--allow-tool",
+                "danger__read",
+                "--quiet",
+            ]
+        )
+
+        assert exit_code == 0
+        assert [_submitted_tool_names(call) for call in fake_litellm._calls] == [
+            {"ctx__recommend_bundle", "danger__read"},
+            set(),
+        ]
+        assert calls == [
+            "start",
+            "list_tools",
+            "activate:danger",
+            "call:danger__read",
+            "deactivate:danger",
+            "stop",
+        ]
+        metadata = run_cli.load_session("adaptive-resume-mcp", sessions_dir=tmp_path).metadata
+        assert metadata["ctx_adaptive"]["mcp_configured_count"] == 2
+        assert metadata["ctx_adaptive"]["mcp_activated_count"] == 1
 
     def test_resume_without_model_in_session_requires_flag(
         self,

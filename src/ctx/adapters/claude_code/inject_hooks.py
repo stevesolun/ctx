@@ -45,7 +45,8 @@ def make_hooks(ctx_dir: str) -> dict:
         "ctx.adapters.claude_code.hooks.lifecycle_hooks",
         "quality-on-session-end",
     )
-    # Skill-add detection: when Write/Edit/Bash touches a SKILL.md path → register in wiki
+    # Skill-add detection: a Write/Edit to an installed SKILL.md refreshes
+    # its catalog row.
     skill_add_cmd = _module_cmd("skill_add_detector", "--from-stdin")
     # Graph-based skill suggestion: surfaces pending-skills.json to Claude for user approval
     suggest_cmd = _module_cmd("ctx.adapters.claude_code.hooks.bundle_orchestrator")

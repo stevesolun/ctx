@@ -10,7 +10,7 @@ and harness wiki/graph browsing.
 ```bash
 ctx-monitor serve              # http://127.0.0.1:8765
 ctx-monitor serve --port 8888  # custom port
-ctx-monitor serve --host 0.0.0.0 --port 8888  # LAN read-only with startup token URL
+ctx-monitor serve --host 0.0.0.0 --port 8888 --allow-non-loopback  # LAN read-only
 ```
 
 Zero Python dependencies added by the dashboard. Everything runs on
@@ -260,7 +260,7 @@ per-process monitor token injected into the rendered page.
 | `GET /api/kpi.json` | `DashboardSummary` passthrough — `{total, by_subject, grade_counts, lifecycle_counts, category_breakdown, hard_floor_counts, low_quality_candidates, archived, generated_at}`. Returns `{total: 0, detail: "no sidecars yet"}` when the quality directory is empty |
 | `GET /api/runtime.json` | Runtime lifecycle summary: source path, validation count, failed/error count, open-escalation count, latest validation, recent validations, open escalations, session IDs, `tool_selection`, `token_usage`, `token_usage_history`, and `recent_tool_usage`. |
 | `GET /api/skillspector.json?q=<text>&status=<status>&severity=<severity>&tag=<tag>&family=<family>&limit=100` | SkillSpector audit payload for `/skillspector`: summary counts, available filters, filtered records, audit path, and audit availability |
-| `GET /api/config.json` | Effective/default/user config payload used by the Config tab. |
+| `GET /api/config.json` | Effective/default/user config payload used by the Config tab; secret values in all three maps are recursively redacted, and reading the payload does not mutate the stored config. |
 | `GET /api/entities/search.json?q=<text>&type=<entity>&limit=80` | Wiki entity search results for Manage, Config, and entity picker flows, with wiki-relative `path` values. |
 | `GET /api/entity/<slug>.json?type=<entity>` | Frontmatter, wiki-relative `path`, and Markdown body for one wiki entity from the same merged pack/local source as `/wiki/<slug>`. |
 | `GET /api/events.stream` | Server-sent events tail of `~/.claude/ctx-audit.jsonl` |
@@ -272,9 +272,10 @@ non-loopback host, HTML, `/api/*` JSON, and SSE routes require the
 read-token URL printed by `ctx-monitor`; the first successful token URL
 sets an HttpOnly same-site cookie for dashboard navigation. Keep the
 default loopback bind for local automation. POST endpoints enforce
-same-origin (browser tab open on another origin can't forge a request), require the per-process
-`X-CTX-Monitor-Token` injected into the dashboard page, and reject any
-slug failing the shared safe-name validator. That validator blocks path
+the exact normalized HTTP `Origin`/`Host` authority, including the effective
+port (a browser tab open on another origin cannot forge a request), require the
+per-process `X-CTX-Monitor-Token` injected into the dashboard page, and reject
+any slug failing the shared safe-name validator. That validator blocks path
 separators, Windows drive-relative strings, malformed names, and Windows
 reserved device names such as `con.txt` and `nul.`. There is no harness
 load/unload mutation endpoint yet.
@@ -289,7 +290,7 @@ load/unload mutation endpoint yet.
 | `POST /api/unload` | `{"slug": "...", "entity_type": "mcp-server"}` | `mcp_install.uninstall_mcp(slug, wiki_dir=...)` |
 | `POST /api/config` | `{"updates": {...}}` | persist supported user config overrides after validation |
 | `POST /api/entity/upsert` | entity metadata/body payload | write or update a wiki entity, then attach graph/recommendation metadata |
-| `POST /api/entity/delete` | `{"slug": "...", "entity_type": "skill"}` | remove a dashboard-supported wiki entity after safe-name validation; active wiki packs receive a tombstone on worker drain |
+| `POST /api/entity/delete` | `{"slug": "...", "entity_type": "skill"}` | validate the request, unload a live entity before unlinking its wiki page, then queue graph refresh and an active-pack tombstone for worker drain |
 
 Harness load/unload POSTs are rejected with the exact
 `ctx-harness-install ... --dry-run` command to run instead. Skill rows emit
@@ -367,14 +368,16 @@ observability proof that ctx's telemetry pipeline is live.
 
 ## Security
 
-- **Binds to 127.0.0.1 by default**. Use `--host 0.0.0.0` only if
-  you actually want LAN-visible read-only access. The startup output
-  prints a one-process read-token URL; without that token or the cookie
-  it sets, LAN HTML/API/SSE requests return 403. Mutations remain
-  disabled on non-loopback binds.
+- **Binds to 127.0.0.1 by default**. Use
+  `ctx-monitor serve --host 0.0.0.0 --allow-non-loopback` only if you
+  actually want LAN-visible read-only access. The startup output prints a
+  one-process read-token URL; without that token or the cookie it sets, LAN
+  HTML/API/SSE requests return 403. Mutations remain disabled on non-loopback
+  binds.
 - **Same-origin gating on mutation**. Any POST with an `Origin`
-  header that doesn't match `Host` returns 403. Curl and direct
-  tool calls are allowed (no Origin header at all).
+  header whose normalized HTTP authority or effective port does not match
+  `Host` returns 403. Curl and direct tool calls are allowed (no Origin header
+  at all) only with the mutation token.
 - **Slug allowlist on all paths**. Anywhere the dashboard resolves
   a skill, agent, MCP, or harness slug to a file path (`/wiki/<slug>`,
   `/graph?slug=<slug>&type=<entity>`, `/api/graph/<slug>.json`), the slug is

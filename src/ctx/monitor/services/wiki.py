@@ -384,8 +384,6 @@ def search_entities_from_index(
     index_matches_manifest: Callable[[Path], bool],
 ) -> list[dict[str, Any]] | None:
     terms = [term for term in re.split(r"\s+", query.lower().strip()) if term]
-    if not terms:
-        return None
     normalized = normalize_entity_type(entity_type) if entity_type else None
     if entity_type is not None and normalized is None:
         raise ValueError(f"unsupported entity_type: {entity_type!r}")
@@ -408,19 +406,25 @@ def search_entities_from_index(
                 "coalesce(description,'')) LIKE ?"
             )
             params.append(f"%{term}%")
+        where_sql = f" WHERE {' AND '.join(where)}" if where else ""
+        if terms:
+            first = terms[0]
+            order_sql = (
+                " ORDER BY CASE "
+                "WHEN lower(label) = ? THEN 0 "
+                "WHEN lower(id) = ? THEN 1 "
+                "WHEN lower(label) LIKE ? THEN 2 "
+                "WHEN lower(id) LIKE ? THEN 3 "
+                "ELSE 4 END, degree DESC, label COLLATE NOCASE"
+            )
+            params.extend([first, first, f"{first}%", f"%:{first}%"])
+        else:
+            order_sql = " ORDER BY degree DESC, label COLLATE NOCASE"
         sql = (
             "SELECT id,label,type,tags,description,quality_score,usage_score,degree "
-            f"FROM nodes WHERE {' AND '.join(where)} "
-            "ORDER BY CASE "
-            "WHEN lower(label) = ? THEN 0 "
-            "WHEN lower(id) = ? THEN 1 "
-            "WHEN lower(label) LIKE ? THEN 2 "
-            "WHEN lower(id) LIKE ? THEN 3 "
-            "ELSE 4 END, degree DESC, label COLLATE NOCASE "
-            "LIMIT ?"
+            f"FROM nodes{where_sql}{order_sql} LIMIT ?"
         )
-        first = terms[0]
-        params.extend([first, first, f"{first}%", f"%:{first}%", max(1, limit)])
+        params.append(max(1, limit))
         rows = conn.execute(sql, params).fetchall()
     except (sqlite3.Error, TypeError):
         return None

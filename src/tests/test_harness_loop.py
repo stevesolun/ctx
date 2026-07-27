@@ -26,7 +26,10 @@ import pytest
 from ctx.adapters.generic.loop import (
     LoopResult,
     LoopObserver,
+    TurnAuthorization,
+    TurnPreparation,
     _collect_tools,
+    _should_compact_conversation,
     run_loop,
 )
 from ctx.adapters.generic.providers import (
@@ -175,6 +178,87 @@ def _filter_response() -> CompletionResponse:
     )
 
 
+def _tool_definition(name: str) -> ToolDefinition:
+    return ToolDefinition(
+        name=name,
+        description=f"Test tool {name}.",
+        parameters={"type": "object", "properties": {}},
+    )
+
+
+class _TestTurnController:
+    def __init__(
+        self,
+        preparation: TurnPreparation | None = None,
+        *,
+        authorization_denial: str | None = None,
+        authorization_usage: Usage | None = None,
+        result_usage: Usage | None = None,
+        result_error: Exception | None = None,
+        close_usage: Usage | None = None,
+        close_error: Exception | None = None,
+    ) -> None:
+        self.preparation = preparation or TurnPreparation()
+        self.authorization_denial = authorization_denial
+        self.authorization_usage = authorization_usage
+        self.authorization_calls = 0
+        self.result_usage = result_usage
+        self.result_error = result_error
+        self.result_calls = 0
+        self.close_usage = close_usage
+        self.close_error = close_error
+        self.closed: list[tuple[int, int, str]] = []
+
+    def prepare_turn(
+        self,
+        iteration: int,
+        messages: tuple[Message, ...],
+        base_tools: tuple[ToolDefinition, ...],
+        *,
+        deadline_monotonic: float | None,
+        cancel_event: threading.Event | None,
+    ) -> TurnPreparation:
+        return self.preparation
+
+    def authorize_tool_call(
+        self,
+        iteration: int,
+        capability_epoch: int,
+        call: ToolCall,
+    ) -> TurnAuthorization | None:
+        self.authorization_calls += 1
+        if self.authorization_denial is None and self.authorization_usage is None:
+            return None
+        return TurnAuthorization(
+            denial=self.authorization_denial,
+            usage=self.authorization_usage or Usage(),
+        )
+
+    def on_tool_result(
+        self,
+        iteration: int,
+        capability_epoch: int,
+        call: ToolCall,
+        result: str,
+        error: str | None,
+    ) -> Usage | None:
+        self.result_calls += 1
+        if self.result_error is not None:
+            raise self.result_error
+        return self.result_usage
+
+    def close_turn(
+        self,
+        iteration: int,
+        capability_epoch: int,
+        outcome: str,
+    ) -> Usage | None:
+        self.closed.append((iteration, capability_epoch, outcome))
+        if self.close_error is not None:
+            raise self.close_error
+        return self.close_usage
+
+
 # ── Termination: completed ──────────────────────────────────────────────────
 
 
@@ -259,8 +343,12 @@ class TestCompletion:
 class TestMaxIterations:
     def test_hits_iteration_cap(self) -> None:
         """Model that never stops calling a tool hits the iteration cap."""
-        tc = ToolCall(id="c1", name="srv__noop", arguments={})
-        provider = _Scripted([_tool_response(tc) for _ in range(10)])
+        provider = _Scripted(
+            [
+                _tool_response(ToolCall(id=f"c{index}", name="srv__noop", arguments={}))
+                for index in range(10)
+            ]
+        )
         result = run_loop(
             provider=provider,
             system_prompt="",
@@ -312,18 +400,18 @@ class TestBudgets:
         assert not [m for m in result.messages if m.role == "tool"]
 
     def test_cost_budget_trips(self) -> None:
-        tc = ToolCall(id="c1", name="srv__noop", arguments={})
         # Each turn: $0.10 cost. Budget $0.25 trips on the third
         # provider response because the check is strictly ">".
-        expensive = CompletionResponse(
-            content="",
-            tool_calls=(tc,),
-            finish_reason="tool_calls",
-            usage=Usage(input_tokens=0, output_tokens=0, cost_usd=0.10),
-            provider="scripted",
-            model="x",
+        provider = _Scripted(
+            [
+                _tool_response(
+                    ToolCall(id=f"c{index}", name="srv__noop", arguments={}),
+                    usage=Usage(input_tokens=0, output_tokens=0, cost_usd=0.10),
+                )
+                for index in range(3)
+            ]
+            + [_stop_response()]
         )
-        provider = _Scripted([expensive, expensive, expensive, _stop_response()])
         result = run_loop(
             provider=provider,
             system_prompt="",
@@ -339,10 +427,38 @@ class TestBudgets:
         assert result.usage.cost_usd == pytest.approx(0.30)
         assert len([m for m in result.messages if m.role == "tool"]) == 2
 
-    def test_token_budget_trips(self) -> None:
+    def test_exact_cost_budget_stops_before_second_provider_call(self) -> None:
         tc = ToolCall(id="c1", name="srv__noop", arguments={})
-        heavy = _tool_response(tc, usage=Usage(input_tokens=100, output_tokens=50))
-        provider = _Scripted([heavy, heavy, heavy, _stop_response()])
+        provider = _Scripted(
+            [
+                _tool_response(tc, usage=Usage(cost_usd=0.10)),
+                _stop_response("unreached", usage=Usage(cost_usd=0.10)),
+            ]
+        )
+
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="spend exactly",
+            tool_executor=lambda _call: "ok",
+            budget_usd=0.10,
+        )
+
+        assert result.stop_reason == "cost_budget"
+        assert len(provider.calls) == 1
+        assert result.usage.cost_usd == pytest.approx(0.10)
+
+    def test_token_budget_trips(self) -> None:
+        provider = _Scripted(
+            [
+                _tool_response(
+                    ToolCall(id=f"c{index}", name="srv__noop", arguments={}),
+                    usage=Usage(input_tokens=100, output_tokens=50),
+                )
+                for index in range(3)
+            ]
+            + [_stop_response()]
+        )
         result = run_loop(
             provider=provider,
             system_prompt="",
@@ -355,6 +471,287 @@ class TestBudgets:
         assert result.iterations == 2
         assert result.usage.input_tokens + result.usage.output_tokens == 300
         assert len([m for m in result.messages if m.role == "tool"]) == 1
+
+    def test_exact_token_budget_stops_before_second_provider_call(self) -> None:
+        tc = ToolCall(id="c1", name="srv__noop", arguments={})
+        provider = _Scripted(
+            [
+                _tool_response(tc, usage=Usage(input_tokens=6, output_tokens=4)),
+                _stop_response("unreached"),
+            ]
+        )
+
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="spend exactly",
+            tool_executor=lambda _call: "ok",
+            budget_tokens=10,
+        )
+
+        assert result.stop_reason == "token_budget"
+        assert len(provider.calls) == 1
+        assert result.usage.input_tokens + result.usage.output_tokens == 10
+
+    @pytest.mark.parametrize(
+        ("budget_tokens", "budget_usd", "expected_reason"),
+        [
+            (10, None, "token_budget"),
+            (None, 0.10, "cost_budget"),
+        ],
+    )
+    def test_exact_budget_stops_before_compactor_provider_call(
+        self,
+        budget_tokens: int | None,
+        budget_usd: float | None,
+        expected_reason: str,
+    ) -> None:
+        from ctx.adapters.generic.compaction import CompactionResult
+
+        class _CountingCompactor:
+            calls = 0
+
+            def should_compact(self, messages):
+                return True
+
+            def compact_with_usage(self, messages, provider):
+                self.calls += 1
+                return CompactionResult(
+                    new_messages=list(messages),
+                    compacted_count=0,
+                    summary="unreached",
+                    usage=Usage(input_tokens=1, output_tokens=1, cost_usd=0.01),
+                )
+
+        tc = ToolCall(id="c1", name="srv__noop", arguments={})
+        provider = _Scripted(
+            [
+                _tool_response(
+                    tc,
+                    usage=Usage(input_tokens=6, output_tokens=4, cost_usd=0.10),
+                )
+            ]
+        )
+        compactor = _CountingCompactor()
+
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="spend exactly",
+            tool_executor=lambda _call: "ok",
+            compactor=compactor,
+            budget_tokens=budget_tokens,
+            budget_usd=budget_usd,
+        )
+
+        assert result.stop_reason == expected_reason
+        assert compactor.calls == 0
+        assert len(provider.calls) == 1
+
+    @pytest.mark.parametrize(
+        ("budget_tokens", "budget_usd", "expected_reason"),
+        [
+            (100, None, "token_budget"),
+            (None, 1.0, "cost_budget"),
+        ],
+    )
+    def test_compactor_failure_with_active_budget_fails_closed(
+        self,
+        budget_tokens: int | None,
+        budget_usd: float | None,
+        expected_reason: str,
+    ) -> None:
+        class _FailingCompactor:
+            def should_compact(self, messages):
+                return True
+
+            def compact_with_usage(self, messages, provider):
+                raise RuntimeError("summary provider failed after dispatch")
+
+        tc = ToolCall(id="c1", name="srv__noop", arguments={})
+        provider = _Scripted(
+            [
+                _tool_response(
+                    tc,
+                    usage=Usage(
+                        input_tokens=1,
+                        output_tokens=1,
+                        cost_usd=0.01,
+                    ),
+                ),
+                _stop_response("unreached"),
+            ]
+        )
+
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="meter uncertain compaction",
+            tool_executor=lambda _call: "ok",
+            compactor=_FailingCompactor(),
+            budget_tokens=budget_tokens,
+            budget_usd=budget_usd,
+        )
+
+        assert result.stop_reason == expected_reason
+        assert "usage unavailable" in result.detail
+        assert len(provider.calls) == 1
+
+    def test_exact_initial_usage_stops_before_first_provider_call(self) -> None:
+        provider = _Scripted([_stop_response("unreached")])
+
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="already exhausted",
+            budget_tokens=10,
+            initial_usage=Usage(input_tokens=6, output_tokens=4),
+        )
+
+        assert result.stop_reason == "token_budget"
+        assert result.iterations == 0
+        assert provider.calls == []
+
+    def test_missing_initial_token_usage_fails_closed_before_provider_call(self) -> None:
+        provider = _Scripted([_stop_response("unreached")])
+
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="unknown prior spend",
+            budget_tokens=10,
+            initial_usage=Usage(tokens_reported=False),
+        )
+
+        assert result.stop_reason == "token_budget"
+        assert "usage unavailable" in result.detail
+        assert provider.calls == []
+
+    def test_missing_provider_token_usage_fails_closed_after_one_call(self) -> None:
+        provider = _Scripted([_stop_response("answer", usage=Usage(tokens_reported=False))])
+
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="meter me",
+            budget_tokens=100,
+        )
+
+        assert result.stop_reason == "token_budget"
+        assert result.final_message == "answer"
+        assert "usage unavailable" in result.detail
+        assert len(provider.calls) == 1
+
+    def test_explicit_zero_usage_remains_valid_under_budget(self) -> None:
+        provider = _Scripted(
+            [
+                _stop_response(
+                    "answer",
+                    usage=Usage(
+                        cost_usd=0.0,
+                        cached_input_tokens=0,
+                        tokens_reported=True,
+                    ),
+                )
+            ]
+        )
+
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="meter me",
+            budget_tokens=100,
+            budget_usd=1.0,
+        )
+
+        assert result.stop_reason == "completed"
+        assert result.usage.tokens_reported
+        assert result.usage.cost_usd == 0.0
+        assert result.usage.cached_input_tokens == 0
+
+    def test_missing_provider_cost_fails_closed_under_usd_budget(self) -> None:
+        provider = _Scripted(
+            [
+                _stop_response(
+                    "answer",
+                    usage=Usage(
+                        input_tokens=1,
+                        output_tokens=1,
+                        cached_input_tokens=0,
+                    ),
+                )
+            ]
+        )
+
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="meter me",
+            budget_usd=1.0,
+        )
+
+        assert result.stop_reason == "cost_budget"
+        assert "usage unavailable" in result.detail
+        assert len(provider.calls) == 1
+
+    def test_cache_usage_aggregates_only_when_every_call_reports_it(self) -> None:
+        tc = ToolCall(id="c1", name="srv__noop", arguments={})
+        complete = run_loop(
+            provider=_Scripted(
+                [
+                    _tool_response(
+                        tc,
+                        usage=Usage(
+                            input_tokens=1,
+                            output_tokens=1,
+                            cost_usd=0.0,
+                            cached_input_tokens=3,
+                        ),
+                    ),
+                    _stop_response(
+                        "done",
+                        usage=Usage(
+                            input_tokens=2,
+                            output_tokens=2,
+                            cost_usd=0.0,
+                            cached_input_tokens=2,
+                        ),
+                    ),
+                ]
+            ),
+            system_prompt="",
+            task="aggregate",
+            tool_executor=lambda _call: "ok",
+        )
+        incomplete = run_loop(
+            provider=_Scripted(
+                [
+                    _tool_response(
+                        tc,
+                        usage=Usage(
+                            input_tokens=1,
+                            output_tokens=1,
+                            cost_usd=0.0,
+                            cached_input_tokens=3,
+                        ),
+                    ),
+                    _stop_response(
+                        "done",
+                        usage=Usage(
+                            input_tokens=2,
+                            output_tokens=2,
+                            cost_usd=0.0,
+                        ),
+                    ),
+                ]
+            ),
+            system_prompt="",
+            task="aggregate",
+            tool_executor=lambda _call: "ok",
+        )
+
+        assert complete.usage.cached_input_tokens == 5
+        assert incomplete.usage.cached_input_tokens is None
 
     def test_cost_budget_trips_on_terminal_response(self) -> None:
         provider = _Scripted([_stop_response("done", usage=Usage(cost_usd=0.50))])
@@ -417,7 +814,12 @@ class TestCancel:
                 cancel.set()
             return "ok"
 
-        provider = _Scripted([_tool_response(tc), _tool_response(tc), _tool_response(tc)])
+        provider = _Scripted(
+            [
+                _tool_response(ToolCall(id=f"c{index}", name=tc.name, arguments={}))
+                for index in range(3)
+            ]
+        )
         result = run_loop(
             provider=provider,
             system_prompt="",
@@ -645,6 +1047,303 @@ class TestToolDispatch:
         assert [m.content for m in tool_msgs] == ["result-c1", "result-c2"]
         assert [m.tool_call_id for m in tool_msgs] == ["c1", "c2"]
 
+    def test_raw_wiki_tool_result_is_available_for_exactly_one_provider_turn(
+        self,
+    ) -> None:
+        wiki = ToolCall(id="wiki-1", name="ctx__wiki_get", arguments={"slug": "secret"})
+        ordinary = ToolCall(id="ordinary-1", name="x__keep", arguments={})
+        follow_up = ToolCall(id="ordinary-2", name="x__next", arguments={})
+
+        class _CompactorProbe:
+            def __init__(self) -> None:
+                self.seen: list[list[Message]] = []
+
+            def should_compact(self, messages: list[Message]) -> bool:
+                self.seen.append(list(messages))
+                return False
+
+        compactor = _CompactorProbe()
+        provider = _Scripted(
+            [
+                _tool_response(wiki, ordinary, content="mixed call"),
+                _tool_response(follow_up),
+                _stop_response("done"),
+            ]
+        )
+
+        def execute(call: ToolCall) -> str:
+            return "private wiki body" if call.name == "ctx__wiki_get" else call.id
+
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="task",
+            tool_executor=execute,
+            compactor=compactor,
+        )
+
+        second_turn = provider.calls[1]["messages"]
+        assert any(message.content == "private wiki body" for message in second_turn)
+        mixed_second = next(message for message in second_turn if message.content == "mixed call")
+        assert [call.name for call in mixed_second.tool_calls] == [
+            "ctx__wiki_get",
+            "x__keep",
+        ]
+
+        third_turn = provider.calls[2]["messages"]
+        assert not any(message.content == "private wiki body" for message in third_turn)
+        mixed_third = next(message for message in third_turn if message.content == "mixed call")
+        assert [call.name for call in mixed_third.tool_calls] == ["x__keep"]
+        assert any(
+            message.role == "tool" and message.name == "x__keep" and message.content == "ordinary-1"
+            for message in third_turn
+        )
+        assert not any(
+            call.name == "ctx__wiki_get"
+            for message in result.messages
+            for call in message.tool_calls
+        )
+        assert not any(
+            message.role == "tool" and message.name == "ctx__wiki_get"
+            for message in result.messages
+        )
+        assert len(compactor.seen) == 1
+        assert not any(message.content == "private wiki body" for message in compactor.seen[0])
+
+    def test_raw_wiki_tool_context_is_pruned_after_provider_failure(self) -> None:
+        wiki = ToolCall(id="wiki-1", name="ctx__wiki_get", arguments={"slug": "secret"})
+        provider = _Scripted([_tool_response(wiki)])
+        observer = _RecordingObserver()
+
+        with pytest.raises(RuntimeError, match="ran out of canned responses"):
+            run_loop(
+                provider=provider,
+                system_prompt="",
+                task="task",
+                tool_executor=lambda _call: "private wiki body",
+                observer=observer,
+            )
+
+        assert any(
+            message.content == "private wiki body" for message in provider.calls[1]["messages"]
+        )
+        assert len(observer.stops) == 1
+        assert not any(
+            call.name == "ctx__wiki_get"
+            for message in observer.stops[0].messages
+            for call in message.tool_calls
+        )
+        assert not any(
+            message.role == "tool" and message.name == "ctx__wiki_get"
+            for message in observer.stops[0].messages
+        )
+
+    def test_failed_wiki_call_leaves_no_raw_tool_history(self) -> None:
+        wiki = ToolCall(id="wiki-1", name="ctx__wiki_get", arguments={"slug": "missing"})
+
+        def fail(_call: ToolCall) -> str:
+            raise RuntimeError("wiki unavailable")
+
+        result = run_loop(
+            provider=_Scripted([_tool_response(wiki)]),
+            system_prompt="",
+            task="task",
+            tool_executor=fail,
+        )
+
+        assert result.stop_reason == "tool_error"
+        assert "wiki unavailable" in result.detail
+        assert not any(
+            call.name == "ctx__wiki_get"
+            for message in result.messages
+            for call in message.tool_calls
+        )
+        assert not any(
+            message.role == "tool" and message.name == "ctx__wiki_get"
+            for message in result.messages
+        )
+
+    @pytest.mark.parametrize("bad_id", ["", "   "])
+    def test_blank_tool_call_id_is_rejected_before_any_side_effect(
+        self,
+        bad_id: str,
+    ) -> None:
+        call = ToolCall(id=bad_id, name="ctx__wiki_get", arguments={"slug": "secret"})
+        observer = _RecordingObserver()
+        executed: list[ToolCall] = []
+
+        class _CompactorProbe:
+            calls = 0
+
+            def should_compact(self, _messages: list[Message]) -> bool:
+                self.calls += 1
+                return False
+
+        def execute(tool_call: ToolCall) -> str:
+            executed.append(tool_call)
+            return "unreached"
+
+        compactor = _CompactorProbe()
+        result = run_loop(
+            provider=_Scripted([_tool_response(call)]),
+            system_prompt="",
+            task="task",
+            tool_executor=execute,
+            observer=observer,
+            compactor=compactor,
+        )
+
+        assert result.stop_reason == "provider_error"
+        assert "blank tool-call id" in result.detail
+        assert executed == []
+        assert observer.responses == []
+        assert compactor.calls == 0
+        assert [message.role for message in result.messages] == ["user"]
+
+    def test_duplicate_tool_call_id_is_rejected_before_any_side_effect(self) -> None:
+        wiki = ToolCall(id="duplicate", name="ctx__wiki_get", arguments={"slug": "secret"})
+        ordinary = ToolCall(id="duplicate", name="x__keep", arguments={})
+        observer = _RecordingObserver()
+        executed: list[ToolCall] = []
+
+        def execute(tool_call: ToolCall) -> str:
+            executed.append(tool_call)
+            return "unreached"
+
+        result = run_loop(
+            provider=_Scripted([_tool_response(wiki, ordinary)]),
+            system_prompt="",
+            task="task",
+            tool_executor=execute,
+            observer=observer,
+        )
+
+        assert result.stop_reason == "provider_error"
+        assert "duplicate tool-call id 'duplicate'" in result.detail
+        assert executed == []
+        assert observer.responses == []
+        assert [message.role for message in result.messages] == ["user"]
+
+    def test_retained_non_wiki_id_reused_by_wiki_is_rejected_before_side_effects(
+        self,
+    ) -> None:
+        prior = ToolCall(id="retained-id", name="x__keep", arguments={})
+        reused = ToolCall(
+            id=prior.id,
+            name="ctx__wiki_get",
+            arguments={"slug": "secret"},
+        )
+        observer = _RecordingObserver()
+        executed: list[ToolCall] = []
+
+        class _CompactorProbe:
+            calls = 0
+
+            def should_compact(self, _messages: list[Message]) -> bool:
+                self.calls += 1
+                return False
+
+        def execute(call: ToolCall) -> str:
+            executed.append(call)
+            return "unreached"
+
+        compactor = _CompactorProbe()
+        result = run_loop(
+            provider=_Scripted([_tool_response(reused)]),
+            system_prompt="",
+            task="next turn",
+            messages=[
+                Message(role="user", content="prior turn"),
+                Message(role="assistant", content="", tool_calls=(prior,)),
+                Message(
+                    role="tool",
+                    content="prior result",
+                    tool_call_id=prior.id,
+                    name=prior.name,
+                ),
+            ],
+            append_task_after_messages=True,
+            tool_executor=execute,
+            observer=observer,
+            compactor=compactor,
+        )
+
+        assert result.stop_reason == "provider_error"
+        assert "reused retained tool-call id 'retained-id'" in result.detail
+        assert executed == []
+        assert observer.responses == []
+        assert compactor.calls == 0
+        assert not any(
+            call.name == "ctx__wiki_get"
+            for message in result.messages
+            for call in message.tool_calls
+        )
+
+    def test_compaction_guard_skips_malformed_ambiguous_raw_wiki_result(
+        self,
+    ) -> None:
+        shared_id = "ambiguous-id"
+        messages = [
+            Message(
+                role="assistant",
+                content="",
+                tool_calls=(
+                    ToolCall(id=shared_id, name="ctx__wiki_get", arguments={}),
+                    ToolCall(id=shared_id, name="x__keep", arguments={}),
+                ),
+            ),
+            Message(
+                role="user",
+                content="raw wiki result with malformed role and missing name",
+                tool_call_id=shared_id,
+            ),
+        ]
+
+        class _CompactorProbe:
+            calls = 0
+
+            def should_compact(self, _messages: list[Message]) -> bool:
+                self.calls += 1
+                return True
+
+        compactor = _CompactorProbe()
+
+        assert not _should_compact_conversation(messages, compactor)
+        assert compactor.calls == 0
+
+    def test_orphan_and_malformed_seeded_raw_wiki_results_are_removed(
+        self,
+    ) -> None:
+        provider = _Scripted([_stop_response("done")])
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="task",
+            messages=[
+                Message(
+                    role="tool",
+                    content="orphan raw wiki result",
+                    tool_call_id="orphan",
+                    name="ctx__wiki_get",
+                ),
+                Message(
+                    role="user",
+                    content="malformed-role raw wiki result",
+                    tool_call_id="",
+                    name="ctx__wiki_get",
+                ),
+            ],
+        )
+
+        assert not any(
+            message.content == "orphan raw wiki result" for message in provider.calls[0]["messages"]
+        )
+        assert not any(
+            message.content == "malformed-role raw wiki result"
+            for message in provider.calls[0]["messages"]
+        )
+        assert not any(message.name == "ctx__wiki_get" for message in result.messages)
+
 
 # ── Tool catalogue + extra_tools ────────────────────────────────────────────
 
@@ -721,6 +1420,977 @@ class TestToolCatalogue:
         assert provider.calls[0]["tools"] is None
 
 
+# ── Per-turn context + capabilities ────────────────────────────────────────
+
+
+class TestTurnController:
+    def test_context_and_tools_are_ephemeral_per_turn(self) -> None:
+        base_tools = tuple(_tool_definition(f"custom__tool_{index}") for index in range(12))
+        first_tool = base_tools[0]
+
+        class _Controller(_TestTurnController):
+            def prepare_turn(
+                self,
+                iteration,
+                messages,
+                base_tools,
+                *,
+                deadline_monotonic,
+                cancel_event,
+            ):
+                if iteration == 1:
+                    return TurnPreparation(
+                        ephemeral_user_context=("CTX SELECTED SKILL: focused-test",),
+                        tools=(first_tool,),
+                        capability_epoch=1,
+                    )
+                return TurnPreparation(tools=(), capability_epoch=2)
+
+        call = ToolCall(id="c1", name=first_tool.name, arguments={})
+        provider = _Scripted([_tool_response(call), _stop_response("done")])
+        controller = _Controller()
+        result = run_loop(
+            provider=provider,
+            system_prompt="base prompt",
+            task="task",
+            extra_tools=list(base_tools),
+            tool_executor=lambda _call: "ok",
+            turn_controller=controller,
+        )
+
+        first_messages = provider.calls[0]["messages"]
+        first_contents = [message.content for message in first_messages]
+        second_contents = [message.content for message in provider.calls[1]["messages"]]
+        persisted_contents = [message.content for message in result.messages]
+        assert any("CTX SELECTED SKILL: focused-test" in item for item in first_contents)
+        assert "CTX SELECTED SKILL: focused-test" not in second_contents
+        assert "CTX SELECTED SKILL: focused-test" not in persisted_contents
+        assert [message.role for message in first_messages] == ["system", "user"]
+        assert first_messages[-1].content.endswith("--- current user request ---\ntask")
+        assert [tool.name for tool in provider.calls[0]["tools"]] == [first_tool.name]
+        assert provider.calls[1]["tools"] is None
+        assert controller.closed == [(1, 1, "continue"), (2, 2, "completed")]
+
+    def test_system_and_user_context_keep_authority_and_share_byte_limit(self) -> None:
+        legacy = TurnPreparation(
+            ("LEGACY POSITIONAL CONTEXT",),
+            None,
+            9,
+            Usage(input_tokens=1),
+        )
+        assert legacy.ephemeral_context == ("LEGACY POSITIONAL CONTEXT",)
+        assert legacy.capability_epoch == 9
+        assert legacy.usage.input_tokens == 1
+        assert legacy.ephemeral_user_context == ()
+
+        preparation = TurnPreparation(
+            ephemeral_context=("TRUSTED HOST CONTEXT",),
+            ephemeral_user_context=("UNTRUSTED REFERENCE",),
+            capability_epoch=1,
+        )
+        provider = _Scripted([_stop_response("done")])
+
+        result = run_loop(
+            provider=provider,
+            system_prompt="base prompt",
+            task="current task",
+            turn_controller=_TestTurnController(preparation),
+        )
+
+        messages = provider.calls[0]["messages"]
+        assert [message.role for message in messages] == [
+            "system",
+            "system",
+            "user",
+        ]
+        assert [message.content for message in messages] == [
+            "base prompt",
+            "TRUSTED HOST CONTEXT",
+            "UNTRUSTED REFERENCE\n\n--- current user request ---\ncurrent task",
+        ]
+        persisted = [message.content for message in result.messages]
+        assert "TRUSTED HOST CONTEXT" not in persisted
+        assert "UNTRUSTED REFERENCE" not in persisted
+
+        rejected_provider = _Scripted([_stop_response("unreached")])
+        rejected = run_loop(
+            provider=rejected_provider,
+            system_prompt="base prompt",
+            task="current task",
+            turn_controller=_TestTurnController(preparation),
+            max_ephemeral_context_bytes=20,
+        )
+        assert rejected.stop_reason == "controller_error"
+        assert rejected_provider.calls == []
+
+        resume_provider = _Scripted([_stop_response("resumed")])
+        resumed = run_loop(
+            provider=resume_provider,
+            system_prompt="base prompt",
+            task="follow-up task",
+            messages=[
+                Message(role="system", content="base prompt"),
+                Message(role="user", content="prior task"),
+                Message(role="assistant", content="prior answer"),
+            ],
+            append_task_after_messages=True,
+            turn_controller=_TestTurnController(preparation),
+        )
+        resume_messages = resume_provider.calls[0]["messages"]
+        assert [message.role for message in resume_messages] == [
+            "system",
+            "system",
+            "user",
+            "assistant",
+            "user",
+        ]
+        assert resume_messages[-1].content.endswith("--- current user request ---\nfollow-up task")
+        assert "UNTRUSTED REFERENCE" not in [message.content for message in resumed.messages]
+
+    def test_unadvertised_tool_is_denied_before_dispatch(self) -> None:
+        allowed = _tool_definition("custom__allowed")
+        invoked = False
+        controller = _TestTurnController(TurnPreparation(tools=(allowed,), capability_epoch=7))
+
+        def execute(_call: ToolCall) -> str:
+            nonlocal invoked
+            invoked = True
+            return "should-not-run"
+
+        hidden_call = ToolCall(id="c1", name="custom__hidden", arguments={})
+        result = run_loop(
+            provider=_Scripted([_tool_response(hidden_call)]),
+            system_prompt="",
+            task="task",
+            tool_executor=execute,
+            turn_controller=controller,
+        )
+
+        assert result.stop_reason == "tool_denied"
+        assert "capability epoch 7 did not advertise" in result.detail
+        assert not invoked
+        assert controller.closed == [(1, 7, "tool_denied")]
+
+    def test_stale_epoch_denies_later_call_from_same_response(self) -> None:
+        first_tool = _tool_definition("custom__first")
+        second_tool = _tool_definition("custom__second")
+
+        class _Controller(_TestTurnController):
+            def __init__(self) -> None:
+                super().__init__()
+                self.current_epoch = 4
+
+            def prepare_turn(
+                self,
+                iteration,
+                messages,
+                base_tools,
+                *,
+                deadline_monotonic,
+                cancel_event,
+            ):
+                return TurnPreparation(
+                    tools=(first_tool, second_tool),
+                    capability_epoch=self.current_epoch,
+                )
+
+            def authorize_tool_call(self, iteration, capability_epoch, call):
+                if capability_epoch != self.current_epoch:
+                    return TurnAuthorization(denial=f"stale capability epoch {capability_epoch}")
+                return None
+
+            def on_tool_result(
+                self,
+                iteration,
+                capability_epoch,
+                call,
+                result,
+                error,
+            ):
+                if error is None:
+                    self.current_epoch += 1
+                return None
+
+        invoked: list[str] = []
+
+        def execute(call: ToolCall) -> str:
+            invoked.append(call.name)
+            return "ok"
+
+        calls = (
+            ToolCall(id="c1", name=first_tool.name, arguments={}),
+            ToolCall(id="c2", name=second_tool.name, arguments={}),
+        )
+        result = run_loop(
+            provider=_Scripted([_tool_response(*calls)]),
+            system_prompt="",
+            task="task",
+            tool_executor=execute,
+            turn_controller=_Controller(),
+        )
+
+        assert result.stop_reason == "tool_denied"
+        assert "stale capability epoch 4" in result.detail
+        assert invoked == [first_tool.name]
+
+    def test_controller_usage_counts_toward_loop_budget(self) -> None:
+        tool = _tool_definition("custom__metered")
+        controller = _TestTurnController(
+            TurnPreparation(tools=(tool,), capability_epoch=1),
+            result_usage=Usage(input_tokens=7, output_tokens=3, cost_usd=0.02),
+        )
+
+        call = ToolCall(id="c1", name=tool.name, arguments={})
+        provider = _Scripted(
+            [
+                _tool_response(
+                    call,
+                    usage=Usage(input_tokens=10, output_tokens=5, cost_usd=0.0),
+                ),
+                _stop_response(
+                    "done",
+                    usage=Usage(input_tokens=5, output_tokens=3, cost_usd=0.0),
+                ),
+            ]
+        )
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="task",
+            tool_executor=lambda _call: "ok",
+            turn_controller=controller,
+        )
+
+        assert result.usage.input_tokens == 22
+        assert result.usage.output_tokens == 11
+        assert result.usage.cost_usd == pytest.approx(0.02)
+
+    def test_exact_provider_budget_closes_turn_with_budget_outcome(self) -> None:
+        tool = _tool_definition("custom__exact-provider-budget")
+        controller = _TestTurnController(TurnPreparation(tools=(tool,), capability_epoch=99))
+        invoked = False
+
+        def execute(_call: ToolCall) -> str:
+            nonlocal invoked
+            invoked = True
+            return "unreached"
+
+        result = run_loop(
+            provider=_Scripted(
+                [
+                    _tool_response(
+                        ToolCall("c1", tool.name, {}),
+                        usage=Usage(input_tokens=6, output_tokens=4),
+                    )
+                ]
+            ),
+            system_prompt="",
+            task="task",
+            tool_executor=execute,
+            turn_controller=controller,
+            budget_tokens=10,
+        )
+
+        assert result.stop_reason == "token_budget"
+        assert not invoked
+        assert controller.authorization_calls == 0
+        assert controller.closed == [(1, 99, "token_budget")]
+
+    def test_exact_result_hook_budget_stops_before_next_authorization(self) -> None:
+        tools = (
+            _tool_definition("custom__first"),
+            _tool_definition("custom__second"),
+        )
+        controller = _TestTurnController(
+            TurnPreparation(tools=tools, capability_epoch=100),
+            authorization_usage=Usage(input_tokens=1),
+            result_usage=Usage(input_tokens=10),
+        )
+        invoked: list[str] = []
+        calls = tuple(
+            ToolCall(id=str(index), name=tool.name, arguments={})
+            for index, tool in enumerate(tools)
+        )
+
+        def execute(call: ToolCall) -> str:
+            invoked.append(call.name)
+            return "ok"
+
+        result = run_loop(
+            provider=_Scripted([_tool_response(*calls, usage=Usage(input_tokens=39))]),
+            system_prompt="",
+            task="task",
+            tool_executor=execute,
+            turn_controller=controller,
+            budget_tokens=50,
+        )
+
+        assert result.stop_reason == "token_budget"
+        assert invoked == [tools[0].name]
+        assert controller.authorization_calls == 1
+        assert controller.result_calls == 1
+        assert controller.closed == [(1, 100, "token_budget")]
+
+    def test_authorization_usage_stops_before_dispatch_and_close_usage_is_metered(
+        self,
+    ) -> None:
+        tool = _tool_definition("custom__metered-activation")
+        controller = _TestTurnController(
+            TurnPreparation(tools=(tool,), capability_epoch=21),
+            authorization_usage=Usage(input_tokens=60),
+            close_usage=Usage(input_tokens=7),
+        )
+        invoked = False
+
+        def execute(_call: ToolCall) -> str:
+            nonlocal invoked
+            invoked = True
+            return "unreached"
+
+        result = run_loop(
+            provider=_Scripted(
+                [
+                    _tool_response(
+                        ToolCall("c1", tool.name, {}),
+                        usage=Usage(),
+                    )
+                ]
+            ),
+            system_prompt="",
+            task="task",
+            tool_executor=execute,
+            turn_controller=controller,
+            budget_tokens=50,
+        )
+
+        assert result.stop_reason == "token_budget"
+        assert result.usage.input_tokens == 67
+        assert not invoked
+        assert controller.closed == [(1, 21, "token_budget")]
+
+    def test_denied_authorization_usage_stops_before_result_hook(self) -> None:
+        tool = _tool_definition("custom__denied-metered-activation")
+        controller = _TestTurnController(
+            TurnPreparation(tools=(tool,), capability_epoch=27),
+            authorization_denial="host denied activation",
+            authorization_usage=Usage(input_tokens=60),
+            result_usage=Usage(input_tokens=100),
+        )
+
+        result = run_loop(
+            provider=_Scripted(
+                [
+                    _tool_response(
+                        ToolCall("c1", tool.name, {}),
+                        usage=Usage(),
+                    )
+                ]
+            ),
+            system_prompt="",
+            task="task",
+            tool_executor=lambda _call: pytest.fail("denied tool was dispatched"),
+            turn_controller=controller,
+            budget_tokens=50,
+        )
+
+        assert result.stop_reason == "token_budget"
+        assert result.usage.input_tokens == 60
+        assert controller.result_calls == 0
+        assert controller.closed == [(1, 27, "token_budget")]
+
+    def test_close_usage_can_trip_budget_before_result_emission(self) -> None:
+        controller = _TestTurnController(
+            TurnPreparation(tools=(), capability_epoch=22),
+            close_usage=Usage(output_tokens=60),
+        )
+
+        result = run_loop(
+            provider=_Scripted([_stop_response("done", usage=Usage())]),
+            system_prompt="",
+            task="task",
+            turn_controller=controller,
+            budget_tokens=50,
+        )
+
+        assert result.stop_reason == "token_budget"
+        assert result.usage.output_tokens == 60
+        assert controller.closed == [(1, 22, "completed")]
+
+    def test_preparation_usage_stops_before_provider_and_closes(self) -> None:
+        controller = _TestTurnController(
+            TurnPreparation(
+                tools=(),
+                capability_epoch=3,
+                usage=Usage(input_tokens=60),
+            )
+        )
+        provider = _Scripted([_stop_response("unreached")])
+
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="task",
+            turn_controller=controller,
+            budget_tokens=50,
+        )
+
+        assert result.stop_reason == "token_budget"
+        assert result.usage.input_tokens == 60
+        assert provider.calls == []
+        assert controller.closed == [(1, 3, "token_budget")]
+
+    def test_controller_usage_stops_before_next_tool_call(self) -> None:
+        tools = (_tool_definition("custom__one"), _tool_definition("custom__two"))
+        controller = _TestTurnController(
+            TurnPreparation(tools=tools, capability_epoch=5),
+            result_usage=Usage(input_tokens=60),
+        )
+        invoked: list[str] = []
+
+        def execute(call: ToolCall) -> str:
+            invoked.append(call.name)
+            return "ok"
+
+        calls = tuple(
+            ToolCall(id=str(index), name=tool.name, arguments={})
+            for index, tool in enumerate(tools)
+        )
+        result = run_loop(
+            provider=_Scripted(
+                [_tool_response(*calls, usage=Usage(input_tokens=0, output_tokens=0))]
+            ),
+            system_prompt="",
+            task="task",
+            tool_executor=execute,
+            turn_controller=controller,
+            budget_tokens=50,
+        )
+
+        assert result.stop_reason == "token_budget"
+        assert invoked == [tools[0].name]
+        assert controller.closed == [(1, 5, "token_budget")]
+
+    @pytest.mark.parametrize(
+        "usage",
+        [Usage(input_tokens=-1), Usage(cost_usd=float("nan"))],
+    )
+    def test_invalid_controller_usage_fails_closed(self, usage: Usage) -> None:
+        controller = _TestTurnController(TurnPreparation(capability_epoch=8, usage=usage))
+        provider = _Scripted([_stop_response("unreached")])
+
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="task",
+            turn_controller=controller,
+        )
+
+        assert result.stop_reason == "controller_error"
+        assert provider.calls == []
+        assert controller.closed == [(1, 8, "preparation_rejected")]
+
+    @pytest.mark.parametrize(
+        ("preparation", "context_limit", "tool_limit", "schema_limit", "detail"),
+        [
+            (
+                TurnPreparation(ephemeral_context=cast(Any, "bad"), capability_epoch=1),
+                100,
+                10,
+                1_000,
+                "ephemeral_context must be a tuple",
+            ),
+            (
+                TurnPreparation(
+                    ephemeral_user_context=cast(Any, "bad"),
+                    capability_epoch=2,
+                ),
+                100,
+                10,
+                1_000,
+                "ephemeral_user_context must be a tuple",
+            ),
+            (
+                TurnPreparation(ephemeral_context=("too large",), capability_epoch=3),
+                4,
+                10,
+                1_000,
+                "ephemeral context is",
+            ),
+            (
+                TurnPreparation(
+                    tools=(_tool_definition("one"), _tool_definition("two")),
+                    capability_epoch=4,
+                ),
+                100,
+                1,
+                1_000,
+                "turn exposes 2 tools",
+            ),
+            (
+                TurnPreparation(
+                    tools=(
+                        ToolDefinition(
+                            name="large",
+                            description="x" * 200,
+                            parameters={"type": "object"},
+                        ),
+                    ),
+                    capability_epoch=5,
+                ),
+                100,
+                10,
+                50,
+                "tool schemas are",
+            ),
+        ],
+    )
+    def test_turn_payload_limits_fail_closed(
+        self,
+        preparation: TurnPreparation,
+        context_limit: int,
+        tool_limit: int,
+        schema_limit: int,
+        detail: str,
+    ) -> None:
+        controller = _TestTurnController(preparation)
+        provider = _Scripted([_stop_response("unreached")])
+
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="task",
+            turn_controller=controller,
+            max_ephemeral_context_bytes=context_limit,
+            max_turn_tools=tool_limit,
+            max_turn_schema_bytes=schema_limit,
+        )
+
+        assert result.stop_reason == "controller_error"
+        assert detail in result.detail
+        assert provider.calls == []
+        assert len(controller.closed) == 1
+
+    def test_turn_tool_schema_is_isolated_before_provider_call(self) -> None:
+        parameters: dict[str, Any] = {"type": "object", "properties": {}}
+        tool = ToolDefinition("custom__stable", "stable", parameters)
+
+        class _MutatingCancellationProbe:
+            checks = 0
+
+            def is_set(self) -> bool:
+                self.checks += 1
+                if self.checks == 2:
+                    parameters["properties"]["late"] = {"description": "x" * 5_000}
+                return False
+
+        provider = _Scripted([_stop_response("done")])
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="task",
+            turn_controller=_TestTurnController(
+                TurnPreparation(tools=(tool,), capability_epoch=23)
+            ),
+            cancel_event=cast(Any, _MutatingCancellationProbe()),
+            max_turn_schema_bytes=200,
+        )
+
+        assert result.stop_reason == "completed"
+        submitted = provider.calls[0]["tools"][0]
+        assert submitted.parameters == {"type": "object", "properties": {}}
+        assert "late" in parameters["properties"]
+
+    def test_non_finite_turn_schema_fails_closed(self) -> None:
+        tool = ToolDefinition(
+            "custom__nan",
+            "invalid schema",
+            {"type": "number", "default": float("nan")},
+        )
+        provider = _Scripted([_stop_response("unreached")])
+
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="task",
+            turn_controller=_TestTurnController(
+                TurnPreparation(tools=(tool,), capability_epoch=24)
+            ),
+        )
+
+        assert result.stop_reason == "controller_error"
+        assert "not JSON serializable" in result.detail
+        assert provider.calls == []
+
+    def test_rejected_payload_keeps_preparation_usage(self) -> None:
+        controller = _TestTurnController(
+            TurnPreparation(
+                ephemeral_context=("too large",),
+                capability_epoch=6,
+                usage=Usage(input_tokens=123, output_tokens=7, cost_usd=0.02),
+            )
+        )
+
+        result = run_loop(
+            provider=_Scripted([_stop_response("unreached")]),
+            system_prompt="",
+            task="task",
+            turn_controller=controller,
+            max_ephemeral_context_bytes=4,
+        )
+
+        assert result.stop_reason == "controller_error"
+        assert result.usage == Usage(input_tokens=123, output_tokens=7, cost_usd=0.02)
+        assert controller.closed == [(1, 6, "controller_error")]
+
+    def test_structurally_rejected_preparation_keeps_valid_usage(self) -> None:
+        controller = _TestTurnController(
+            TurnPreparation(
+                ephemeral_context=cast(Any, "bad"),
+                capability_epoch=25,
+                usage=Usage(input_tokens=77, output_tokens=3, cost_usd=0.01),
+            )
+        )
+
+        result = run_loop(
+            provider=_Scripted([_stop_response("unreached")]),
+            system_prompt="",
+            task="task",
+            turn_controller=controller,
+        )
+
+        assert result.stop_reason == "controller_error"
+        assert result.usage == Usage(input_tokens=77, output_tokens=3, cost_usd=0.01)
+        assert controller.closed == [(1, 25, "preparation_rejected")]
+
+    def test_result_hook_failure_preserves_successful_tool_result(self) -> None:
+        tool = _tool_definition("custom__commit")
+        controller = _TestTurnController(
+            TurnPreparation(tools=(tool,), capability_epoch=9),
+            result_error=RuntimeError("telemetry unavailable"),
+        )
+        call = ToolCall(id="c1", name=tool.name, arguments={})
+
+        result = run_loop(
+            provider=_Scripted([_tool_response(call)]),
+            system_prompt="",
+            task="task",
+            tool_executor=lambda _call: "committed",
+            turn_controller=controller,
+        )
+
+        tool_message = next(message for message in result.messages if message.role == "tool")
+        assert result.stop_reason == "controller_error"
+        assert "executed successfully" in result.detail
+        assert tool_message.content == "committed"
+        assert controller.closed == [(1, 9, "controller_error")]
+
+    def test_close_failure_is_reported_once(self) -> None:
+        controller = _TestTurnController(
+            TurnPreparation(tools=(), capability_epoch=10),
+            close_error=RuntimeError("revoke failed"),
+        )
+
+        result = run_loop(
+            provider=_Scripted([_stop_response("done")]),
+            system_prompt="",
+            task="task",
+            turn_controller=controller,
+        )
+
+        assert result.stop_reason == "controller_error"
+        assert "revoke failed" in result.detail
+        assert controller.closed == [(1, 10, "completed")]
+
+    def test_close_failure_overrides_budget_stop_and_cli_reports_error(self) -> None:
+        from ctx.cli.run import _emit_result, _loop_result_outcome
+
+        controller = _TestTurnController(
+            TurnPreparation(
+                tools=(),
+                capability_epoch=12,
+                usage=Usage(input_tokens=60),
+            ),
+            close_error=RuntimeError("revocation failed"),
+        )
+
+        result = run_loop(
+            provider=_Scripted([_stop_response("unreached")]),
+            system_prompt="",
+            task="task",
+            turn_controller=controller,
+            budget_tokens=50,
+        )
+
+        assert result.stop_reason == "controller_error"
+        assert "turn ended as token_budget" in result.detail
+        assert "revocation failed" in result.detail
+        assert _loop_result_outcome(result) == ("error", "controller_error")
+        assert _emit_result(result, "test", as_json=False, quiet=True) == 2
+
+    def test_max_iteration_outcome_reaches_close_hook(self) -> None:
+        tool = _tool_definition("custom__once")
+        controller = _TestTurnController(TurnPreparation(tools=(tool,), capability_epoch=13))
+        call = ToolCall(id="c1", name=tool.name, arguments={})
+
+        result = run_loop(
+            provider=_Scripted([_tool_response(call)]),
+            system_prompt="",
+            task="task",
+            tool_executor=lambda _call: "ok",
+            turn_controller=controller,
+            max_iterations=1,
+        )
+
+        assert result.stop_reason == "max_iterations"
+        assert controller.closed == [(1, 13, "max_iterations")]
+
+    def test_compaction_budget_outcome_reaches_close_hook(self) -> None:
+        from ctx.adapters.generic.compaction import CompactionResult
+
+        class _Compactor:
+            def should_compact(self, messages):
+                return True
+
+            def compact_with_usage(self, messages, provider):
+                return CompactionResult(
+                    new_messages=list(messages),
+                    compacted_count=0,
+                    summary="",
+                    usage=Usage(input_tokens=60),
+                )
+
+        tool = _tool_definition("custom__compact")
+        controller = _TestTurnController(TurnPreparation(tools=(tool,), capability_epoch=14))
+        call = ToolCall(id="c1", name=tool.name, arguments={})
+        result = run_loop(
+            provider=_Scripted(
+                [_tool_response(call, usage=Usage(input_tokens=0, output_tokens=0))]
+            ),
+            system_prompt="",
+            task="task",
+            tool_executor=lambda _call: "ok",
+            turn_controller=controller,
+            compactor=_Compactor(),
+            budget_tokens=50,
+        )
+
+        assert result.stop_reason == "token_budget"
+        assert controller.closed == [(1, 14, "token_budget")]
+
+    def test_observer_failure_still_closes_turn(self) -> None:
+        class _FailingObserver:
+            def on_iteration_start(self, iteration, messages):
+                return None
+
+            def on_model_response(self, iteration, response):
+                raise RuntimeError("observer disk full")
+
+            def on_tool_call(self, iteration, call, result, error):
+                return None
+
+            def on_stop(self, result):
+                return None
+
+        controller = _TestTurnController(TurnPreparation(tools=(), capability_epoch=15))
+
+        with pytest.raises(RuntimeError, match="observer disk full"):
+            run_loop(
+                provider=_Scripted([_stop_response("done")]),
+                system_prompt="",
+                task="task",
+                turn_controller=controller,
+                observer=_FailingObserver(),
+            )
+
+        assert controller.closed == [(1, 15, "RuntimeError")]
+
+    def test_tool_observer_failure_preserves_committed_result(self) -> None:
+        from ctx.cli.run import _loop_result_outcome
+
+        class _FailingToolObserver:
+            def on_iteration_start(self, iteration, messages):
+                return None
+
+            def on_model_response(self, iteration, response):
+                return None
+
+            def on_tool_call(self, iteration, call, result, error):
+                raise RuntimeError("event sink unavailable")
+
+            def on_stop(self, result):
+                return None
+
+        tool = _tool_definition("custom__irreversible-write")
+        controller = _TestTurnController(TurnPreparation(tools=(tool,), capability_epoch=26))
+        executed: list[str] = []
+
+        def execute(call: ToolCall) -> str:
+            executed.append(call.name)
+            return "committed"
+
+        result = run_loop(
+            provider=_Scripted([_tool_response(ToolCall("c1", tool.name, {}))]),
+            system_prompt="",
+            task="task",
+            tool_executor=execute,
+            turn_controller=controller,
+            observer=_FailingToolObserver(),
+        )
+
+        assert result.stop_reason == "observer_error"
+        assert _loop_result_outcome(result) == ("error", "observer_error")
+        assert executed == [tool.name]
+        assert any(
+            message.role == "tool" and message.content == "committed" for message in result.messages
+        )
+        assert controller.closed == [(1, 26, "observer_error")]
+
+    def test_base_exception_still_closes_turn(self) -> None:
+        class _InterruptingProvider:
+            name = "interrupting"
+
+            def complete(
+                self,
+                messages,
+                tools=None,
+                *,
+                model=None,
+                temperature=0.7,
+                max_tokens=None,
+            ):
+                raise KeyboardInterrupt
+
+        controller = _TestTurnController(TurnPreparation(tools=(), capability_epoch=16))
+
+        with pytest.raises(KeyboardInterrupt):
+            run_loop(
+                provider=_InterruptingProvider(),
+                system_prompt="",
+                task="task",
+                turn_controller=controller,
+            )
+
+        assert controller.closed == [(1, 16, "KeyboardInterrupt")]
+
+    def test_provider_and_close_failures_are_combined(self) -> None:
+        controller = _TestTurnController(
+            TurnPreparation(tools=(), capability_epoch=17),
+            close_error=RuntimeError("revoke failed"),
+        )
+
+        with pytest.raises(RuntimeError, match="provider network down.*revoke failed") as raised:
+            run_loop(
+                provider=_Exploding(),
+                system_prompt="",
+                task="task",
+                turn_controller=controller,
+            )
+
+        assert isinstance(raised.value.__cause__, RuntimeError)
+        assert controller.closed == [(1, 17, "provider_error")]
+
+    @pytest.mark.parametrize(
+        "timeout",
+        [True, 0, -1, float("nan"), float("inf"), float("-inf"), "1"],
+    )
+    def test_invalid_preparation_timeout_is_rejected(self, timeout: Any) -> None:
+        with pytest.raises(
+            ValueError,
+            match="turn_prepare_timeout must be a positive finite number or None",
+        ):
+            run_loop(
+                provider=_Scripted([_stop_response("unreached")]),
+                system_prompt="",
+                task="task",
+                turn_prepare_timeout=timeout,
+            )
+
+    def test_preparation_timeout_stops_before_provider(self) -> None:
+        class _SlowController(_TestTurnController):
+            def prepare_turn(
+                self,
+                iteration,
+                messages,
+                base_tools,
+                *,
+                deadline_monotonic,
+                cancel_event,
+            ):
+                assert deadline_monotonic is not None
+                delay = max(0.0, deadline_monotonic - time.monotonic()) + 0.005
+                time.sleep(delay)
+                return TurnPreparation(
+                    tools=(),
+                    capability_epoch=19,
+                    usage=Usage(input_tokens=321, output_tokens=4),
+                )
+
+        controller = _SlowController()
+        provider = _Scripted([_stop_response("unreached")])
+        started = time.monotonic()
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="task",
+            turn_controller=controller,
+            turn_prepare_timeout=0.01,
+        )
+        elapsed = time.monotonic() - started
+        assert result.stop_reason == "controller_error"
+        assert "preparation exceeded" in result.detail
+        assert elapsed < 0.2
+        assert result.usage == Usage(input_tokens=321, output_tokens=4)
+        assert provider.calls == []
+        assert controller.closed == [(1, 19, "preparation_timeout")]
+        assert not any(
+            thread.name.startswith("ctx-turn-prepare-") for thread in threading.enumerate()
+        )
+
+    def test_cancellation_during_preparation_skips_provider(self) -> None:
+        cancel_event = threading.Event()
+
+        class _CancellingController(_TestTurnController):
+            def prepare_turn(
+                self,
+                iteration,
+                messages,
+                base_tools,
+                *,
+                deadline_monotonic,
+                cancel_event,
+            ):
+                cancel_event.set()
+                return TurnPreparation(tools=(), capability_epoch=18)
+
+        controller = _CancellingController()
+        provider = _Scripted([_stop_response("unreached")])
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="task",
+            turn_controller=controller,
+            cancel_event=cancel_event,
+        )
+
+        assert result.stop_reason == "cancelled"
+        assert provider.calls == []
+        assert controller.closed == [(1, 18, "cancelled")]
+
+    def test_provider_timeout_closes_turn(self) -> None:
+        controller = _TestTurnController(TurnPreparation(tools=(), capability_epoch=11))
+
+        result = run_loop(
+            provider=_NativeTimeout(),
+            system_prompt="",
+            task="task",
+            turn_controller=controller,
+        )
+
+        assert result.stop_reason == "provider_timeout"
+        assert not result.usage.tokens_reported
+        assert controller.closed == [(1, 11, "provider_timeout")]
+
+
 # ── Usage accumulation ──────────────────────────────────────────────────────
 
 
@@ -789,8 +2459,14 @@ class TestUsage:
                 )
 
         tc = ToolCall(id="c1", name="x__a", arguments={})
-        a = _tool_response(tc, usage=Usage(input_tokens=1, output_tokens=1))
-        b = _stop_response("done", usage=Usage(input_tokens=2, output_tokens=2))
+        a = _tool_response(
+            tc,
+            usage=Usage(input_tokens=1, output_tokens=1, cost_usd=0.0),
+        )
+        b = _stop_response(
+            "done",
+            usage=Usage(input_tokens=2, output_tokens=2, cost_usd=0.0),
+        )
         provider = _Scripted([a, b])
         result = run_loop(
             provider=provider,
@@ -893,7 +2569,31 @@ class TestObserver:
 
         assert len(obs.stops) == 1
         assert obs.stops[0].stop_reason == "provider_error"
+        assert not obs.stops[0].usage.tokens_reported
         assert "provider network down" in obs.stops[0].detail
+
+    def test_provider_exception_redacts_secret_from_terminal_observation(
+        self,
+    ) -> None:
+        class _SecretProvider:
+            name = "secret-provider"
+
+            def complete(self, *args: Any, **kwargs: Any) -> CompletionResponse:
+                del args, kwargs
+                raise RuntimeError("authorization=sk-abcdefghijklmnopqrstuvwxyz")
+
+        obs = _RecordingObserver()
+
+        with pytest.raises(RuntimeError, match="authorization="):
+            run_loop(
+                provider=_SecretProvider(),
+                system_prompt="",
+                task="task",
+                observer=obs,
+            )
+
+        assert len(obs.stops) == 1
+        assert obs.stops[0].detail == "provider raised RuntimeError: authorization=[redacted]"
 
     def test_provider_timeout_returns_terminal_observation(self) -> None:
         obs = _RecordingObserver()
@@ -909,6 +2609,7 @@ class TestObserver:
 
         assert time.monotonic() - started < 1.0
         assert result.stop_reason == "provider_timeout"
+        assert not result.usage.tokens_reported
         assert len(obs.stops) == 1
         assert obs.stops[0].stop_reason == "provider_timeout"
 
@@ -925,6 +2626,7 @@ class TestObserver:
 
         assert result.stop_reason == "provider_timeout"
         assert "socket timed out" in result.detail
+        assert not result.usage.tokens_reported
         assert len(obs.stops) == 1
         assert obs.stops[0].stop_reason == "provider_timeout"
 
@@ -936,6 +2638,7 @@ class TestObserver:
         )
 
         assert result.stop_reason == "provider_timeout"
+        assert not result.usage.tokens_reported
 
 
 # ── State seeding (resume path) ─────────────────────────────────────────────

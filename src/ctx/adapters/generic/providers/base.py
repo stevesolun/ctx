@@ -89,11 +89,19 @@ class ToolDefinition:
 
 @dataclass(frozen=True)
 class Usage:
-    """Token counts + optional cost for a single provider call."""
+    """Normalized usage for one provider call.
+
+    ``tokens_reported`` is true only when both input and output counts were
+    present, distinguishing an explicit zero pair from missing or partial
+    usage. ``cached_input_tokens`` is ``None`` when the provider did not
+    expose a cache-read count.
+    """
 
     input_tokens: int = 0
     output_tokens: int = 0
     cost_usd: float | None = None
+    cached_input_tokens: int | None = None
+    tokens_reported: bool = True
 
 
 @dataclass(frozen=True)
@@ -108,6 +116,10 @@ class CompletionResponse:
     model: str
     # Opaque underlying SDK response — debugging aid, not stable API.
     raw: dict[str, Any] = field(default_factory=dict)
+    # Non-secret request/response evidence for provenance-sensitive callers.
+    response_model: str | None = None
+    authentication_submitted: bool = False
+    request_endpoint_hash: str | None = None
 
 
 class ModelProvider(Protocol):

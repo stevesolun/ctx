@@ -13,6 +13,7 @@ from ctx.adapters.generic.ctx_core_tools import (
     _recommendation_context_from_args,
     _recommendation_context_skip_reason,
 )
+from ctx.api import recommendation_rejections
 from ctx_config import cfg
 
 
@@ -47,6 +48,16 @@ def _build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         help="Rejected recommendation ID/name. May be repeated or comma-separated.",
+    )
+    parser.add_argument(
+        "--session-id",
+        help="Optional host/session ID used to remember canonical rejected recommendations.",
+    )
+    parser.add_argument(
+        "--rejection-mode",
+        choices=("use", "replace", "ignore"),
+        default="use",
+        help="How explicit rejections interact with remembered session state (default: use).",
     )
     parser.add_argument(
         "--active",
@@ -198,12 +209,24 @@ def _render_row(row: dict[str, Any], *, index: int | None = None) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = _build_parser().parse_args(argv)
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    if args.rejection_mode != "use" and not args.session_id:
+        parser.error("--rejection-mode requires --session-id")
     query = " ".join(args.query).strip()
     top_k = max(1, min(int(args.top_k), cfg.recommendation_top_k))
     related_top_n = max(1, min(int(args.related_top_n), cfg.recommendation_top_k))
     selected = _split_selection_values(args.selected)
-    rejected = _split_selection_values(args.rejected)
+    explicit_rejected = _split_selection_values(args.rejected)
+    rejected = (
+        recommendation_rejections(
+            explicit_rejected,
+            session_id=args.session_id,
+            rejection_mode=args.rejection_mode,
+        )
+        if args.session_id
+        else explicit_rejected
+    )
     active = _split_selection_values(args.active)
     baseline_context = _split_selection_values(args.baseline_context)
     bundle_kwargs: dict[str, Any] = {"top_k": top_k}
@@ -211,6 +234,9 @@ def main(argv: list[str] | None = None) -> int:
         bundle_kwargs["selected"] = selected
     if rejected:
         bundle_kwargs["rejected"] = rejected
+    if args.session_id:
+        bundle_kwargs["session_id"] = args.session_id
+        bundle_kwargs["rejection_mode"] = "ignore"
     if active:
         bundle_kwargs["active_context"] = active
     if baseline_context:
@@ -237,11 +263,14 @@ def main(argv: list[str] | None = None) -> int:
         excluded_count=len(related_rejected),
         context=related_context,
     )
-    raw_related_results = (
-        recommend_related(selected, rejected=related_rejected, top_n=related_fetch_top_n)
-        if selected
-        else []
-    )
+    related_kwargs: dict[str, Any] = {
+        "rejected": related_rejected,
+        "top_n": related_fetch_top_n,
+    }
+    if args.session_id:
+        related_kwargs["session_id"] = args.session_id
+        related_kwargs["rejection_mode"] = "ignore"
+    raw_related_results = recommend_related(selected, **related_kwargs) if selected else []
     related_results = _filter_related_results(
         raw_related_results,
         context=related_context,
@@ -249,14 +278,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     if args.json:
         payload: dict[str, Any] = {"query": query, "results": results}
-        if selected or rejected or active or baseline_context:
+        if selected or rejected or active or baseline_context or args.session_id:
             payload["selection"] = {
                 "selected": selected,
-                "rejected": rejected,
+                "rejected": explicit_rejected,
                 "active_context": active,
                 "baseline_context": baseline_context,
                 "related_results": related_results,
             }
+            if args.session_id:
+                payload["selection"]["effective_rejected"] = rejected
+                payload["selection"]["session_id"] = args.session_id
+                payload["selection"]["rejection_mode"] = args.rejection_mode
         print(json.dumps(payload, indent=2))
         return 0
     if not results:

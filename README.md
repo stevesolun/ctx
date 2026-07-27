@@ -1,212 +1,121 @@
-# ctx — Skill, Agent, MCP & Harness Recommendations
+# ctx
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python 3.11+](https://img.shields.io/badge/Python-3.11+-green.svg)](https://python.org)
+[![CI](https://github.com/stevesolun/ctx/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
+[![Tests](https://img.shields.io/badge/Tests-5695_inventory-blue.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
-[![Tests](https://img.shields.io/badge/Tests-4641_inventory-brightgreen.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
-[![Graph](https://img.shields.io/badge/Graph-79%2C958_nodes_/_1%2C778%2C069_edges-red.svg)](https://stevesolun.github.io/ctx/knowledge-graph/)
+
+ctx is a Python CLI and library that recommends a small, relevant set of
+skills, agents, and MCP servers for a repository or task. It can use your
+organization's local/private knowledge or the shipped graph. Harness selection
+for custom, API, and local models is a separate workflow. Recommendations do
+not install or load tools without an operator action or approval.
+
+**Release status:** [v1.0.20](https://github.com/stevesolun/ctx/releases/tag/v1.0.20)
+is the current GitHub and [PyPI](https://pypi.org/project/claude-ctx/) release;
+this source tree declares `1.0.21` for unreleased work.
+
+## Install
+
+Requires Python 3.11 or newer.
+
+```bash
+pip install claude-ctx
+```
+
+## Quickstart
+
+From the repository you want to analyze, install the runtime graph and request
+recommendations:
+
+```bash
+ctx-init --graph --model-mode skip
+ctx-scan-repo --repo . --recommend
+```
+
+`ctx-init --graph` uses the bundled runtime artifact in a source checkout or
+downloads the matching release asset for a package install. The full packed
+wiki is optional; see the [knowledge graph guide](https://stevesolun.github.io/ctx/knowledge-graph/).
+
+Every clean graph install seeds six project-owned, MIT-licensed, no-key
+fallbacks: `ctx-python-testing`, `ctx-javascript-testing`,
+`ctx-rust-patterns`, `ctx-typescript`, the `ctx-python-reviewer` agent, and the
+local `ctx-core` MCP server. ctx preserves unrelated skill, agent, MCP, and
+converted-skill content; runtime-managed harness pages are refreshed from the
+installed artifact. Installation fails closed if a reserved `ctx-*` identity,
+body, overlay, or parent path is unexpected.
+
+## Privacy And Telemetry
+
+These controls are available in release `1.0.20` and the current source tree.
+Telemetry is enabled by default in `local_redacted` mode. Events are written to
+`~/.ctx/telemetry/events.jsonl`, metrics are written to
+`~/.ctx/telemetry/metrics.jsonl`, and raw prompts and queries are removed or
+hashed. Continuous log, trace, and metric exporters are disabled by default.
+
+A network export requires an explicit `ctx-telemetry-export` command or an
+operator-enabled exporter configuration. Local JSONL may retain a raw
+`session_id` for compatibility, so treat the spool as sensitive. Review the
+[enterprise telemetry guide](https://stevesolun.github.io/ctx/telemetry/) before
+enabling export.
+
+```bash
+ctx-telemetry-export --dry-run --json
+```
+
+The dry run inspects the local spool without exporting it.
+
+## CLI Reference
+
+| Task | CLI | Guide |
+| --- | --- | --- |
+| Initialize ctx and install graph data | `ctx-init` | [Knowledge graph](https://stevesolun.github.io/ctx/knowledge-graph/) |
+| Scan a repository and get recommendations | `ctx-scan-repo`, `ctx-recommend` | [Entity onboarding](https://stevesolun.github.io/ctx/entity-onboarding/) |
+| Connect an MCP, Python, or CLI host | `ctx-mcp-server`, `ctx` | [Host integration](https://stevesolun.github.io/ctx/harness/attaching-to-hosts/) |
+| Inspect the local runtime | `ctx-monitor serve` | [Dashboard](https://stevesolun.github.io/ctx/dashboard/) |
+| Review or export telemetry | `ctx-telemetry-export`, `ctx-telemetry-retention` | [Telemetry](https://stevesolun.github.io/ctx/telemetry/) |
+
+See the [full documentation](https://stevesolun.github.io/ctx/) for configuration,
+APIs, entity lifecycle, and operational details.
+
+## Example user stories
+
+| Tracker ID | User outcome |
+| --- | --- |
+| `CLI-002` | Scan a repository and receive a bounded skill, agent, and MCP recommendation set. |
+| `CLI-026` | Review a custom-model harness recommendation with `ctx-harness-install --dry-run` before installation. |
+| `API-011` | Manage local entities through the dashboard's validated API. |
+
+<details>
+<summary>Tracking sources</summary>
+
+Release readiness is tracked in [`qa/feature_status.csv`](qa/feature_status.csv).
+The [`docs/qa/feature-user-story-status.csv`](docs/qa/feature-user-story-status.csv),
+[`docs/qa/dashboard-user-story-status.csv`](docs/qa/dashboard-user-story-status.csv),
+and [`qa/tool-selection-token-history/tracker.csv`](qa/tool-selection-token-history/tracker.csv)
+files are supporting detail ledgers.
+
+</details>
+
+## Test Signal
+
+The inventory badge reports pytest collection, not a blanket passing claim.
+The CI badge links to the change-classified GitHub Actions workflow; individual
+jobs run the lanes required for a change.
+
+<details>
+<summary>Shipped graph inventory</summary>
+
 [![Skills](https://img.shields.io/badge/Skills-68%2C494-blue.svg)](https://stevesolun.github.io/ctx/catalog/?type=skill)
 [![Agents](https://img.shields.io/badge/Agents-467-purple.svg)](https://stevesolun.github.io/ctx/catalog/?type=agent)
 [![MCPs](https://img.shields.io/badge/MCPs-10%2C790-pink.svg)](https://stevesolun.github.io/ctx/catalog/?type=mcp-server)
 [![Harnesses](https://img.shields.io/badge/Harnesses-207-orange.svg)](https://stevesolun.github.io/ctx/catalog/?type=harness)
-[![Docs](https://img.shields.io/badge/docs-MkDocs_Material-blue.svg)](https://stevesolun.github.io/ctx/)
-[![Repo views](https://hits.sh/github.com/stevesolun/ctx.svg?label=repo%20views)](https://hits.sh/github.com/stevesolun/ctx/)
 
-**ctx is not an Amazon-style catalog of skills, MCPs, agents, tools, or
-harnesses. It is a recommendation layer.** Point it at your organization's own
-tools, or use the pre-built graph, and ctx recommends the smallest useful bundle
-for the current development window. The goal is to load the right skills,
-agents, MCP servers, and optional harness at the right moment so hosted LLMs
-burn fewer tokens and local models waste less CPU/GPU work.
+The shipped artifact contract is a **79,958-node** graph covering
+**68,494 skill entity pages**, **467 agents**, **10,790 MCP servers**, and
+**207 harnesses**.
 
-ctx watches what you are building, walks a **79,958-node** graph, and
-recommends a small, top-scored bundle of skills, agents, and MCP servers for
-the current task. If you use your own local/API model instead of Claude Code or
-run an external loop such as LoopFlow, ctx has separate harness and adapter
-flows: tell it the model and goal, review recommendations, and keep installs
-behind dry-run/update/uninstall controls.
-
-Current shipped snapshot:
-
-- **68,494 skill entity pages**, with **67,024** hydrated installable `SKILL.md` bodies.
-- **467 agents**, **10,790 MCP servers**, and **207 harnesses**.
-- **1,778,069 graph edges** across semantic similarity, tags, slug tokens, source overlap, direct links, quality, usage, type affinity, and graph structure.
-- **28,612 long skill bodies** converted through the micro-skill gate instead of shipping raw long prompts.
-- Entity updates for skills, agents, MCPs, and harnesses print benefits/risks and skip replacement unless you explicitly approve the update.
-
-## Why it exists
-
-- **Discovery** — with 68,494 skill pages, 467 agents, 10,790 MCP servers, and 207 harnesses, you can't possibly know which exist or which apply to your current work.
-- **Context budget** — loading everything wastes tokens and degrades quality. You need the right 10–15 per session.
-- **Skill rot** — skills you installed months ago and never used are cluttering context. Stale ones should be flagged automatically.
-
-## Example user stories
-
-The canonical QA tracker is
-[`qa/feature_status.csv`](qa/feature_status.csv). The supporting feature ledger
-[`docs/qa/feature-user-story-status.csv`](docs/qa/feature-user-story-status.csv),
-dashboard-specific ledger
-[`docs/qa/dashboard-user-story-status.csv`](docs/qa/dashboard-user-story-status.csv),
-and tool-selection/token-history ledger
-[`qa/tool-selection-token-history/tracker.csv`](qa/tool-selection-token-history/tracker.csv)
-are supporting detail ledgers that feed that root tracker; canonical status and
-release readiness stay in `qa/feature_status.csv`.
-Bug-smoke audit findings live in
-[`qa/bug_smoke_status.csv`](qa/bug_smoke_status.csv) and are validated by the
-same public docs tracker. `Retested Pass` bug-smoke rows must include `PASS:`
-retest evidence and a closed `next_action` starting with `Closed;`.
-Rows for public MkDocs pages use the exact `docs/...md` path from `mkdocs.yml`
-as `entrypoint_or_route`. Public linked docs assets under
-`docs/assets/javascripts/`, `docs/services/`, and `docs/toolbox/templates/`
-are tracker-covered too, so adding, moving, or removing one means adding or
-updating matching rows in the relevant supporting ledger and canonical tracker.
-Examples from that tracker:
-
-| Tracker row | User story | Expected ctx behavior |
-| --- | --- | --- |
-| `CLI-002` | As a user I can ask ctx for current repo recommendations. | `ctx-recommend` returns a capped, graph-scored bundle of relevant skills, agents, and MCP servers from the shared recommendation engine. |
-| `CLI-026` | As a local/API model user I can get harness recommendations and install one. | `ctx-harness-install --dry-run` interviews model/goals/tools/privacy, recommends a fitting harness above threshold, or emits a no-fit custom harness PRD. |
-| `CLI-049` | As a DSL runner or custom agent-loop author I can ask ctx for scoped planning capabilities before each loop plan. | `python -m ctx.adapters.loopflow` emits a permission-gated JSON contract with skill, agent, MCP, ctx MCP server, and gated harness recommendations. |
-| `API-011` | As a dashboard user I can manually add, edit, or delete entities. | `/api/entity/upsert` and `/api/entity/delete` validate type, slug, and body, then queue safe graph/wiki updates instead of mutating blindly. |
-
-## Install
-
-```bash
-pip install claude-ctx
-ctx-init                    # terminal wizard: hooks, graph, model, harness goal
-ctx-init --graph --hooks --model-mode skip  # fast runtime graph + Claude Code hooks
-ctx-init --graph --graph-install-mode full  # install the full packed wiki locally
-ctx-init --wizard           # force the same wizard from scripts/tests
-ctx-init --model-mode custom --model openai/gpt-5.5 --goal "build a CAD agent"
-```
-
-Optional extras: `pip install "claude-ctx[embeddings]"` for the semantic backend, `pip install "claude-ctx[harness]"` for local/API model harness runs, `pip install "claude-ctx[dev]"` for the test toolchain.
-
-### Pre-built knowledge graph
-
-Graph-backed recommendations need the pre-built graph. By default, `ctx-init
---graph` installs the fast runtime artifact: `graph/wiki-graph-runtime.tar.gz`
-in source checkouts, or the matching GitHub release asset from pip installs.
-It contains `graphify-out/*`, the shipped skill index needed for
-recommendations, and the 207 harness pages needed by
-`ctx-harness-install` and LoopFlow adapter harness recommendations:
-
-```bash
-ctx-init --graph
-```
-
-The full LLM-wiki artifact remains available for local browsing and Obsidian.
-High-fanout skill, agent, MCP, converted, and concept pages are stored in
-`wiki-packs/` instead of expanded as individual files:
-
-```bash
-ctx-init --graph --graph-install-mode full
-```
-
-The full `wiki-graph.tar.gz` includes the shipped skill index and a wiki-pack
-base containing 68,494 skill entity pages plus 67,024 hydrated installable
-`SKILL.md` files. Harness pages remain directly available under
-`entities/harnesses/`.
-
-> **Windows:** PowerShell's built-in `tar.exe` does not support
-> `--force-local`; use `tar -xzf graph\wiki-graph.tar.gz -C "$env:USERPROFILE\.claude\skill-wiki"`.
-> In Git Bash or MSYS, use `--force-local` only when your `-C` target is a
-> drive-letter path such as `C:/Users/...`.
-
-## Use
-
-After `ctx-init --hooks` or the wizard hook step, ctx observes Claude Code's
-`PostToolUse` and `Stop` events. Typical flow:
-
-```bash
-ctx-scan-repo --repo .     # scan current repo and stack signals
-ctx-scan-repo --repo . --recommend  # include skill/agent/MCP recommendations
-ctx-agent-add --agent-path ./code-reviewer.md --name code-reviewer
-ctx-harness-add --repo https://github.com/earthtojake/text-to-cad --tag cad
-ctx-harness-install text-to-cad --dry-run   # inspect before cloning/running anything
-ctx-harness-install text-to-cad             # install after reviewing the plan
-ctx-harness-install text-to-cad --update --dry-run
-ctx-harness-install text-to-cad --uninstall --dry-run
-ctx-recommend "fix FastAPI auth" --selected skill:fastapi-pro --active mcp-server:codex-cli --json
-ctx-recommend "LoCoBench python feature_implementation no API keys" --local-code-task --no-api-keys --language python --json
-python -m ctx --help      # same run/resume/sessions CLI as the ctx script
-python -m ctx.adapters.loopflow --goal "fix checkout e2e" --permissions skills,agents,mcps
-ctx-skill-quality list     # four-signal quality score for every skill
-ctx-skill-quality explain python-patterns   # drill into a single skill
-ctx-skill-health dashboard # structural health + drift detection
-ctx-toolbox run --event pre-commit          # run a council on the current diff
-ctx-telemetry-export --dry-run --json       # inspect privacy-redacted telemetry spool
-ctx-monitor serve          # local dashboard: http://127.0.0.1:8765/
-```
-
-`ctx-recommend` accepts `--selected`, `--rejected`, `--active`,
-`--baseline-context`, `--include-baseline-context`, `--show-unavailable`,
-`--local-code-task`, `--no-api-keys`, and `--language` so loops can recover
-from partial choices without re-suggesting active or baseline host context.
-
-Before pushing, run the two-tier local PR gate. Start with the smoke profile
-when you want quick feedback before paying for the heavier lanes:
-
-```bash
-scripts/no_mistakes_run.sh fast --profile smoke
-```
-
-Then run the full fast committed-HEAD gate:
-
-```bash
-scripts/no_mistakes_run.sh fast
-```
-
-That runner selects checks from the same classifier as PR preflight, groups
-independent checks into isolated temporary worktree lanes, and runs them in
-parallel. The smoke profile keeps cheap invariants, no-test policy, ruff, and
-public docs tracker checks while deferring slow unit, package, graph, browser,
-similarity, telemetry, and strict docs lanes to the normal PR profile. Treat the
-normal profile as the fast front door before no-mistakes or PR. It writes lane
-timing evidence to `.gate/local-fast.json` by default; use lane filters for
-quick reruns after a failed lane:
-
-```bash
-scripts/no_mistakes_run.sh fast --lane static --lane unit
-scripts/no_mistakes_run.sh fast --lane unit --lane canary --lane contract --lane clean-host
-scripts/no_mistakes_run.sh fast --skip-lane graph
-scripts/no_mistakes_run.sh fast --summary-json /tmp/local-fast.json
-```
-
-Use the gate wrapper when the branch is ready for no-mistakes. It refuses
-implicit/stale intent, runs smoke + full local-fast first, then starts
-no-mistakes with the explicit branch objective:
-
-```bash
-scripts/no_mistakes_run.sh gate --intent "narrow task statement for this branch"
-```
-
-The serial preflight/no-mistakes path remains available when you need to inspect
-individual checks. Preflight uses the same changed-file classifier as GitHub
-Actions, then runs the matching local checks: stats, ruff format/check, mypy,
-pip check, unit coverage, canaries, package build, twine, docs, graph
-validation, browser, and similarity gates as needed. For docs changes, that
-docs gate runs the public docs tracker checks before the strict MkDocs build.
-When graph artifacts are changed and still checked out as Git LFS pointers,
-preflight hydrates only the required tarballs, checks the pointer SHA-256 and
-size caps, then validates the artifacts. Use `--profile full` before release
-work to force the source/package gates even for docs-only or graph-only changes.
-Always pass an explicit narrow no-mistakes intent so review/test/doc agents
-validate this branch instead of inferring a stale broader goal from local
-transcripts.
-
-The **`ctx-monitor`** dashboard shows currently loaded skills, agents, MCP servers, installed harness records, selectable recommendations (`/recommend`), and generic-harness validation/escalation plus tool-selection/token-usage state (`/runtime`). It provides load/unload buttons where ctx owns the live action, a graph view (`/graph?slug=...`), the LLM-wiki entity browser (`/wiki/<slug>`), a filterable skills grid, a session timeline, audit/runtime log views, and a live SSE event stream. Installed harness records appear in `/loaded`; harness pages appear in `/wiki` and `/graph`. Harness install/update/uninstall actions stay in `ctx-harness-install`.
-
-When `ctx-skill-add`, `ctx-agent-add`, `ctx-mcp-add`, or `ctx-harness-add`
-finds an existing entity, ctx prints a benefits/risks update review and skips
-replacement by default. Re-run with `--update-existing` to apply the catalog or
-local asset update after review.
-
-Step-by-step entity onboarding:
-**<https://stevesolun.github.io/ctx/entity-onboarding/>**
-
-Full docs, architecture, and every module: **<https://stevesolun.github.io/ctx/>**
+</details>
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).

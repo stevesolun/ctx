@@ -103,6 +103,8 @@ nav:
   - Entity onboarding: entity-onboarding.md
   - Dashboard: dashboard.md
   - Telemetry: telemetry.md
+  - Threat model: threat-model.md
+  - Enterprise readiness: enterprise-readiness-review.md
   - Harness:
       - Attach to hosts: harness/attaching-to-hosts.md
       - LoopFlow adapter demo: harness/loopflow-adapter-demo.md

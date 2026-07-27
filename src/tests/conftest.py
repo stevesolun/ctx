@@ -2,6 +2,7 @@
 conftest.py -- Shared pytest fixtures for the ctx test suite.
 """
 
+import os
 import sys
 import textwrap
 from pathlib import Path
@@ -21,6 +22,18 @@ from ctx.core.wiki.wiki_sync import ensure_wiki  # noqa: E402  (import after pat
 # ---------------------------------------------------------------------------
 # Markers
 # ---------------------------------------------------------------------------
+
+_MAX_XDIST_AUTO_WORKERS = 8
+
+
+def _xdist_auto_worker_count() -> int:
+    return max(1, min(os.cpu_count() or 1, _MAX_XDIST_AUTO_WORKERS))
+
+
+def pytest_xdist_auto_num_workers(config: pytest.Config) -> int:
+    """Keep nested local-fast runs from oversubscribing latency-sensitive tests."""
+    del config
+    return _xdist_auto_worker_count()
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:

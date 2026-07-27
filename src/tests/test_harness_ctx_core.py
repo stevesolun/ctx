@@ -13,10 +13,15 @@ Covers:
 
 from __future__ import annotations
 
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from contextlib import closing
 import json
+import multiprocessing
 import os
+import sqlite3
 import sys
 from pathlib import Path
+import threading
 from types import SimpleNamespace
 from typing import Any
 
@@ -25,16 +30,29 @@ import pytest
 
 from ctx.adapters.generic.ctx_core_tools import (
     CtxCoreToolbox,
+    _WIKI_GET_BODY_MAX_BYTES,
     _clamp_int,
     _excerpt,
     _file_signature,
     _infer_query_language,
     _query_to_tags,
+    _recommendation_context_policy,
     make_tool_executor,
 )
 from ctx.adapters.generic.providers import ToolCall, ToolDefinition
 from ctx.core.graph.graph_packs import write_base_pack, write_overlay_pack
 from ctx.core.wiki.wiki_packs import write_wiki_base_pack, write_wiki_overlay_pack
+
+
+def _remember_rejection_in_process(arguments: tuple[str, int]) -> list[str]:
+    from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+    runtime_root, index = arguments
+    return RuntimeLifecycleStore(root=Path(runtime_root)).remember_recommendation_rejections(
+        session_id="process-session",
+        rejected=[f"skill:process-{index}"],
+        merge=True,
+    )
 
 
 # ── Helpers: build a synthetic wiki + graph for the toolbox ────────────────
@@ -385,6 +403,62 @@ def test_wiki_page_cache_reloads_when_wiki_pack_overlay_changes(tmp_path: Path) 
     assert second["results"][0]["slug"] == "pack-skill"
 
 
+def test_wiki_page_cache_reloads_for_attested_runtime_availability_page(
+    tmp_path: Path,
+) -> None:
+    from ctx.core.wiki.wiki_query import _runtime_availability_page_specs
+
+    wiki = tmp_path / "wiki"
+    write_wiki_base_pack(
+        pack_dir=wiki / "wiki-packs" / "base-export-1",
+        pack_id="base-export-1",
+        base_export_id="wiki-export-1",
+        pages={"entities/skills/pack-only.md": "# Pack only\n"},
+    )
+    spec = next(
+        spec
+        for spec in _runtime_availability_page_specs()
+        if spec.entity_type == "skill" and "nullable" in spec.content
+    )
+    source = wiki.joinpath(*spec.source_relpath.split("/"))
+    toolbox = CtxCoreToolbox(wiki_dir=wiki, graph_path=tmp_path / "missing.json")
+
+    before = json.loads(
+        toolbox.dispatch(
+            ToolCall(
+                id="before-runtime-page",
+                name="ctx__wiki_search",
+                arguments={"query": "nullable"},
+            )
+        )
+    )
+    source.parent.mkdir(parents=True)
+    source.write_text(spec.content, encoding="utf-8")
+    after_install = json.loads(
+        toolbox.dispatch(
+            ToolCall(
+                id="after-runtime-page",
+                name="ctx__wiki_search",
+                arguments={"query": "nullable"},
+            )
+        )
+    )
+    source.write_text(spec.content.replace("nullable", "nullablx"), encoding="utf-8")
+    after_tamper = json.loads(
+        toolbox.dispatch(
+            ToolCall(
+                id="after-runtime-tamper",
+                name="ctx__wiki_search",
+                arguments={"query": "nullable"},
+            )
+        )
+    )
+
+    assert before["results"] == []
+    assert [row["slug"] for row in after_install["results"]] == [spec.slug]
+    assert after_tamper["results"] == []
+
+
 def test_semantic_miss_cache_clears_when_embedding_artifacts_change(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -444,6 +518,42 @@ class TestToolDefinitions:
     def test_graph_query_requires_seeds(self, toolbox: CtxCoreToolbox) -> None:
         td = next(d for d in toolbox.tool_definitions() if d.name == "ctx__graph_query")
         assert td.parameters["required"] == ["seeds"]
+
+    def test_load_entity_schema_is_advisory(self, toolbox: CtxCoreToolbox) -> None:
+        definition = next(
+            item for item in toolbox.tool_definitions() if item.name == "ctx__load_entity"
+        )
+
+        assert "advisory" in definition.description
+        assert "selected" not in definition.parameters["properties"]
+        assert "selection_source" not in definition.parameters["properties"]
+
+    def test_mark_entity_used_exposes_complete_token_usage_schema(
+        self,
+        toolbox: CtxCoreToolbox,
+    ) -> None:
+        definition = next(
+            item for item in toolbox.tool_definitions() if item.name == "ctx__mark_entity_used"
+        )
+        token_usage = definition.parameters["properties"]["token_usage"]
+
+        assert token_usage["properties"] == {
+            "attribution": {
+                "type": "string",
+                "enum": ["exact", "estimated", "unavailable"],
+            },
+            "input_tokens": {"type": "integer", "minimum": 0},
+            "cached_input_tokens": {"type": "integer", "minimum": 0},
+            "cache_write_input_tokens": {"type": "integer", "minimum": 0},
+            "uncached_input_tokens": {"type": "integer", "minimum": 0},
+            "output_tokens": {"type": "integer", "minimum": 0},
+            "total_tokens": {"type": "integer", "minimum": 0},
+            "tokens_reported": {"type": "boolean"},
+            "cost_usd": {"type": "number", "minimum": 0},
+            "attribution_reason": {"type": "string"},
+            "provider": {"type": "string"},
+            "model": {"type": "string"},
+        }
 
     def test_read_tools_expose_optional_response_format(
         self,
@@ -636,7 +746,11 @@ class TestRuntimeLifecycle:
                         "token_usage": {
                             "attribution": "exact",
                             "input_tokens": 12,
+                            "cached_input_tokens": 7,
+                            "cache_write_input_tokens": 3,
+                            "uncached_input_tokens": 5,
                             "output_tokens": 8,
+                            "tokens_reported": True,
                             "provider": "test",
                             "model": "local-test",
                         },
@@ -650,16 +764,25 @@ class TestRuntimeLifecycle:
         assert "ctx.core.lifecycle" in event_names
         assert [metric[1] for metric in metrics] == [
             "ctx.tool_usage.records",
+            "ctx.tool_usage.input_tokens",
+            "ctx.tool_usage.cached_input_tokens",
+            "ctx.tool_usage.cache_write_input_tokens",
+            "ctx.tool_usage.uncached_input_tokens",
+            "ctx.tool_usage.output_tokens",
             "ctx.tool_usage.tokens",
             "ctx.tool_usage.tokens_per_record",
         ]
         assert {metric[4]["ctx.usage.attribution"] for metric in metrics} == {"exact"}
+        assert {metric[4]["ctx.usage.tokens_reported"] for metric in metrics} == {True}
         usage_payloads = [
             event["payload"]
             for event in events
             if event["payload"].get("ctx.usage.attribution") == "exact"
         ]
         assert usage_payloads[0]["ctx.usage.total_tokens"] == 20
+        assert usage_payloads[0]["ctx.usage.cached_input_tokens"] == 7
+        assert usage_payloads[0]["ctx.usage.cache_write_input_tokens"] == 3
+        assert usage_payloads[0]["ctx.usage.uncached_input_tokens"] == 5
         for event in events:
             payload = event["payload"]
             assert payload["otel.status_code"] == "OK"
@@ -714,6 +837,17 @@ class TestRuntimeLifecycle:
                     "entity_type": "mcp-server",
                     "slug": "filesystem",
                     "evidence": "read workspace tree",
+                    "token_usage": {
+                        "attribution": "unavailable",
+                        "input_tokens": 0,
+                        "cached_input_tokens": 0,
+                        "cache_write_input_tokens": 0,
+                        "uncached_input_tokens": 0,
+                        "output_tokens": 0,
+                        "total_tokens": 0,
+                        "tokens_reported": False,
+                        "cost_usd": 0.0,
+                    },
                 },
             ),
         ]
@@ -722,6 +856,12 @@ class TestRuntimeLifecycle:
                 toolbox.dispatch(ToolCall(id="c1", name=tool_name, arguments=arguments))
             )
             assert result["ok"] is True
+            if tool_name == "ctx__load_entity":
+                toolbox._lifecycle.mark_entity_loaded(
+                    session_id="s-mcp",
+                    entity_type="mcp-server",
+                    slug="filesystem",
+                )
 
         state = json.loads(
             toolbox.dispatch(
@@ -737,10 +877,14 @@ class TestRuntimeLifecycle:
         assert state["used"][0]["entity_type"] == "mcp-server"
         assert usage == {
             "records": 1,
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "total_tokens": 0,
-            "cost_usd": 0.0,
+            "input_tokens": None,
+            "cached_input_tokens": None,
+            "cache_write_input_tokens": None,
+            "uncached_input_tokens": None,
+            "output_tokens": None,
+            "total_tokens": None,
+            "tokens_reported": False,
+            "cost_usd": None,
             "by_attribution": {
                 "estimated": 0,
                 "exact": 0,
@@ -775,6 +919,14 @@ class TestRuntimeLifecycle:
             entity_type="skill",
             slug="fastapi-pro",
             evidence=f"opened {secret} from /Users/steves/private/app.py",
+            token_usage={
+                "attribution": "exact",
+                "input_tokens": 10,
+                "output_tokens": 5,
+                "attribution_reason": f"reported with {secret}",
+                "model": "/Users/steves/private/model",
+                "provider": f"provider-{secret}",
+            },
         )
         validation = store.record_validation(
             session_id="s-private",
@@ -807,6 +959,270 @@ class TestRuntimeLifecycle:
         assert "/Users/steves" not in payload
         assert "[redacted]" in payload
         assert "[redacted-path]" in payload
+        token_usage = used["event"]["token_usage"]
+        assert token_usage["attribution_reason"] == "reported with [redacted]"
+        assert token_usage["model"].startswith("[path_hash:sha256:")
+        assert token_usage["provider"] == "provider-[redacted]"
+
+    def test_runtime_lifecycle_rejects_impossible_cache_write_usage(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        store = RuntimeLifecycleStore(root=tmp_path)
+
+        with pytest.raises(
+            ValueError,
+            match="cache_write_input_tokens cannot exceed input_tokens",
+        ):
+            store.mark_entity_used(
+                session_id="s-invalid-cache",
+                entity_type="skill",
+                slug="fastapi-pro",
+                token_usage={
+                    "attribution": "exact",
+                    "input_tokens": 5,
+                    "cache_write_input_tokens": 6,
+                    "output_tokens": 1,
+                },
+            )
+
+    def test_runtime_lifecycle_rejects_reported_usage_without_output(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        store = RuntimeLifecycleStore(root=tmp_path)
+
+        with pytest.raises(
+            ValueError,
+            match="tokens_reported=true requires input_tokens and output_tokens",
+        ):
+            store.mark_entity_used(
+                session_id="s-incomplete-usage",
+                entity_type="skill",
+                slug="fastapi-pro",
+                token_usage={
+                    "attribution": "exact",
+                    "input_tokens": 5,
+                    "tokens_reported": True,
+                },
+            )
+
+    def test_runtime_lifecycle_rejects_contradictory_total_usage(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        store = RuntimeLifecycleStore(root=tmp_path)
+
+        with pytest.raises(
+            ValueError,
+            match=r"total_tokens must equal input_tokens \+ output_tokens",
+        ):
+            store.mark_entity_used(
+                session_id="s-contradictory-usage",
+                entity_type="skill",
+                slug="fastapi-pro",
+                token_usage={
+                    "attribution": "exact",
+                    "input_tokens": 5,
+                    "output_tokens": 1,
+                    "total_tokens": 999,
+                    "tokens_reported": True,
+                },
+            )
+
+    @pytest.mark.parametrize(
+        "token_usage",
+        [
+            {
+                "attribution": "exact",
+                "input_tokens": 5,
+                "output_tokens": 1,
+                "tokens_reported": False,
+            },
+            {
+                "attribution": "exact",
+                "input_tokens": 5,
+            },
+        ],
+    )
+    def test_runtime_lifecycle_rejects_untruthful_exact_usage(
+        self,
+        tmp_path: Path,
+        token_usage: dict[str, Any],
+    ) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        store = RuntimeLifecycleStore(root=tmp_path)
+
+        with pytest.raises(
+            ValueError,
+            match="attribution=exact requires input_tokens, output_tokens, and tokens_reported=true",
+        ):
+            store.mark_entity_used(
+                session_id="s-untruthful-exact",
+                entity_type="skill",
+                slug="fastapi-pro",
+                token_usage=token_usage,
+            )
+
+    def test_runtime_lifecycle_preserves_exact_zero_usage(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        store = RuntimeLifecycleStore(root=tmp_path)
+
+        used = store.mark_entity_used(
+            session_id="s-zero-usage",
+            entity_type="skill",
+            slug="fastapi-pro",
+            token_usage={
+                "attribution": "exact",
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "total_tokens": 0,
+                "tokens_reported": True,
+                "cost_usd": 0.0,
+            },
+        )
+
+        token_usage = used["event"]["token_usage"]
+        assert token_usage["input_tokens"] == 0
+        assert token_usage["output_tokens"] == 0
+        assert token_usage["total_tokens"] == 0
+        assert token_usage["tokens_reported"] is True
+
+    def test_session_state_normalizes_all_historical_usage_records(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        store = RuntimeLifecycleStore(root=tmp_path)
+        entities = [
+            ("skill", "missing-usage"),
+            ("agent", "malformed-reported"),
+            ("mcp-server", "contradictory-total"),
+        ]
+        for entity_type, slug in entities:
+            store.load_entity(
+                session_id="s-historical-usage",
+                entity_type=entity_type,
+                slug=slug,
+            )
+            store.mark_entity_loaded(
+                session_id="s-historical-usage",
+                entity_type=entity_type,
+                slug=slug,
+            )
+        historical_events = [
+            {
+                "action": "used",
+                "session_id": "s-historical-usage",
+                "entity_type": "skill",
+                "slug": "missing-usage",
+            },
+            {
+                "action": "used",
+                "session_id": "s-historical-usage",
+                "entity_type": "agent",
+                "slug": "malformed-reported",
+                "token_usage": {
+                    "attribution": "exact",
+                    "input_tokens": 2,
+                    "output_tokens": 1,
+                    "total_tokens": 3,
+                    "tokens_reported": "true",
+                },
+            },
+            {
+                "action": "used",
+                "session_id": "s-historical-usage",
+                "entity_type": "mcp-server",
+                "slug": "contradictory-total",
+                "token_usage": {
+                    "attribution": "exact",
+                    "input_tokens": 5,
+                    "output_tokens": 1,
+                    "total_tokens": 999,
+                    "tokens_reported": True,
+                },
+            },
+        ]
+        with store.events_path.open("a", encoding="utf-8") as event_file:
+            for event in historical_events:
+                event_file.write(json.dumps(event) + "\n")
+
+        state = store.session_state(session_id="s-historical-usage")
+        by_slug = {entry["slug"]: entry["token_usage"] for entry in state["used"]}
+
+        missing = by_slug["missing-usage"]
+        assert missing["records"] == 1
+        assert missing["total_tokens"] is None
+        assert missing["tokens_reported"] is False
+        assert missing["by_attribution"]["unavailable"] == 1
+
+        malformed = by_slug["malformed-reported"]
+        assert malformed["records"] == 1
+        assert malformed["input_tokens"] == 2
+        assert malformed["output_tokens"] == 1
+        assert malformed["total_tokens"] == 3
+        assert malformed["tokens_reported"] is False
+        assert malformed["by_attribution"]["estimated"] == 1
+
+        contradictory = by_slug["contradictory-total"]
+        assert contradictory["records"] == 1
+        assert contradictory["total_tokens"] == 6
+        assert contradictory["tokens_reported"] is False
+        assert contradictory["by_attribution"]["estimated"] == 1
+
+    def test_session_state_only_reports_applied_entities_as_loaded(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        store = RuntimeLifecycleStore(root=tmp_path)
+        common: dict[str, Any] = {
+            "session_id": "s-applied-state",
+            "entity_type": "skill",
+            "slug": "fastapi-pro",
+        }
+        store.load_entity(**common, selected=True, selection_source="host")
+        store.mark_entity_used(**common, evidence="advisory event cannot prove activation")
+
+        requested = store.session_state(session_id="s-applied-state")
+        assert requested["loaded"] == []
+        assert requested["used"] == []
+        assert requested["unload_candidates"] == []
+        assert [entry["slug"] for entry in requested["requested"]] == ["fastapi-pro"]
+        assert requested["requested"][0]["selected"] is True
+        assert requested["requested"][0]["selection_source"] == "host"
+
+        store.mark_entity_loaded(**common)
+        applied = store.session_state(session_id="s-applied-state")
+        assert applied["requested"] == []
+        assert [entry["slug"] for entry in applied["loaded"]] == ["fastapi-pro"]
+        assert applied["loaded"][0]["selected"] is True
+        assert applied["loaded"][0]["selection_source"] == "host"
+        assert [entry["slug"] for entry in applied["used"]] == ["fastapi-pro"]
+
+        store.unload_entity(**common)
+        pending_unload = store.session_state(session_id="s-applied-state")
+        assert [entry["slug"] for entry in pending_unload["loaded"]] == ["fastapi-pro"]
+
+        store.mark_entity_unloaded(**common)
+        unloaded = store.session_state(session_id="s-applied-state")
+        assert unloaded["loaded"] == []
+        assert unloaded["requested"] == []
+        assert unloaded["unloaded"][-1]["unload_status"] == "applied"
 
     def test_runtime_lifecycle_usage_metrics_share_lifecycle_span(
         self,
@@ -856,6 +1272,8 @@ class TestRuntimeLifecycle:
         metric_spans = [item for item in spans if item[0] == "metric"]
         assert [item[1] for item in metric_spans] == [
             "ctx.tool_usage.records",
+            "ctx.tool_usage.input_tokens",
+            "ctx.tool_usage.output_tokens",
             "ctx.tool_usage.tokens",
             "ctx.tool_usage.tokens_per_record",
         ]
@@ -949,8 +1367,8 @@ class TestRuntimeLifecycle:
             "unload_requested",
             "session_end",
         ]
-        assert events[1]["selected"] is True
-        assert events[1]["selection_source"] == "user"
+        assert events[1]["selected"] is False
+        assert events[1]["selection_source"] == "unknown"
         assert events[1]["source_context"] == {"surface": "ctx-recommend"}
         assert events[2]["token_usage"]["attribution"] == "unavailable"
         assert events[2]["token_usage"]["total_tokens"] is None
@@ -1073,10 +1491,11 @@ class TestRuntimeLifecycle:
                 )
             )
         )
-        assert state["loaded"][0]["security_scan"]["status"] == "not_provided"
-        assert state["loaded"][0]["selected"] is True
-        assert state["loaded"][0]["selection_source"] == "user"
-        assert state["loaded"][0]["source_context"] == {}
+        assert state["loaded"] == []
+        assert state["requested"][0]["security_scan"]["status"] == "not_provided"
+        assert state["requested"][0]["selected"] is False
+        assert state["requested"][0]["selection_source"] == "unknown"
+        assert state["requested"][0]["source_context"] == {}
 
     def test_skill_load_accepts_security_scan_proof(
         self,
@@ -1125,7 +1544,8 @@ class TestRuntimeLifecycle:
                 )
             )
         )
-        assert state["loaded"][0]["security_scan"]["status"] == "passed"
+        assert state["loaded"] == []
+        assert state["requested"][0]["security_scan"]["status"] == "passed"
 
     def test_skill_load_redacts_security_scan_tokens_and_paths(
         self,
@@ -1191,7 +1611,8 @@ class TestRuntimeLifecycle:
                 )
             )
         )
-        assert state["loaded"][0]["security_scan"] == scan
+        assert state["loaded"] == []
+        assert state["requested"][0]["security_scan"] == scan
 
         serialized_scan = json.dumps(scan)
         assert github_token not in serialized_scan
@@ -1259,6 +1680,12 @@ class TestRuntimeLifecycle:
         ]
         for name, arguments in calls:
             toolbox.dispatch(ToolCall(id="c1", name=name, arguments=arguments))
+            if name == "ctx__load_entity":
+                toolbox._lifecycle.mark_entity_loaded(
+                    session_id="s-2",
+                    entity_type=str(arguments["entity_type"]),
+                    slug=str(arguments["slug"]),
+                )
 
         result = json.loads(
             toolbox.dispatch(
@@ -1275,8 +1702,12 @@ class TestRuntimeLifecycle:
         assert result["used"][0]["token_usage"] == {
             "records": 1,
             "input_tokens": 10,
+            "cached_input_tokens": None,
+            "cache_write_input_tokens": None,
+            "uncached_input_tokens": None,
             "output_tokens": 5,
             "total_tokens": 15,
+            "tokens_reported": True,
             "cost_usd": 0.01,
             "by_attribution": {
                 "estimated": 0,
@@ -1389,7 +1820,7 @@ def test_session_state_suppresses_current_dev_window_unloads(
 ) -> None:
     from ctx.adapters.generic import runtime_lifecycle
 
-    timestamps = iter([100.0, 101.0, 102.0, 103.0, 104.0, 105.0])
+    timestamps = iter([100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0])
     monkeypatch.setattr(runtime_lifecycle.time, "time", lambda: next(timestamps))
 
     for name, arguments in [
@@ -1410,6 +1841,11 @@ def test_session_state_suppresses_current_dev_window_unloads(
         ),
     ]:
         toolbox.dispatch(ToolCall(id="c1", name=name, arguments=arguments))
+    toolbox._lifecycle.mark_entity_loaded(
+        session_id="s-window",
+        entity_type="skill",
+        slug="fastapi-pro",
+    )
 
     current_window = json.loads(
         toolbox.dispatch(
@@ -1560,6 +1996,779 @@ class TestRecommendBundle:
         assert "skill:local-security" in filtered_ids
         assert "skill:remote-security" not in filtered_ids
 
+        inferred = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="c3",
+                    name="ctx__recommend_bundle",
+                    arguments={"query": "security with no API key", "top_k": 5},
+                )
+            )
+        )
+        inferred_ids = {row["id"] for row in inferred["results"]}
+        assert "skill:local-security" in inferred_ids
+        assert "skill:remote-security" not in inferred_ids
+
+    def test_context_policy_starts_one_skill_and_defers_expensive_context(self) -> None:
+        results: list[dict[str, Any]] = [
+            {"id": "agent:reviewer", "type": "agent", "installable": True},
+            {"id": "skill:baseline", "type": "skill", "installable": True},
+            {"id": "skill:primary", "type": "skill", "installable": True},
+            {"id": "skill:secondary", "type": "skill", "installable": True},
+            {"id": "mcp-server:wiki", "type": "mcp-server", "installable": True},
+            {"id": "skill:remote", "type": "skill", "installable": False},
+            {
+                "id": "skill:external",
+                "type": "skill",
+                "installable": True,
+                "external": True,
+            },
+            {"id": "skill:malformed", "type": "skill", "installable": "false"},
+            {"id": "tool:unknown", "type": "tool", "installable": True},
+        ]
+
+        policy = _recommendation_context_policy(
+            baseline_context=["skill:baseline"],
+            active_context=[],
+            results=results,
+        )
+
+        assert policy["keep"] == ["skill:baseline"]
+        assert policy["load"] == ["skill:primary"]
+        assert policy["deferred"] == [
+            "agent:reviewer",
+            "skill:secondary",
+            "mcp-server:wiki",
+        ]
+        assert policy["manual"] == [
+            "skill:remote",
+            "skill:external",
+            "skill:malformed",
+            "tool:unknown",
+        ]
+
+        expensive_only = _recommendation_context_policy(
+            baseline_context=[],
+            active_context=[],
+            results=[results[0], results[4]],
+        )
+        assert expensive_only["load"] == []
+        assert expensive_only["deferred"] == ["agent:reviewer", "mcp-server:wiki"]
+
+    def test_session_rejections_persist_isolate_clear_and_ignore(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        graph_path = _build_synthetic_graph(tmp_path)
+        wiki_dir = _build_synthetic_wiki(tmp_path)
+        runtime_dir = tmp_path / "runtime"
+        first_session = CtxCoreToolbox(
+            wiki_dir=wiki_dir,
+            graph_path=graph_path,
+            lifecycle_dir=runtime_dir,
+            bound_session_id="first-session",
+        )
+        second_session = CtxCoreToolbox(
+            wiki_dir=wiki_dir,
+            graph_path=graph_path,
+            lifecycle_dir=runtime_dir,
+            bound_session_id="second-session",
+        )
+
+        def recommend(box: CtxCoreToolbox, **arguments: Any) -> dict[str, Any]:
+            return json.loads(
+                box.dispatch(
+                    ToolCall(
+                        id="rejection-memory",
+                        name="ctx__recommend_bundle",
+                        arguments={"query": "python web api", "top_k": 5, **arguments},
+                    )
+                )
+            )
+
+        recommend(first_session, rejected=["skill:fastapi-pro"])
+        remembered = recommend(first_session)
+        isolated = recommend(second_session)
+        ignored = recommend(first_session, rejection_mode="ignore")
+
+        assert "skill:fastapi-pro" not in {row["id"] for row in remembered["results"]}
+        assert "skill:fastapi-pro" in {row["id"] for row in isolated["results"]}
+        assert "skill:fastapi-pro" in {row["id"] for row in ignored["results"]}
+
+        cleared = recommend(first_session, rejection_mode="replace", rejected=[])
+        assert "skill:fastapi-pro" in {row["id"] for row in cleared["results"]}
+        state = json.loads(
+            first_session.dispatch(ToolCall(id="state", name="ctx__session_state", arguments={}))
+        )
+        assert state["rejected_recommendations"] == []
+
+    def test_session_rejections_persist_only_known_canonical_graph_ids(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        toolbox = CtxCoreToolbox(
+            wiki_dir=_build_synthetic_wiki(tmp_path),
+            graph_path=_build_synthetic_graph(tmp_path),
+            lifecycle_dir=tmp_path / "runtime",
+            bound_session_id="canonical-session",
+        )
+
+        json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="remember",
+                    name="ctx__recommend_bundle",
+                    arguments={
+                        "query": "python web api",
+                        "rejected": ["fastapi-pro", "skill:not-in-graph"],
+                    },
+                )
+            )
+        )
+        state = json.loads(
+            toolbox.dispatch(ToolCall(id="state", name="ctx__session_state", arguments={}))
+        )
+
+        assert state["rejected_recommendations"] == ["skill:fastapi-pro"]
+
+    def test_remembered_rejections_do_not_rescan_graph_without_new_feedback(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import ctx.adapters.generic.ctx_core_tools as core_tools
+
+        toolbox = CtxCoreToolbox(
+            wiki_dir=_build_synthetic_wiki(tmp_path),
+            graph_path=_build_synthetic_graph(tmp_path),
+            lifecycle_dir=tmp_path / "runtime",
+            bound_session_id="steady-session",
+        )
+        calls = 0
+        canonicalize = core_tools._canonical_graph_recommendation_ids
+
+        def count_canonicalize(graph: Any, values: list[str]) -> list[str]:
+            nonlocal calls
+            calls += 1
+            return canonicalize(graph, values)
+
+        monkeypatch.setattr(
+            core_tools,
+            "_canonical_graph_recommendation_ids",
+            count_canonicalize,
+        )
+
+        for arguments in (
+            {"rejected": ["skill:fastapi-pro"]},
+            {},
+            {},
+        ):
+            json.loads(
+                toolbox.dispatch(
+                    ToolCall(
+                        id="steady",
+                        name="ctx__recommend_bundle",
+                        arguments={"query": "python web api", **arguments},
+                    )
+                )
+            )
+
+        assert calls == 1
+
+    def test_rejection_lookup_without_event_log_is_read_only(self, tmp_path: Path) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        absent_root = tmp_path / "absent-runtime"
+        absent_store = RuntimeLifecycleStore(root=absent_root)
+        assert absent_store.recommendation_rejections(session_id="fresh-session") == []
+        assert not absent_root.exists()
+
+        existing_root = tmp_path / "existing-runtime"
+        existing_root.mkdir(mode=0o755)
+        initial_mode = existing_root.stat().st_mode & 0o777
+        existing_store = RuntimeLifecycleStore(root=existing_root)
+        assert existing_store.recommendation_rejections(session_id="fresh-session") == []
+        assert list(existing_root.iterdir()) == []
+        assert existing_root.stat().st_mode & 0o777 == initial_mode
+
+    def test_concurrent_session_rejections_merge_without_lost_updates(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        store = RuntimeLifecycleStore(root=tmp_path / "runtime")
+        barrier = threading.Barrier(8)
+
+        def remember(index: int) -> list[str]:
+            barrier.wait()
+            return store.remember_recommendation_rejections(
+                session_id="concurrent-session",
+                rejected=[f"skill:helper-{index}"],
+                merge=True,
+            )
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            list(executor.map(remember, range(8)))
+
+        assert set(store.recommendation_rejections(session_id="concurrent-session")) == {
+            f"skill:helper-{index}" for index in range(8)
+        }
+
+    def test_cross_process_session_rejections_merge_without_lost_updates(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        runtime_root = tmp_path / "runtime"
+        context = multiprocessing.get_context("spawn")
+        with ProcessPoolExecutor(max_workers=4, mp_context=context) as executor:
+            list(
+                executor.map(
+                    _remember_rejection_in_process,
+                    [(str(runtime_root), index) for index in range(8)],
+                )
+            )
+
+        assert set(
+            RuntimeLifecycleStore(root=runtime_root).recommendation_rejections(
+                session_id="process-session"
+            )
+        ) == {f"skill:process-{index}" for index in range(8)}
+
+    def test_slow_rejection_telemetry_does_not_hold_event_lock(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import ctx.adapters.generic.runtime_lifecycle as lifecycle
+
+        store = lifecycle.RuntimeLifecycleStore(root=tmp_path / "runtime")
+        first_telemetry_started = threading.Event()
+        release_first_telemetry = threading.Event()
+        call_lock = threading.Lock()
+        calls = 0
+
+        def slow_first_telemetry(_event: dict[str, Any]) -> None:
+            nonlocal calls
+            with call_lock:
+                calls += 1
+                call_number = calls
+            if call_number == 1:
+                first_telemetry_started.set()
+                assert release_first_telemetry.wait(timeout=5)
+
+        monkeypatch.setattr(
+            lifecycle,
+            "_record_runtime_lifecycle_telemetry",
+            slow_first_telemetry,
+        )
+        failures: list[BaseException] = []
+
+        def first_writer() -> None:
+            try:
+                store.remember_recommendation_rejections(
+                    session_id="slow-telemetry-a",
+                    rejected=["skill:first"],
+                )
+            except BaseException as exc:  # pragma: no cover - asserted below
+                failures.append(exc)
+
+        writer = threading.Thread(target=first_writer)
+        writer.start()
+        assert first_telemetry_started.wait(timeout=5)
+
+        assert store.remember_recommendation_rejections(
+            session_id="slow-telemetry-b",
+            rejected=["skill:second"],
+        ) == ["skill:second"]
+        release_first_telemetry.set()
+        writer.join(timeout=5)
+
+        assert not writer.is_alive()
+        assert failures == []
+        assert store.recommendation_rejections(session_id="slow-telemetry-a") == ["skill:first"]
+
+    def test_rejection_append_repairs_crash_partial_jsonl_tail(self, tmp_path: Path) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        store = RuntimeLifecycleStore(root=tmp_path / "runtime")
+        store.remember_recommendation_rejections(
+            session_id="partial-tail",
+            rejected=["skill:first"],
+        )
+        with store.events_path.open("ab") as handle:
+            handle.write(b'{"action":"recommendation_rejections"')
+
+        store.remember_recommendation_rejections(
+            session_id="partial-tail",
+            rejected=["agent:second"],
+            merge=True,
+        )
+        store.recommendation_checkpoint_path.unlink()
+
+        assert store.recommendation_rejections(session_id="partial-tail") == [
+            "skill:first",
+            "agent:second",
+        ]
+        assert all(
+            isinstance(json.loads(line), dict)
+            for line in store.events_path.read_text(encoding="utf-8").splitlines()
+        )
+
+    def test_malformed_rejection_snapshot_retains_last_valid_state(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        store = RuntimeLifecycleStore(root=tmp_path / "runtime")
+        store.remember_recommendation_rejections(
+            session_id="malformed-session",
+            rejected=["skill:valid"],
+        )
+        with store.events_path.open("a", encoding="utf-8") as handle:
+            handle.write(
+                json.dumps(
+                    {
+                        "action": "recommendation_rejections",
+                        "session_id": "malformed-session",
+                        "rejected": ["skill:valid", "bare-id", 7],
+                    }
+                )
+                + "\n"
+            )
+
+        with caplog.at_level("WARNING"):
+            rejected = store.recommendation_rejections(session_id="malformed-session")
+            state = store.session_state(session_id="malformed-session")
+
+        assert rejected == ["skill:valid"]
+        assert state["rejected_recommendations"] == ["skill:valid"]
+        assert "skipped malformed recommendation rejection snapshot" in caplog.text
+        assert "bare-id" not in caplog.text
+        assert "malformed-session" not in caplog.text
+
+    def test_rejection_index_tracks_every_lifecycle_append_without_rebuild(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import ctx.adapters.generic.runtime_lifecycle as lifecycle
+
+        store = lifecycle.RuntimeLifecycleStore(root=tmp_path / "runtime")
+        store.remember_recommendation_rejections(
+            session_id="checkpoint-session",
+            rejected=["skill:valid"],
+        )
+        assert store.recommendation_checkpoint_path.is_file()
+        with closing(sqlite3.connect(store.recommendation_checkpoint_path)) as connection:
+            initial_size = connection.execute(
+                "SELECT event_size FROM metadata WHERE singleton = 1"
+            ).fetchone()[0]
+
+        def unexpected_content_verification(*_args: Any, **_kwargs: Any) -> None:
+            raise AssertionError("ordinary append scanned the complete event stream")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(lifecycle, "_event_stream_head", unexpected_content_verification)
+            store.record_dev_event(
+                session_id="checkpoint-session",
+                event_type="test",
+            )
+        with closing(sqlite3.connect(store.recommendation_checkpoint_path)) as connection:
+            updated_size = connection.execute(
+                "SELECT event_size FROM metadata WHERE singleton = 1"
+            ).fetchone()[0]
+
+        def unexpected_rebuild(*_args: Any, **_kwargs: Any) -> None:
+            raise AssertionError("steady lookup rebuilt the rejection index")
+
+        monkeypatch.setattr(lifecycle, "_rebuild_rejection_index", unexpected_rebuild)
+
+        assert store.recommendation_rejections(session_id="checkpoint-session") == ["skill:valid"]
+        assert updated_size > initial_size
+        assert updated_size == store.events_path.stat().st_size
+
+    def test_rejection_index_corruption_rebuilds_from_events(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        store = RuntimeLifecycleStore(root=tmp_path / "runtime")
+        store.remember_recommendation_rejections(
+            session_id="checkpoint-rebuild",
+            rejected=["agent:reviewer"],
+        )
+        store.recommendation_checkpoint_path.write_bytes(b"not a sqlite database")
+
+        with caplog.at_level("WARNING"):
+            rejected = store.recommendation_rejections(session_id="checkpoint-rebuild")
+
+        assert rejected == ["agent:reviewer"]
+        assert "rebuilding malformed rejection index" in caplog.text
+        with closing(sqlite3.connect(store.recommendation_checkpoint_path)) as connection:
+            row = connection.execute(
+                "SELECT rejected_json FROM sessions WHERE session_id = ?",
+                ("checkpoint-rebuild",),
+            ).fetchone()
+        assert row is not None
+        assert json.loads(row[0]) == ["agent:reviewer"]
+
+    def test_v2_sampled_anchor_index_migrates_to_complete_stream_schema(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        store = RuntimeLifecycleStore(root=tmp_path / "runtime")
+        store.remember_recommendation_rejections(
+            session_id="v2-migration",
+            rejected=["skill:canonical"],
+        )
+        with closing(sqlite3.connect(store.recommendation_index_path)) as connection:
+            connection.execute(
+                "ALTER TABLE metadata ADD COLUMN prefix_anchor TEXT NOT NULL DEFAULT ''"
+            )
+            connection.execute(
+                "ALTER TABLE metadata ADD COLUMN tail_anchor TEXT NOT NULL DEFAULT ''"
+            )
+            connection.execute("UPDATE metadata SET version = 2")
+            connection.execute("PRAGMA user_version=2")
+            connection.commit()
+
+        assert store.recommendation_rejections(session_id="v2-migration") == ["skill:canonical"]
+        with closing(sqlite3.connect(store.recommendation_index_path)) as connection:
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+            columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(metadata)").fetchall()
+            }
+        assert version == 3
+        assert {"prefix_anchor", "tail_anchor"}.isdisjoint(columns)
+
+    def test_rejection_index_row_tampering_rebuilds_from_events(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        store = RuntimeLifecycleStore(root=tmp_path / "runtime")
+        store.remember_recommendation_rejections(
+            session_id="checkpoint-integrity",
+            rejected=["skill:valid"],
+        )
+        with closing(sqlite3.connect(store.recommendation_checkpoint_path)) as connection:
+            connection.execute(
+                "UPDATE sessions SET rejected_json = ? WHERE session_id = ?",
+                ('["agent:tampered"]', "checkpoint-integrity"),
+            )
+            connection.commit()
+
+        with caplog.at_level("WARNING"):
+            rejected = store.recommendation_rejections(session_id="checkpoint-integrity")
+
+        assert rejected == ["skill:valid"]
+        assert "rebuilding malformed rejection index" in caplog.text
+
+    def test_middle_same_length_event_edit_rebuilds_with_frozen_metadata(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import ctx.adapters.generic.runtime_lifecycle as lifecycle
+
+        store = lifecycle.RuntimeLifecycleStore(root=tmp_path / "runtime")
+        padding = [
+            (
+                json.dumps(
+                    {
+                        "action": "dev_event",
+                        "session_id": "middle-integrity",
+                        "event_type": "padding",
+                        "payload": {"index": index, "padding": "x" * 128},
+                    },
+                    separators=(",", ":"),
+                )
+                + "\n"
+            ).encode()
+            for index in range(220)
+        ]
+        rejection = (
+            json.dumps(
+                {
+                    "action": "recommendation_rejections",
+                    "session_id": "middle-integrity",
+                    "rejected": ["skill:valid"],
+                },
+                separators=(",", ":"),
+            )
+            + "\n"
+        ).encode()
+        payload = b"".join([*padding, rejection, *padding])
+        store.events_path.parent.mkdir(parents=True)
+        store.events_path.write_bytes(payload)
+        os.chmod(store.events_path, 0o600)
+        assert len(payload) > 55_000
+        assert store.recommendation_rejections(session_id="middle-integrity") == ["skill:valid"]
+
+        with closing(sqlite3.connect(store.recommendation_index_path)) as connection:
+            frozen_stat = connection.execute(
+                """
+                SELECT event_dev, event_ino, event_mtime_ns, event_ctime_ns
+                FROM metadata WHERE singleton = 1
+                """
+            ).fetchone()
+        assert frozen_stat is not None
+        monkeypatch.setattr(
+            lifecycle,
+            "_event_file_id",
+            lambda _event_stat: (frozen_stat[0], frozen_stat[1]),
+        )
+        frozen_times = {
+            "st_mtime_ns": frozen_stat[2],
+            "st_ctime_ns": frozen_stat[3],
+        }
+        monkeypatch.setattr(
+            lifecycle,
+            "_stat_time_ns",
+            lambda _event_stat, field: frozen_times[field],
+        )
+
+        original = b"skill:valid"
+        replacement = b"agent:evilx"
+        assert len(original) == len(replacement)
+        offset = payload.index(original)
+        assert 4096 < offset < len(payload) - 4096 - len(original)
+        with store.events_path.open("r+b") as handle:
+            handle.seek(offset)
+            handle.write(replacement)
+            handle.flush()
+            os.fsync(handle.fileno())
+
+        indexed = store.recommendation_rejections(session_id="middle-integrity")
+        store.recommendation_checkpoint_path.unlink()
+        rebuilt = store.recommendation_rejections(session_id="middle-integrity")
+
+        assert indexed == ["agent:evilx"]
+        assert rebuilt == indexed
+
+    def test_jsonl_append_survives_index_update_crash(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import ctx.adapters.generic.runtime_lifecycle as lifecycle
+
+        store = lifecycle.RuntimeLifecycleStore(root=tmp_path / "runtime")
+
+        def crash_after_jsonl(*_args: Any, **_kwargs: Any) -> None:
+            raise RuntimeError("simulated index update crash")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                lifecycle,
+                "_update_rejection_index_after_append",
+                crash_after_jsonl,
+            )
+            recorded = store.record_dev_event(
+                session_id="crash-recovery",
+                event_type="canonical-write",
+            )
+            assert recorded["ok"] is True
+            assert not store.recommendation_index_path.exists()
+            assert store.remember_recommendation_rejections(
+                session_id="crash-recovery",
+                rejected=["skill:durable"],
+            ) == ["skill:durable"]
+            assert not store.recommendation_index_path.exists()
+
+        assert store.recommendation_rejections(session_id="crash-recovery") == ["skill:durable"]
+        assert store.remember_recommendation_rejections(
+            session_id="crash-recovery",
+            rejected=["skill:durable"],
+        ) == ["skill:durable"]
+        persisted = [
+            json.loads(line) for line in store.events_path.read_text(encoding="utf-8").splitlines()
+        ]
+        assert [event["action"] for event in persisted] == [
+            "dev_event",
+            "recommendation_rejections",
+        ]
+
+    def test_legacy_rejection_checkpoint_is_rebuilt_from_jsonl(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        store = RuntimeLifecycleStore(root=tmp_path / "runtime")
+        store.remember_recommendation_rejections(
+            session_id="legacy-rebuild",
+            rejected=["skill:canonical"],
+        )
+        store.recommendation_checkpoint_path.unlink()
+        legacy_path = store.events_path.with_name("recommendation-rejections.json")
+        legacy_path.write_text(
+            json.dumps({"version": 2, "sessions": {"legacy-rebuild": ["agent:stale"]}}),
+            encoding="utf-8",
+        )
+
+        assert store.recommendation_rejections(session_id="legacy-rebuild") == ["skill:canonical"]
+        assert not legacy_path.exists()
+        assert store.recommendation_checkpoint_path.is_file()
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX ownership modes and symlinks")
+    def test_rejection_index_rejects_symlinks_and_keeps_state_private(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        store = RuntimeLifecycleStore(root=tmp_path / "runtime")
+        store.remember_recommendation_rejections(
+            session_id="private-index",
+            rejected=["skill:valid"],
+        )
+        lock_path = store.events_path.with_suffix(store.events_path.suffix + ".lock")
+        assert {
+            store.events_path.stat().st_mode & 0o777,
+            store.recommendation_checkpoint_path.stat().st_mode & 0o777,
+            lock_path.stat().st_mode & 0o777,
+        } == {0o600}
+
+        store.recommendation_checkpoint_path.unlink()
+        victim = tmp_path / "victim.sqlite3"
+        victim.write_bytes(b"untouched")
+        store.recommendation_checkpoint_path.symlink_to(victim)
+
+        with pytest.raises(ValueError, match="symlinked path"):
+            store.recommendation_rejections(session_id="private-index")
+        assert victim.read_bytes() == b"untouched"
+
+    @pytest.mark.no_cover
+    def test_rejection_index_100k_session_hot_path_budget(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import ctx.adapters.generic.runtime_lifecycle as lifecycle
+
+        store = lifecycle.RuntimeLifecycleStore(root=tmp_path / "runtime")
+        store.events_path.parent.mkdir(parents=True)
+        with store.events_path.open("w", encoding="utf-8") as handle:
+            for index in range(100_000):
+                handle.write(
+                    json.dumps(
+                        {
+                            "action": "recommendation_rejections",
+                            "session_id": f"session-{index:06d}",
+                            "rejected": [f"skill:item-{index:06d}"],
+                        },
+                        separators=(",", ":"),
+                    )
+                    + "\n"
+                )
+        os.chmod(store.events_path, 0o600)
+
+        target_session = "session-099999"
+        assert store.recommendation_rejections(session_id=target_session) == ["skill:item-099999"]
+
+        def unexpected_rebuild(*_args: Any, **_kwargs: Any) -> None:
+            raise AssertionError("steady indexed operations rebuilt the 100k-session event stream")
+
+        monkeypatch.setattr(lifecycle, "_rebuild_rejection_index", unexpected_rebuild)
+        for _ in range(5):
+            assert store.recommendation_rejections(session_id=target_session) == [
+                "skill:item-099999"
+            ]
+        assert store.remember_recommendation_rejections(
+            session_id=target_session,
+            rejected=["agent:reviewer"],
+        ) == ["agent:reviewer"]
+
+    def test_context_policy_replaces_rejected_or_stale_applied_context(self) -> None:
+        policy = _recommendation_context_policy(
+            baseline_context=["mcp-server:codex-cli"],
+            active_context=[
+                {
+                    "id": "skill:stale-helper",
+                    "load_status": "applied",
+                    "stale": True,
+                },
+                "agent:rejected-reviewer",
+                "mcp-server:codex-cli",
+            ],
+            rejected_context=[
+                "agent:rejected-reviewer",
+                "mcp-server:codex-cli",
+            ],
+            results=[
+                {
+                    "id": "skill:replacement",
+                    "type": "skill",
+                    "installable": True,
+                },
+                {
+                    "id": "agent:secondary",
+                    "type": "agent",
+                    "installable": True,
+                },
+            ],
+        )
+
+        assert policy["keep"] == ["mcp-server:codex-cli"]
+        assert policy["load"] == []
+        assert policy["replace"] == [
+            {
+                "unload": "skill:stale-helper",
+                "load": "skill:replacement",
+                "reason": "host marked applied context as stale",
+            }
+        ]
+        assert policy["unload"] == ["agent:rejected-reviewer"]
+        assert policy["deferred"] == ["agent:secondary"]
+
+        bare_baseline = _recommendation_context_policy(
+            baseline_context=["mcp-server:codex-cli"],
+            active_context=["codex-cli"],
+            rejected_context=["codex-cli"],
+            results=[],
+        )
+        assert bare_baseline["keep"] == ["mcp-server:codex-cli"]
+        assert bare_baseline["unload"] == []
+        assert bare_baseline["replace"] == []
+
+        bare_rejected = _recommendation_context_policy(
+            baseline_context=[],
+            active_context=["rejected-reviewer"],
+            rejected_context=["agent:rejected-reviewer"],
+            results=[],
+        )
+        assert bare_rejected["keep"] == []
+        assert bare_rejected["unload"] == ["agent:rejected-reviewer"]
+
+    def test_context_policy_does_not_resolve_ambiguous_bare_graph_ids(self) -> None:
+        graph = nx.Graph()
+        graph.add_node("skill:shared", label="shared", type="skill")
+        graph.add_node("mcp-server:shared", label="shared", type="mcp-server")
+
+        policy = _recommendation_context_policy(
+            baseline_context=[],
+            active_context=["shared"],
+            rejected_context=["skill:shared"],
+            results=[],
+            graph=graph,
+        )
+
+        assert policy["keep"] == ["shared"]
+        assert policy["unload"] == []
+        assert policy["replace"] == []
+
     def test_language_inference_resolves_common_word_aliases(self) -> None:
         assert _infer_query_language("go through python tests") == "python"
         assert _infer_query_language("python tree node bug") == "python"
@@ -1677,6 +2886,63 @@ class TestRecommendBundle:
         assert "skill:safe-api-helper" in {row["id"] for row in no_key_result["results"]}
         assert "skill:cloud-helper" not in {row["id"] for row in no_key_result["results"]}
 
+    def test_local_no_key_filters_do_not_starve_runtime_recommendations(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        graph = nx.Graph()
+        for index in range(60):
+            slug = f"aaa-python-testing-{index:02d}"
+            graph.add_node(
+                f"skill:{slug}",
+                label=slug,
+                type="skill",
+                tags=["python", "testing"],
+                status="available",
+                source_catalog="skill-index",
+                install_command=f"ctx-skill-install {slug}",
+            )
+        graph.add_node(
+            "skill:ctx-python-testing",
+            label="ctx-python-testing",
+            type="skill",
+            tags=["ctx", "local", "no-api-key", "python", "testing"],
+            source="ctx-runtime-availability",
+            project_owned=True,
+            requires_api_keys=False,
+        )
+        graph_path = tmp_path / "graph.json"
+        graph_path.write_text(json.dumps(nx.node_link_data(graph, edges="edges")), encoding="utf-8")
+        wiki = tmp_path / "wiki"
+        converted = wiki / "converted" / "ctx-python-testing"
+        converted.mkdir(parents=True)
+        (converted / "SKILL.md").write_text("# ctx Python testing\n", encoding="utf-8")
+        toolbox = CtxCoreToolbox(
+            wiki_dir=wiki,
+            graph_path=graph_path,
+            lifecycle_dir=tmp_path / "runtime",
+        )
+
+        result = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="local-no-key-backfill",
+                    name="ctx__recommend_bundle",
+                    arguments={
+                        "query": "python testing",
+                        "top_k": 1,
+                        "local_code_task": True,
+                        "no_api_keys": True,
+                        "language": "python",
+                    },
+                )
+            )
+        )
+
+        assert [row["id"] for row in result["results"]] == ["skill:ctx-python-testing"]
+        assert result["results"][0]["source"] == "ctx-runtime-availability"
+        assert result["results"][0]["installable"] is True
+
     def test_companion_harnesses_are_separate_from_dev_results(
         self,
         toolbox: CtxCoreToolbox,
@@ -1775,6 +3041,39 @@ class TestRecommendBundle:
         )
 
         assert result["companion_harnesses"] == []
+
+    def test_companion_harness_rejections_are_filtered_and_backfilled(
+        self,
+        toolbox: CtxCoreToolbox,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import ctx_init
+
+        monkeypatch.setattr(
+            ctx_init,
+            "recommend_harnesses",
+            lambda *args, **kwargs: [
+                {"name": "rejected-runner", "fit_score": 0.99},
+                {"name": "accepted-runner", "fit_score": 0.90},
+            ],
+        )
+
+        result = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="harness-rejection",
+                    name="ctx__recommend_bundle",
+                    arguments={
+                        "query": "python agent workflow",
+                        "top_k": 1,
+                        "model_provider": "openai",
+                        "rejected": ["harness:rejected-runner"],
+                    },
+                )
+            )
+        )
+
+        assert [row["name"] for row in result["companion_harnesses"]] == ["accepted-runner"]
 
     def test_workflow_action_metadata_survives_generic_recommendation(
         self,
@@ -2009,6 +3308,55 @@ class TestWikiGet:
         assert "frontmatter" in result
         assert "body" in result
         assert "Python Patterns" in result["body"]
+        assert result["body_truncated"] is False
+        assert result["body_bytes"] == len(result["body"].encode("utf-8"))
+        assert result["body_returned_bytes"] == result["body_bytes"]
+        assert result["body_limit_bytes"] == _WIKI_GET_BODY_MAX_BYTES
+
+    def test_body_at_byte_limit_is_not_truncated(self, tmp_path: Path) -> None:
+        wiki = _build_synthetic_wiki(tmp_path)
+        body = "x" * _WIKI_GET_BODY_MAX_BYTES
+        (wiki / "entities" / "skills" / "limit.md").write_text(
+            "---\nname: limit\ntitle: Limit\n---\n" + body,
+            encoding="utf-8",
+        )
+        toolbox = CtxCoreToolbox(wiki_dir=wiki, graph_path=tmp_path / "missing.json")
+
+        result = json.loads(
+            toolbox.dispatch(ToolCall(id="c1", name="ctx__wiki_get", arguments={"slug": "limit"}))
+        )
+
+        assert result["body"] == body
+        assert result["body_truncated"] is False
+        assert result["body_bytes"] == _WIKI_GET_BODY_MAX_BYTES
+        assert result["body_returned_bytes"] == _WIKI_GET_BODY_MAX_BYTES
+
+    def test_long_body_is_bounded_at_utf8_boundary(self, tmp_path: Path) -> None:
+        wiki = _build_synthetic_wiki(tmp_path)
+        body = ("x" * (_WIKI_GET_BODY_MAX_BYTES - 1)) + "🙂tail"
+        (wiki / "entities" / "skills" / "unicode-boundary.md").write_text(
+            "---\nname: unicode-boundary\ntitle: Unicode Boundary\ntags: [unicode]\n---\n" + body,
+            encoding="utf-8",
+        )
+        toolbox = CtxCoreToolbox(wiki_dir=wiki, graph_path=tmp_path / "missing.json")
+
+        result = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="c1",
+                    name="ctx__wiki_get",
+                    arguments={"slug": "unicode-boundary"},
+                )
+            )
+        )
+
+        assert result["slug"] == "unicode-boundary"
+        assert result["frontmatter"]["title"] == "Unicode Boundary"
+        assert result["body_truncated"] is True
+        assert result["body_bytes"] == len(body.encode("utf-8"))
+        assert result["body"] == "x" * (_WIKI_GET_BODY_MAX_BYTES - 1)
+        assert result["body_returned_bytes"] == _WIKI_GET_BODY_MAX_BYTES - 1
+        assert result["body_returned_bytes"] <= result["body_limit_bytes"]
 
     def test_missing_slug(self, toolbox: CtxCoreToolbox) -> None:
         result = json.loads(toolbox.dispatch(ToolCall(id="c1", name="ctx__wiki_get", arguments={})))

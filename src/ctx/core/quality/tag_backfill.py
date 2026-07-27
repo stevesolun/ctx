@@ -3,23 +3,18 @@
 Many imported skills (especially the auto-mirrored short ones) ship
 with no ``tags:`` block. The recommender uses tag overlap as one of
 three signals; an entity with zero tags is invisible to that signal.
-This tool walks the wiki, finds entities with empty ``tags`` (or
-missing the field entirely), and proposes a backfill set drawn from:
+This tool scans installed skills and agents, with unpacked wiki entity cards
+as fallbacks, finds entities with empty ``tags`` (or missing the field entirely),
+and proposes a backfill set drawn from:
 
   1. **Slug tokens** — the entity's filename, hyphen-split, lowercased,
      filtered against a stopword list. ``python-fastapi-development``
      contributes ``python``, ``fastapi``, ``development``.
 
-  2. **Detected keywords** — a small allowlist of well-known
+  2. **Body keywords** — a small allowlist of well-known
      technologies / disciplines. We scan the entity body for these
      and add any that fire. ``react``, ``kubernetes``, ``security``,
      ``testing``, etc.
-
-  3. **Existing-corpus tag overlap** — any tag already used elsewhere
-     in the catalog that also appears as a slug-token of this entity
-     is added with high confidence. This keeps backfilled tags
-     consistent with the existing tag vocabulary instead of inventing
-     new ones.
 
 The tool is **propose-only** by default. It writes a report (YAML
 patches per file) and never edits frontmatter unless explicitly
@@ -180,7 +175,7 @@ class TagProposal:
     proposed_add: list[str]  # tags to add (no duplicates with current)
     sources: dict[str, list[str]] = field(
         default_factory=dict
-    )  # token | keyword | corpus → list of tags
+    )  # slug_token | body_keyword → list of tags
 
 
 @dataclass
@@ -195,46 +190,46 @@ class TagReport:
 # ── Frontmatter parsing + writing ──────────────────────────────────────
 
 
-_FM_OPEN = re.compile(r"^---\s*\n", re.MULTILINE)
+_FM_OPEN = re.compile(r"\A---[^\S\r\n]*\r?\n")
+_FM_CLOSE = re.compile(r"^---[^\S\r\n]*(?:\r?\n|\Z)", re.MULTILINE)
+_IMPORT_ATTRIBUTION_PREFIX = re.compile(
+    r"\A(?:"
+    r"<!-- designdotmd-import: upstream=[^<>\r\n]+ id=[^<>\r\n]+ "
+    r"fetched=[^<>\r\n]+ author=[^<>\r\n]+ -->|"
+    r"<!-- mattpocock-import: upstream=[^<>\r\n]+ rev=[^<>\r\n]+ "
+    r"license=[^<>\r\n]+ -->|"
+    r"<!-- strix-import: upstream=[^<>\r\n]+ rev=[^<>\r\n]+ "
+    r"license=[^<>\r\n]+ category=[^<>\r\n]+ -->"
+    r")\r?\n"
+)
 
 
 def _split_frontmatter(text: str) -> tuple[str, str, str]:
     """Return ``(prefix, body_after, frontmatter_text)``.
 
     ``prefix`` is everything before the opening ``---`` (usually empty
-    or an HTML comment from a strix/mattpocock import header).
+    or an attribution comment from a supported DesignDotMD, Matt Pocock,
+    or Strix import).
     ``body_after`` is the markdown body after the closing ``---``.
     """
-    if not text.lstrip().startswith("---"):
-        return text, "", ""
-    # First --- could be after an HTML comment (strix/mattpocock import header)
-    open_match = _FM_OPEN.match(text)
-    if not open_match:
-        # find first ---
-        first = text.find("---")
-        if first < 0:
-            return text, "", ""
-        # we want everything before the line containing the leading ---
-        prefix_end = text.rfind("\n", 0, first) + 1
-        prefix = text[:prefix_end]
-        rest = text[prefix_end:]
-        if not rest.startswith("---"):
-            return text, "", ""
-        try:
-            close = rest.index("\n---", 3)
-        except ValueError:
-            return text, "", ""
-        fm = rest[3:close].strip("\n")
-        body_after = rest[close + 4 :].lstrip("\n")
-        return prefix, body_after, fm
     prefix = ""
     rest = text
-    try:
-        close = rest.index("\n---", 3)
-    except ValueError:
+    open_match = _FM_OPEN.match(rest)
+    if not open_match:
+        attribution_match = _IMPORT_ATTRIBUTION_PREFIX.match(text)
+        if not attribution_match:
+            return text, "", ""
+        prefix = attribution_match.group(0)
+        rest = text[attribution_match.end() :]
+        open_match = _FM_OPEN.match(rest)
+    if not open_match:
         return text, "", ""
-    fm = rest[3:close].strip("\n")
-    body_after = rest[close + 4 :].lstrip("\n")
+    after_open = rest[open_match.end() :]
+    close_match = _FM_CLOSE.search(after_open)
+    if not close_match:
+        return text, "", ""
+    fm = after_open[: close_match.start()].strip("\r\n")
+    body_after = after_open[close_match.end() :].lstrip("\r\n")
     return prefix, body_after, fm
 
 
@@ -323,7 +318,7 @@ def _render_frontmatter_with_added_tags(
 
 
 def _existing_tag_vocabulary(entities: Iterable[Path]) -> Counter:
-    """Tally tag usage across the corpus so backfill prefers existing tags."""
+    """Count existing tag frequency for body-keyword candidate ordering."""
     counter: Counter = Counter()
     for p in entities:
         try:
@@ -411,50 +406,66 @@ def _propose(
     )
 
 
-def discover_empty_tag_entities(wiki_dir: Path) -> list[tuple[str, str, Path]]:
-    """Return ``(entity_type, slug, source_path)`` for every entity whose
-    canonical SKILL.md / agent file has empty or missing tags.
-
-    The "canonical" path for skills is ``~/.claude/skills/<slug>/SKILL.md``
-    when present (the deployed source), falling back to the entity card
-    in the wiki. Same shape for agents.
-    """
-    out: list[tuple[str, str, Path]] = []
+def _entity_sources(wiki_dir: Path) -> list[tuple[str, str, Path]]:
+    """Return installed entity sources plus wiki fallbacks by slug."""
+    sources: list[tuple[str, str, Path]] = []
+    installed: set[tuple[str, str]] = set()
     skills_root = Path.home() / ".claude" / "skills"
     agents_root = Path.home() / ".claude" / "agents"
 
-    # Skills: each <slug>/SKILL.md
     if skills_root.is_dir():
-        for skill_dir in skills_root.iterdir():
-            if not skill_dir.is_dir():
-                continue
+        for skill_dir in sorted(skills_root.iterdir()):
             skill_md = skill_dir / "SKILL.md"
             if not skill_md.is_file():
                 continue
-            try:
-                text = skill_md.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                continue
-            _, _, fm = _split_frontmatter(text)
-            if not fm:
-                continue
-            tags, present = _parse_frontmatter_tags(fm)
-            if not tags:  # absent OR present-but-empty both qualify
-                out.append(("skill", skill_dir.name, skill_md))
+            installed.add(("skill", skill_dir.name))
+            sources.append(("skill", skill_dir.name, skill_md))
 
-    # Agents: each <slug>.md
     if agents_root.is_dir():
-        for agent_md in agents_root.glob("*.md"):
-            try:
-                text = agent_md.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                continue
-            _, _, fm = _split_frontmatter(text)
-            if not fm:
-                continue
-            tags, present = _parse_frontmatter_tags(fm)
-            if not tags:
-                out.append(("agent", agent_md.stem, agent_md))
+        for agent_md in sorted(agents_root.glob("*.md")):
+            installed.add(("agent", agent_md.stem))
+            sources.append(("agent", agent_md.stem, agent_md))
+
+    wiki_roots = {
+        "skill": wiki_dir / "entities" / "skills",
+        "agent": wiki_dir / "entities" / "agents",
+    }
+    for entity_type, root in wiki_roots.items():
+        if not root.is_dir():
+            continue
+        for entity_md in sorted(root.glob("*.md")):
+            key = (entity_type, entity_md.stem)
+            if key not in installed:
+                sources.append((entity_type, entity_md.stem, entity_md))
+
+    return sources
+
+
+def discover_empty_tag_entities(wiki_dir: Path) -> list[tuple[str, str, Path]]:
+    """Return canonical entity sources whose tags are empty or missing.
+
+    Installed skills and agents take precedence. Entity cards below
+    ``<wiki>/entities`` provide the source when the entity is not installed.
+    """
+    return _empty_tag_entities(_entity_sources(wiki_dir))
+
+
+def _empty_tag_entities(
+    sources: Iterable[tuple[str, str, Path]],
+) -> list[tuple[str, str, Path]]:
+    """Filter a stable entity-source snapshot to empty-tag entries."""
+    out: list[tuple[str, str, Path]] = []
+    for entity_type, slug, path in sources:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        _, _, fm = _split_frontmatter(text)
+        if not fm:
+            continue
+        tags, _ = _parse_frontmatter_tags(fm)
+        if not tags:
+            out.append((entity_type, slug, path))
 
     return out
 
@@ -464,17 +475,12 @@ def run_backfill(
     wiki_dir: Path,
     max_tags_per_entity: int = 6,
 ) -> TagReport:
-    """Walk the catalog, propose backfills for empty-tag entities."""
-    skills_root = Path.home() / ".claude" / "skills"
-    agents_root = Path.home() / ".claude" / "agents"
-    all_paths: list[Path] = []
-    if skills_root.is_dir():
-        all_paths.extend(skills_root.glob("*/SKILL.md"))
-    if agents_root.is_dir():
-        all_paths.extend(agents_root.glob("*.md"))
+    """Scan canonical installed/wiki sources and propose empty-tag backfills."""
+    sources = _entity_sources(wiki_dir)
+    all_paths = [path for _, _, path in sources]
     vocab = _existing_tag_vocabulary(all_paths)
 
-    targets = discover_empty_tag_entities(wiki_dir)
+    targets = _empty_tag_entities(sources)
     proposals: list[TagProposal] = []
     for entity_type, slug, path in targets:
         prop = _propose(
@@ -580,7 +586,11 @@ def main(argv: Iterable[str] | None = None) -> int:
         "--wiki",
         type=Path,
         default=Path.home() / ".claude" / "skill-wiki",
-        help="Wiki directory (default: ~/.claude/skill-wiki)",
+        help=(
+            "Wiki directory containing unpacked entities/{skills,agents} cards "
+            "used when an entity is not installed "
+            "(default: ~/.claude/skill-wiki)"
+        ),
     )
     parser.add_argument(
         "--max-tags",

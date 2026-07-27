@@ -2,7 +2,7 @@
 """
 wiki_visualize.py -- Interactive knowledge graph visualization.
 
-The full graph (2,167 nodes, 593K edges) is too large to render at once.
+The full graph is too large to render at once.
 Users MUST specify boundaries to get a feasible visualization.
 
 Usage:
@@ -39,11 +39,11 @@ from typing import Any
 def _safe_json_for_script(obj) -> str:
     """Serialize ``obj`` so it can be safely embedded inside an HTML ``<script>``.
 
-    ``json.dumps`` does not escape ``</``, so a payload containing ``</script>``
-    would terminate the script block. Replace ``</`` with ``<\\/`` (a
-    JavaScript-legal and JSON-legal representation of the same string).
+    Escape every less-than sign as a JSON Unicode escape so untrusted values
+    cannot alter the HTML parser's script-data state. JSON and JavaScript decode
+    the escape back to the original character.
     """
-    return json.dumps(obj).replace("</", "<\\/")
+    return json.dumps(obj).replace("<", "\\u003c")
 
 
 try:
@@ -62,6 +62,36 @@ def _load_plotly_graph_objects() -> Any:
             'Plotly is optional. Install it with: pip install "claude-ctx[viz]"'
         ) from exc
     return go
+
+
+def _positive_int(raw: str) -> int:
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be an integer") from exc
+    if value < 1:
+        raise argparse.ArgumentTypeError("must be >= 1")
+    return value
+
+
+def _nonnegative_int(raw: str) -> int:
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be an integer") from exc
+    if value < 0:
+        raise argparse.ArgumentTypeError("must be >= 0")
+    return value
+
+
+def _nonnegative_float(raw: str) -> float:
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a number") from exc
+    if not math.isfinite(value) or value < 0:
+        raise argparse.ArgumentTypeError("must be a finite number >= 0")
+    return value
 
 
 WIKI_DIR = Path(os.path.expanduser("~/.claude/skill-wiki"))
@@ -132,10 +162,11 @@ def extract_subgraph(
     top_n: int | None = None,
 ) -> nx.Graph:
     """Extract a viewable subgraph based on user boundaries."""
+    seed_ids: set[str] = set()
+
     # Start with candidate nodes
     if seeds:
         # Find seed nodes by label match
-        seed_ids: set[str] = set()
         for seed in seeds:
             for nid, data in G.nodes(data=True):
                 if data.get("label", "") == seed or nid.endswith(f":{seed}"):
@@ -172,8 +203,8 @@ def extract_subgraph(
         nodes = set(G.nodes())
 
     # Apply top-N filter by degree within the candidate set
-    if top_n and len(nodes) > top_n:
-        ranked = sorted(nodes, key=lambda n: G.degree(n), reverse=True)
+    if top_n is not None and len(nodes) > top_n:
+        ranked = sorted(nodes, key=lambda n: (-G.degree(n), str(n)))
         nodes = set(ranked[:top_n])
 
     # Build subgraph
@@ -184,9 +215,10 @@ def extract_subgraph(
         weak_edges = [(u, v) for u, v, d in sub.edges(data=True) if d.get("weight", 1) < min_weight]
         sub.remove_edges_from(weak_edges)
 
-    # Remove isolated nodes after edge filtering
-    isolated = [n for n in sub.nodes() if sub.degree(n) == 0]
-    sub.remove_nodes_from(isolated)
+    # Explicit seeds and a top-1 view are intentional singleton selections.
+    if top_n != 1:
+        isolated = [n for n in sub.nodes() if sub.degree(n) == 0 and n not in seed_ids]
+        sub.remove_nodes_from(isolated)
 
     return sub
 
@@ -319,9 +351,9 @@ def build_html_with_filters(
     {"".join(f'<label><input type="checkbox" class="type-filter" data-type="{html.escape(node_type, quote=True)}" checked onchange="applyFilters()"> {html.escape(node_type)}</label>' for node_type in TYPE_COLORS)}
   </div>
 
-  <h2>Min Connections: <span id="deg-val">1</span></h2>
+  <h2>Min Connections: <span id="deg-val">0</span></h2>
   <div class="filter-group">
-    <input type="range" id="min-degree" min="1" max="50" value="1" oninput="document.getElementById('deg-val').textContent=this.value; applyFilters()">
+    <input type="range" id="min-degree" min="0" max="50" value="0" oninput="document.getElementById('deg-val').textContent=this.value; applyFilters()">
   </div>
 
   <h2>Tags</h2>
@@ -457,7 +489,13 @@ applyFilters();
 </script></body></html>"""
 
 
-def build_figure(G: nx.Graph, pos: dict, title: str = "Knowledge Graph") -> Any:
+def build_figure(
+    G: nx.Graph,
+    pos: dict,
+    title: str = "Knowledge Graph",
+    *,
+    communities: dict | None = None,
+) -> Any:
     """Build an interactive plotly figure from the subgraph."""
     go = _load_plotly_graph_objects()
     if G.number_of_nodes() == 0:
@@ -466,7 +504,7 @@ def build_figure(G: nx.Graph, pos: dict, title: str = "Knowledge Graph") -> Any:
         return fig
 
     # Assign community colors
-    communities = load_communities()
+    communities = communities if communities is not None else load_communities()
     node_community: dict[str, int] = {}
     for cid, comm_data in communities.get("communities", {}).items():
         for member in comm_data.get("members", []):
@@ -574,11 +612,11 @@ def get_available_tags(G: nx.Graph) -> list[tuple[str, int]]:
     return sorted(tag_counts.items(), key=lambda x: -x[1])
 
 
-def interactive_menu(G: nx.Graph) -> None:
+def interactive_menu(G: nx.Graph, communities: dict | None = None) -> None:
     """Interactive filtering menu when no CLI args provided."""
     skills = sum(1 for _, d in G.nodes(data=True) if d.get("type") == "skill")
     agents = sum(1 for _, d in G.nodes(data=True) if d.get("type") == "agent")
-    communities = load_communities()
+    communities = communities if communities is not None else load_communities()
     num_communities = len(communities.get("communities", {}))
     tags = get_available_tags(G)
 
@@ -679,6 +717,7 @@ The full graph is too large to render. Choose a view:
         hops=hops,
         min_weight=min_weight,
         community_id=community_id,
+        communities=communities,
         tag_filter=tag_filter,
         top_n=top_n,
     )
@@ -704,7 +743,11 @@ The full graph is too large to render. Choose a view:
     title = f"Knowledge Graph ({sub.number_of_nodes()} nodes) - {' | '.join(parts)}"
 
     pos = compute_layout(sub)
-    fig = build_figure(sub, pos, title=title)
+    try:
+        fig = build_figure(sub, pos, title=title, communities=communities)
+    except RuntimeError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from None
 
     if output:
         fig.write_html(output, include_plotlyjs=True)
@@ -718,16 +761,24 @@ def main() -> None:
         description="Interactive knowledge graph visualization",
         epilog="The full graph is too large to render. Use boundaries to focus on a region.",
     )
-    parser.add_argument("--seed", help="Comma-separated skill/agent names to center on")
+    primary_filter = parser.add_mutually_exclusive_group()
+    primary_filter.add_argument("--seed", help="Comma-separated skill/agent names to center on")
     parser.add_argument(
-        "--hops", type=int, default=1, help="Neighborhood depth from seeds (default 1)"
+        "--hops", type=_nonnegative_int, default=1, help="Neighborhood depth from seeds (default 1)"
     )
     parser.add_argument(
-        "--min-weight", type=float, default=0.0, help="Minimum edge weight to include (default 0)"
+        "--min-weight",
+        type=_nonnegative_float,
+        default=0.0,
+        help="Minimum edge weight to include (default 0)",
     )
-    parser.add_argument("--community", type=int, help="Show a specific community by ID")
-    parser.add_argument("--tag", help="Show only nodes with this tag")
-    parser.add_argument("--top", type=int, help="Show only the top-N most connected nodes")
+    primary_filter.add_argument(
+        "--community", type=_nonnegative_int, help="Show a specific community by ID"
+    )
+    primary_filter.add_argument("--tag", help="Show only nodes with this tag")
+    parser.add_argument(
+        "--top", type=_positive_int, help="Show only the top-N most connected nodes"
+    )
     parser.add_argument("--output", help="Save to HTML file instead of opening browser")
     parser.add_argument("--stats", action="store_true", help="Print graph stats and exit")
     parser.add_argument("--graph-json", type=Path, help="Load this graph.json instead of ~/.claude")
@@ -754,7 +805,7 @@ def main() -> None:
         return
 
     if not (args.seed or args.community is not None or args.tag or args.top):
-        interactive_menu(G)
+        interactive_menu(G, communities=communities)
         return
 
     # Parse seeds
@@ -773,6 +824,10 @@ def main() -> None:
     )
 
     print(f"Subgraph: {sub.number_of_nodes()} nodes, {sub.number_of_edges()} edges")
+
+    if sub.number_of_nodes() == 0:
+        print("Error: no nodes matched the requested filters", file=sys.stderr)
+        raise SystemExit(1)
 
     if sub.number_of_nodes() > 500:
         print(

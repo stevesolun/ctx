@@ -31,6 +31,7 @@ the full LiteLLM dependency tree (litellm brings in a lot).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from typing import Any
@@ -124,6 +125,12 @@ class LiteLLMProvider:
             raw,
             provider=self.name,
             model=effective_model,
+            authentication_submitted="api_key" in params,
+            request_endpoint_hash=(
+                "sha256:" + hashlib.sha256(self._base_url.encode("utf-8")).hexdigest()
+                if self._base_url is not None
+                else None
+            ),
         )
 
 
@@ -179,6 +186,8 @@ def _normalise_response(
     *,
     provider: str,
     model: str,
+    authentication_submitted: bool = False,
+    request_endpoint_hash: str | None = None,
 ) -> CompletionResponse:
     """Convert a LiteLLM response object into ``CompletionResponse``.
 
@@ -197,6 +206,10 @@ def _normalise_response(
         raw_dict = raw
     else:
         raw_dict = {"_repr": repr(raw)}
+    raw_response_model = raw_dict.get("model")
+    response_model = (
+        str(raw_response_model).strip() if raw_response_model not in (None, "") else None
+    )
 
     choices = raw_dict.get("choices") or []
     if not choices:
@@ -208,6 +221,9 @@ def _normalise_response(
             provider=provider,
             model=model,
             raw=raw_dict,
+            response_model=response_model,
+            authentication_submitted=authentication_submitted,
+            request_endpoint_hash=request_endpoint_hash,
         )
     first = choices[0]
     message = first.get("message") or {}
@@ -223,6 +239,9 @@ def _normalise_response(
         provider=provider,
         model=model,
         raw=raw_dict,
+        response_model=response_model,
+        authentication_submitted=authentication_submitted,
+        request_endpoint_hash=request_endpoint_hash,
     )
 
 
@@ -266,8 +285,23 @@ def _extract_usage(raw_dict: dict[str, Any]) -> Usage:
     budget tracker can decide how to handle unknown cost.
     """
     usage = raw_dict.get("usage") or {}
+    tokens_reported = all(
+        key in usage and usage.get(key) is not None
+        for key in ("prompt_tokens", "completion_tokens")
+    )
     input_tokens = int(usage.get("prompt_tokens") or 0)
     output_tokens = int(usage.get("completion_tokens") or 0)
+    prompt_details = usage.get("prompt_tokens_details")
+    cached_input_tokens: int | None = None
+    if isinstance(prompt_details, dict) and prompt_details.get("cached_tokens") is not None:
+        cached_input_tokens = int(prompt_details["cached_tokens"])
+
+    # LiteLLM normalizes prompt_tokens to include cache tokens. Providers
+    # expose cache-read detail in either OpenAI's nested field or Anthropic's
+    # top-level field, so capture it without changing the normalized total.
+    cache_read = usage.get("cache_read_input_tokens")
+    if cached_input_tokens is None and cache_read is not None:
+        cached_input_tokens = int(cache_read)
     # LiteLLM sometimes attaches ``response_cost`` at top level, not
     # under usage. Check both without requiring it.
     cost = raw_dict.get("response_cost")
@@ -277,6 +311,8 @@ def _extract_usage(raw_dict: dict[str, Any]) -> Usage:
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         cost_usd=float(cost) if cost is not None else None,
+        cached_input_tokens=cached_input_tokens,
+        tokens_reported=tokens_reported,
     )
 
 

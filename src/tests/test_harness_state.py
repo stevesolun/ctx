@@ -53,6 +53,7 @@ class _Scripted(ModelProvider):
 
     def __init__(self, responses: list[CompletionResponse]) -> None:
         self._responses = list(responses)
+        self.calls: list[list[Message]] = []
 
     def complete(
         self,
@@ -63,6 +64,7 @@ class _Scripted(ModelProvider):
         temperature: float = 0.7,
         max_tokens: int | None = None,
     ) -> CompletionResponse:
+        self.calls.append(list(messages))
         if not self._responses:
             raise RuntimeError("scripted: no more responses")
         return self._responses.pop(0)
@@ -193,6 +195,112 @@ class TestSessionStore:
         assert event["key"] == "value"
         assert "ts" in event
 
+    def test_write_event_redacts_raw_wiki_result_by_tool_name(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        with SessionStore.create(session_id="s1", sessions_dir=tmp_path) as store:
+            store.write_event(
+                "tool_call",
+                {
+                    "iteration": 1,
+                    "call": {
+                        "id": "wiki-1",
+                        "name": "ctx__wiki_get",
+                        "arguments": {"slug": "secret"},
+                    },
+                    "result": "raw wiki result",
+                    "result_ephemeral": False,
+                    "error": None,
+                },
+            )
+
+        raw = (tmp_path / "s1.jsonl").read_text(encoding="utf-8")
+        event = json.loads(raw)
+        assert "raw wiki result" not in raw
+        assert event["result"] == ""
+        assert event["result_ephemeral"] is True
+
+    def test_write_event_drops_malformed_orphan_raw_wiki_message_by_name(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        with SessionStore.create(session_id="s1", sessions_dir=tmp_path) as store:
+            store.write_event(
+                "message",
+                {
+                    "role": "user",
+                    "content": "raw orphan wiki result",
+                    "tool_call_id": "orphan",
+                    "name": "ctx__wiki_get",
+                },
+            )
+
+        assert (tmp_path / "s1.jsonl").read_text(encoding="utf-8") == ""
+
+    def test_write_event_sanitizes_seeded_raw_wiki_result(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        with SessionStore.create(session_id="s1", sessions_dir=tmp_path) as store:
+            store.write_event(
+                "session_start",
+                {
+                    "task": "go",
+                    "seed_messages": [
+                        {"role": "user", "content": "go"},
+                        {
+                            "role": "tool",
+                            "content": "raw seeded orphan wiki result",
+                            "tool_call_id": "",
+                            "name": "ctx__wiki_get",
+                        },
+                    ],
+                },
+            )
+
+        raw = (tmp_path / "s1.jsonl").read_text(encoding="utf-8")
+        event = json.loads(raw)
+        assert "raw seeded orphan wiki result" not in raw
+        assert event["seed_messages"] == [{"role": "user", "content": "go"}]
+
+    def test_write_event_preserves_non_wiki_calls_from_mixed_message(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        with SessionStore.create(session_id="s1", sessions_dir=tmp_path) as store:
+            store.write_event(
+                "message",
+                {
+                    "role": "assistant",
+                    "content": "keep assistant text",
+                    "tool_calls": [
+                        {
+                            "id": "wiki-1",
+                            "name": "ctx__wiki_get",
+                            "arguments": {"slug": "secret"},
+                        },
+                        {
+                            "id": "fs-1",
+                            "name": "fs__read",
+                            "arguments": {"path": "README.md"},
+                        },
+                    ],
+                },
+            )
+
+        raw = (tmp_path / "s1.jsonl").read_text(encoding="utf-8")
+        event = json.loads(raw)
+        assert "ctx__wiki_get" not in raw
+        assert event["content"] == "keep assistant text"
+        assert event["tool_calls"] == [
+            {
+                "id": "fs-1",
+                "name": "fs__read",
+                "arguments": {"path": "README.md"},
+            }
+        ]
+
     def test_create_rejects_existing_session_by_default(self, tmp_path: Path) -> None:
         path = tmp_path / "s1.jsonl"
         path.write_text("sentinel\n", encoding="utf-8")
@@ -292,6 +400,13 @@ class TestConvenienceWriters:
         assert event["task"] == "hello"
         assert event["model"] == "ollama/x"
 
+    def test_write_session_config(self, tmp_path: Path) -> None:
+        with SessionStore.create(session_id="s", sessions_dir=tmp_path) as store:
+            store.write_session_config({"ctx_tool_surface": "minimal"})
+        event = json.loads((tmp_path / "s.jsonl").read_text(encoding="utf-8"))
+        assert event["type"] == "session_config"
+        assert event["ctx_tool_surface"] == "minimal"
+
     def test_write_message(self, tmp_path: Path) -> None:
         with SessionStore.create(session_id="s", sessions_dir=tmp_path) as store:
             store.write_message(Message(role="user", content="hi"))
@@ -310,6 +425,47 @@ class TestConvenienceWriters:
         assert events[0]["role"] == "user"
         assert events[1]["tool_calls"][0]["arguments"] == {"x": 1}
 
+    def test_write_message_drops_orphan_raw_wiki_result_by_name(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        with SessionStore.create(session_id="s", sessions_dir=tmp_path) as store:
+            store.write_message(
+                Message(
+                    role="tool",
+                    content="raw orphan wiki result",
+                    tool_call_id="",
+                    name="ctx__wiki_get",
+                )
+            )
+
+        assert (tmp_path / "s.jsonl").read_text(encoding="utf-8") == ""
+
+    def test_write_session_start_drops_orphan_seeded_raw_wiki_result(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        with SessionStore.create(session_id="s", sessions_dir=tmp_path) as store:
+            store.write_session_start(
+                {
+                    "task": "go",
+                    "seed_messages": [
+                        {"role": "user", "content": "go"},
+                        {
+                            "role": "tool",
+                            "content": "raw seeded orphan wiki result",
+                            "tool_call_id": "orphan",
+                            "name": "ctx__wiki_get",
+                        },
+                    ],
+                }
+            )
+
+        raw = (tmp_path / "s.jsonl").read_text(encoding="utf-8")
+        event = json.loads(raw)
+        assert "raw seeded orphan wiki result" not in raw
+        assert event["seed_messages"] == [{"role": "user", "content": "go"}]
+
     def test_write_model_response(self, tmp_path: Path) -> None:
         with SessionStore.create(session_id="s", sessions_dir=tmp_path) as store:
             store.write_model_response(
@@ -318,16 +474,33 @@ class TestConvenienceWriters:
                     content="ok",
                     tool_calls=(),
                     finish_reason="stop",
-                    usage=Usage(input_tokens=10, output_tokens=5, cost_usd=0.002),
+                    usage=Usage(
+                        input_tokens=10,
+                        output_tokens=5,
+                        cost_usd=0.002,
+                        cached_input_tokens=6,
+                    ),
                     provider="litellm",
                     model="openrouter/x",
+                    response_model="openrouter/x",
+                    authentication_submitted=True,
+                    request_endpoint_hash="sha256:endpoint",
                 ),
             )
         event = json.loads((tmp_path / "s.jsonl").read_text(encoding="utf-8"))
         assert event["iteration"] == 3
-        assert event["usage"]["cost_usd"] == 0.002
+        assert event["usage"] == {
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "cost_usd": 0.002,
+            "cached_input_tokens": 6,
+            "tokens_reported": True,
+        }
         assert event["provider"] == "litellm"
         assert event["model"] == "openrouter/x"
+        assert event["response_model"] == "openrouter/x"
+        assert event["authentication_submitted"] is True
+        assert event["request_endpoint_hash"] == "sha256:endpoint"
 
     def test_write_tool_call(self, tmp_path: Path) -> None:
         with SessionStore.create(session_id="s", sessions_dir=tmp_path) as store:
@@ -340,6 +513,24 @@ class TestConvenienceWriters:
         event = json.loads((tmp_path / "s.jsonl").read_text(encoding="utf-8"))
         assert event["call"]["arguments"] == {"path": "/tmp"}
         assert event["error"] is None
+
+    def test_write_wiki_tool_call_redacts_raw_result_by_name(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        with SessionStore.create(session_id="s", sessions_dir=tmp_path) as store:
+            store.write_tool_call(
+                1,
+                ToolCall(id="wiki-1", name="ctx__wiki_get", arguments={"slug": "secret"}),
+                result="raw wiki result",
+                error=None,
+            )
+
+        raw = (tmp_path / "s.jsonl").read_text(encoding="utf-8")
+        event = json.loads(raw)
+        assert "raw wiki result" not in raw
+        assert event["result"] == ""
+        assert event["result_ephemeral"] is True
 
     def test_write_stop(self, tmp_path: Path) -> None:
         with SessionStore.create(session_id="s", sessions_dir=tmp_path) as store:
@@ -402,6 +593,24 @@ class TestLoadSession:
         assert state.stopped is True
         assert state.stop_reason == "completed"
 
+    def test_session_config_updates_replayed_metadata(self, tmp_path: Path) -> None:
+        with SessionStore.create(session_id="s", sessions_dir=tmp_path) as store:
+            store.write_session_start({"task": "hello", "ctx_tool_surface": "full"})
+            store.write_session_config(
+                {
+                    "ctx_tool_surface": "minimal",
+                    "ctx_tool_names": ["ctx__recommend_bundle", "ctx__wiki_get"],
+                }
+            )
+
+        state = load_session("s", sessions_dir=tmp_path)
+        assert state.metadata["task"] == "hello"
+        assert state.metadata["ctx_tool_surface"] == "minimal"
+        assert state.metadata["ctx_tool_names"] == [
+            "ctx__recommend_bundle",
+            "ctx__wiki_get",
+        ]
+
     def test_replay_unstopped_session(self, tmp_path: Path) -> None:
         """Session that trails off mid-run (no stop event) is flagged."""
         with SessionStore.create(session_id="s", sessions_dir=tmp_path) as store:
@@ -410,6 +619,93 @@ class TestLoadSession:
         state = load_session("s", sessions_dir=tmp_path)
         assert state.stopped is False
         assert state.stop_reason is None
+        assert not state.usage.tokens_reported
+
+    def test_replay_usage_preserves_cache_and_incomplete_attribution(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        with SessionStore.create(session_id="s", sessions_dir=tmp_path) as store:
+            store.write_stop(
+                LoopResult(
+                    stop_reason="completed",
+                    final_message="first",
+                    iterations=1,
+                    usage=Usage(
+                        input_tokens=10,
+                        output_tokens=2,
+                        cost_usd=0.1,
+                        cached_input_tokens=4,
+                    ),
+                    messages=(),
+                )
+            )
+            store.write_stop(
+                LoopResult(
+                    stop_reason="completed",
+                    final_message="second",
+                    iterations=1,
+                    usage=Usage(
+                        input_tokens=15,
+                        output_tokens=3,
+                        cached_input_tokens=6,
+                        tokens_reported=False,
+                    ),
+                    messages=(),
+                )
+            )
+
+        usage = load_session("s", sessions_dir=tmp_path).usage
+
+        assert usage.input_tokens == 15
+        assert usage.output_tokens == 3
+        assert usage.cost_usd is None
+        assert usage.cached_input_tokens == 6
+        assert not usage.tokens_reported
+
+    def test_replay_legacy_usage_defaults_to_reported_tokens(self, tmp_path: Path) -> None:
+        path = tmp_path / "s.jsonl"
+        path.write_text(
+            json.dumps(
+                {
+                    "type": "stop",
+                    "stop_reason": "completed",
+                    "usage": {
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "cost_usd": 0.0,
+                    },
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        usage = load_session("s", sessions_dir=tmp_path).usage
+
+        assert usage.tokens_reported
+        assert usage.cached_input_tokens is None
+        assert usage.cost_usd == 0.0
+
+    def test_replay_malformed_usage_does_not_claim_exact_tokens(self, tmp_path: Path) -> None:
+        path = tmp_path / "s.jsonl"
+        path.write_text(
+            json.dumps(
+                {
+                    "type": "stop",
+                    "stop_reason": "completed",
+                    "usage": {
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "tokens_reported": "false",
+                    },
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        assert not load_session("s", sessions_dir=tmp_path).usage.tokens_reported
 
     def test_replay_tool_call_messages(self, tmp_path: Path) -> None:
         """Assistant-with-tool_calls + tool-result must round-trip faithfully."""
@@ -575,6 +871,187 @@ class TestJsonlObserverRoundTrip:
         tool_msg = state.messages[2]
         assert tool_msg.content == "echo:hi"
         assert tool_msg.tool_call_id == "c1"
+
+    def test_raw_wiki_tool_record_is_one_turn_only_and_model_echo_persists(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        wiki = ToolCall(id="wiki-1", name="ctx__wiki_get", arguments={"slug": "secret"})
+        ordinary = ToolCall(id="ordinary-1", name="srv__echo", arguments={})
+        raw_wiki_result = "same text in raw result and model-authored echo"
+        provider = _Scripted(
+            [
+                _tool_response(wiki, ordinary),
+                _stop_response(raw_wiki_result),
+            ]
+        )
+        store = SessionStore.create(session_id="wiki-ephemeral", sessions_dir=tmp_path)
+        observer = JsonlObserver(store, session_metadata={"task": "go"})
+
+        def execute(call: ToolCall) -> str:
+            return raw_wiki_result if call.name == "ctx__wiki_get" else "ordinary result"
+
+        try:
+            result = run_loop(
+                provider=provider,
+                system_prompt="",
+                task="go",
+                tool_executor=execute,
+                observer=observer,
+            )
+        finally:
+            store.close()
+
+        assert any(message.content == raw_wiki_result for message in provider.calls[1])
+        assert not any(
+            call.name == "ctx__wiki_get"
+            for message in result.messages
+            for call in message.tool_calls
+        )
+        assert any(
+            message.role == "tool"
+            and message.name == "srv__echo"
+            and message.content == "ordinary result"
+            for message in result.messages
+        )
+        assert result.final_message == raw_wiki_result
+
+        replay = load_session("wiki-ephemeral", sessions_dir=tmp_path)
+        assert replay.messages == result.messages
+        raw_log = (tmp_path / "wiki-ephemeral.jsonl").read_text(encoding="utf-8")
+        events = [json.loads(line) for line in raw_log.splitlines()]
+        wiki_event = next(
+            event
+            for event in events
+            if event["type"] == "tool_call" and event["call"]["name"] == "ctx__wiki_get"
+        )
+        assert wiki_event["result"] == ""
+        assert wiki_event["result_ephemeral"] is True
+        assert not any(
+            event["type"] == "message"
+            and event.get("role") == "tool"
+            and event.get("name") == "ctx__wiki_get"
+            for event in events
+        )
+        assert any(
+            event["type"] == "message"
+            and event.get("role") == "assistant"
+            and event.get("content") == raw_wiki_result
+            for event in events
+        )
+
+    def test_seeded_raw_wiki_tool_pair_is_consumed_but_not_serialized(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        wiki = ToolCall(id="wiki-1", name="ctx__wiki_get", arguments={"slug": "secret"})
+        seeded_messages = [
+            Message(role="assistant", content="", tool_calls=(wiki,)),
+            Message(
+                role="tool",
+                content="private seeded wiki body",
+                tool_call_id=wiki.id,
+                name=wiki.name,
+            ),
+        ]
+        provider = _Scripted([_stop_response("done")])
+        store = SessionStore.create(session_id="wiki-seed", sessions_dir=tmp_path)
+        try:
+            result = run_loop(
+                provider=provider,
+                system_prompt="",
+                task="go",
+                messages=seeded_messages,
+                observer=JsonlObserver(store, session_metadata={"task": "go"}),
+            )
+        finally:
+            store.close()
+
+        assert any(message.content == "private seeded wiki body" for message in provider.calls[0])
+        assert not any(
+            call.name == "ctx__wiki_get"
+            for message in result.messages
+            for call in message.tool_calls
+        )
+        raw_log = (tmp_path / "wiki-seed.jsonl").read_text(encoding="utf-8")
+        assert "private seeded wiki body" not in raw_log
+        replay = load_session("wiki-seed", sessions_dir=tmp_path)
+        assert replay.messages == result.messages
+
+    def test_replay_prunes_legacy_raw_wiki_records_and_orphans(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        wiki = ToolCall(id="wiki-1", name="ctx__wiki_get", arguments={"slug": "secret"})
+        ordinary = ToolCall(id="ordinary-1", name="srv__echo", arguments={})
+        events = [
+            {"type": "message", "role": "user", "content": "go"},
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": "mixed call",
+                "tool_calls": [
+                    {"id": wiki.id, "name": wiki.name, "arguments": wiki.arguments},
+                    {
+                        "id": ordinary.id,
+                        "name": ordinary.name,
+                        "arguments": ordinary.arguments,
+                    },
+                ],
+            },
+            {
+                "type": "message",
+                "role": "tool",
+                "content": "private wiki body",
+                "tool_call_id": wiki.id,
+                "name": wiki.name,
+            },
+            {
+                "type": "message",
+                "role": "tool",
+                "content": "ordinary result",
+                "tool_call_id": ordinary.id,
+                "name": ordinary.name,
+            },
+            {
+                "type": "message",
+                "role": "tool",
+                "content": "orphan legacy wiki body",
+                "tool_call_id": "",
+                "name": wiki.name,
+            },
+            {
+                "type": "message",
+                "role": "user",
+                "content": "malformed-role legacy wiki body",
+                "tool_call_id": "",
+                "name": wiki.name,
+            },
+        ]
+        (tmp_path / "legacy-wiki.jsonl").write_text(
+            "\n".join(json.dumps(event) for event in events) + "\n",
+            encoding="utf-8",
+        )
+
+        replay = load_session("legacy-wiki", sessions_dir=tmp_path)
+
+        assistant = next(message for message in replay.messages if message.role == "assistant")
+        assert assistant.content == "mixed call"
+        assert assistant.tool_calls == (ordinary,)
+        assert not any(
+            message.role == "tool" and message.name == "ctx__wiki_get"
+            for message in replay.messages
+        )
+        assert not any(message.content == "orphan legacy wiki body" for message in replay.messages)
+        assert not any(
+            message.content == "malformed-role legacy wiki body" for message in replay.messages
+        )
+        assert any(
+            message.role == "tool"
+            and message.name == "srv__echo"
+            and message.content == "ordinary result"
+            for message in replay.messages
+        )
 
     def test_resume_via_messages_kwarg(self, tmp_path: Path) -> None:
         """Load a prior session and hand its messages to a fresh run_loop."""

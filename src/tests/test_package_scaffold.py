@@ -179,6 +179,22 @@ def test_pyproject_declares_all_subpackages() -> None:
     assert not missing, f"pyproject.toml packages list is missing: {sorted(missing)}"
 
 
+def test_runtime_availability_json_is_declared_as_package_data() -> None:
+    """The truthful JSON resource must survive source-to-wheel packaging."""
+    try:
+        import tomllib  # py 3.11+
+    except ImportError:
+        import tomli as tomllib  # type: ignore[no-redef]
+
+    root = Path(__file__).resolve().parent.parent.parent
+    with open(root / "pyproject.toml", "rb") as fh:
+        data = tomllib.load(fh)
+
+    package_data = set(data["tool"]["setuptools"]["package-data"]["ctx"])
+    assert "assets/*.json" in package_data
+    assert (root / "src" / "ctx" / "assets" / "runtime-availability.json").is_file()
+
+
 def test_flat_console_scripts_are_packaged() -> None:
     """Flat console-script targets must be listed in py-modules.
 

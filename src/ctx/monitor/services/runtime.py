@@ -8,8 +8,18 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from ctx.adapters.generic.runtime_lifecycle import normalize_historical_token_usage
+
 _TOKEN_ATTRIBUTIONS = ("exact", "estimated", "unavailable")
 _SELECTION_SOURCES = ("user", "system", "host", "unknown")
+_TOKEN_USAGE_FIELDS = (
+    "input_tokens",
+    "cached_input_tokens",
+    "cache_write_input_tokens",
+    "uncached_input_tokens",
+    "output_tokens",
+    "total_tokens",
+)
 
 
 def read_jsonl(path: Path, limit: int | None = None) -> list[dict[str, Any]]:
@@ -41,50 +51,43 @@ def lifecycle_events(path: Path, limit: int | None = 200) -> list[dict[str, Any]
     return [event for event in events if event.get("action") in {"validation", "escalation"}]
 
 
-def _int_value(value: Any) -> int | None:
-    try:
-        result = int(value)
-    except (TypeError, ValueError):
-        return None
-    return result if result >= 0 else None
-
-
-def _float_value(value: Any) -> float | None:
-    try:
-        result = float(value)
-    except (TypeError, ValueError):
-        return None
-    return result if result >= 0 else None
+def _normalized_token_usage(raw: Any) -> dict[str, Any]:
+    return normalize_historical_token_usage(raw)
 
 
 def _empty_token_usage_summary() -> dict[str, Any]:
     return {
         "records": 0,
         "input_tokens": 0,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "uncached_input_tokens": 0,
         "output_tokens": 0,
         "total_tokens": 0,
+        "tokens_reported": True,
         "cost_usd": 0.0,
         "by_attribution": {key: 0 for key in _TOKEN_ATTRIBUTIONS},
     }
 
 
-def _merge_token_usage(summary: dict[str, Any], raw: Any) -> None:
-    if not isinstance(raw, dict):
-        return
+def _merge_token_usage(summary: dict[str, Any], usage: dict[str, Any]) -> None:
     summary["records"] = int(summary.get("records") or 0) + 1
-    attribution = str(raw.get("attribution") or "unavailable").lower()
-    if attribution not in _TOKEN_ATTRIBUTIONS:
-        attribution = "unavailable"
+    attribution = str(usage["attribution"])
     summary["by_attribution"][attribution] = (
         int(summary["by_attribution"].get(attribution) or 0) + 1
     )
-    for key in ("input_tokens", "output_tokens", "total_tokens"):
-        value = _int_value(raw.get(key))
-        if value is not None:
-            summary[key] = int(summary.get(key) or 0) + value
-    cost = _float_value(raw.get("cost_usd"))
-    if cost is not None:
-        summary["cost_usd"] = round(float(summary.get("cost_usd") or 0.0) + cost, 8)
+    for key in _TOKEN_USAGE_FIELDS:
+        value = usage[key]
+        current = summary.get(key)
+        summary[key] = None if current is None or value is None else int(current) + value
+    summary["tokens_reported"] = bool(
+        summary.get("tokens_reported") and usage["tokens_reported"] is True
+    )
+    cost = usage["cost_usd"]
+    current_cost = summary.get("cost_usd")
+    summary["cost_usd"] = (
+        None if current_cost is None or cost is None else round(float(current_cost) + cost, 8)
+    )
 
 
 def _tool_key(event: dict[str, Any]) -> tuple[str, str] | None:
@@ -176,38 +179,38 @@ def _runtime_tool_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
         elif action == "used" and key is not None:
             used_total += 1
             raw_usage = event.get("token_usage")
-            _merge_token_usage(token_usage, raw_usage)
+            normalized_usage = _normalized_token_usage(raw_usage)
+            _merge_token_usage(token_usage, normalized_usage)
             session_id = str(event.get("session_id") or "unknown")
             active_entry = active.get(load_key) if load_key is not None else None
             source = _selection_source(
                 active_entry.get("selection_source") if active_entry is not None else None
             )
-            if isinstance(raw_usage, dict):
-                _merge_token_usage(
-                    _usage_bucket(
-                        usage_by_tool,
-                        key,
-                        entity_type=key[0],
-                        slug=key[1],
-                    ),
-                    raw_usage,
-                )
-                _merge_token_usage(
-                    _usage_bucket(usage_by_type, key[0], entity_type=key[0]),
-                    raw_usage,
-                )
-                _merge_token_usage(
-                    _usage_bucket(usage_by_session, session_id, session_id=session_id),
-                    raw_usage,
-                )
-                _merge_token_usage(
-                    _usage_bucket(
-                        usage_by_source,
-                        source,
-                        selection_source=source,
-                    ),
-                    raw_usage,
-                )
+            _merge_token_usage(
+                _usage_bucket(
+                    usage_by_tool,
+                    key,
+                    entity_type=key[0],
+                    slug=key[1],
+                ),
+                normalized_usage,
+            )
+            _merge_token_usage(
+                _usage_bucket(usage_by_type, key[0], entity_type=key[0]),
+                normalized_usage,
+            )
+            _merge_token_usage(
+                _usage_bucket(usage_by_session, session_id, session_id=session_id),
+                normalized_usage,
+            )
+            _merge_token_usage(
+                _usage_bucket(
+                    usage_by_source,
+                    source,
+                    selection_source=source,
+                ),
+                normalized_usage,
+            )
             recent_tool_usage.append(
                 {
                     "created_at": event.get("created_at"),
@@ -216,7 +219,7 @@ def _runtime_tool_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
                     "slug": key[1],
                     "selection_source": source,
                     **_evidence_metadata(event.get("evidence")),
-                    "token_usage": raw_usage if isinstance(raw_usage, dict) else None,
+                    "token_usage": normalized_usage,
                 }
             )
 

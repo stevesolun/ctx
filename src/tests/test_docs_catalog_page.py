@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import json
 import re
 import sys
 from pathlib import Path
@@ -101,3 +102,36 @@ def test_public_docs_render_current_graph_contract_totals() -> None:
     assert f"{_required_stat(stats, 'agents'):,} agent" in public_text
     assert f"{_required_stat(stats, 'mcps'):,} MCP" in public_text
     assert f"{_required_stat(stats, 'harnesses'):,} harness" in public_text
+
+
+def test_public_docs_describe_clean_install_fallback_contract() -> None:
+    manifest = json.loads(
+        (repo_root / "src" / "ctx" / "assets" / "runtime-availability.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    nodes = manifest["overlay"]["nodes"]
+    node_ids = {node["id"] for node in nodes}
+    entry_ids = {entry["id"] for entry in manifest["entries"]}
+
+    assert len(node_ids) == 6
+    assert node_ids == entry_ids
+    assert all(node["project_owned"] is True for node in nodes)
+    assert all(node["license"] == "MIT" for node in nodes)
+    assert all(node["requires_api_keys"] is False for node in nodes)
+
+    documents = (
+        (repo_root / "README.md").read_text(encoding="utf-8").lower(),
+        (repo_root / "docs" / "knowledge-graph.md").read_text(encoding="utf-8").lower(),
+    )
+    for text in documents:
+        for entity_id in node_ids:
+            assert entity_id.split(":", 1)[-1] in text
+        for boundary in (
+            "project-owned",
+            "no-key",
+            "preserves unrelated skill",
+            "runtime-managed harness pages",
+            "fails closed",
+        ):
+            assert boundary in text

@@ -109,6 +109,19 @@ def test_preflight_runs_source_gates_for_source_changes() -> None:
     assert workflow_unit_command[-4:] == list(unit_check.argv[-4:])
 
 
+def test_xdist_auto_worker_count_is_resource_capped(monkeypatch) -> None:
+    from tests import conftest
+
+    monkeypatch.setattr(conftest.os, "cpu_count", lambda: 64)
+    assert conftest._xdist_auto_worker_count() == 8
+
+    monkeypatch.setattr(conftest.os, "cpu_count", lambda: 4)
+    assert conftest._xdist_auto_worker_count() == 4
+
+    monkeypatch.setattr(conftest.os, "cpu_count", lambda: None)
+    assert conftest._xdist_auto_worker_count() == 1
+
+
 def test_preflight_smoke_profile_runs_only_fast_source_gates() -> None:
     names = _names_for(["src/ctx/adapters/generic/loop.py"], profile="smoke")
 
@@ -169,6 +182,19 @@ def test_local_fast_lane_filters_are_composable() -> None:
     )
 
     assert [lane.name for lane in filtered] == ["static", "unit"]
+
+
+def test_local_fast_reserves_cpu_for_nested_xdist(monkeypatch) -> None:
+    monkeypatch.setattr(local_fast_gate.os, "cpu_count", lambda: 18)
+    unit_check = Check(
+        "unit-linux equivalent",
+        ("python", "-m", "pytest", "-q", "-n", "auto", "--dist=loadfile"),
+    )
+
+    unit_lane = local_fast_gate.group_checks([unit_check])[0]
+
+    assert unit_lane.checks[0].argv[-3:] == ("-n", "4", "--dist=loadfile")
+    assert local_fast_gate._default_jobs() == 9
 
 
 def test_local_fast_main_accepts_repeated_lane_args(monkeypatch, capsys) -> None:
@@ -392,9 +418,29 @@ def test_preflight_pr_profile_runs_package_build_for_source_prs() -> None:
         profile="pr",
         python="python",
     )
+    build = next(check for check in checks if check.name == "build wheel")
+    twine = next(check for check in checks if check.name == "twine check")
 
-    assert "build wheel" in [check.name for check in checks]
-    assert "twine check" in [check.name for check in checks]
+    assert build.argv == (
+        "python",
+        "scripts/build_reproducible_dist.py",
+        "--verify",
+        "--output-dir",
+        ".ci-preflight-dist",
+    )
+    assert "verified_artifact_paths" in twine.argv[-1]
+    assert "glob" not in twine.argv[-1]
+
+
+def test_publish_workflow_consumes_only_manifest_verified_artifacts() -> None:
+    workflow = Path(".github/workflows/publish.yml").read_text(encoding="utf-8")
+
+    assert 'python -m twine check "$CTX_WHEEL" "$CTX_SDIST"' in workflow
+    assert "twine check dist/*" not in workflow
+    assert workflow.count("--check-output dist") >= 3
+    assert workflow.count("packages-dir: dist/packages/") == 2
+    assert "dist/packages/*.whl" in workflow
+    assert "dist/packages/*.tar.gz" in workflow
 
 
 def test_preflight_full_profile_forces_source_gates_for_docs_changes() -> None:

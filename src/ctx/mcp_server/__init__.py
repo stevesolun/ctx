@@ -31,6 +31,18 @@ Host examples that can attach this server:
 Plan 001 Phase H8.
 """
 
-from ctx.mcp_server.server import main, run_server
+from importlib import import_module
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ctx.mcp_server.server import main, run_server
 
 __all__ = ["main", "run_server"]
+
+
+def __getattr__(name: str) -> Any:
+    if name not in __all__:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module("ctx.mcp_server.server"), name)
+    globals()[name] = value
+    return value

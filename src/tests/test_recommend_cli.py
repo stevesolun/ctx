@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 import ctx.cli.recommend as recommend_cli
+import pytest
 
 
 def test_recommend_cli_text(monkeypatch, capsys) -> None:
@@ -250,6 +251,88 @@ def test_recommend_cli_suppresses_primary_bundle_with_session_state(monkeypatch,
             },
         )
     ]
+
+
+def test_recommend_cli_resolves_session_memory_once(monkeypatch, capsys) -> None:
+    rejection_calls: list[tuple[list[str], str, str]] = []
+    bundle_calls: list[dict[str, object]] = []
+    related_calls: list[dict[str, object]] = []
+
+    def fake_rejections(
+        rejected: list[str],
+        *,
+        session_id: str,
+        rejection_mode: str,
+    ) -> list[str]:
+        rejection_calls.append((rejected, session_id, rejection_mode))
+        return ["skill:remembered", *rejected]
+
+    def fake_bundle(query: str, **kwargs: object) -> list[dict[str, str]]:
+        del query
+        bundle_calls.append(kwargs)
+        return []
+
+    def fake_related(selected: list[str], **kwargs: object) -> list[dict[str, str]]:
+        del selected
+        related_calls.append(kwargs)
+        return []
+
+    monkeypatch.setattr(recommend_cli, "recommendation_rejections", fake_rejections)
+    monkeypatch.setattr(recommend_cli, "recommend_bundle", fake_bundle)
+    monkeypatch.setattr(recommend_cli, "recommend_related", fake_related)
+
+    exit_code = recommend_cli.main(
+        [
+            "build",
+            "api",
+            "--session-id",
+            "cli-session",
+            "--rejection-mode",
+            "replace",
+            "--selected",
+            "skill:selected",
+            "--rejected",
+            "skill:explicit",
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert rejection_calls == [(["skill:explicit"], "cli-session", "replace")]
+    assert bundle_calls == [
+        {
+            "top_k": 5,
+            "selected": ["skill:selected"],
+            "rejected": ["skill:remembered", "skill:explicit"],
+            "session_id": "cli-session",
+            "rejection_mode": "ignore",
+        }
+    ]
+    assert related_calls == [
+        {
+            "rejected": [
+                "skill:remembered",
+                "skill:explicit",
+                "mcp-server:codex-cli",
+            ],
+            "top_n": 5,
+            "session_id": "cli-session",
+            "rejection_mode": "ignore",
+        }
+    ]
+    assert payload["selection"]["rejected"] == ["skill:explicit"]
+    assert payload["selection"]["effective_rejected"] == [
+        "skill:remembered",
+        "skill:explicit",
+    ]
+    assert payload["selection"]["session_id"] == "cli-session"
+    assert payload["selection"]["rejection_mode"] == "replace"
+
+
+def test_recommend_cli_rejection_mode_requires_session() -> None:
+    with pytest.raises(SystemExit):
+        recommend_cli.main(["build", "api", "--rejection-mode", "ignore"])
 
 
 def test_recommend_cli_filters_related_with_context_policy(monkeypatch, capsys) -> None:

@@ -300,6 +300,30 @@ class TestResolve:
         assert "flask" not in loaded_names
         assert any("Conflict" in w for w in manifest["warnings"])
 
+    def test_equal_priority_conflict_uses_deterministic_name_tiebreaker(self, tmp_path):
+        available = {
+            name: {"path": str(tmp_path / name / "SKILL.md"), "name": name}
+            for name in ("jest", "vitest")
+        }
+        profile = _minimal_profile()
+        profile["testing"] = [_detection("jest", 0.9), _detection("vitest", 0.9)]
+
+        manifest = _resolve_without_graph(profile, available, {})
+
+        assert [entry["skill"] for entry in manifest["load"]] == ["jest"]
+
+    def test_fuzzy_match_requires_token_boundary_and_stays_suggestion(self, tmp_path):
+        available = {
+            name: {"path": str(tmp_path / name / "SKILL.md"), "name": name}
+            for name in ("api-contract-review", "c-language")
+        }
+        profile = _minimal_profile(languages=[_detection("c")])
+
+        manifest = _resolve_without_graph(profile, available, {}, max_skills=1)
+
+        assert manifest["load"] == []
+        assert {row["skill"] for row in manifest["suggestions"]} == {"c-language"}
+
     def test_max_skills_cap(self, tmp_path):
         # Create 20 available skills each mapped from detections
         skills_with_map = [
@@ -319,12 +343,100 @@ class TestResolve:
         }
         profile = _minimal_profile(frameworks=[_detection(n, 0.9) for n in skills_with_map])
         manifest = _resolve_without_graph(profile, available, {}, max_skills=3)
-        # At most 3 skill-mapped items (plus meta skills if available)
+        # Passing max_skills explicitly opts into three automatic candidates.
         non_meta = [
             e for e in manifest["load"] if e["skill"] not in ("skill-router", "file-reading")
         ]
-        assert len(non_meta) <= 3
+        assert len(non_meta) == 3
         assert any("Capped" in w for w in manifest["warnings"])
+
+    def test_always_load_override_is_additional_to_automatic_cap(self, tmp_path):
+        available = {
+            "react": {"path": str(tmp_path / "react/SKILL.md"), "name": "react"},
+            "docker": {"path": str(tmp_path / "docker/SKILL.md"), "name": "docker"},
+        }
+        overrides = {
+            "docker": {
+                "always_load": True,
+                "never_load": False,
+                "use_count": 0,
+                "last_used": "",
+                "status": "installed",
+            }
+        }
+        profile = _minimal_profile(frameworks=[_detection("react"), _detection("docker")])
+
+        manifest = _resolve_without_graph(profile, available, overrides, max_skills=1)
+
+        assert {entry["skill"] for entry in manifest["load"]} == {"react", "docker"}
+
+    def test_single_slot_prefers_direct_detection_over_graph_neighbor(self, tmp_path, monkeypatch):
+        from ctx.core.resolve import resolve_skills  # noqa: PLC0415
+
+        class _FakeGraph:
+            def number_of_nodes(self) -> int:
+                return 1
+
+        monkeypatch.setattr(resolve_skills, "_GRAPH_AVAILABLE", True)
+        monkeypatch.setattr(resolve_skills, "_load_graph", lambda: _FakeGraph())
+        monkeypatch.setattr(
+            resolve_skills,
+            "_resolve_by_seeds",
+            lambda *_args, **_kwargs: [
+                {
+                    "name": "generic-advisor",
+                    "type": "agent",
+                    "score": 100.0,
+                    "normalized_score": 1.0,
+                    "shared_tags": [],
+                    "via": ["docker"],
+                }
+            ],
+        )
+        available = {
+            "docker": {"path": str(tmp_path / "docker/SKILL.md"), "name": "docker"},
+        }
+        profile = _minimal_profile(frameworks=[_detection("docker", confidence=0.5)])
+
+        manifest = resolve(profile, available, {}, max_skills=1)
+
+        assert [entry["skill"] for entry in manifest["load"]] == ["docker"]
+        assert {row["skill"] for row in manifest["suggestions"]} == {"generic-advisor"}
+
+    def test_single_slot_does_not_replace_unavailable_skill_with_graph_agent(
+        self, tmp_path, monkeypatch
+    ):
+        from ctx.core.resolve import resolve_skills  # noqa: PLC0415
+
+        class _FakeGraph:
+            def number_of_nodes(self) -> int:
+                return 1
+
+        monkeypatch.setattr(resolve_skills, "_GRAPH_AVAILABLE", True)
+        monkeypatch.setattr(resolve_skills, "_load_graph", lambda: _FakeGraph())
+        monkeypatch.setattr(
+            resolve_skills,
+            "_resolve_by_seeds",
+            lambda *_args, **_kwargs: [
+                {
+                    "name": "generic-review-agent",
+                    "type": "agent",
+                    "score": 3.0,
+                    "normalized_score": 1.0,
+                    "shared_tags": [],
+                    "via": ["docker"],
+                }
+            ],
+        )
+        profile = _minimal_profile(frameworks=[_detection("docker")])
+
+        manifest = resolve(profile, {}, {}, max_skills=1)
+
+        assert manifest["load"] == []
+        assert {row["skill"] for row in manifest["suggestions"]} == {
+            "docker",
+            "generic-review-agent",
+        }
 
     def test_meta_skills_added_if_available(self, tmp_path):
         available = {
@@ -882,3 +994,63 @@ class TestNoiseFloorNormalized:
         manifest = resolve(profile, available, {})
         # Raw score 2.5 >> any old skill floor so legacy behaviour survives.
         assert "legacy-hit" in {e["skill"] for e in manifest["load"]}
+
+
+class TestResolverCli:
+    def test_default_selects_one_skill_and_explicit_limit_opts_into_multiple(
+        self, tmp_path, monkeypatch
+    ):
+        from ctx.core.resolve import resolve_skills  # noqa: PLC0415
+
+        skills_dir = tmp_path / "skills"
+        for name in ("react", "docker", "pytest"):
+            _make_skill(skills_dir, name)
+        profile_path = tmp_path / "profile.json"
+        profile_path.write_text(
+            json.dumps(
+                _minimal_profile(
+                    frameworks=[
+                        _detection("react"),
+                        _detection("docker"),
+                        _detection("pytest"),
+                    ]
+                )
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(resolve_skills, "_REGISTRY_DEFAULT", tmp_path / "missing-registry")
+        monkeypatch.setattr(resolve_skills, "_GRAPH_AVAILABLE", False)
+
+        def run_cli(output: Path, *extra: str) -> dict:
+            monkeypatch.setattr(
+                sys,
+                "argv",
+                [
+                    "resolve_skills.py",
+                    "--profile",
+                    str(profile_path),
+                    "--wiki",
+                    str(tmp_path / "wiki"),
+                    "--available-skills",
+                    str(skills_dir),
+                    "--intent-log",
+                    str(tmp_path / "missing-intent.jsonl"),
+                    "--output",
+                    str(output),
+                    *extra,
+                ],
+            )
+            resolve_skills.main()
+            return json.loads(output.read_text(encoding="utf-8"))
+
+        pending_path = tmp_path / "pending.json"
+        default_manifest = run_cli(tmp_path / "default.json", "--pending-output", str(pending_path))
+        explicit_manifest = run_cli(tmp_path / "explicit.json", "--max-skills", "3")
+
+        assert [entry["skill"] for entry in default_manifest["load"]] == ["react"]
+        assert json.loads(pending_path.read_text(encoding="utf-8")) == default_manifest
+        assert {entry["skill"] for entry in explicit_manifest["load"]} == {
+            "react",
+            "docker",
+            "pytest",
+        }

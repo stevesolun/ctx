@@ -12,12 +12,14 @@ Usage:
 """
 
 import argparse
+from functools import lru_cache
+from importlib.resources import files
 import json
 import re
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Optional
 
 from ctx_config import cfg
@@ -25,14 +27,19 @@ from ctx.core.entity_types import (
     ENTITY_TYPE_FOR_SUBJECT_TYPE,
     RECOMMENDABLE_ENTITY_TYPES,
     SUBJECT_TYPE_FOR_ENTITY_TYPE,
+    entity_relpath,
     entity_wikilink,
     mcp_shard,
 )
 from ctx.core.wiki.wiki_packs import load_merged_wiki_pages, write_active_wiki_overlay_pack
 from ctx.core.wiki.wiki_utils import parse_frontmatter_and_body as _extract_frontmatter
+from ctx.utils._fs_utils import secure_directory
 from ctx.utils._safe_name import is_safe_source_name
 
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+_RUNTIME_AVAILABILITY_RESOURCE = "runtime-availability.json"
+_RUNTIME_AVAILABILITY_SOURCE = "ctx-runtime-availability"
+_RUNTIME_AVAILABILITY_TYPES = frozenset({"skill", "agent", "mcp-server"})
 
 
 @dataclass
@@ -66,6 +73,15 @@ class QueryResult:
     description: str
     excerpt: str
     wikilink: str
+
+
+@dataclass(frozen=True)
+class _RuntimeAvailabilityPage:
+    entity_type: str
+    slug: str
+    source_relpath: str
+    logical_relpath: str
+    content: str
 
 
 # _extract_frontmatter is imported from wiki_utils
@@ -203,10 +219,171 @@ def _load_wiki_pack_pages(wiki: Path) -> list[SkillPage]:
     return pages
 
 
+@lru_cache(maxsize=1)
+def _runtime_availability_page_specs() -> tuple[_RuntimeAvailabilityPage, ...]:
+    """Return the attested project-owned pages declared by the package."""
+    try:
+        payload = json.loads(
+            files("ctx.assets").joinpath(_RUNTIME_AVAILABILITY_RESOURCE).read_text(encoding="utf-8")
+        )
+    except (json.JSONDecodeError, ModuleNotFoundError, OSError, TypeError):
+        return ()
+    if (
+        not isinstance(payload, dict)
+        or payload.get("version") != 1
+        or payload.get("provenance")
+        != {
+            "owner": "ctx project",
+            "source": "https://github.com/stevesolun/ctx",
+            "license": "MIT",
+        }
+    ):
+        return ()
+    overlay = payload.get("overlay")
+    if (
+        not isinstance(overlay, dict)
+        or overlay.get("replace_scope") != "ctx:runtime-availability"
+        or overlay.get("source") != _RUNTIME_AVAILABILITY_SOURCE
+        or overlay.get("provenance") != "ctx-project-authored"
+    ):
+        return ()
+    entries = payload.get("entries")
+    nodes = overlay.get("nodes")
+    if not isinstance(entries, list) or not entries or not isinstance(nodes, list) or not nodes:
+        return ()
+
+    specs: list[_RuntimeAvailabilityPage] = []
+    seen_keys: set[tuple[str, str]] = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            return ()
+        entity_id = entry.get("id")
+        entity_type = entry.get("type")
+        if (
+            not isinstance(entity_id, str)
+            or not isinstance(entity_type, str)
+            or entity_type not in _RUNTIME_AVAILABILITY_TYPES
+            or ":" not in entity_id
+        ):
+            return ()
+        prefix, slug = entity_id.split(":", 1)
+        if (
+            prefix != entity_type
+            or not slug.startswith("ctx-")
+            or not is_safe_source_name(slug)
+            or entry.get("no_api_keys") is not True
+        ):
+            return ()
+        logical_path = entity_relpath(entity_type, slug)
+        if logical_path is None:
+            return ()
+        if entity_type == "skill":
+            source_relpath = f"converted/{slug}/SKILL.md"
+        else:
+            source_relpath = logical_path.as_posix()
+
+        file_rows = entry.get("files")
+        if not isinstance(file_rows, list):
+            return ()
+        matching_rows = [
+            row for row in file_rows if isinstance(row, dict) and row.get("path") == source_relpath
+        ]
+        if len(matching_rows) != 1:
+            return ()
+        content = matching_rows[0].get("content")
+        if not isinstance(content, str) or not content:
+            return ()
+        fields, _body = _extract_frontmatter(content)
+        if (
+            fields.get("source") != _RUNTIME_AVAILABILITY_SOURCE
+            or fields.get("license") != "MIT"
+            or fields.get("requires_api_keys") != "false"
+        ):
+            return ()
+        key = (entity_type, slug)
+        if key in seen_keys:
+            return ()
+        seen_keys.add(key)
+        specs.append(
+            _RuntimeAvailabilityPage(
+                entity_type=entity_type,
+                slug=slug,
+                source_relpath=source_relpath,
+                logical_relpath=logical_path.as_posix(),
+                content=content,
+            )
+        )
+
+    node_by_id = {
+        str(node.get("id")): node
+        for node in nodes
+        if isinstance(node, dict) and isinstance(node.get("id"), str)
+    }
+    expected_ids = {f"{spec.entity_type}:{spec.slug}" for spec in specs}
+    if len(node_by_id) != len(nodes) or set(node_by_id) != expected_ids:
+        return ()
+    if any(
+        node_by_id[entity_id].get("type") != entity_id.split(":", 1)[0]
+        or node_by_id[entity_id].get("source") != _RUNTIME_AVAILABILITY_SOURCE
+        or node_by_id[entity_id].get("project_owned") is not True
+        or node_by_id[entity_id].get("license") != "MIT"
+        or node_by_id[entity_id].get("requires_api_keys") is not False
+        for entity_id in expected_ids
+    ):
+        return ()
+    return tuple(sorted(specs, key=lambda spec: (spec.entity_type, spec.slug)))
+
+
+def _read_runtime_availability_page(
+    wiki: Path,
+    spec: _RuntimeAvailabilityPage,
+) -> str | None:
+    source_path = wiki.joinpath(*PurePosixPath(spec.source_relpath).parts)
+    try:
+        with secure_directory(source_path.parent) as directory:
+            content = directory.read_text(source_path.name, encoding="utf-8")
+    except (OSError, RuntimeError, UnicodeError, ValueError):
+        return None
+    return content if content == spec.content else None
+
+
+def _runtime_availability_page_signature(wiki: Path) -> tuple[tuple[str, bool], ...]:
+    """Fingerprint only whether each attested page is safely materialized."""
+    return tuple(
+        (spec.source_relpath, _read_runtime_availability_page(wiki, spec) is not None)
+        for spec in _runtime_availability_page_specs()
+    )
+
+
+def _load_runtime_availability_pages(wiki: Path) -> list[SkillPage]:
+    pages: list[SkillPage] = []
+    for spec in _runtime_availability_page_specs():
+        content = _read_runtime_availability_page(wiki, spec)
+        if content is None:
+            continue
+        logical_path = wiki.joinpath(*PurePosixPath(spec.logical_relpath).parts)
+        pages.append(
+            _parse_page_text(
+                logical_path,
+                content,
+                entity_type=spec.entity_type,
+                wikilink=_wikilink(spec.entity_type, spec.slug),
+            )
+        )
+    return pages
+
+
 def load_all_pages(wiki: Path) -> list[SkillPage]:
     """Load recommendable entity pages from the wiki."""
     if (wiki / "wiki-packs").is_dir():
-        return _load_wiki_pack_pages(wiki)
+        packed_pages = _load_wiki_pack_pages(wiki)
+        packed_keys = {(page.entity_type, page.name) for page in packed_pages}
+        runtime_pages = [
+            page
+            for page in _load_runtime_availability_pages(wiki)
+            if (page.entity_type, page.name) not in packed_keys
+        ]
+        return [*packed_pages, *runtime_pages]
     entities = wiki / "entities"
     pages: list[SkillPage] = []
     for entity_type in RECOMMENDABLE_ENTITY_TYPES:

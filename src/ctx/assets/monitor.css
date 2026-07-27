@@ -97,9 +97,14 @@ pre { padding: 0.6rem 0.8rem; overflow-x: auto; }
 .nav a.nav-drag-over { outline: 2px solid #93c5fd; background: rgba(147,197,253,0.18); }
 .nav-reset { border: 1px solid #d1d5db; border-radius: 4px; background: transparent;
              color: #6b7280; cursor: pointer; padding: 0.1rem 0.35rem; font-size: 0.78rem; }
-.card { border: 1px solid rgba(216,225,238,0.92); border-radius: 12px; padding: 1rem 1.25rem;
-        margin-bottom: 1rem; background: rgba(255,255,255,0.94); box-shadow: var(--shadow-soft); }
+.card { min-width: 0; border: 1px solid rgba(216,225,238,0.92); border-radius: 12px; padding: 1rem 1.25rem;
+        margin-bottom: 1rem; background: var(--surface); box-shadow: var(--shadow-soft); }
 .card:hover { box-shadow: 0 10px 28px rgba(15,23,42,0.07); }
+.responsive-split-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+                         gap: 1rem; }
+.responsive-sidebar-grid { display: grid; grid-template-columns: minmax(0, 220px) minmax(0, 1fr);
+                           gap: 1.25rem; align-items: start; }
+.table-scroll { overflow-x: auto; }
 .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
 .wiki-entity-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
                     gap: 1rem; align-items: start; }
@@ -238,7 +243,7 @@ pre { padding: 0.6rem 0.8rem; overflow-x: auto; }
 .graph-node-detail-panel { width: 100%; }
 .graph-edge-detail-inline { width: 100%; margin-bottom: 0.55rem; padding: 0.4rem 0.55rem;
                             border: 1px solid var(--border); border-radius: var(--radius);
-                            background: rgba(248,250,252,0.92); }
+                            background: var(--surface-2); }
 .graph-selected-summary { display: grid; gap: 0.25rem; margin-bottom: 0.55rem; }
 .graph-selected-summary p { margin: 0.15rem 0 0; }
 .graph-neighbor-tree h3 { margin: 0.45rem 0 0.35rem; font-size: 1rem; }
@@ -365,6 +370,8 @@ pre { padding: 0.6rem 0.8rem; overflow-x: auto; }
 .manage-result .muted { grid-column: 1 / -1; font-size: 0.82rem; }
 @media (max-width: 860px) {
     .wiki-entity-grid { grid-template-columns: 1fr; }
+    .responsive-split-grid, .responsive-sidebar-grid { grid-template-columns: minmax(0, 1fr); }
+    .responsive-sidebar { position: static !important; }
     .wizard-layout, .wizard-grid, .setup-header, .setup-flow { grid-template-columns: 1fr; }
     .docs-hero-grid { grid-template-columns: 1fr; }
     .docs-hero-meta { justify-content: flex-start; }

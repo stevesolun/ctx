@@ -53,15 +53,11 @@ architecture patterns.
 ## How to integrate
 
 These files are **staged** in the repo but not yet deployed to
-`~/.claude/skills/`. Two ways to consume them:
+`~/.claude/skills/`. The nested source files are not directly discoverable
+`SKILL.md` packages, so the builders' `--extra-dirs` option does not ingest this
+tree as-is.
 
-### Option A — Feed them to the knowledge graph directly
-
-Use the wiki/graph builders with `--extra-dirs` to include this tree in the
-scan without installing the skills globally. Requires a minor patch to
-`catalog_builder.py` if not already supported.
-
-### Option B — Install as global skills
+### Install as global skills
 
 Run `python src/import_strix_skills.py --install` (see that script for
 options). It creates one directory per Strix skill under `~/.claude/skills/`

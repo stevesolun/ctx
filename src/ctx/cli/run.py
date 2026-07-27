@@ -24,6 +24,7 @@ Plan 001 Phase H7.
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext, redirect_stdout
 import json
 import logging
 import math
@@ -31,20 +32,39 @@ import os
 import re
 import shlex
 import sys
+import threading
 import time
 from dataclasses import replace
 from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
 
+from ctx import __version__
+from ctx.adapters.generic.adaptive_runtime import AdaptiveRuntimeController, SelectedSkill
 from ctx.adapters.generic.compaction import TokenBudgetCompactor
 from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox, make_tool_executor
 from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
-from ctx.adapters.generic.loop import ToolPolicy, run_loop
+from ctx.adapters.generic.loop import (
+    LoopObserver,
+    LoopResult,
+    ToolPolicy,
+    TurnActivation,
+    TurnAuthorization,
+    TurnPreparation,
+    _validate_usage,
+    run_loop,
+)
 from ctx.adapters.generic.contract import ContractBuilder
 from ctx.adapters.generic.evaluator import Evaluator, run_with_evaluation
 from ctx.adapters.generic.planner import Planner, augmented_system_prompt
-from ctx.adapters.generic.providers import ToolCall, ToolDefinition, get_provider
+from ctx.adapters.generic.providers import (
+    CompletionResponse,
+    Message,
+    ToolCall,
+    ToolDefinition,
+    Usage,
+    get_provider,
+)
 from ctx.adapters.generic.state import (
     JsonlObserver,
     SessionStore,
@@ -53,13 +73,16 @@ from ctx.adapters.generic.state import (
     load_session,
     new_session_id,
 )
-from ctx.adapters.generic.tools import McpRouter, McpServerConfig
+from ctx.adapters.generic.tools import TOOL_SEPARATOR, McpRouter, McpServerConfig
 from ctx.telemetry import record_event, record_exception, telemetry_span
 from ctx.utils._secret_scan import find_inline_secret_arg
 
 
 _logger = logging.getLogger(__name__)
 _CTX_SESSION_MARKER = "ctx runtime session id:"
+_CTX_TOOL_INSTRUCTIONS_START = "ctx tool instructions:"
+_CTX_TOOL_INSTRUCTIONS_END = "end ctx tool instructions."
+_MISSING = object()
 _SESSION_USAGE_ATTRIBUTION_REASON = (
     "ctx run provider usage is aggregated across the session; exact per-tool "
     "token attribution requires host-supplied ctx__mark_entity_used.token_usage."
@@ -71,6 +94,48 @@ _GITHUB_MCP_CREDENTIAL_ENV = (
     "GH_TOKEN",
 )
 _TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+_CTX_TOOL_SURFACES = ("adaptive", "minimal", "full")
+_CTX_BOOTSTRAP_TOOL_NAMES = frozenset({"ctx__recommend_bundle", "ctx__wiki_get"})
+_MAX_AUXILIARY_AGENT_TIMEOUT = 45.0
+
+
+class _DeferredStopObserver:
+    """Forward evaluator events while persisting one orchestration-level stop."""
+
+    def __init__(self, delegate: LoopObserver) -> None:
+        self._delegate = delegate
+        self._round_results: list[LoopResult] = []
+
+    def on_iteration_start(self, iteration: int, messages: list[Message]) -> None:
+        self._delegate.on_iteration_start(iteration, messages)
+
+    def on_model_response(self, iteration: int, response: CompletionResponse) -> None:
+        self._delegate.on_model_response(iteration, response)
+
+    def on_tool_call(
+        self,
+        iteration: int,
+        call: ToolCall,
+        result: str,
+        error: str | None,
+    ) -> None:
+        self._delegate.on_tool_call(iteration, call, result, error)
+
+    def on_stop(self, result: LoopResult) -> None:
+        self._round_results.append(result)
+
+    def failure_result(self, exc: Exception) -> LoopResult:
+        """Collapse completed generator rounds into one failed orchestration result."""
+
+        previous = self._round_results[-1] if self._round_results else None
+        return LoopResult(
+            stop_reason="provider_error",
+            final_message=previous.final_message if previous is not None else "",
+            iterations=sum(result.iterations for result in self._round_results),
+            usage=previous.usage if previous is not None else Usage(),
+            messages=previous.messages if previous is not None else (),
+            detail=f"evaluator orchestration failed: {type(exc).__name__}",
+        )
 
 
 # ── Provider key-env defaults ───────────────────────────────────────────────
@@ -171,6 +236,13 @@ def _positive_int(raw: str) -> int:
     return value
 
 
+def _evaluator_rounds(raw: str) -> int:
+    value = _positive_int(raw)
+    if value > 2:
+        raise argparse.ArgumentTypeError("must be <= 2 (one initial round plus one revision)")
+    return value
+
+
 def _positive_float(raw: str) -> float:
     try:
         value = float(raw)
@@ -183,6 +255,64 @@ def _positive_float(raw: str) -> float:
 
 def _normalise_tool_patterns(patterns: list[str] | tuple[str, ...] | None) -> tuple[str, ...]:
     return tuple(p.strip() for p in (patterns or []) if p and p.strip())
+
+
+def _resolve_ctx_tool_surface(explicit: str | None, recorded: Any = _MISSING) -> str:
+    if explicit in _CTX_TOOL_SURFACES:
+        return explicit
+    if recorded in _CTX_TOOL_SURFACES:
+        return str(recorded)
+    # Sessions created before surfaces were recorded exposed all ctx tools.
+    return "full" if recorded is _MISSING else "minimal"
+
+
+def _ctx_toolbox_for_surface(
+    *,
+    lifecycle_dir: Path | None,
+    bound_session_id: str,
+    surface: str,
+    allow_patterns: list[str] | tuple[str, ...] | None,
+    deny_patterns: list[str] | tuple[str, ...] | None,
+) -> tuple[CtxCoreToolbox, list[ToolDefinition]]:
+    """Build a toolbox whose submitted and executable ctx tools agree."""
+    if surface not in _CTX_TOOL_SURFACES:
+        raise ValueError(f"unsupported ctx tool surface: {surface!r}")
+    allow = _normalise_tool_patterns(allow_patterns)
+    deny = _normalise_tool_patterns(deny_patterns)
+    inventory = CtxCoreToolbox(
+        lifecycle_dir=lifecycle_dir,
+        bound_session_id=bound_session_id,
+    )
+    definitions = inventory.tool_definitions()
+    inventory_names = frozenset(definition.name for definition in definitions)
+    if allow:
+        definitions = [
+            definition
+            for definition in definitions
+            if any(fnmatchcase(definition.name, pattern) for pattern in allow)
+        ]
+    elif surface == "minimal":
+        definitions = [
+            definition for definition in definitions if definition.name in _CTX_BOOTSTRAP_TOOL_NAMES
+        ]
+    elif surface == "adaptive":
+        definitions = []
+    if deny:
+        definitions = [
+            definition
+            for definition in definitions
+            if not any(fnmatchcase(definition.name, pattern) for pattern in deny)
+        ]
+
+    exposed_names = frozenset(definition.name for definition in definitions)
+    if exposed_names == inventory_names:
+        return inventory, definitions
+    toolbox = CtxCoreToolbox(
+        lifecycle_dir=lifecycle_dir,
+        bound_session_id=bound_session_id,
+        allowed_tool_names=exposed_names,
+    )
+    return toolbox, toolbox.tool_definitions()
 
 
 def _compile_tool_policy(
@@ -232,7 +362,8 @@ def _add_tool_policy_args(parser: argparse.ArgumentParser) -> None:
         metavar="PATTERN",
         help=(
             "Allow only tool names matching this glob pattern. Repeatable. "
-            "If omitted, all attached tools are allowed unless denied."
+            "Matching ctx tools are the only ctx schemas sent to the provider. "
+            "If omitted, the selected ctx tool surface is allowed unless denied."
         ),
     )
     parser.add_argument(
@@ -242,7 +373,30 @@ def _add_tool_policy_args(parser: argparse.ArgumentParser) -> None:
         metavar="PATTERN",
         help=(
             "Deny tool names matching this glob pattern before execution. "
-            "Repeatable; deny rules override allow rules."
+            "Denied ctx schemas are not sent to the provider. Repeatable; "
+            "deny rules override allow rules."
+        ),
+    )
+
+
+def _add_ctx_tool_surface_arg(
+    parser: argparse.ArgumentParser,
+    *,
+    default: str | None,
+) -> None:
+    parser.add_argument(
+        "--ctx-tool-surface",
+        choices=_CTX_TOOL_SURFACES,
+        default=default,
+        help=(
+            "CTX capability mode: 'adaptive' selects at most one installed skill "
+            "from trusted user/configured roots. Explicit MCP servers stay dormant "
+            "until a namespaced --allow-tool grant (or an explicit '*') selects them; "
+            "--mcp alone grants all supplied servers. Their filtered schemas are "
+            "leased for one turn. It "
+            "abstains when secure local reads are unavailable. 'minimal' exposes "
+            "recommend_bundle + wiki_get; 'full' restores the complete "
+            "read/lifecycle surface. --allow-tool selects an explicit subset."
         ),
     )
 
@@ -429,7 +583,7 @@ def _mcp_configs_from_metadata(meta: dict) -> list[McpServerConfig]:
     return out
 
 
-_DEFAULT_SYSTEM_PROMPT = """\
+_LEGACY_DEFAULT_SYSTEM_PROMPT = """\
 You are a coding assistant running inside the ctx harness. You have
 access to the model's knowledge PLUS a set of tools for file system
 access, git operations, and the ctx knowledge graph (ctx__*). The
@@ -453,23 +607,95 @@ Be concise. Preserve file paths and slugs verbatim in your responses.
 """
 
 
-def _with_ctx_session_instructions(system_prompt: str, session_id: str) -> str:
-    if _CTX_SESSION_MARKER in system_prompt:
-        return system_prompt
-    return (
-        system_prompt.rstrip()
-        + "\n\n"
-        + "ctx runtime session id: "
-        + session_id
-        + "\n"
-        + "Use this exact session_id when calling ctx lifecycle tools. "
-        + "Record ctx__load_entity when the user/host chooses a recommended "
-        + "skill, agent, MCP server, or harness; record ctx__mark_entity_used "
-        + "when it materially helps; call ctx__unload_entity only after user "
-        + "confirmation or an explicit skip/unload instruction. Include "
-        + "ctx__mark_entity_used.token_usage only when exact per-entity usage "
-        + "is available; do not allocate session totals across tools.\n"
-    )
+_DEFAULT_SYSTEM_PROMPT = """\
+You are a coding assistant running inside the ctx harness. Use only the
+tools attached to the current request, and use them only when they are
+relevant to the user's task.
+
+Workflow:
+  1. Read the task carefully.
+  2. Use attached filesystem, git, knowledge, or MCP tools as needed.
+  3. Make and verify the requested changes.
+  4. When done or blocked on user input, answer in text.
+
+Be concise. Preserve file paths and slugs verbatim in your responses.
+"""
+
+
+def _without_ctx_session_instructions(system_prompt: str) -> str:
+    prompt = system_prompt
+    managed_marker = "\n\n" + _CTX_TOOL_INSTRUCTIONS_START
+    if managed_marker in prompt:
+        prompt = prompt.split(managed_marker, 1)[0]
+    legacy_marker = "\n\n" + _CTX_SESSION_MARKER
+    if legacy_marker in prompt:
+        prompt = prompt.split(legacy_marker, 1)[0]
+    legacy_default = _LEGACY_DEFAULT_SYSTEM_PROMPT.rstrip()
+    if prompt.startswith(legacy_default):
+        prompt = _DEFAULT_SYSTEM_PROMPT.rstrip() + prompt[len(legacy_default) :]
+    return prompt.rstrip()
+
+
+def _with_ctx_session_instructions(
+    system_prompt: str,
+    session_id: str,
+    definitions: list[ToolDefinition],
+) -> str:
+    base_prompt = _without_ctx_session_instructions(system_prompt)
+    if not base_prompt:
+        return ""
+    names = {definition.name for definition in definitions}
+    instructions: list[str] = []
+    if "ctx__recommend_bundle" in names:
+        instructions.append(
+            "Call ctx__recommend_bundle only when the task needs relevant skills, "
+            "agents, or MCP servers that are not already active."
+        )
+    if "ctx__wiki_get" in names:
+        instructions.append("Use ctx__wiki_get to inspect a recommended entity before choosing it.")
+    if "ctx__load_entity" in names:
+        instructions.append(
+            "Record ctx__load_entity when the user/host chooses a recommended "
+            "skill, agent, MCP server, or harness."
+        )
+    if "ctx__mark_entity_used" in names:
+        instructions.append(
+            "Record ctx__mark_entity_used when it materially helps; include "
+            "ctx__mark_entity_used.token_usage only when exact per-entity usage "
+            "is available, and do not allocate session totals across tools."
+        )
+    if "ctx__unload_entity" in names:
+        instructions.append(
+            "Call ctx__unload_entity only after user confirmation or an explicit "
+            "skip/unload instruction."
+        )
+    if not instructions:
+        return base_prompt
+    lifecycle_names = {
+        "ctx__load_entity",
+        "ctx__mark_entity_used",
+        "ctx__unload_entity",
+    }
+    lines = [_CTX_TOOL_INSTRUCTIONS_START, *instructions]
+    if names & lifecycle_names:
+        lines.extend(
+            [
+                f"{_CTX_SESSION_MARKER} {session_id}",
+                "Use this exact session_id when calling ctx lifecycle tools.",
+            ]
+        )
+    lines.append(_CTX_TOOL_INSTRUCTIONS_END)
+    return base_prompt + "\n\n" + "\n".join(lines) + "\n"
+
+
+def _resume_messages_with_system_prompt(messages: tuple[Any, ...], system_prompt: str) -> list[Any]:
+    replay = list(messages)
+    if replay and replay[0].role == "system":
+        if system_prompt:
+            replay[0] = replace(replay[0], content=system_prompt)
+        else:
+            replay.pop(0)
+    return replay
 
 
 def _record_lifecycle_safely(
@@ -477,11 +703,11 @@ def _record_lifecycle_safely(
     method_name: str,
     **kwargs: Any,
 ) -> None:
-    method = getattr(lifecycle, method_name)
     started = time.perf_counter()
     try:
+        method = getattr(lifecycle, method_name)
         method(**kwargs)
-    except (OSError, ValueError) as exc:
+    except Exception as exc:  # noqa: BLE001 - lifecycle must not break the runtime.
         _logger.warning("ctx runtime lifecycle record failed: %s", exc)
         _record_cli_telemetry(
             "ctx.runtime_lifecycle.write",
@@ -492,6 +718,127 @@ def _record_lifecycle_safely(
             duration_ms=_duration_ms(started),
             error_kind=type(exc).__name__,
         )
+
+
+def _usage_token_fields(usage: Any) -> dict[str, Any]:
+    input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
+    output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
+    reported_raw = getattr(usage, "tokens_reported", _MISSING)
+    if reported_raw is _MISSING:
+        tokens_reported = input_tokens > 0 or output_tokens > 0
+    elif isinstance(reported_raw, bool):
+        tokens_reported = reported_raw
+    else:
+        tokens_reported = False
+    cached_raw = getattr(usage, "cached_input_tokens", None)
+    cached_input_tokens = (
+        int(cached_raw)
+        if not isinstance(cached_raw, bool) and isinstance(cached_raw, int) and cached_raw >= 0
+        else None
+    )
+    reported_input = input_tokens if tokens_reported else None
+    return {
+        "tokens_reported": tokens_reported,
+        "input_tokens": reported_input,
+        "output_tokens": output_tokens if tokens_reported else None,
+        "total_tokens": input_tokens + output_tokens if tokens_reported else None,
+        "cached_input_tokens": cached_input_tokens,
+        "uncached_input_tokens": (
+            reported_input - cached_input_tokens
+            if reported_input is not None
+            and cached_input_tokens is not None
+            and cached_input_tokens <= reported_input
+            else None
+        ),
+    }
+
+
+def _agent_token_usage(usage: Usage, *, model: str | None, provider: str) -> dict[str, Any]:
+    token_fields = _usage_token_fields(usage)
+    tokens_reported = bool(token_fields["tokens_reported"])
+    return {
+        "attribution": "exact" if tokens_reported else "unavailable",
+        **token_fields,
+        "cost_usd": usage.cost_usd,
+        "attribution_reason": None if tokens_reported else "provider did not report token usage",
+        "model": model,
+        "provider": provider,
+    }
+
+
+def _load_runtime_agent(
+    lifecycle: RuntimeLifecycleStore,
+    *,
+    session_id: str,
+    role: str,
+) -> None:
+    common = {"session_id": session_id, "entity_type": "agent", "slug": role}
+    _record_lifecycle_safely(
+        lifecycle,
+        "load_entity",
+        **common,
+        reason="explicit CLI agent flag",
+        selected=True,
+        selection_source="user",
+        source_context={"surface": "ctx-run"},
+    )
+    _record_lifecycle_safely(
+        lifecycle,
+        "mark_entity_loaded",
+        **common,
+        reason="agent provider call enabled",
+    )
+
+
+def _mark_runtime_agent_used(
+    lifecycle: RuntimeLifecycleStore,
+    *,
+    session_id: str,
+    role: str,
+    usage: Usage,
+    model: str | None,
+    provider: str,
+) -> None:
+    _record_lifecycle_safely(
+        lifecycle,
+        "mark_entity_used",
+        session_id=session_id,
+        entity_type="agent",
+        slug=role,
+        evidence="explicit agent provider call completed",
+        token_usage=_agent_token_usage(usage, model=model, provider=provider),
+    )
+
+
+def _unload_runtime_agent(
+    lifecycle: RuntimeLifecycleStore,
+    *,
+    session_id: str,
+    role: str,
+) -> None:
+    common = {"session_id": session_id, "entity_type": "agent", "slug": role}
+    _record_lifecycle_safely(
+        lifecycle,
+        "unload_entity",
+        **common,
+        reason="bounded agent call complete",
+    )
+    _record_lifecycle_safely(
+        lifecycle,
+        "mark_entity_unloaded",
+        **common,
+        reason="agent provider surface released",
+    )
+
+
+def _write_session_config_safely(
+    store: SessionStore,
+    config: dict[str, Any],
+) -> None:
+    try:
+        store.write_session_config(config)
+    except Exception as exc:  # noqa: BLE001 - cleanup must preserve the primary failure.
+        _logger.warning("ctx session metadata write failed: %s", exc)
 
 
 def _duration_ms(started: float) -> float:
@@ -508,6 +855,7 @@ def _record_cli_telemetry(
     duration_ms: float,
     error_kind: str | None = None,
     exc: BaseException | None = None,
+    exception_escaped: bool = True,
 ) -> None:
     event_payload = dict(payload)
     event_payload["ctx.run.phase"] = phase
@@ -520,6 +868,7 @@ def _record_cli_telemetry(
                 event_name,
                 source="ctx-cli",
                 exc=exc,
+                escaped=exception_escaped,
                 transport="cli",
                 actor="user",
                 session_id=session_id,
@@ -571,6 +920,398 @@ def _run_start_payload(
         "ctx.tool_policy.allow_count": allow_count,
         "ctx.tool_policy.deny_count": deny_count,
     }
+
+
+def _adaptive_runtime_payload(
+    controller: AdaptiveRuntimeController | _AdaptiveMcpController | None,
+) -> dict[str, Any]:
+    if controller is None:
+        return {
+            "ctx.adaptive.enabled": False,
+            "ctx.adaptive.skill_selected": False,
+            "ctx.adaptive.selection_duration_ms": 0.0,
+            "ctx.adaptive.selected_context_bytes": 0,
+            "ctx.adaptive.submitted_context_bytes": 0,
+            "ctx.adaptive.estimated_selected_context_tokens": 0,
+            "ctx.adaptive.mcp_configured_count": 0,
+            "ctx.adaptive.mcp_activated_count": 0,
+            "ctx.adaptive.mcp_fetched_tool_count": 0,
+            "ctx.adaptive.mcp_submitted_tool_count": 0,
+            "ctx.adaptive.mcp_submitted_schema_bytes": 0,
+            "ctx.adaptive.mcp_estimated_schema_tokens": 0,
+            "ctx.adaptive.mcp_schema_submission_attempted": False,
+        }
+    summary = controller.summary()
+    return {
+        "ctx.adaptive.enabled": True,
+        "ctx.adaptive.skill_selected": bool(summary["skill_selected"]),
+        "ctx.adaptive.selection_duration_ms": float(summary["selection_duration_ms"]),
+        "ctx.adaptive.selected_context_bytes": int(summary["selected_context_bytes"]),
+        "ctx.adaptive.submitted_context_bytes": int(summary["submitted_context_bytes"]),
+        "ctx.adaptive.estimated_selected_context_tokens": int(
+            summary["estimated_selected_context_tokens"]
+        ),
+        "ctx.adaptive.skill_hash": summary["skill_hash"],
+        "ctx.adaptive.mcp_configured_count": int(summary.get("mcp_configured_count", 0)),
+        "ctx.adaptive.mcp_activated_count": int(summary.get("mcp_activated_count", 0)),
+        "ctx.adaptive.mcp_fetched_tool_count": int(summary.get("mcp_fetched_tool_count", 0)),
+        "ctx.adaptive.mcp_submitted_tool_count": int(summary.get("mcp_submitted_tool_count", 0)),
+        "ctx.adaptive.mcp_submitted_schema_bytes": int(
+            summary.get("mcp_submitted_schema_bytes", 0)
+        ),
+        "ctx.adaptive.mcp_estimated_schema_tokens": int(
+            summary.get("mcp_estimated_schema_tokens", 0)
+        ),
+        "ctx.adaptive.mcp_schema_submission_attempted": bool(
+            summary.get("mcp_schema_submission_attempted", False)
+        ),
+    }
+
+
+class _AdaptiveMcpController:
+    """Compose a one-turn skill lease with exact host-granted MCP servers."""
+
+    def __init__(
+        self,
+        skill: AdaptiveRuntimeController,
+        *,
+        router: McpRouter,
+        server_names: tuple[str, ...],
+        configured_count: int,
+        lifecycle: RuntimeLifecycleStore,
+        session_id: str,
+        allow_patterns: tuple[str, ...],
+        deny_patterns: tuple[str, ...],
+    ) -> None:
+        self._skill = skill
+        self._router = router
+        self._server_names = server_names
+        self._configured_count = configured_count
+        self._lifecycle = lifecycle
+        self._session_id = session_id
+        self._allow_patterns = allow_patterns
+        self._deny_patterns = deny_patterns
+        self._prepared_epoch: int | None = None
+        self._prepared_tools: tuple[ToolDefinition, ...] = ()
+        self._active_servers: tuple[str, ...] = ()
+        self._mcp_consumed = False
+        self._mcp_activated_count = 0
+        self._mcp_fetched_tool_count = 0
+        self._mcp_submitted_tool_count = 0
+        self._mcp_submitted_schema_bytes = 0
+        self._mcp_schema_submission_attempted = False
+
+    @property
+    def selection(self) -> SelectedSkill | None:
+        return self._skill.selection
+
+    @property
+    def mcp_server_names(self) -> tuple[str, ...]:
+        return self._server_names
+
+    def summary(self) -> dict[str, Any]:
+        summary = self._skill.summary()
+        summary["mcp_configured_count"] = self._configured_count
+        summary["mcp_activated_count"] = self._mcp_activated_count
+        summary["mcp_fetched_tool_count"] = self._mcp_fetched_tool_count
+        summary["mcp_submitted_tool_count"] = self._mcp_submitted_tool_count
+        summary["mcp_submitted_schema_bytes"] = self._mcp_submitted_schema_bytes
+        summary["mcp_estimated_schema_tokens"] = (self._mcp_submitted_schema_bytes + 3) // 4
+        summary["mcp_schema_submission_attempted"] = self._mcp_schema_submission_attempted
+        return summary
+
+    def prepare_turn(
+        self,
+        iteration: int,
+        messages: tuple[Message, ...],
+        base_tools: tuple[ToolDefinition, ...],
+        *,
+        deadline_monotonic: float | None,
+        cancel_event: threading.Event | None,
+    ) -> TurnPreparation:
+        preparation = self._skill.prepare_turn(
+            iteration,
+            messages,
+            base_tools,
+            deadline_monotonic=deadline_monotonic,
+            cancel_event=cancel_event,
+        )
+        self._prepared_epoch = iteration
+        self._prepared_tools = base_tools
+        return preparation
+
+    def activate_turn(
+        self,
+        iteration: int,
+        capability_epoch: int,
+    ) -> TurnActivation | Usage | None:
+        skill_usage = self._skill.activate_turn(iteration, capability_epoch)
+        if capability_epoch != iteration or self._prepared_epoch != iteration:
+            return skill_usage
+        if not self._server_names:
+            return TurnActivation(
+                tools=self._prepared_tools,
+                usage=skill_usage or Usage(),
+            )
+        if self._mcp_consumed:
+            return skill_usage
+        tools = self._router.activate(
+            self._server_names,
+            capability_epoch=capability_epoch,
+        )
+        self._active_servers = self._server_names
+        self._mcp_activated_count += len(self._active_servers)
+        self._mcp_fetched_tool_count = len(tools)
+        for server_name in self._active_servers:
+            _record_lifecycle_safely(
+                self._lifecycle,
+                "mark_entity_loaded",
+                session_id=self._session_id,
+                entity_type="mcp-server",
+                slug=server_name,
+                reason="adaptive MCP capability lease activated",
+            )
+        visible_tools = tuple(tool for tool in tools if self._tool_is_visible(tool.name))
+        encoded_schemas = (
+            json.dumps(
+                [
+                    {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.parameters,
+                    }
+                    for tool in visible_tools
+                ],
+                allow_nan=False,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            if visible_tools
+            else ""
+        )
+        self._mcp_submitted_tool_count = len(visible_tools)
+        self._mcp_submitted_schema_bytes = len(encoded_schemas.encode("utf-8"))
+        return TurnActivation(
+            tools=(*self._prepared_tools, *visible_tools),
+            usage=skill_usage or Usage(),
+        )
+
+    def on_provider_request(self, iteration: int, capability_epoch: int) -> None:
+        self._skill.on_provider_request(iteration, capability_epoch)
+        if self._active_servers and self._mcp_submitted_tool_count:
+            self._mcp_schema_submission_attempted = True
+
+    def authorize_tool_call(
+        self,
+        iteration: int,
+        capability_epoch: int,
+        call: ToolCall,
+    ) -> TurnAuthorization | None:
+        return self._skill.authorize_tool_call(iteration, capability_epoch, call)
+
+    def on_tool_result(
+        self,
+        iteration: int,
+        capability_epoch: int,
+        call: ToolCall,
+        result: str,
+        error: str | None,
+    ) -> Usage | None:
+        server_name = call.name.split(TOOL_SEPARATOR, 1)[0] if TOOL_SEPARATOR in call.name else ""
+        mcp_dispatched = error is None or error.startswith(("MCP: ", "MCP-dispatch: "))
+        if server_name in self._active_servers and mcp_dispatched:
+            _record_lifecycle_safely(
+                self._lifecycle,
+                "mark_entity_used",
+                session_id=self._session_id,
+                entity_type="mcp-server",
+                slug=server_name,
+                evidence="adaptive MCP tool call attempted",
+            )
+        return self._skill.on_tool_result(iteration, capability_epoch, call, result, error)
+
+    def close_turn(
+        self,
+        iteration: int,
+        capability_epoch: int,
+        outcome: str,
+    ) -> Usage | None:
+        deactivation_error: Exception | None = None
+        active_servers = self._active_servers
+        self._active_servers = ()
+        if active_servers:
+            try:
+                self._router.deactivate(active_servers)
+            except Exception as exc:  # noqa: BLE001 - skill cleanup must still run.
+                deactivation_error = exc
+            else:
+                for server_name in active_servers:
+                    _record_lifecycle_safely(
+                        self._lifecycle,
+                        "mark_entity_unloaded",
+                        session_id=self._session_id,
+                        entity_type="mcp-server",
+                        slug=server_name,
+                        reason=f"adaptive MCP capability lease closed after {outcome}",
+                    )
+            self._mcp_consumed = True
+        self._prepared_epoch = None
+        self._prepared_tools = ()
+        usage = self._skill.close_turn(iteration, capability_epoch, outcome)
+        if deactivation_error is not None:
+            raise deactivation_error
+        return usage
+
+    def _tool_is_visible(self, name: str) -> bool:
+        if self._deny_patterns and any(
+            fnmatchcase(name, pattern) for pattern in self._deny_patterns
+        ):
+            return False
+        return not self._allow_patterns or any(
+            fnmatchcase(name, pattern) for pattern in self._allow_patterns
+        )
+
+
+def _adaptive_controller_for_task(
+    task: str,
+    *,
+    cwd: Path,
+    lifecycle: RuntimeLifecycleStore,
+    session_id: str,
+    router: McpRouter | None = None,
+    mcp_server_names: tuple[str, ...] = (),
+    mcp_configured_count: int = 0,
+    allow_patterns: tuple[str, ...] = (),
+    deny_patterns: tuple[str, ...] = (),
+) -> AdaptiveRuntimeController | _AdaptiveMcpController:
+    def on_activate(selection: SelectedSkill) -> None:
+        _record_lifecycle_safely(
+            lifecycle,
+            "mark_entity_loaded",
+            session_id=session_id,
+            entity_type="skill",
+            slug=selection.name,
+            reason="adaptive capability lease activated",
+        )
+
+    def on_deactivate(selection: SelectedSkill, outcome: str, submitted: bool) -> None:
+        if submitted:
+            _record_lifecycle_safely(
+                lifecycle,
+                "mark_entity_used",
+                session_id=session_id,
+                entity_type="skill",
+                slug=selection.name,
+                evidence="adaptive context submitted to provider",
+                token_usage={
+                    "attribution": "estimated",
+                    "input_tokens": selection.estimated_context_tokens,
+                    "output_tokens": 0,
+                    "attribution_reason": "bounded character estimate for selected skill context",
+                },
+            )
+        _record_lifecycle_safely(
+            lifecycle,
+            "mark_entity_unloaded",
+            session_id=session_id,
+            entity_type="skill",
+            slug=selection.name,
+            reason=f"adaptive capability lease closed after {outcome}",
+        )
+
+    controller = AdaptiveRuntimeController.from_task(
+        task,
+        cwd=cwd,
+        on_activate=on_activate,
+        on_deactivate=on_deactivate,
+    )
+    if router is None:
+        return controller
+    return _AdaptiveMcpController(
+        controller,
+        router=router,
+        server_names=mcp_server_names,
+        configured_count=mcp_configured_count,
+        lifecycle=lifecycle,
+        session_id=session_id,
+        allow_patterns=allow_patterns,
+        deny_patterns=deny_patterns,
+    )
+
+
+def _adaptive_mcp_server_names(
+    configs: list[McpServerConfig],
+    allow_patterns: tuple[str, ...],
+    deny_patterns: tuple[str, ...] = (),
+) -> tuple[str, ...]:
+    """Return only servers that can satisfy the host's allow patterns."""
+    configured = tuple(config.name for config in configs)
+    if any(pattern in {"*", "**"} for pattern in deny_patterns):
+        return ()
+    server_patterns = tuple(
+        pattern.split(TOOL_SEPARATOR, 1)[0]
+        for pattern in allow_patterns
+        if TOOL_SEPARATOR in pattern
+    )
+    allow_all = any(pattern in {"*", "**"} for pattern in allow_patterns)
+    allowed = (
+        configured
+        if not allow_patterns or allow_all
+        else tuple(
+            name
+            for name in configured
+            if any(fnmatchcase(name, pattern) for pattern in server_patterns)
+        )
+    )
+
+    def fully_denied(name: str) -> bool:
+        for pattern in deny_patterns:
+            if TOOL_SEPARATOR not in pattern:
+                continue
+            server_pattern, tool_pattern = pattern.split(TOOL_SEPARATOR, 1)
+            if tool_pattern in {"*", "**"} and fnmatchcase(name, server_pattern):
+                return True
+        return False
+
+    return tuple(name for name in allowed if not fully_denied(name))
+
+
+def _record_adaptive_selection_request(
+    lifecycle: RuntimeLifecycleStore,
+    controller: AdaptiveRuntimeController | _AdaptiveMcpController | None,
+    *,
+    session_id: str,
+) -> None:
+    selection = controller.selection if controller is not None else None
+    if selection is not None:
+        _record_lifecycle_safely(
+            lifecycle,
+            "load_entity",
+            session_id=session_id,
+            entity_type="skill",
+            slug=selection.name,
+            reason="adaptive task match",
+            selected=True,
+            selection_source="host",
+            source_context={
+                "score": selection.score,
+                "estimated_context_tokens": selection.estimated_context_tokens,
+            },
+        )
+    server_names = getattr(controller, "mcp_server_names", ())
+    for server_name in server_names:
+        _record_lifecycle_safely(
+            lifecycle,
+            "load_entity",
+            session_id=session_id,
+            entity_type="mcp-server",
+            slug=server_name,
+            reason="explicit adaptive MCP grant",
+            selected=True,
+            selection_source="user",
+            source_context={"surface": "ctx-run"},
+        )
 
 
 def _run_setup_failure_payload(args: argparse.Namespace, *, stage: str) -> dict[str, Any]:
@@ -660,11 +1401,18 @@ def _loop_result_payload(result: Any) -> dict[str, Any]:
     payload["ctx.iterations"] = int(getattr(result, "iterations", 0) or 0)
     usage = getattr(result, "usage", None)
     if usage is not None:
-        input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
-        output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
-        payload["ctx.usage.input_tokens"] = input_tokens
-        payload["ctx.usage.output_tokens"] = output_tokens
-        payload["ctx.usage.total_tokens"] = input_tokens + output_tokens
+        token_fields = _usage_token_fields(usage)
+        payload["ctx.usage.tokens_reported"] = token_fields["tokens_reported"]
+        for name in (
+            "input_tokens",
+            "output_tokens",
+            "total_tokens",
+            "cached_input_tokens",
+            "uncached_input_tokens",
+        ):
+            value = token_fields[name]
+            if value is not None:
+                payload[f"ctx.usage.{name}"] = value
         payload["ctx.usage.scope"] = "session"
         payload["ctx.usage.attribution"] = "unavailable"
         payload["ctx.usage.attribution_reason"] = _SESSION_USAGE_ATTRIBUTION_REASON
@@ -673,15 +1421,11 @@ def _loop_result_payload(result: Any) -> dict[str, Any]:
 
 
 def _usage_attribution_summary(usage: Any) -> dict[str, Any]:
-    input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
-    output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
     return {
         "scope": "session",
         "attribution": "unavailable",
         "attribution_reason": _SESSION_USAGE_ATTRIBUTION_REASON,
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-        "total_tokens": input_tokens + output_tokens,
+        **_usage_token_fields(usage),
         "cost_usd": getattr(usage, "cost_usd", None),
     }
 
@@ -729,6 +1473,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "tools attached."
         ),
     )
+    p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = p.add_subparsers(dest="command", required=True)
 
     # run
@@ -790,6 +1535,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Do not attach the built-in ctx__* tool surface.",
     )
+    _add_ctx_tool_surface_arg(r, default="adaptive")
     _add_tool_policy_args(r)
     r.add_argument(
         "--api-key-env",
@@ -892,7 +1638,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     r.add_argument(
         "--evaluator-rounds",
-        type=_positive_int,
+        type=_evaluator_rounds,
         default=2,
         help=(
             "Max Generator->Evaluator rounds (1 = one generation "
@@ -983,6 +1729,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "can contain executable command metadata."
         ),
     )
+    _add_ctx_tool_surface_arg(rz, default=None)
     _add_tool_policy_args(rz)
     rz.add_argument(
         "--quiet",
@@ -1037,6 +1784,22 @@ def _cmd_run(args: argparse.Namespace) -> int:
             )
         return 2
 
+    if args.contract and not (args.planner and args.evaluator):
+        with telemetry_span():
+            _record_cli_telemetry(
+                "ctx.cli.run",
+                session_id=args.session_id,
+                phase="failed",
+                payload=_run_setup_failure_payload(args, stage="validation"),
+                outcome="error",
+                duration_ms=_duration_ms(telemetry_started),
+                error_kind="SystemExit",
+            )
+        raise SystemExit(
+            "error: --contract requires --planner and --evaluator "
+            "(all three agents share the same testable success criteria)."
+        )
+
     sdir = Path(args.sessions_dir) if args.sessions_dir else default_sessions_dir()
 
     api_key_env = _resolve_api_key_env(args.api_key_env, args.model, args.provider)
@@ -1045,6 +1808,16 @@ def _cmd_run(args: argparse.Namespace) -> int:
         base_url=args.base_url,
         api_key_env=api_key_env,
         timeout=args.provider_timeout,
+    )
+    auxiliary_provider = (
+        get_provider(
+            default_model=args.model,
+            base_url=args.base_url,
+            api_key_env=api_key_env,
+            timeout=min(args.provider_timeout, _MAX_AUXILIARY_AGENT_TIMEOUT),
+        )
+        if args.planner or args.evaluator or args.contract
+        else provider
     )
 
     session_id = args.session_id or new_session_id()
@@ -1063,85 +1836,6 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 exc=exc,
             )
         raise
-
-    # Planner pass (opt-in, SOLO path only — when --evaluator is set,
-    # run_with_evaluation owns the planner call so the P/G/E agents
-    # share state coherently). In the solo path, the planner runs
-    # inline here and the produced spec is embedded into
-    # system_prompt for the Generator.
-    plan_artifact = None
-    if args.planner and not args.evaluator:
-        if not args.quiet:
-            print("[ctx] planner: building spec...", file=sys.stderr)
-        planner = Planner(
-            provider,
-            model=args.planner_model or args.model,
-        )
-        try:
-            plan_artifact = planner.plan(args.task)
-        except Exception as exc:
-            with telemetry_span():
-                _record_cli_telemetry(
-                    "ctx.cli.run",
-                    session_id=session_id,
-                    phase="failed",
-                    payload=_run_setup_failure_payload(args, stage="planner"),
-                    outcome="error",
-                    duration_ms=_duration_ms(telemetry_started),
-                    error_kind=type(exc).__name__,
-                    exc=exc,
-                )
-            raise
-        system_prompt = augmented_system_prompt(system_prompt, plan_artifact)
-        if not args.quiet:
-            status = "ok" if plan_artifact.parsed_ok else "unstructured"
-            print(
-                f"[ctx] planner: spec {status} "
-                f"(criteria={len(plan_artifact.success_criteria)}, "
-                f"risks={len(plan_artifact.risks)})",
-                file=sys.stderr,
-            )
-
-    ctx_tools_enabled = not args.no_ctx_tools
-    if ctx_tools_enabled:
-        system_prompt = _with_ctx_session_instructions(system_prompt, session_id)
-
-    try:
-        mcp_configs = _apply_mcp_env_overlays(
-            [_parse_mcp_spec(spec) for spec in args.mcp],
-            args.mcp_env,
-        )
-    except Exception as exc:
-        with telemetry_span():
-            _record_cli_telemetry(
-                "ctx.cli.run",
-                session_id=session_id,
-                phase="failed",
-                payload=_run_setup_failure_payload(args, stage="validation"),
-                outcome="error",
-                duration_ms=_duration_ms(telemetry_started),
-                error_kind=type(exc).__name__,
-                exc=exc,
-            )
-        raise
-    router = McpRouter(mcp_configs, session_id=session_id) if mcp_configs else None
-
-    # ctx-core tools.
-    lifecycle = RuntimeLifecycleStore()
-    extra_tools = []
-    tool_executor = None
-    if ctx_tools_enabled:
-        toolbox = CtxCoreToolbox(
-            lifecycle_dir=lifecycle.root,
-            bound_session_id=session_id,
-        )
-        extra_tools.extend(toolbox.tool_definitions())
-        tool_executor = make_tool_executor(toolbox, fallback=None)
-
-    compactor = None if args.no_compact else TokenBudgetCompactor()
-    allow_tools = _normalise_tool_patterns(args.allow_tool)
-    deny_tools = _normalise_tool_patterns(args.deny_tool)
-    tool_policy = _compile_tool_policy(allow_tools, deny_tools)
 
     try:
         store = SessionStore.create(
@@ -1179,6 +1873,135 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 error_kind=type(exc).__name__,
             )
         return 1
+
+    lifecycle = RuntimeLifecycleStore()
+
+    # Planner pass (opt-in, SOLO path only — when --evaluator is set,
+    # run_with_evaluation owns the planner call so the P/G/E agents
+    # share state coherently). In the solo path, the planner runs
+    # inline here and the produced spec is embedded into
+    # system_prompt for the Generator.
+    plan_artifact = None
+    if args.planner and not args.evaluator:
+        if not args.quiet:
+            print("[ctx] planner: building spec...", file=sys.stderr)
+        planner = Planner(
+            auxiliary_provider,
+            model=args.planner_model or args.model,
+        )
+        _load_runtime_agent(lifecycle, session_id=session_id, role="planner")
+        try:
+            with redirect_stdout(sys.stderr) if args.json else nullcontext():
+                plan_artifact = planner.plan(args.task)
+            _validate_usage(plan_artifact.usage, source="planner")
+            _mark_runtime_agent_used(
+                lifecycle,
+                session_id=session_id,
+                role="planner",
+                usage=plan_artifact.usage,
+                model=args.planner_model or args.model,
+                provider=args.provider or _model_provider_prefix(args.planner_model or args.model),
+            )
+        except Exception as exc:
+            with telemetry_span():
+                _record_cli_telemetry(
+                    "ctx.cli.run",
+                    session_id=session_id,
+                    phase="failed",
+                    payload=_run_setup_failure_payload(args, stage="planner"),
+                    outcome="error",
+                    duration_ms=_duration_ms(telemetry_started),
+                    error_kind=type(exc).__name__,
+                    exc=exc,
+                )
+            raise
+        finally:
+            _unload_runtime_agent(lifecycle, session_id=session_id, role="planner")
+        system_prompt = augmented_system_prompt(system_prompt, plan_artifact)
+        if not args.quiet:
+            status = "ok" if plan_artifact.parsed_ok else "unstructured"
+            print(
+                f"[ctx] planner: spec {status} "
+                f"(criteria={len(plan_artifact.success_criteria)}, "
+                f"risks={len(plan_artifact.risks)})",
+                file=sys.stderr,
+            )
+
+    ctx_tools_enabled = not args.no_ctx_tools
+    lifecycle_active = bool(ctx_tools_enabled or args.planner or args.evaluator or args.contract)
+    ctx_tool_surface = _resolve_ctx_tool_surface(args.ctx_tool_surface)
+    allow_tools = _normalise_tool_patterns(args.allow_tool)
+    deny_tools = _normalise_tool_patterns(args.deny_tool)
+
+    try:
+        mcp_configs = _apply_mcp_env_overlays(
+            [_parse_mcp_spec(spec) for spec in args.mcp],
+            args.mcp_env,
+        )
+    except Exception as exc:
+        with telemetry_span():
+            _record_cli_telemetry(
+                "ctx.cli.run",
+                session_id=session_id,
+                phase="failed",
+                payload=_run_setup_failure_payload(args, stage="validation"),
+                outcome="error",
+                duration_ms=_duration_ms(telemetry_started),
+                error_kind=type(exc).__name__,
+                exc=exc,
+            )
+        raise
+    router: McpRouter | None = None
+
+    # ctx-core tools.
+    extra_tools: list[ToolDefinition] = []
+    tool_executor = None
+    turn_controller: AdaptiveRuntimeController | _AdaptiveMcpController | None = None
+    if ctx_tools_enabled:
+        toolbox, ctx_definitions = _ctx_toolbox_for_surface(
+            lifecycle_dir=lifecycle.root,
+            bound_session_id=session_id,
+            surface=ctx_tool_surface,
+            allow_patterns=allow_tools,
+            deny_patterns=deny_tools,
+        )
+        if ctx_definitions:
+            extra_tools.extend(ctx_definitions)
+            tool_executor = make_tool_executor(toolbox, fallback=None)
+            system_prompt = _with_ctx_session_instructions(
+                system_prompt,
+                session_id,
+                ctx_definitions,
+            )
+        if ctx_tool_surface == "adaptive":
+            if mcp_configs:
+                router = McpRouter(mcp_configs, session_id=session_id, lazy=True)
+            if mcp_configs or not ctx_definitions:
+                turn_controller = _adaptive_controller_for_task(
+                    args.task,
+                    cwd=Path.cwd(),
+                    lifecycle=lifecycle,
+                    session_id=session_id,
+                    router=router,
+                    mcp_server_names=_adaptive_mcp_server_names(
+                        mcp_configs,
+                        allow_tools,
+                        deny_tools,
+                    ),
+                    mcp_configured_count=len(mcp_configs),
+                    allow_patterns=allow_tools,
+                    deny_patterns=deny_tools,
+                )
+            if not ctx_definitions:
+                system_prompt = _without_ctx_session_instructions(system_prompt)
+        elif not ctx_definitions:
+            system_prompt = _without_ctx_session_instructions(system_prompt)
+    if router is None and mcp_configs:
+        router = McpRouter(mcp_configs, session_id=session_id)
+
+    compactor = None if args.no_compact else TokenBudgetCompactor()
+    tool_policy = _compile_tool_policy(allow_tools, deny_tools)
+
     with telemetry_span() as span:
         metadata = {
             "task": args.task,
@@ -1205,6 +2028,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 for c in mcp_configs
             ],
             "ctx_tools_enabled": ctx_tools_enabled,
+            "ctx_tool_surface": ctx_tool_surface,
+            "ctx_tool_names": [definition.name for definition in extra_tools],
+            "ctx_adaptive": turn_controller.summary() if turn_controller else {"enabled": False},
             "tool_policy": {"allow": list(allow_tools), "deny": list(deny_tools)},
             "planner_used": plan_artifact is not None,
             "contract_used": bool(args.evaluator and args.contract),
@@ -1213,8 +2039,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             "plan": plan_artifact.to_dict() if plan_artifact else None,
             "plan_usage": (
                 {
-                    "input_tokens": plan_artifact.usage.input_tokens,
-                    "output_tokens": plan_artifact.usage.output_tokens,
+                    **_usage_token_fields(plan_artifact.usage),
                     "cost_usd": plan_artifact.usage.cost_usd,
                 }
                 if plan_artifact
@@ -1222,7 +2047,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             ),
         }
         observer = JsonlObserver(store, session_metadata=metadata)
-        if ctx_tools_enabled:
+        if lifecycle_active:
             _record_lifecycle_safely(
                 lifecycle,
                 "record_dev_event",
@@ -1236,18 +2061,26 @@ def _cmd_run(args: argparse.Namespace) -> int:
                     "provider": args.provider or _model_provider_prefix(args.model),
                 },
             )
+            _record_adaptive_selection_request(
+                lifecycle,
+                turn_controller,
+                session_id=session_id,
+            )
         _record_cli_telemetry(
             "ctx.cli.run",
             session_id=session_id,
             phase="started",
-            payload=_run_start_payload(
-                args,
-                ctx_tools_enabled=ctx_tools_enabled,
-                mcp_count=len(mcp_configs),
-                allow_count=len(allow_tools),
-                deny_count=len(deny_tools),
-                plan_available=plan_artifact is not None,
-            ),
+            payload={
+                **_run_start_payload(
+                    args,
+                    ctx_tools_enabled=ctx_tools_enabled,
+                    mcp_count=len(mcp_configs),
+                    allow_count=len(allow_tools),
+                    deny_count=len(deny_tools),
+                    plan_available=plan_artifact is not None,
+                ),
+                **_adaptive_runtime_payload(turn_controller),
+            },
             outcome="ok",
             duration_ms=_duration_ms(telemetry_started),
         )
@@ -1259,37 +2092,21 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 print(f"[ctx] budget: ${args.budget_usd:.2f}", file=sys.stderr)
 
         evaluator_rounds: list[dict[str, Any]] | None = None
+        handled_provider_exception: Exception | None = None
         contract_artifact = None  # populated only on P/C/G/E path
         result = None
+        deferred_stop_observer: _DeferredStopObserver | None = None
+        loaded_runtime_agents: list[str] = []
         try:
             if router is not None:
                 if not args.quiet:
+                    action = "registering dormant" if router.lazy else "starting"
                     print(
-                        f"[ctx] starting MCP servers: {[c.name for c in mcp_configs]}",
+                        f"[ctx] {action} MCP servers: {[c.name for c in mcp_configs]}",
                         file=sys.stderr,
                     )
                 router.start()
             if args.evaluator:
-                if args.contract and not args.planner:
-                    # Contracts refine planner output; without a plan
-                    # they'd have no prior spec to refine.
-                    _record_cli_telemetry(
-                        "ctx.cli.run",
-                        session_id=session_id,
-                        phase="failed",
-                        payload=_run_setup_failure_payload(
-                            args,
-                            stage="validation",
-                        ),
-                        outcome="error",
-                        duration_ms=_duration_ms(telemetry_started),
-                        error_kind="SystemExit",
-                    )
-                    raise SystemExit(
-                        "error: --contract requires --planner (the contract "
-                        "refines the planner's success_criteria into "
-                        "testable clauses)."
-                    )
                 if not args.quiet:
                     pieces = ["evaluator"]
                     if args.planner:
@@ -1301,46 +2118,80 @@ def _cmd_run(args: argparse.Namespace) -> int:
                         f"(max_rounds={args.evaluator_rounds})",
                         file=sys.stderr,
                     )
+                agent_models = {
+                    "planner": args.planner_model or args.model,
+                    "contract": args.contract_model or args.model,
+                    "evaluator": args.evaluator_model or args.model,
+                }
+                enabled_agent_roles = [
+                    role
+                    for role, enabled in (
+                        ("planner", args.planner),
+                        ("contract", args.contract),
+                        ("evaluator", True),
+                    )
+                    if enabled
+                ]
+                for role in enabled_agent_roles:
+                    _load_runtime_agent(lifecycle, session_id=session_id, role=role)
+                    loaded_runtime_agents.append(role)
+
+                def observe_agent_usage(role: str, usage: Usage) -> None:
+                    _mark_runtime_agent_used(
+                        lifecycle,
+                        session_id=session_id,
+                        role=role,
+                        usage=usage,
+                        model=agent_models.get(role),
+                        provider=args.provider
+                        or _model_provider_prefix(agent_models.get(role) or args.model),
+                    )
+
                 planner_agent = (
-                    Planner(provider, model=args.planner_model or args.model)
+                    Planner(auxiliary_provider, model=args.planner_model or args.model)
                     if args.planner
                     else None
                 )
                 contract_builder = (
                     ContractBuilder(
-                        provider,
+                        auxiliary_provider,
                         model=args.contract_model or args.model,
                     )
                     if args.contract
                     else None
                 )
                 evaluator_agent = Evaluator(
-                    provider,
+                    auxiliary_provider,
                     model=args.evaluator_model or args.model,
                 )
-                eval_outcome = run_with_evaluation(
-                    provider=provider,
-                    system_prompt=system_prompt,
-                    task=args.task,
-                    evaluator=evaluator_agent,
-                    max_rounds=args.evaluator_rounds,
-                    planner=planner_agent,
-                    contract_builder=contract_builder,
-                    router=router,
-                    extra_tools=extra_tools or None,
-                    tool_executor=tool_executor,
-                    tool_policy=tool_policy,
-                    model=args.model,
-                    temperature=args.temperature,
-                    max_tokens=args.max_tokens,
-                    provider_timeout=args.provider_timeout,
-                    max_iterations=args.max_iterations,
-                    budget_usd=args.budget_usd,
-                    budget_tokens=args.budget_tokens,
-                    observer=observer,
-                    compactor=compactor,
-                )
-                result = eval_outcome.final
+                deferred_stop_observer = _DeferredStopObserver(observer)
+                with redirect_stdout(sys.stderr) if args.json else nullcontext():
+                    eval_outcome = run_with_evaluation(
+                        provider=provider,
+                        system_prompt=system_prompt,
+                        task=args.task,
+                        evaluator=evaluator_agent,
+                        max_rounds=args.evaluator_rounds,
+                        planner=planner_agent,
+                        contract_builder=contract_builder,
+                        router=router,
+                        extra_tools=extra_tools or None,
+                        tool_executor=tool_executor,
+                        tool_policy=tool_policy,
+                        turn_controller=turn_controller,
+                        model=args.model,
+                        temperature=args.temperature,
+                        max_tokens=args.max_tokens,
+                        provider_timeout=args.provider_timeout,
+                        max_iterations=args.max_iterations,
+                        budget_usd=args.budget_usd,
+                        budget_tokens=args.budget_tokens,
+                        agent_usage_observer=observe_agent_usage,
+                        observer=deferred_stop_observer,
+                        compactor=compactor,
+                    )
+                result = replace(eval_outcome.final, usage=eval_outcome.total_usage)
+                observer.on_stop(result)
                 plan_artifact = eval_outcome.plan
                 contract_artifact = eval_outcome.contract
                 # session_start metadata was snapshotted BEFORE the planner
@@ -1373,54 +2224,103 @@ def _cmd_run(args: argparse.Namespace) -> int:
                             file=sys.stderr,
                         )
             else:
-                result = run_loop(
-                    provider=provider,
-                    system_prompt=system_prompt,
-                    task=args.task,
-                    router=router,
-                    extra_tools=extra_tools or None,
-                    tool_executor=tool_executor,
-                    tool_policy=tool_policy,
-                    model=args.model,
-                    temperature=args.temperature,
-                    max_tokens=args.max_tokens,
-                    provider_timeout=args.provider_timeout,
-                    max_iterations=args.max_iterations,
-                    budget_usd=args.budget_usd,
-                    budget_tokens=args.budget_tokens,
-                    observer=observer,
-                    compactor=compactor,
-                )
+                with redirect_stdout(sys.stderr) if args.json else nullcontext():
+                    result = run_loop(
+                        provider=provider,
+                        system_prompt=system_prompt,
+                        task=args.task,
+                        router=router,
+                        extra_tools=extra_tools or None,
+                        tool_executor=tool_executor,
+                        tool_policy=tool_policy,
+                        turn_controller=turn_controller,
+                        model=args.model,
+                        temperature=args.temperature,
+                        max_tokens=args.max_tokens,
+                        provider_timeout=args.provider_timeout,
+                        max_iterations=args.max_iterations,
+                        budget_usd=args.budget_usd,
+                        budget_tokens=args.budget_tokens,
+                        initial_usage=plan_artifact.usage if plan_artifact is not None else None,
+                        observer=observer,
+                        compactor=compactor,
+                    )
         except Exception as exc:
-            failure_payload = _loop_result_payload(result)
-            failure_payload["ctx.evaluator.round_count"] = (
-                len(evaluator_rounds) if evaluator_rounds is not None else 0
-            )
-            _record_cli_telemetry(
-                "ctx.cli.run",
-                session_id=session_id,
-                phase="failed",
-                payload=failure_payload,
-                outcome="error",
-                duration_ms=_duration_ms(telemetry_started),
-                error_kind=type(exc).__name__,
-                exc=exc,
-            )
-            raise
-        finally:
-            if ctx_tools_enabled:
-                _record_lifecycle_safely(
-                    lifecycle,
-                    "end_session",
-                    session_id=session_id,
-                    status=str(getattr(result, "stop_reason", "error")),
+            if result is None and deferred_stop_observer is not None:
+                result = deferred_stop_observer.failure_result(exc)
+                try:
+                    observer.on_stop(result)
+                except Exception:  # noqa: BLE001 - preserve the original failure.
+                    _logger.exception("failed to persist evaluator failure stop")
+                _write_session_config_safely(
+                    store,
+                    {
+                        "ctx_usage": {
+                            "complete": False,
+                            "scope": "completed_generator_rounds",
+                        }
+                    },
                 )
-            store.close()
-            if router is not None:
-                router.stop()
+            provider_failure = observer.last_provider_failure
+            if (
+                deferred_stop_observer is None
+                and result is None
+                and provider_failure is not None
+                and provider_failure.exception is exc
+            ):
+                result = provider_failure.result
+                handled_provider_exception = exc
+            else:
+                failure_payload = {
+                    **_loop_result_payload(result),
+                    **_adaptive_runtime_payload(turn_controller),
+                }
+                if deferred_stop_observer is not None:
+                    failure_payload["ctx.usage.complete"] = False
+                    failure_payload["ctx.usage.scope"] = "completed_generator_rounds"
+                failure_payload["ctx.evaluator.round_count"] = (
+                    len(evaluator_rounds) if evaluator_rounds is not None else 0
+                )
+                _record_cli_telemetry(
+                    "ctx.cli.run",
+                    session_id=session_id,
+                    phase="failed",
+                    payload=failure_payload,
+                    outcome="error",
+                    duration_ms=_duration_ms(telemetry_started),
+                    error_kind=type(exc).__name__,
+                    exc=exc,
+                )
+                raise
+        finally:
+            try:
+                for role in reversed(loaded_runtime_agents):
+                    _unload_runtime_agent(lifecycle, session_id=session_id, role=role)
+                loaded_runtime_agents.clear()
+                if turn_controller is not None:
+                    _write_session_config_safely(
+                        store,
+                        {"ctx_adaptive": turn_controller.summary()},
+                    )
+                if lifecycle_active:
+                    _record_lifecycle_safely(
+                        lifecycle,
+                        "end_session",
+                        session_id=session_id,
+                        status=str(getattr(result, "stop_reason", "error")),
+                    )
+            finally:
+                try:
+                    store.close()
+                finally:
+                    if router is not None:
+                        router.stop()
 
         outcome, error_kind = _loop_result_outcome(result)
-        finish_payload = _loop_result_payload(result)
+        finish_payload = {
+            **_loop_result_payload(result),
+            **_adaptive_runtime_payload(turn_controller),
+        }
         finish_payload["ctx.evaluator.round_count"] = (
             len(evaluator_rounds) if evaluator_rounds is not None else 0
         )
@@ -1432,6 +2332,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
             outcome=outcome,
             duration_ms=_duration_ms(telemetry_started),
             error_kind=error_kind,
+            exc=handled_provider_exception,
+            exception_escaped=handled_provider_exception is None,
         )
         return _emit_result(
             result,
@@ -1504,11 +2406,6 @@ def _cmd_resume(args: argparse.Namespace) -> int:
         if isinstance(recorded_system_prompt, str)
         else _DEFAULT_SYSTEM_PROMPT
     )
-    if use_ctx_tools:
-        system_prompt = _with_ctx_session_instructions(
-            str(system_prompt),
-            args.session_id,
-        )
     provider_name = args.provider or meta.get("provider") or meta.get("provider_prefix")
     provider_key = provider_name if isinstance(provider_name, str) else None
     if args.api_key_env is not None:
@@ -1562,19 +2459,71 @@ def _cmd_resume(args: argparse.Namespace) -> int:
     # transcript unless the user explicitly opts in for this resume.
     recorded_mcp_configs = _mcp_configs_from_metadata(meta)
     mcp_configs = recorded_mcp_configs if args.restore_session_mcp else []
-    router = McpRouter(mcp_configs, session_id=args.session_id) if mcp_configs else None
+    router: McpRouter | None = None
 
     lifecycle = RuntimeLifecycleStore()
     extra_tools: list[ToolDefinition] = []
     tool_executor = None
+    turn_controller: AdaptiveRuntimeController | _AdaptiveMcpController | None = None
+    allow_tools, deny_tools = _resume_tool_policy_patterns(args, meta)
+    ctx_tool_surface = _resolve_ctx_tool_surface(
+        args.ctx_tool_surface,
+        meta["ctx_tool_surface"] if "ctx_tool_surface" in meta else _MISSING,
+    )
     if use_ctx_tools:
-        ctx_toolbox = CtxCoreToolbox(
+        ctx_toolbox, ctx_definitions = _ctx_toolbox_for_surface(
             lifecycle_dir=lifecycle.root,
             bound_session_id=args.session_id,
+            surface=ctx_tool_surface,
+            allow_patterns=allow_tools,
+            deny_patterns=deny_tools,
         )
-        extra_tools.extend(ctx_toolbox.tool_definitions())
-        tool_executor = make_tool_executor(ctx_toolbox)
-    allow_tools, deny_tools = _resume_tool_policy_patterns(args, meta)
+        if ctx_definitions:
+            extra_tools.extend(ctx_definitions)
+            tool_executor = make_tool_executor(ctx_toolbox)
+            system_prompt = _with_ctx_session_instructions(
+                str(system_prompt),
+                args.session_id,
+                ctx_definitions,
+            )
+        if ctx_tool_surface == "adaptive":
+            if mcp_configs:
+                router = McpRouter(mcp_configs, session_id=args.session_id, lazy=True)
+            if mcp_configs or not ctx_definitions:
+                turn_controller = _adaptive_controller_for_task(
+                    args.task,
+                    cwd=Path.cwd(),
+                    lifecycle=lifecycle,
+                    session_id=args.session_id,
+                    router=router,
+                    mcp_server_names=_adaptive_mcp_server_names(
+                        mcp_configs,
+                        allow_tools,
+                        deny_tools,
+                    ),
+                    mcp_configured_count=len(mcp_configs),
+                    allow_patterns=allow_tools,
+                    deny_patterns=deny_tools,
+                )
+            if not ctx_definitions:
+                system_prompt = _without_ctx_session_instructions(str(system_prompt))
+        elif not ctx_definitions:
+            system_prompt = _without_ctx_session_instructions(str(system_prompt))
+    else:
+        system_prompt = _without_ctx_session_instructions(str(system_prompt))
+    if router is None and mcp_configs:
+        router = McpRouter(mcp_configs, session_id=args.session_id)
+    store.write_session_config(
+        {
+            "system_prompt": system_prompt,
+            "ctx_tools_enabled": use_ctx_tools,
+            "ctx_tool_surface": ctx_tool_surface,
+            "ctx_tool_names": [definition.name for definition in extra_tools],
+            "ctx_adaptive": turn_controller.summary() if turn_controller else {"enabled": False},
+            "tool_policy": {"allow": list(allow_tools), "deny": list(deny_tools)},
+        }
+    )
+    resume_messages = _resume_messages_with_system_prompt(state.messages, system_prompt)
     tool_policy = _compile_tool_policy(allow_tools, deny_tools)
 
     with telemetry_span():
@@ -1585,7 +2534,7 @@ def _cmd_resume(args: argparse.Namespace) -> int:
             elif recorded_mcp_configs:
                 bits.append(f"{len(recorded_mcp_configs)} recorded MCP server(s) skipped")
             if use_ctx_tools:
-                bits.append("ctx-core tools")
+                bits.append(f"ctx-core tools ({ctx_tool_surface}, {len(extra_tools)} schemas)")
             if allow_tools or deny_tools:
                 bits.append(f"tool policy allow={len(allow_tools)} deny={len(deny_tools)}")
             suffix = f" + {', '.join(bits)}" if bits else ""
@@ -1611,81 +2560,113 @@ def _cmd_resume(args: argparse.Namespace) -> int:
                 cwd=str(Path.cwd()),
                 payload={"task": args.task, "model": model},
             )
+            _record_adaptive_selection_request(
+                lifecycle,
+                turn_controller,
+                session_id=args.session_id,
+            )
         _record_cli_telemetry(
             "ctx.cli.resume",
             session_id=args.session_id,
             phase="started",
-            payload=_resume_start_payload(
-                args,
-                model=str(model),
-                use_ctx_tools=use_ctx_tools,
-                prior_message_count=len(state.messages),
-                recorded_mcp_count=len(recorded_mcp_configs),
-                restored_mcp_count=len(mcp_configs),
-                allow_count=len(allow_tools),
-                deny_count=len(deny_tools),
-                previous_trace_id=previous_trace_id,
-            ),
+            payload={
+                **_resume_start_payload(
+                    args,
+                    model=str(model),
+                    use_ctx_tools=use_ctx_tools,
+                    prior_message_count=len(state.messages),
+                    recorded_mcp_count=len(recorded_mcp_configs),
+                    restored_mcp_count=len(mcp_configs),
+                    allow_count=len(allow_tools),
+                    deny_count=len(deny_tools),
+                    previous_trace_id=previous_trace_id,
+                ),
+                **_adaptive_runtime_payload(turn_controller),
+            },
             outcome="ok",
             duration_ms=_duration_ms(telemetry_started),
         )
 
         result = None
+        handled_provider_exception: Exception | None = None
         try:
             if router is not None:
                 router.start()
-            result = run_loop(
-                provider=provider,
-                system_prompt=system_prompt,
-                task=args.task,
-                messages=list(state.messages),
-                model=model,
-                observer=observer,
-                compactor=compactor,
-                router=router,
-                extra_tools=extra_tools or None,
-                tool_executor=tool_executor,
-                tool_policy=tool_policy,
-                # Resume must keep the replayed transcript first; the
-                # follow-up task is appended at the end, not shoved before
-                # the prior conversation.
-                append_task_after_messages=True,
-                # Inherit the original run's safety limits when present
-                # so the resume doesn't blow past the original ceiling.
-                max_iterations=int(meta.get("max_iterations") or 25),
-                temperature=float(meta.get("temperature") or 0.7),
-                max_tokens=meta.get("max_tokens"),
-                provider_timeout=provider_timeout,
-                budget_usd=meta.get("budget_usd"),
-                budget_tokens=meta.get("budget_tokens"),
-                initial_usage=state.usage,
-            )
-        except Exception as exc:
-            _record_cli_telemetry(
-                "ctx.cli.resume",
-                session_id=args.session_id,
-                phase="failed",
-                payload=_with_previous_trace_id(
-                    _loop_result_payload(result),
-                    previous_trace_id,
-                ),
-                outcome="error",
-                duration_ms=_duration_ms(telemetry_started),
-                error_kind=type(exc).__name__,
-                exc=exc,
-            )
-            raise
-        finally:
-            if use_ctx_tools:
-                _record_lifecycle_safely(
-                    lifecycle,
-                    "end_session",
-                    session_id=args.session_id,
-                    status=str(getattr(result, "stop_reason", "error")),
+            with redirect_stdout(sys.stderr) if args.json else nullcontext():
+                result = run_loop(
+                    provider=provider,
+                    system_prompt=system_prompt,
+                    task=args.task,
+                    messages=resume_messages,
+                    model=model,
+                    observer=observer,
+                    compactor=compactor,
+                    router=router,
+                    extra_tools=extra_tools or None,
+                    tool_executor=tool_executor,
+                    tool_policy=tool_policy,
+                    turn_controller=turn_controller,
+                    # Resume must keep the replayed transcript first; the
+                    # follow-up task is appended at the end, not shoved before
+                    # the prior conversation.
+                    append_task_after_messages=True,
+                    # Inherit the original run's safety limits when present
+                    # so the resume doesn't blow past the original ceiling.
+                    max_iterations=int(meta.get("max_iterations") or 25),
+                    temperature=float(meta.get("temperature") or 0.7),
+                    max_tokens=meta.get("max_tokens"),
+                    provider_timeout=provider_timeout,
+                    budget_usd=meta.get("budget_usd"),
+                    budget_tokens=meta.get("budget_tokens"),
+                    initial_usage=state.usage,
                 )
-            store.close()
-            if router is not None:
-                router.stop()
+        except Exception as exc:
+            provider_failure = observer.last_provider_failure
+            if (
+                result is None
+                and provider_failure is not None
+                and provider_failure.exception is exc
+            ):
+                result = provider_failure.result
+                handled_provider_exception = exc
+            else:
+                _record_cli_telemetry(
+                    "ctx.cli.resume",
+                    session_id=args.session_id,
+                    phase="failed",
+                    payload=_with_previous_trace_id(
+                        {
+                            **_loop_result_payload(result),
+                            **_adaptive_runtime_payload(turn_controller),
+                        },
+                        previous_trace_id,
+                    ),
+                    outcome="error",
+                    duration_ms=_duration_ms(telemetry_started),
+                    error_kind=type(exc).__name__,
+                    exc=exc,
+                )
+                raise
+        finally:
+            try:
+                if turn_controller is not None:
+                    _write_session_config_safely(
+                        store,
+                        {"ctx_adaptive": turn_controller.summary()},
+                    )
+                if use_ctx_tools:
+                    _record_lifecycle_safely(
+                        lifecycle,
+                        "end_session",
+                        session_id=args.session_id,
+                        status=str(getattr(result, "stop_reason", "error")),
+                    )
+            finally:
+                try:
+                    store.close()
+                finally:
+                    if router is not None:
+                        router.stop()
 
         outcome, error_kind = _loop_result_outcome(result)
         _record_cli_telemetry(
@@ -1693,12 +2674,17 @@ def _cmd_resume(args: argparse.Namespace) -> int:
             session_id=args.session_id,
             phase="finished",
             payload=_with_previous_trace_id(
-                _loop_result_payload(result),
+                {
+                    **_loop_result_payload(result),
+                    **_adaptive_runtime_payload(turn_controller),
+                },
                 previous_trace_id,
             ),
             outcome=outcome,
             duration_ms=_duration_ms(telemetry_started),
             error_kind=error_kind,
+            exc=handled_provider_exception,
+            exception_escaped=handled_provider_exception is None,
         )
         return _emit_result(result, args.session_id, as_json=args.json, quiet=args.quiet)
 
@@ -1753,8 +2739,10 @@ def _cmd_sessions(args: argparse.Namespace) -> int:
 _ERROR_STOP_REASONS = frozenset(
     {
         "content_filter",
+        "controller_error",
         "empty_response",
         "length",
+        "observer_error",
         "provider_error",
         "provider_other",
         "provider_timeout",
@@ -1772,6 +2760,7 @@ def _emit_result(
     quiet: bool,
     evaluator_rounds: list[dict[str, Any]] | None = None,
 ) -> int:
+    token_fields = _usage_token_fields(result.usage)
     if as_json:
         payload = {
             "session_id": session_id,
@@ -1779,8 +2768,7 @@ def _emit_result(
             "final_message": result.final_message,
             "iterations": result.iterations,
             "usage": {
-                "input_tokens": result.usage.input_tokens,
-                "output_tokens": result.usage.output_tokens,
+                **token_fields,
                 "cost_usd": result.usage.cost_usd,
             },
             "usage_attribution": _usage_attribution_summary(result.usage),
@@ -1791,9 +2779,10 @@ def _emit_result(
         print(json.dumps(payload, indent=2))
     else:
         if not quiet:
+            token_count = token_fields["total_tokens"]
             print(
                 f"\n[ctx] stop={result.stop_reason}  iterations={result.iterations}  "
-                f"tokens={result.usage.input_tokens + result.usage.output_tokens}  "
+                f"tokens={token_count if token_count is not None else 'unavailable'}  "
                 "usage_scope=session  per_tool_usage=unavailable",
                 file=sys.stderr,
             )

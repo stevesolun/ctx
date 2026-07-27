@@ -15,6 +15,8 @@ import urllib.error
 import urllib.request
 import zlib
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -36,6 +38,8 @@ from ctx.monitor.api import mutations as mutations_api
 from ctx.monitor.api import readonly as readonly_api
 from ctx.monitor import routes as monitor_routes
 from ctx.monitor import cli as monitor_cli
+from ctx.monitor import security as monitor_security
+from ctx.monitor.server import MonitorHandlerDeps, build_monitor_handler
 from ctx.monitor.services import config as config_service
 from ctx.monitor.services import graph as graph_service
 from ctx.monitor.services import harness as harness_service
@@ -1000,8 +1004,12 @@ def test_runtime_lifecycle_summary_reads_validation_and_escalation_events(
                 "token_usage": {
                     "attribution": "exact",
                     "input_tokens": 10,
+                    "cached_input_tokens": 6,
+                    "cache_write_input_tokens": 2,
+                    "uncached_input_tokens": 4,
                     "output_tokens": 5,
                     "total_tokens": 15,
+                    "tokens_reported": True,
                     "cost_usd": 0.02,
                 },
                 "created_at": "2026-05-08T01:10:00Z",
@@ -1035,8 +1043,12 @@ def test_runtime_lifecycle_summary_reads_validation_and_escalation_events(
     assert summary["token_usage"] == {
         "records": 1,
         "input_tokens": 10,
+        "cached_input_tokens": 6,
+        "cache_write_input_tokens": 2,
+        "uncached_input_tokens": 4,
         "output_tokens": 5,
         "total_tokens": 15,
+        "tokens_reported": True,
         "cost_usd": 0.02,
         "by_attribution": {"exact": 1, "estimated": 0, "unavailable": 0},
     }
@@ -1075,6 +1087,14 @@ def test_runtime_lifecycle_summary_counts_mcp_token_usage_history(
                 "token_usage": {
                     "attribution": "unavailable",
                     "attribution_reason": "host did not provide per-tool token usage",
+                    "input_tokens": 0,
+                    "cached_input_tokens": 0,
+                    "cache_write_input_tokens": 0,
+                    "uncached_input_tokens": 0,
+                    "output_tokens": 0,
+                    "total_tokens": 0,
+                    "tokens_reported": False,
+                    "cost_usd": 0.0,
                 },
                 "created_at": "2026-05-08T01:09:00Z",
             },
@@ -1086,10 +1106,14 @@ def test_runtime_lifecycle_summary_counts_mcp_token_usage_history(
     assert summary["tool_selection"]["used_total"] == 1
     assert summary["token_usage"] == {
         "records": 1,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "total_tokens": 0,
-        "cost_usd": 0.0,
+        "input_tokens": None,
+        "cached_input_tokens": None,
+        "cache_write_input_tokens": None,
+        "uncached_input_tokens": None,
+        "output_tokens": None,
+        "total_tokens": None,
+        "tokens_reported": False,
+        "cost_usd": None,
         "by_attribution": {"exact": 0, "estimated": 0, "unavailable": 1},
     }
     history = summary["token_usage_history"]
@@ -1100,6 +1124,476 @@ def test_runtime_lifecycle_summary_counts_mcp_token_usage_history(
     assert history["by_session"][0]["session_id"] == "s-mcp"
     assert history["by_source"][0]["selection_source"] == "host"
     assert summary["recent_tool_usage"][0]["token_usage"]["attribution"] == "unavailable"
+
+
+def test_runtime_lifecycle_summary_aggregates_complete_cache_usage_by_dimension(
+    tmp_path: Path,
+) -> None:
+    events = tmp_path / "runtime" / "events.jsonl"
+    complete_load = {
+        "action": "load_requested",
+        "session_id": "s-complete",
+        "entity_type": "skill",
+        "slug": "cache-aware",
+        "selected": True,
+        "selection_source": "host",
+    }
+    complete_usage = [
+        {
+            "action": "used",
+            "session_id": "s-complete",
+            "entity_type": "skill",
+            "slug": "cache-aware",
+            "token_usage": {
+                "attribution": "exact",
+                "input_tokens": 10,
+                "cached_input_tokens": 4,
+                "cache_write_input_tokens": 2,
+                "uncached_input_tokens": 6,
+                "output_tokens": 2,
+                "total_tokens": 12,
+                "tokens_reported": True,
+                "cost_usd": 0.01,
+            },
+        },
+        {
+            "action": "used",
+            "session_id": "s-complete",
+            "entity_type": "skill",
+            "slug": "cache-aware",
+            "token_usage": {
+                "attribution": "exact",
+                "input_tokens": 5,
+                "cached_input_tokens": 2,
+                "cache_write_input_tokens": 1,
+                "uncached_input_tokens": 3,
+                "output_tokens": 1,
+                "total_tokens": 6,
+                "tokens_reported": True,
+                "cost_usd": 0.02,
+            },
+        },
+    ]
+    missing_load = {
+        "action": "load_requested",
+        "session_id": "s-missing",
+        "entity_type": "agent",
+        "slug": "usage-missing",
+        "selected": False,
+        "selection_source": "system",
+    }
+    missing_usage = {
+        "action": "used",
+        "session_id": "s-missing",
+        "entity_type": "agent",
+        "slug": "usage-missing",
+    }
+    _write_runtime_events(
+        events,
+        [complete_load, *complete_usage, missing_load, missing_usage],
+    )
+
+    summary = runtime_service.lifecycle_summary(events)
+
+    assert summary["token_usage"] == {
+        "records": 3,
+        "input_tokens": None,
+        "cached_input_tokens": None,
+        "cache_write_input_tokens": None,
+        "uncached_input_tokens": None,
+        "output_tokens": None,
+        "total_tokens": None,
+        "tokens_reported": False,
+        "cost_usd": None,
+        "by_attribution": {"exact": 2, "estimated": 0, "unavailable": 1},
+    }
+    history = summary["token_usage_history"]
+    by_tool = {(row["entity_type"], row["slug"]): row for row in history["by_tool"]}
+    assert by_tool[("skill", "cache-aware")] == {
+        "entity_type": "skill",
+        "slug": "cache-aware",
+        "records": 2,
+        "input_tokens": 15,
+        "cached_input_tokens": 6,
+        "cache_write_input_tokens": 3,
+        "uncached_input_tokens": 9,
+        "output_tokens": 3,
+        "total_tokens": 18,
+        "tokens_reported": True,
+        "cost_usd": 0.03,
+        "by_attribution": {"exact": 2, "estimated": 0, "unavailable": 0},
+    }
+    assert by_tool[("agent", "usage-missing")]["total_tokens"] is None
+    assert by_tool[("agent", "usage-missing")]["tokens_reported"] is False
+    by_type = {row["entity_type"]: row for row in history["by_type"]}
+    assert by_type["skill"]["cache_write_input_tokens"] == 3
+    assert by_type["agent"]["cache_write_input_tokens"] is None
+    by_session = {row["session_id"]: row for row in history["by_session"]}
+    assert by_session["s-complete"]["uncached_input_tokens"] == 9
+    assert by_session["s-missing"]["uncached_input_tokens"] is None
+    by_source = {row["selection_source"]: row for row in history["by_source"]}
+    assert by_source["host"]["cached_input_tokens"] == 6
+    assert by_source["system"]["cached_input_tokens"] is None
+    assert summary["recent_tool_usage"][-1]["token_usage"]["attribution"] == "unavailable"
+
+
+def test_runtime_lifecycle_summary_preserves_consistent_legacy_usage(
+    tmp_path: Path,
+) -> None:
+    events = tmp_path / "runtime" / "events.jsonl"
+    _write_runtime_events(
+        events,
+        [
+            {
+                "action": "used",
+                "session_id": "s-legacy",
+                "entity_type": "skill",
+                "slug": "legacy-usage",
+                "token_usage": {
+                    "input_tokens": 10,
+                    "cached_input_tokens": 4,
+                    "cache_write_input_tokens": 2,
+                    "uncached_input_tokens": 6,
+                    "output_tokens": 5,
+                    "total_tokens": 15,
+                    "cost_usd": 0.03,
+                },
+            }
+        ],
+    )
+
+    summary = runtime_service.lifecycle_summary(events)
+
+    assert summary["token_usage"] == {
+        "records": 1,
+        "input_tokens": 10,
+        "cached_input_tokens": 4,
+        "cache_write_input_tokens": 2,
+        "uncached_input_tokens": 6,
+        "output_tokens": 5,
+        "total_tokens": 15,
+        "tokens_reported": True,
+        "cost_usd": 0.03,
+        "by_attribution": {"exact": 0, "estimated": 1, "unavailable": 0},
+    }
+    recent = summary["recent_tool_usage"][0]["token_usage"]
+    assert recent["attribution"] == "estimated"
+    assert (
+        recent["attribution_reason"]
+        == "legacy token usage without attribution; treated as estimated"
+    )
+
+
+def test_runtime_lifecycle_summary_downgrades_incomplete_reported_usage(
+    tmp_path: Path,
+) -> None:
+    events = tmp_path / "runtime" / "events.jsonl"
+    _write_runtime_events(
+        events,
+        [
+            {
+                "action": "used",
+                "session_id": "s-incomplete",
+                "entity_type": "skill",
+                "slug": "incomplete-usage",
+                "token_usage": {
+                    "attribution": "exact",
+                    "input_tokens": 5,
+                    "total_tokens": 5,
+                    "tokens_reported": True,
+                },
+            }
+        ],
+    )
+
+    summary = runtime_service.lifecycle_summary(events)
+    recent = summary["recent_tool_usage"][0]["token_usage"]
+
+    assert recent["attribution"] == "unavailable"
+    assert recent["attribution_reason"] == "incomplete exact token usage; treated as unavailable"
+    assert recent["input_tokens"] is None
+    assert recent["output_tokens"] is None
+    assert recent["total_tokens"] is None
+    assert recent["tokens_reported"] is False
+    assert summary["token_usage"]["tokens_reported"] is False
+
+
+def test_runtime_lifecycle_summary_infers_reported_only_when_absent(
+    tmp_path: Path,
+) -> None:
+    events = tmp_path / "runtime" / "events.jsonl"
+    _write_runtime_events(
+        events,
+        [
+            {
+                "action": "used",
+                "session_id": "s-reported-flags",
+                "entity_type": "skill",
+                "slug": "reported-absent",
+                "token_usage": {
+                    "attribution": "exact",
+                    "input_tokens": 5,
+                    "output_tokens": 1,
+                    "total_tokens": 6,
+                },
+            },
+            {
+                "action": "used",
+                "session_id": "s-reported-flags",
+                "entity_type": "agent",
+                "slug": "reported-malformed",
+                "token_usage": {
+                    "attribution": "exact",
+                    "input_tokens": 5,
+                    "output_tokens": 1,
+                    "total_tokens": 6,
+                    "tokens_reported": "true",
+                },
+            },
+            {
+                "action": "used",
+                "session_id": "s-reported-flags",
+                "entity_type": "mcp-server",
+                "slug": "reported-false",
+                "token_usage": {
+                    "attribution": "exact",
+                    "input_tokens": 5,
+                    "output_tokens": 1,
+                    "total_tokens": 6,
+                    "tokens_reported": False,
+                },
+            },
+        ],
+    )
+
+    recent = runtime_service.lifecycle_summary(events)["recent_tool_usage"]
+    by_slug = {row["slug"]: row["token_usage"] for row in recent}
+
+    absent = by_slug["reported-absent"]
+    assert absent["attribution"] == "exact"
+    assert absent["tokens_reported"] is True
+
+    malformed = by_slug["reported-malformed"]
+    assert malformed["attribution"] == "estimated"
+    assert malformed["tokens_reported"] is False
+    assert malformed["attribution_reason"] == (
+        "invalid tokens_reported value; treated as estimated"
+    )
+
+    explicit_false = by_slug["reported-false"]
+    assert explicit_false["attribution"] == "estimated"
+    assert explicit_false["tokens_reported"] is False
+    assert explicit_false["attribution_reason"] == (
+        "exact token usage was not fully reported; treated as estimated"
+    )
+
+
+def test_runtime_lifecycle_summary_repairs_contradictory_exact_total(
+    tmp_path: Path,
+) -> None:
+    events = tmp_path / "runtime" / "events.jsonl"
+    _write_runtime_events(
+        events,
+        [
+            {
+                "action": "used",
+                "session_id": "s-contradictory",
+                "entity_type": "agent",
+                "slug": "contradictory-usage",
+                "token_usage": {
+                    "attribution": "exact",
+                    "input_tokens": 5,
+                    "output_tokens": 1,
+                    "total_tokens": 999,
+                    "tokens_reported": True,
+                },
+            }
+        ],
+    )
+
+    summary = runtime_service.lifecycle_summary(events)
+    recent = summary["recent_tool_usage"][0]["token_usage"]
+
+    assert recent["attribution"] == "estimated"
+    assert recent["attribution_reason"] == "inconsistent total token usage; treated as estimated"
+    assert recent["total_tokens"] == 6
+    assert recent["tokens_reported"] is False
+    assert summary["token_usage"]["total_tokens"] == 6
+    assert summary["token_usage"]["tokens_reported"] is False
+    assert summary["token_usage"]["by_attribution"]["estimated"] == 1
+
+
+def test_runtime_lifecycle_summary_repairs_contradictory_legacy_total(
+    tmp_path: Path,
+) -> None:
+    events = tmp_path / "runtime" / "events.jsonl"
+    _write_runtime_events(
+        events,
+        [
+            {
+                "action": "used",
+                "session_id": "s-legacy-contradictory",
+                "entity_type": "skill",
+                "slug": "legacy-contradictory-usage",
+                "token_usage": {
+                    "input_tokens": 5,
+                    "output_tokens": 1,
+                    "total_tokens": 999,
+                },
+            }
+        ],
+    )
+
+    recent = runtime_service.lifecycle_summary(events)["recent_tool_usage"][0]["token_usage"]
+
+    assert recent["attribution"] == "estimated"
+    assert (
+        recent["attribution_reason"]
+        == "legacy token usage without attribution; treated as estimated"
+    )
+    assert recent["total_tokens"] == 6
+    assert recent["tokens_reported"] is False
+
+
+def test_runtime_lifecycle_summary_preserves_exact_zero_usage(tmp_path: Path) -> None:
+    events = tmp_path / "runtime" / "events.jsonl"
+    _write_runtime_events(
+        events,
+        [
+            {
+                "action": "used",
+                "session_id": "s-zero",
+                "entity_type": "mcp-server",
+                "slug": "zero-usage",
+                "token_usage": {
+                    "attribution": "exact",
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "total_tokens": 0,
+                    "tokens_reported": True,
+                    "cost_usd": 0.0,
+                },
+            }
+        ],
+    )
+
+    summary = runtime_service.lifecycle_summary(events)
+    recent = summary["recent_tool_usage"][0]["token_usage"]
+
+    assert recent["input_tokens"] == 0
+    assert recent["output_tokens"] == 0
+    assert recent["total_tokens"] == 0
+    assert recent["tokens_reported"] is True
+    assert summary["token_usage"]["input_tokens"] == 0
+    assert summary["token_usage"]["output_tokens"] == 0
+    assert summary["token_usage"]["total_tokens"] == 0
+    assert summary["token_usage"]["tokens_reported"] is True
+
+
+@pytest.mark.parametrize(
+    ("cache_fields", "invalid_fields"),
+    [
+        ({"cached_input_tokens": 6}, {"cached_input_tokens", "uncached_input_tokens"}),
+        ({"cache_write_input_tokens": 6}, {"cache_write_input_tokens"}),
+        (
+            {"cached_input_tokens": 2, "uncached_input_tokens": 2},
+            {"cached_input_tokens", "uncached_input_tokens"},
+        ),
+    ],
+)
+def test_runtime_lifecycle_summary_nulls_malformed_cache_usage(
+    tmp_path: Path,
+    cache_fields: dict[str, int],
+    invalid_fields: set[str],
+) -> None:
+    events = tmp_path / "runtime" / "events.jsonl"
+    _write_runtime_events(
+        events,
+        [
+            {
+                "action": "used",
+                "session_id": "s-malformed",
+                "entity_type": "agent",
+                "slug": "cache-reader",
+                "token_usage": {
+                    "attribution": "exact",
+                    "input_tokens": 5,
+                    "output_tokens": 1,
+                    "total_tokens": 6,
+                    "tokens_reported": True,
+                    "cost_usd": 0.01,
+                    **cache_fields,
+                },
+            }
+        ],
+    )
+
+    summary = runtime_service.lifecycle_summary(events)
+    recent = summary["recent_tool_usage"][0]["token_usage"]
+
+    assert summary["token_usage"]["records"] == 1
+    assert summary["token_usage"]["tokens_reported"] is False
+    assert summary["token_usage"]["input_tokens"] == 5
+    assert summary["token_usage"]["output_tokens"] == 1
+    assert summary["token_usage"]["total_tokens"] == 6
+    for field in invalid_fields:
+        assert summary["token_usage"][field] is None
+        assert recent[field] is None
+
+
+def test_runtime_lifecycle_summary_whitelists_and_sanitizes_token_metadata(
+    tmp_path: Path,
+) -> None:
+    events = tmp_path / "runtime" / "events.jsonl"
+    secret = "sk-" + ("a" * 32)
+    _write_runtime_events(
+        events,
+        [
+            {
+                "action": "used",
+                "session_id": "s-private",
+                "entity_type": "mcp-server",
+                "slug": "filesystem",
+                "token_usage": {
+                    "attribution": "exact",
+                    "input_tokens": 1,
+                    "output_tokens": 0,
+                    "total_tokens": 1,
+                    "tokens_reported": True,
+                    "cost_usd": 0.0,
+                    "attribution_reason": f"read /Users/alice/private with {secret}",
+                    "model": "/Users/alice/private/model",
+                    "provider": f"provider-{secret}",
+                    "api_key": secret,
+                    "arbitrary": {"path": "/Users/alice/private/raw"},
+                },
+            }
+        ],
+    )
+
+    recent = runtime_service.lifecycle_summary(events)["recent_tool_usage"][0]["token_usage"]
+    serialized = json.dumps(recent)
+
+    assert set(recent) == {
+        "attribution",
+        "attribution_reason",
+        "cache_write_input_tokens",
+        "cached_input_tokens",
+        "cost_usd",
+        "input_tokens",
+        "model",
+        "output_tokens",
+        "provider",
+        "tokens_reported",
+        "total_tokens",
+        "uncached_input_tokens",
+    }
+    assert "api_key" not in recent
+    assert "arbitrary" not in recent
+    assert secret not in serialized
+    assert "/Users/alice" not in serialized
+    assert recent["provider"] == "provider-[redacted]"
+    assert recent["model"].startswith("[path_hash:sha256:")
 
 
 def test_runtime_lifecycle_summary_uses_full_history_for_open_state(
@@ -1198,8 +1692,12 @@ def test_render_runtime_lifecycle_surfaces_checks_and_open_escalations(
                 "token_usage": {
                     "attribution": "exact",
                     "input_tokens": 20,
+                    "cached_input_tokens": 12,
+                    "cache_write_input_tokens": 4,
+                    "uncached_input_tokens": 8,
                     "output_tokens": 7,
                     "total_tokens": 27,
+                    "tokens_reported": True,
                     "cost_usd": 0.03,
                 },
                 "created_at": "2026-05-08T01:08:00Z",
@@ -1219,7 +1717,11 @@ def test_render_runtime_lifecycle_surfaces_checks_and_open_escalations(
     assert "Recent tool usage" in html
     assert "&lt;fastapi-pro&gt;" in html
     assert "<strong>27</strong> tokens" in html
+    assert "<td>Cache read</td><td>12</td>" in html
+    assert "<td>Cache write</td><td>4</td>" in html
+    assert "<td>Uncached input</td><td>8</td>" in html
     assert "<span class='pill'>exact</span>" in html
+    assert html.count("class='card table-scroll'") == 5
 
 
 def test_render_logs_filters_and_renders(fake_claude: Path) -> None:
@@ -1601,6 +2103,207 @@ def test_monitor_post_rejects_cross_origin_with_valid_token(
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+@pytest.mark.parametrize(
+    "origin_kind",
+    [
+        "https-scheme",
+        "wrong-port",
+        "userinfo",
+        "path",
+    ],
+)
+def test_monitor_post_rejects_non_exact_origin_with_valid_token(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    origin_kind: str,
+) -> None:
+    calls: list[str] = []
+
+    def fake_load(slug: str, entity_type: str = "skill") -> tuple[bool, str]:
+        calls.append(slug)
+        return True, f"loaded {entity_type}"
+
+    monkeypatch.setattr(mt, "perform_load", fake_load)
+    server, thread, port = _serve_monitor(monkeypatch)
+    body = json.dumps({"slug": "python-patterns"}).encode("utf-8")
+    origins = {
+        "https-scheme": f"https://127.0.0.1:{port}",
+        "wrong-port": f"http://127.0.0.1:{port + 1}",
+        "userinfo": f"http://ctx@127.0.0.1:{port}",
+        "path": f"http://127.0.0.1:{port}/dashboard",
+    }
+    try:
+        status, payload = _post_raw(
+            port,
+            "/api/load",
+            headers={
+                "Content-Type": "application/json",
+                "Content-Length": str(len(body)),
+                "X-CTX-Monitor-Token": "test-token",
+                "Origin": origins[origin_kind],
+            },
+            body=body,
+        )
+        assert status == 403
+        assert "cross-origin" in payload["detail"]
+        assert calls == []
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_monitor_post_accepts_exact_http_origin_and_originless_client(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    def fake_load(slug: str, entity_type: str = "skill") -> tuple[bool, str]:
+        calls.append(slug)
+        return True, f"loaded {entity_type}"
+
+    monkeypatch.setattr(mt, "perform_load", fake_load)
+    server, thread, port = _serve_monitor(monkeypatch)
+    body = json.dumps({"slug": "python-patterns"}).encode("utf-8")
+    try:
+        status, _ = _post_raw(
+            port,
+            "/api/load",
+            headers={
+                "Content-Type": "application/json",
+                "Content-Length": str(len(body)),
+                "X-CTX-Monitor-Token": "test-token",
+                "Origin": f"http://127.0.0.1:{port}",
+            },
+            body=body,
+        )
+        assert status == 200
+
+        status, _ = _post_json(
+            port,
+            "/api/load",
+            {"slug": "python-patterns"},
+            token="test-token",
+        )
+        assert status == 200
+        assert calls == ["python-patterns", "python-patterns"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+@pytest.mark.parametrize(
+    ("origin", "host_header", "expected"),
+    [
+        ("http://localhost:8765", "localhost:8765", True),
+        ("http://[::1]:8765", "[::1]:8765", True),
+        ("http://[0:0:0:0:0:0:0:1]", "[::1]:80", True),
+        ("http://localhost", "localhost:80", True),
+        ("https://localhost:8765", "localhost:8765", False),
+        ("http://localhost:8766", "localhost:8765", False),
+        ("http://user@localhost:8765", "localhost:8765", False),
+        ("http://localhost:8765/", "localhost:8765", False),
+        ("http://localhost:8765?", "localhost:8765", False),
+        ("http://localhost:8765#", "localhost:8765", False),
+        ("http://localhost:8765?#", "localhost:8765", False),
+        ("http://localhost:8765?query", "localhost:8765", False),
+        ("http://localhost:8765#fragment", "localhost:8765", False),
+        (r"http://localhost:8765\dashboard", "localhost:8765", False),
+        ("http://localhost:8765", "user@localhost:8765", False),
+        ("http://localhost:8765", "localhost:", False),
+        ("http://localhost..:8765", "localhost:8765", False),
+        ("http://localhost:8765", "localhost..:8765", False),
+    ],
+)
+def test_origin_matches_http_host_exactly(
+    origin: str,
+    host_header: str,
+    expected: bool,
+) -> None:
+    assert monitor_security.origin_matches_http_host(origin, host_header) is expected
+
+
+@pytest.mark.parametrize(
+    "host_header",
+    [
+        "localhost:",
+        "localhost:notaport",
+        "127.0.0.1:99999",
+        "[::1]:",
+        "[::1]:bad",
+        "localhost/path",
+        "localhost?query",
+        "localhost#fragment",
+        r"localhost\path",
+    ],
+)
+def test_request_host_name_rejects_malformed_authority(host_header: str) -> None:
+    request_host = monitor_security.request_host_name(host_header)
+
+    assert request_host == ""
+    assert monitor_security.host_allows_mutations(request_host) is False
+
+
+@pytest.mark.parametrize(
+    "host_header",
+    [
+        "localhost:",
+        "localhost:notaport",
+        "127.0.0.1:99999",
+        "[::1]:",
+        "[::1]:bad",
+    ],
+)
+def test_monitor_handler_rejects_malformed_host_authority(
+    host_header: str,
+    tmp_path: Path,
+) -> None:
+    deps = MonitorHandlerDeps(
+        monitor_token=lambda: "monitor-secret",
+        mutations_enabled_default=lambda: True,
+        host_allows_mutations=monitor_security.host_allows_mutations,
+        request_host_name=monitor_security.request_host_name,
+        origin_host_name=monitor_security.origin_host_name,
+        read_token_cookie=monitor_security.read_token_cookie,
+        read_token_cookie_name=monitor_security.READ_TOKEN_COOKIE,
+        max_post_body_bytes=monitor_security.MAX_POST_BODY_BYTES,
+        audit_log_path=lambda: tmp_path / "audit.jsonl",
+        handle_get_route=lambda _handler, _route, _query: None,
+        handle_post_route=lambda _handler, _route, _body, _path: None,
+    )
+    handler_type = build_monitor_handler(deps)
+    handler = cast(Any, object.__new__(handler_type))
+    handler.server = SimpleNamespace(_ctx_mutations_enabled=True)
+    handler.headers = {"Host": host_header}
+
+    assert handler._same_origin() is False
+    assert handler._read_authorized({}) is False
+
+
+@pytest.mark.parametrize(
+    ("host_header", "expected"),
+    [
+        ("localhost", "localhost"),
+        ("localhost:8765", "localhost"),
+        ("127.0.0.1:8765", "127.0.0.1"),
+        ("[::1]:8765", "::1"),
+        ("[0:0:0:0:0:0:0:1]:8765", "::1"),
+    ],
+)
+def test_request_host_name_accepts_canonical_authority(
+    host_header: str,
+    expected: str,
+) -> None:
+    assert monitor_security.request_host_name(host_header) == expected
+
+
+def test_repeated_root_dot_is_not_loopback_authority() -> None:
+    assert monitor_security.request_host_name("localhost..:8765") == ""
+    assert monitor_security.host_allows_mutations("localhost..") is False
 
 
 def test_monitor_post_rejects_rebound_host_with_valid_token(
@@ -4449,6 +5152,8 @@ def test_render_home_shows_stat_grid_even_with_no_sessions(fake_claude: Path) ->
         assert f"grade-{grade}" in html_out
     # Empty-state copy kicks in when there are no sessions / audit entries.
     assert "No sessions recorded" in html_out or "Recent sessions" in html_out
+    assert "class='responsive-split-grid'" in html_out
+    assert html_out.count("class='card table-scroll'") == 2
 
 
 def test_render_home_formats_large_counts_with_commas(
@@ -4496,6 +5201,8 @@ def test_render_home_formats_large_counts_with_commas(
     assert "1,778,069 edges" in html_out
     assert "68,494 skills" in html_out
     assert "10,790 MCPs" in html_out
+    assert "&middot;" in html_out
+    assert "&amp;middot;" not in html_out
     assert "10000</div>" not in html_out
     assert "100000</div>" not in html_out
 
@@ -4903,6 +5610,8 @@ def test_render_wiki_index_lists_entities(fake_claude: Path) -> None:
     # Search + type filter must be present.
     assert "id='wiki-search'" in html_out
     assert "class='wiki-type-filter'" in html_out
+    assert "class='responsive-sidebar-grid'" in html_out
+    assert "class='responsive-sidebar'" in html_out
     # Cards link to the typed per-entity wiki page so duplicate slugs can
     # disambiguate skill/agent/MCP/harness pages.
     assert "href='/wiki/python-patterns?type=skill'" in html_out
@@ -5310,6 +6019,356 @@ def test_entity_search_and_detail_apis_support_edit_flow(
         server.shutdown()
         thread.join(timeout=5)
         server.server_close()
+
+
+def test_entity_detail_api_falls_back_to_exact_runtime_graph_entity() -> None:
+    graph_calls: list[tuple[str, int, int, str | None]] = []
+
+    def graph_neighborhood(
+        slug: str,
+        hops: int,
+        limit: int,
+        entity_type: str | None,
+    ) -> dict[str, object]:
+        graph_calls.append((slug, hops, limit, entity_type))
+        return {
+            "center": "mcp-server:github",
+            "nodes": [
+                {
+                    "data": {
+                        "id": "mcp-server:github",
+                        "label": "GitHub",
+                        "type": "mcp-server",
+                        "description": "GitHub MCP integration",
+                        "tags": ["reference"],
+                    }
+                }
+            ],
+        }
+
+    deps = readonly_api.ReadOnlyApiDeps(
+        summarize_sessions=lambda: {},
+        read_manifest=lambda: {},
+        status_payload=lambda: {},
+        kpi_summary=lambda: None,
+        grade_distribution_payload=lambda: {},
+        sidecar_page_payload=lambda _qs: {},
+        runtime_lifecycle_summary=lambda: {},
+        skillspector_audit_payload=lambda _qs: {},
+        effective_config_payload=lambda: {},
+        search_wiki_entities=lambda _q, _type, _limit: [],
+        wiki_entity_detail=lambda _slug, _type: None,
+        load_sidecar=lambda _slug, _type: None,
+        graph_neighborhood=graph_neighborhood,
+        normalize_dashboard_entity_type=mt.normalize_dashboard_entity_type,
+    )
+
+    response = readonly_api.handle_readonly_route(
+        "api_entity",
+        {"slug": "github"},
+        {"type": "mcp-server"},
+        deps,
+    )
+
+    assert response is not None
+    assert response.status == 200
+    assert response.payload == {
+        "slug": "github",
+        "type": "mcp-server",
+        "path": "",
+        "frontmatter": {
+            "title": "GitHub",
+            "type": "mcp-server",
+            "description": "GitHub MCP integration",
+            "tags": ["reference"],
+            "source": "runtime-graph",
+        },
+        "body": "GitHub MCP integration",
+    }
+    assert graph_calls == [("github", 1, 1, "mcp-server")]
+
+
+def test_entity_detail_api_requires_type_for_ambiguous_runtime_graph_slug() -> None:
+    graph_calls: list[str | None] = []
+
+    def graph_neighborhood(
+        slug: str,
+        _hops: int,
+        _limit: int,
+        entity_type: str | None,
+    ) -> dict[str, object]:
+        graph_calls.append(entity_type)
+        if entity_type not in {"skill", "mcp-server"}:
+            return {"center": "", "nodes": []}
+        center = f"{entity_type}:{slug}"
+        return {
+            "center": center,
+            "nodes": [
+                {
+                    "data": {
+                        "id": center,
+                        "label": slug,
+                        "type": entity_type,
+                    }
+                }
+            ],
+        }
+
+    deps = readonly_api.ReadOnlyApiDeps(
+        summarize_sessions=lambda: {},
+        read_manifest=lambda: {},
+        status_payload=lambda: {},
+        kpi_summary=lambda: None,
+        grade_distribution_payload=lambda: {},
+        sidecar_page_payload=lambda _qs: {},
+        runtime_lifecycle_summary=lambda: {},
+        skillspector_audit_payload=lambda _qs: {},
+        effective_config_payload=lambda: {},
+        search_wiki_entities=lambda _q, _type, _limit: [],
+        wiki_entity_detail=lambda _slug, _type: None,
+        load_sidecar=lambda _slug, _type: None,
+        graph_neighborhood=graph_neighborhood,
+        normalize_dashboard_entity_type=mt.normalize_dashboard_entity_type,
+    )
+
+    response = readonly_api.handle_readonly_route(
+        "api_entity",
+        {"slug": "shared"},
+        {},
+        deps,
+    )
+
+    assert response is not None
+    assert response.status == 400
+    assert response.payload == {
+        "detail": (
+            "multiple runtime graph entity types match 'shared'; "
+            "the type query parameter is required"
+        )
+    }
+    assert graph_calls == ["skill", "agent", "mcp-server", "harness"]
+
+
+def test_entity_detail_api_bounds_runtime_graph_metadata() -> None:
+    huge_value = "x" * 1_000_000
+
+    def graph_neighborhood(
+        slug: str,
+        _hops: int,
+        _limit: int,
+        entity_type: str | None,
+    ) -> dict[str, object]:
+        center = f"{entity_type}:{slug}"
+        return {
+            "center": center,
+            "nodes": [
+                {
+                    "data": {
+                        "id": center,
+                        "label": huge_value,
+                        "type": entity_type,
+                        "description": huge_value,
+                        "tags": [huge_value] * 13,
+                    }
+                }
+            ],
+        }
+
+    deps = readonly_api.ReadOnlyApiDeps(
+        summarize_sessions=lambda: {},
+        read_manifest=lambda: {},
+        status_payload=lambda: {},
+        kpi_summary=lambda: None,
+        grade_distribution_payload=lambda: {},
+        sidecar_page_payload=lambda _qs: {},
+        runtime_lifecycle_summary=lambda: {},
+        skillspector_audit_payload=lambda _qs: {},
+        effective_config_payload=lambda: {},
+        search_wiki_entities=lambda _q, _type, _limit: [],
+        wiki_entity_detail=lambda _slug, _type: None,
+        load_sidecar=lambda _slug, _type: None,
+        graph_neighborhood=graph_neighborhood,
+        normalize_dashboard_entity_type=mt.normalize_dashboard_entity_type,
+    )
+
+    response = readonly_api.handle_readonly_route(
+        "api_entity",
+        {"slug": "oversized"},
+        {"type": "skill"},
+        deps,
+    )
+
+    assert response is not None
+    assert response.status == 200
+    assert len(response.payload["frontmatter"]["title"]) == 200
+    assert len(response.payload["frontmatter"]["description"]) == 1_000
+    assert len(response.payload["body"]) == 4_000
+    assert len(response.payload["frontmatter"]["tags"]) == 12
+    assert all(len(tag) == 80 for tag in response.payload["frontmatter"]["tags"])
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("label", {"nested": "title"}),
+        ("description", ["nested description"]),
+        ("tags", {"nested": "tag"}),
+        ("tags", [{"nested": "tag"}]),
+    ],
+)
+def test_entity_detail_api_rejects_non_scalar_runtime_graph_metadata(
+    field: str,
+    value: object,
+) -> None:
+    def graph_neighborhood(
+        slug: str,
+        _hops: int,
+        _limit: int,
+        entity_type: str | None,
+    ) -> dict[str, object]:
+        center = f"{entity_type}:{slug}"
+        data: dict[str, object] = {
+            "id": center,
+            "label": "Safe title",
+            "type": entity_type or "skill",
+            "description": "Safe description",
+            "tags": ["safe"],
+        }
+        data[field] = value
+        return {"center": center, "nodes": [{"data": data}]}
+
+    deps = readonly_api.ReadOnlyApiDeps(
+        summarize_sessions=lambda: {},
+        read_manifest=lambda: {},
+        status_payload=lambda: {},
+        kpi_summary=lambda: None,
+        grade_distribution_payload=lambda: {},
+        sidecar_page_payload=lambda _qs: {},
+        runtime_lifecycle_summary=lambda: {},
+        skillspector_audit_payload=lambda _qs: {},
+        effective_config_payload=lambda: {},
+        search_wiki_entities=lambda _q, _type, _limit: [],
+        wiki_entity_detail=lambda _slug, _type: None,
+        load_sidecar=lambda _slug, _type: None,
+        graph_neighborhood=graph_neighborhood,
+        normalize_dashboard_entity_type=mt.normalize_dashboard_entity_type,
+    )
+
+    response = readonly_api.handle_readonly_route(
+        "api_entity",
+        {"slug": "malformed"},
+        {"type": "skill"},
+        deps,
+    )
+
+    assert response is not None
+    assert response.status == 404
+
+
+@pytest.mark.parametrize(
+    ("slug", "requested_type", "center"),
+    [
+        ("../github", "mcp-server", "mcp-server:github"),
+        ("github", "skill", "mcp-server:github"),
+        ("github", "mcp-server", "mcp-server:github-actions"),
+    ],
+)
+def test_entity_detail_api_rejects_unsafe_or_inexact_graph_fallbacks(
+    slug: str,
+    requested_type: str,
+    center: str,
+) -> None:
+    graph_calls = 0
+
+    def graph_neighborhood(
+        _slug: str,
+        _hops: int,
+        _limit: int,
+        _entity_type: str | None,
+    ) -> dict[str, object]:
+        nonlocal graph_calls
+        graph_calls += 1
+        return {
+            "center": center,
+            "nodes": [
+                {
+                    "data": {
+                        "id": center,
+                        "label": "GitHub",
+                        "type": center.partition(":")[0],
+                    }
+                }
+            ],
+        }
+
+    deps = readonly_api.ReadOnlyApiDeps(
+        summarize_sessions=lambda: {},
+        read_manifest=lambda: {},
+        status_payload=lambda: {},
+        kpi_summary=lambda: None,
+        grade_distribution_payload=lambda: {},
+        sidecar_page_payload=lambda _qs: {},
+        runtime_lifecycle_summary=lambda: {},
+        skillspector_audit_payload=lambda _qs: {},
+        effective_config_payload=lambda: {},
+        search_wiki_entities=lambda _q, _type, _limit: [],
+        wiki_entity_detail=lambda _slug, _type: None,
+        load_sidecar=lambda _slug, _type: None,
+        graph_neighborhood=graph_neighborhood,
+        normalize_dashboard_entity_type=mt.normalize_dashboard_entity_type,
+    )
+
+    response = readonly_api.handle_readonly_route(
+        "api_entity",
+        {"slug": slug},
+        {"type": requested_type},
+        deps,
+    )
+
+    assert response is not None
+    assert response.status == 404
+    assert graph_calls == (0 if slug == "../github" else 1)
+
+
+def test_entity_detail_api_preserves_full_wiki_page_precedence() -> None:
+    wiki_detail = {
+        "slug": "github",
+        "type": "mcp-server",
+        "path": "entities/mcp-servers/g/github.md",
+        "frontmatter": {"title": "Full GitHub page"},
+        "body": "Full wiki content",
+    }
+
+    def unexpected_graph(*_args: object) -> dict[str, object]:
+        raise AssertionError("runtime graph fallback must not replace a full wiki page")
+
+    deps = readonly_api.ReadOnlyApiDeps(
+        summarize_sessions=lambda: {},
+        read_manifest=lambda: {},
+        status_payload=lambda: {},
+        kpi_summary=lambda: None,
+        grade_distribution_payload=lambda: {},
+        sidecar_page_payload=lambda _qs: {},
+        runtime_lifecycle_summary=lambda: {},
+        skillspector_audit_payload=lambda _qs: {},
+        effective_config_payload=lambda: {},
+        search_wiki_entities=lambda _q, _type, _limit: [],
+        wiki_entity_detail=lambda _slug, _type: wiki_detail,
+        load_sidecar=lambda _slug, _type: None,
+        graph_neighborhood=unexpected_graph,
+        normalize_dashboard_entity_type=mt.normalize_dashboard_entity_type,
+    )
+
+    response = readonly_api.handle_readonly_route(
+        "api_entity",
+        {"slug": "github"},
+        {"type": "mcp-server"},
+        deps,
+    )
+
+    assert response is not None
+    assert response.status == 200
+    assert response.payload is wiki_detail
 
 
 def test_entity_search_uses_dashboard_index_for_live_graph_search(
@@ -6098,6 +7157,10 @@ def test_layout_nav_tabs_are_draggable_and_persist_order() -> None:
     assert "id='dashboard-nav'" in out
     assert "app-shell" in out
     assert ".app-shell" in css
+    assert ".responsive-split-grid" in css
+    assert ".responsive-sidebar-grid" in css
+    assert ".table-scroll { overflow-x: auto; }" in css
+    assert ".responsive-sidebar { position: static !important; }" in css
     assert ".graph-canvas-wrap [data-3d-node-id]:focus" in css
     assert (
         ".graph-stage { width: 100%; height: calc(100vh - 2rem); height: calc(100dvh - 2rem);"
@@ -6157,6 +7220,18 @@ def test_layout_nav_tabs_are_draggable_and_persist_order() -> None:
     assert "nav.insertBefore(dragged, target" in out
     assert "drop" in out
     assert "id='nav-reset'" in out
+
+
+def test_dashboard_text_cards_use_color_scheme_surfaces() -> None:
+    css = mt.monitor_asset_text("monitor.css")
+
+    for selector, expected_background in (
+        (".card {", "background: var(--surface)"),
+        (".graph-edge-detail-inline {", "background: var(--surface-2)"),
+    ):
+        rule = css.split(selector, maxsplit=1)[1].split("}", maxsplit=1)[0]
+        assert expected_background in rule
+        assert "rgba(255,255,255" not in rule.replace(" ", "")
 
 
 def test_render_config_page_shows_required_defaults_and_examples(
@@ -6227,6 +7302,8 @@ def test_config_page_module_renders_controls_and_overrides() -> None:
     assert "data-config-clear='resolver.recommendation_top_k'" in html_out
     assert "intake.enabled" in html_out
     assert "X-CTX-Monitor-Token" in html_out
+    assert "<div class='card' style='position:sticky; bottom:0;'>" in html_out
+    assert "bottom:0; background:rgba(255,255,255" not in html_out
 
 
 def test_render_harness_wizard_guides_model_choice_and_real_commands(
@@ -6565,6 +7642,53 @@ def test_cli_argparser_exposes_serve() -> None:
     with pytest.raises(SystemExit) as exc:
         mt.main(["serve", "--help"])
     assert exc.value.code == 0
+
+
+def test_cli_rejects_non_loopback_before_server_creation(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    calls: list[tuple[str, int]] = []
+
+    with pytest.raises(SystemExit) as exc:
+        monitor_cli.main(
+            ["serve", "--host", "0.0.0.0"],
+            serve_func=lambda **kwargs: calls.append((kwargs["host"], kwargs["port"])),
+        )
+
+    assert exc.value.code == 2
+    assert calls == []
+    assert "--allow-non-loopback" in capsys.readouterr().err
+
+
+def test_cli_allows_explicit_non_loopback_read_only_bind() -> None:
+    calls: list[tuple[str, int]] = []
+
+    result = monitor_cli.main(
+        [
+            "serve",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "9876",
+            "--allow-non-loopback",
+        ],
+        serve_func=lambda **kwargs: calls.append((kwargs["host"], kwargs["port"])),
+    )
+
+    assert result == 0
+    assert calls == [("0.0.0.0", 9876)]
+
+
+def test_cli_loopback_bind_needs_no_exposure_flag() -> None:
+    calls: list[tuple[str, int]] = []
+
+    result = monitor_cli.main(
+        ["serve", "--host", "::1"],
+        serve_func=lambda **kwargs: calls.append((kwargs["host"], kwargs["port"])),
+    )
+
+    assert result == 0
+    assert calls == [("::1", 8765)]
 
 
 def test_monitor_server_suppresses_aborted_connection_traceback(

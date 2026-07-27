@@ -26,12 +26,15 @@ from __future__ import annotations
 import io
 import json
 import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from ctx import __version__
 import ctx.mcp_server.server as mcp_server
 from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox
 from ctx.adapters.generic.tools import (
@@ -249,7 +252,7 @@ class TestInitialize:
         assert "protocolVersion" in result
         assert "capabilities" in result
         assert result["serverInfo"]["name"] == "ctx-wiki"
-        assert "version" in result["serverInfo"]
+        assert result["serverInfo"]["version"] == __version__
 
     def test_tools_capability_declared(self) -> None:
         frames = _drive(_encode_request(1, "initialize", {}))
@@ -565,7 +568,9 @@ class TestToolsCall:
             )
         )
         state_payload = json.loads(frames[0]["result"]["content"][0]["text"])
-        assert state_payload["unload_candidates"][0]["slug"] == "python-patterns"
+        assert state_payload["loaded"] == []
+        assert state_payload["unload_candidates"] == []
+        assert state_payload["requested"][0]["slug"] == "python-patterns"
 
 
 # ── Handler unit tests (direct, no I/O loop) ────────────────────────────────
@@ -584,6 +589,75 @@ class TestHandlersDirect:
         with pytest.raises(_JsonRpcError) as ei:
             _handle_tools_call(state, {})
         assert ei.value.code == _ErrorCode.INVALID_PARAMS
+
+    def test_mcp_process_keeps_isolated_rejection_memory(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        created: list[dict[str, Any]] = []
+
+        def build_toolbox(**kwargs: Any) -> CtxCoreToolbox:
+            created.append(kwargs)
+            return CtxCoreToolbox(
+                wiki_dir=_build_overlapping_scope_wiki(tmp_path),
+                graph_path=_build_overlapping_scope_graph(tmp_path),
+                lifecycle_dir=tmp_path / "runtime",
+                **kwargs,
+            )
+
+        monkeypatch.setattr(mcp_server, "CtxCoreToolbox", build_toolbox)
+        state = _ServerState(recommendation_session_id="mcp-process-session")
+
+        first = _handle_tools_call(
+            state,
+            {
+                "name": "ctx__recommend_bundle",
+                "arguments": {
+                    "query": "python patterns",
+                    "rejected": ["skill:python-patterns"],
+                },
+            },
+        )
+        second = _handle_tools_call(
+            state,
+            {
+                "name": "ctx__recommend_bundle",
+                "arguments": {"query": "python patterns"},
+            },
+        )
+
+        first_payload = json.loads(first["content"][0]["text"])
+        second_payload = json.loads(second["content"][0]["text"])
+        assert created[0]["recommendation_session_id"] == "mcp-process-session"
+        listed_tools = _handle_tools_list(state, {})["tools"]
+        assert (
+            "session_id"
+            not in next(tool for tool in listed_tools if tool["name"] == "ctx__recommend_bundle")[
+                "inputSchema"
+            ]["properties"]
+        )
+        assert (
+            "session_id"
+            in next(tool for tool in listed_tools if tool["name"] == "ctx__load_entity")[
+                "inputSchema"
+            ]["properties"]
+        )
+        assert "skill:python-patterns" not in {row["id"] for row in first_payload["results"]}
+        assert "skill:python-patterns" not in {row["id"] for row in second_payload["results"]}
+
+        override = _handle_tools_call(
+            state,
+            {
+                "name": "ctx__recommend_bundle",
+                "arguments": {
+                    "query": "python patterns",
+                    "session_id": "another-session",
+                },
+            },
+        )
+        assert override["isError"] is True
+        assert "host-bound" in override["content"][0]["text"]
 
 
 # ── Frame writers ───────────────────────────────────────────────────────────
@@ -647,6 +721,74 @@ class TestMultiRequestSession:
 
 
 # ── Subprocess round-trip via the H2 client ─────────────────────────────────
+
+
+def test_package_reexports_load_server_lazily() -> None:
+    code = "\n".join(
+        [
+            "import sys",
+            "import ctx.mcp_server",
+            "assert 'ctx.mcp_server.server' not in sys.modules",
+            "from ctx.mcp_server import main, run_server",
+            "assert callable(main)",
+            "assert callable(run_server)",
+            "assert 'ctx.mcp_server.server' in sys.modules",
+        ]
+    )
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(
+        part for part in (str(_SRC_DIR), env.get("PYTHONPATH", "")) if part
+    )
+
+    completed = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        check=False,
+        env=env,
+        text=True,
+        timeout=10,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stderr == ""
+
+
+@pytest.mark.parametrize("entrypoint", ["module", "console"])
+def test_module_and_console_handshakes_have_current_version_and_clean_stderr(
+    entrypoint: str,
+    tmp_path: Path,
+) -> None:
+    wiki = TestRoundTripWithH2Client._build_synthetic_wiki(tmp_path)
+    graph_path = TestRoundTripWithH2Client._build_synthetic_graph(tmp_path)
+    if entrypoint == "module":
+        command = [sys.executable, "-m", "ctx.mcp_server.server"]
+    else:
+        console_script = shutil.which("ctx-mcp-server")
+        assert console_script is not None
+        command = [console_script]
+    env = {
+        **os.environ,
+        **_mcp_subprocess_env(wiki, graph_path),
+    }
+
+    completed = subprocess.run(
+        command,
+        input=_encode_request(1, "initialize", {}),
+        capture_output=True,
+        check=False,
+        env=env,
+        timeout=10,
+    )
+
+    assert completed.returncode == 0, completed.stderr.decode("utf-8", errors="replace")
+    assert completed.stderr == b""
+    frames = [
+        json.loads(line) for line in completed.stdout.decode("utf-8").splitlines() if line.strip()
+    ]
+    assert frames[0]["result"]["serverInfo"] == {
+        "name": "ctx-wiki",
+        "version": __version__,
+    }
 
 
 class TestRoundTripWithH2Client:

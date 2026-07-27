@@ -488,6 +488,54 @@ class TestInstallMcp:
         )
         assert r.status == "installed"
 
+    def test_project_owned_ctx_mcp_command_is_actionable(
+        self,
+        wiki_dir: Path,
+        fake_claude: dict[str, Any],
+        isolated_manifest: Path,
+    ) -> None:
+        _write_entity(
+            wiki_dir,
+            "ctx-core",
+            {"status": "available", "install_cmd": "ctx-mcp-server"},
+        )
+
+        result = mcp_install.install_mcp("ctx-core", wiki_dir=wiki_dir, auto=True)
+
+        assert result.status == "installed"
+        assert result.command == "ctx-mcp-server"
+        assert fake_claude["calls"] == [
+            ["claude", "mcp", "add", "ctx-core", "--", "ctx-mcp-server"]
+        ]
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "ctx-mcp-server --unexpected",
+            "/tmp/ctx-mcp-server",
+            "ctx-mcp-server.exe",
+        ],
+    )
+    def test_project_owned_ctx_mcp_command_must_be_bare_and_argument_free(
+        self,
+        wiki_dir: Path,
+        fake_claude: dict[str, Any],
+        isolated_manifest: Path,
+        command: str,
+    ) -> None:
+        _write_entity(wiki_dir, "ctx-core", {"status": "available"})
+
+        result = mcp_install.install_mcp(
+            "ctx-core",
+            wiki_dir=wiki_dir,
+            command=command,
+            auto=True,
+        )
+
+        assert result.status == "invalid-cmd"
+        assert "bare, argument-free" in result.message
+        assert fake_claude["calls"] == []
+
     def test_unparseable_shlex_rejected(
         self, wiki_dir: Path, fake_claude: dict[str, Any], isolated_manifest: Path
     ) -> None:

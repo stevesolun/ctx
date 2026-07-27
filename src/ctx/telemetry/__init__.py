@@ -7,8 +7,10 @@ disabled by default and must be explicitly enabled in config.
 
 from __future__ import annotations
 
+from email.utils import parsedate_to_datetime
 import hashlib
 import hmac
+from http.client import RemoteDisconnected
 import ipaddress
 import json
 import math
@@ -16,6 +18,7 @@ import os
 import re
 import secrets
 import sys
+import time
 import traceback
 import uuid
 from contextlib import contextmanager
@@ -42,6 +45,7 @@ DEFAULT_METRICS_PATH = Path(os.path.expanduser("~/.ctx/telemetry/metrics.jsonl")
 DEFAULT_METRICS_EXPORT_PATH = Path(os.path.expanduser("~/.ctx/telemetry/exported-metrics.jsonl"))
 DEFAULT_OTLP_LOGS_ENDPOINT = "http://localhost:4318/v1/logs"
 DEFAULT_OTLP_METRICS_ENDPOINT = "http://localhost:4318/v1/metrics"
+DEFAULT_OTLP_TRACES_ENDPOINT = "http://localhost:4318/v1/traces"
 DEFAULT_PRIVACY_MODE = "local_redacted"
 DEFAULT_HASH_SALT_ENV = "CTX_TELEMETRY_HASH_SALT"
 DEFAULT_HASH_SALT_PATH = Path(os.path.expanduser("~/.ctx/telemetry/hash-salt"))
@@ -70,6 +74,14 @@ _DEFAULT_HISTOGRAM_BOUNDS = (
 )
 _PRIVATE_DIR_MODE = 0o700
 _PRIVATE_FILE_MODE = 0o600
+_DEFAULT_OTLP_MAX_RETRIES = 2
+_DEFAULT_OTLP_RETRY_BACKOFF_SECONDS = 0.25
+_DEFAULT_OTLP_MAX_RETRY_DELAY_SECONDS = 5.0
+_DEFAULT_OTLP_RETRY_JITTER_RATIO = 0.2
+_MAX_OTLP_RESPONSE_BYTES = 64 * 1024
+_DEFAULT_TRACE_MATURITY_SECONDS = 5.0
+_MAX_TRACE_MATURITY_SECONDS = 300.0
+_RETRYABLE_OTLP_STATUS_CODES = frozenset({429, 502, 503, 504})
 _RAW_VALUE_KEYS = frozenset(
     {
         "command",
@@ -286,6 +298,9 @@ class ExportResult:
     destination_hash: str | None = None
     last_success_at: str | None = None
     last_success_event_id: str | None = None
+    error_message: str | None = None
+    retained_events: int = 0
+    late_span_events: int = 0
 
 
 @dataclass(frozen=True)
@@ -358,6 +373,7 @@ class _PendingExport:
     malformed_pending_records: int
     malformed_first_line: int | None
     malformed_last_line: int | None
+    exported_span_keys: frozenset[tuple[str, str]]
 
 
 @dataclass(frozen=True)
@@ -370,6 +386,19 @@ class _PendingMetricExport:
     malformed_pending_records: int
     malformed_first_line: int | None
     malformed_last_line: int | None
+
+
+@dataclass(frozen=True)
+class _TraceExportBatch:
+    events: list[TelemetryEvent]
+    retained_events: int
+    late_span_events: int
+
+
+@dataclass(frozen=True)
+class _OTLPResponse:
+    rejected_records: int = 0
+    error_message: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1153,6 +1182,113 @@ def export_metrics(
     return final_result
 
 
+def export_traces(
+    path: Path | None = None,
+    *,
+    trusted_root: Path | None = None,
+    config: Mapping[str, Any] | None = None,
+    include_exported: bool = False,
+) -> ExportResult:
+    """Export locally spooled event spans as the OTLP traces signal."""
+
+    settings = _trace_settings(config)
+    if not settings["enabled"] or not settings["export_enabled"]:
+        return ExportResult(
+            attempted=0,
+            exported=0,
+            failed=0,
+            sink=str(settings["export_sink"]),
+            status="noop",
+        )
+    source_path = path or Path(str(settings["path"]))
+    started_at = _now_iso()
+    pending = _events_pending_export(
+        source_path,
+        settings=settings,
+        trusted_root=trusted_root,
+        include_exported=include_exported,
+    )
+    try:
+        _validate_trace_context(pending.events)
+    except ValueError as exc:
+        batch = _TraceExportBatch(
+            events=[],
+            retained_events=len(pending.events),
+            late_span_events=0,
+        )
+        attempted = _trace_group_count(pending.events)
+        result = ExportResult(
+            attempted=attempted,
+            exported=0,
+            failed=attempted,
+            sink=str(settings["export_sink"]),
+            status="failed",
+            error_kind=type(exc).__name__,
+        )
+    else:
+        batch = _trace_export_batch(pending, settings=settings)
+        result = _export_traces(batch.events, settings=settings)
+    checkpoint_after_event_id = pending.checkpoint_before_event_id
+    checkpoint_advanced = False
+    last_success_at = None
+    last_success_event_id = None
+    last_event = batch.events[-1] if batch.events else None
+    acknowledged = result.status in {"ok", "partial_success"} and result.attempted > 0
+    if result.exported and last_event is not None:
+        last_success_at = _now_iso()
+        if result.failed == 0:
+            last_success_event_id = last_event.event_id
+    if acknowledged and last_event is not None and pending.malformed_pending_records == 0:
+        _write_export_checkpoint(
+            settings,
+            source_path=source_path,
+            event=last_event,
+            trusted_root=trusted_root,
+        )
+        checkpoint_after_event_id = last_event.event_id
+        checkpoint_advanced = checkpoint_after_event_id != pending.checkpoint_before_event_id
+    status_path = _export_status_path(
+        settings,
+        source_path=source_path,
+        trusted_root=trusted_root,
+    )
+    status = _trace_export_status(result, pending=pending, batch=batch)
+    final_result = ExportResult(
+        attempted=result.attempted,
+        exported=result.exported,
+        failed=result.failed,
+        sink=result.sink,
+        status=status,
+        error_kind=result.error_kind,
+        checkpoint_path=str(pending.checkpoint_path),
+        last_event_id=checkpoint_after_event_id,
+        malformed_records=pending.malformed_total_records,
+        malformed_pending_records=pending.malformed_pending_records,
+        malformed_first_line=pending.malformed_first_line,
+        malformed_last_line=pending.malformed_last_line,
+        status_path=str(status_path),
+        checkpoint_before_event_id=pending.checkpoint_before_event_id,
+        checkpoint_after_event_id=checkpoint_after_event_id,
+        checkpoint_advanced=checkpoint_advanced,
+        checkpoint_found=pending.checkpoint_found,
+        destination_hash=_export_destination_hash(settings),
+        last_success_at=last_success_at,
+        last_success_event_id=last_success_event_id,
+        error_message=result.error_message,
+        retained_events=batch.retained_events,
+        late_span_events=batch.late_span_events,
+    )
+    _write_export_status(
+        settings,
+        source_path=source_path,
+        result=final_result,
+        trusted_root=trusted_root,
+        include_exported=include_exported,
+        started_at=started_at,
+    )
+    return final_result
+
+
 def preview_metrics_export(
     path: Path | None = None,
     *,
@@ -1211,6 +1347,95 @@ def preview_metrics_export(
         checkpoint_advanced=False,
         checkpoint_found=pending.checkpoint_found,
         destination_hash=_metric_export_destination_hash(settings),
+    )
+
+
+def preview_traces_export(
+    path: Path | None = None,
+    *,
+    trusted_root: Path | None = None,
+    config: Mapping[str, Any] | None = None,
+    include_exported: bool = False,
+) -> ExportResult:
+    """Return the trace export count without writing to the sink or checkpoint."""
+
+    settings = _trace_settings(config)
+    if not settings["enabled"] or not settings["export_enabled"]:
+        return ExportResult(
+            attempted=0,
+            exported=0,
+            failed=0,
+            sink=str(settings["export_sink"]),
+            status="noop",
+        )
+    source_path = path or Path(str(settings["path"]))
+    pending = _events_pending_export(
+        source_path,
+        settings=settings,
+        trusted_root=trusted_root,
+        include_exported=include_exported,
+    )
+    validation_error_kind = None
+    try:
+        _validate_trace_context(pending.events)
+    except ValueError as exc:
+        validation_error_kind = type(exc).__name__
+        batch = _TraceExportBatch(
+            events=[],
+            retained_events=len(pending.events),
+            late_span_events=0,
+        )
+    else:
+        batch = _trace_export_batch(pending, settings=settings)
+    last_event_id = (
+        batch.events[-1].event_id if batch.events else pending.checkpoint_before_event_id
+    )
+    status_path = _export_status_path(
+        settings,
+        source_path=source_path,
+        trusted_root=trusted_root,
+    )
+    attempted = _trace_group_count(
+        pending.events if validation_error_kind is not None else batch.events
+    )
+    failed = attempted if validation_error_kind else 0
+    error_kind = validation_error_kind
+    if validation_error_kind is None:
+        try:
+            payload = _otlp_traces_payload(batch.events, settings)
+            attempted = _otlp_trace_span_count(payload)
+        except Exception as exc:  # noqa: BLE001 - preview reports validation failures.
+            failed = attempted
+            error_kind = type(exc).__name__
+    preview_result = ExportResult(
+        attempted=attempted,
+        exported=0 if failed else attempted,
+        failed=failed,
+        sink=str(settings["export_sink"]),
+        error_kind=error_kind,
+    )
+    status = _trace_export_status(preview_result, pending=pending, batch=batch)
+    return ExportResult(
+        attempted=attempted,
+        exported=0,
+        failed=failed,
+        sink=str(settings["export_sink"]),
+        status=status,
+        error_kind=error_kind,
+        checkpoint_path=str(pending.checkpoint_path),
+        last_event_id=last_event_id,
+        malformed_records=pending.malformed_total_records,
+        malformed_pending_records=pending.malformed_pending_records,
+        malformed_first_line=pending.malformed_first_line,
+        malformed_last_line=pending.malformed_last_line,
+        status_path=str(status_path),
+        checkpoint_before_event_id=pending.checkpoint_before_event_id,
+        checkpoint_after_event_id=pending.checkpoint_before_event_id,
+        checkpoint_advanced=False,
+        checkpoint_found=pending.checkpoint_found,
+        destination_hash=_export_destination_hash(settings),
+        retained_events=batch.retained_events,
+        late_span_events=batch.late_span_events,
     )
 
 
@@ -1389,6 +1614,43 @@ def _settings(config: Mapping[str, Any] | None) -> dict[str, Any]:
         "otlp_allowed_hosts": sorted(otlp_allowed_hosts),
         "otlp_headers": _mapping_get(otlp, "headers", {}),
         "otlp_timeout_seconds": float(_mapping_get(otlp, "timeout_seconds", 5.0)),
+        "otlp_max_retries": max(
+            0,
+            int(_mapping_get(otlp, "max_retries", _DEFAULT_OTLP_MAX_RETRIES)),
+        ),
+        "otlp_retry_backoff_seconds": max(
+            0.0,
+            float(
+                _mapping_get(
+                    otlp,
+                    "retry_backoff_seconds",
+                    _DEFAULT_OTLP_RETRY_BACKOFF_SECONDS,
+                )
+            ),
+        ),
+        "otlp_max_retry_delay_seconds": max(
+            0.0,
+            float(
+                _mapping_get(
+                    otlp,
+                    "max_retry_delay_seconds",
+                    _DEFAULT_OTLP_MAX_RETRY_DELAY_SECONDS,
+                )
+            ),
+        ),
+        "otlp_retry_jitter_ratio": min(
+            1.0,
+            max(
+                0.0,
+                float(
+                    _mapping_get(
+                        otlp,
+                        "retry_jitter_ratio",
+                        _DEFAULT_OTLP_RETRY_JITTER_RATIO,
+                    )
+                ),
+            ),
+        ),
         "otlp_service_name": str(_mapping_get(otlp, "service_name", "ctx")),
         "otlp_service_namespace": str(_mapping_get(otlp, "service_namespace", "ctx")),
         "otlp_deployment_environment": str(_mapping_get(otlp, "deployment_environment", "local")),
@@ -1441,10 +1703,150 @@ def _metric_settings(config: Mapping[str, Any] | None) -> dict[str, Any]:
         "otlp_allowed_hosts": sorted(otlp_allowed_hosts),
         "otlp_headers": _mapping_get(otlp, "headers", {}),
         "otlp_timeout_seconds": float(_mapping_get(otlp, "timeout_seconds", 5.0)),
+        "otlp_max_retries": max(
+            0,
+            int(_mapping_get(otlp, "max_retries", _DEFAULT_OTLP_MAX_RETRIES)),
+        ),
+        "otlp_retry_backoff_seconds": max(
+            0.0,
+            float(
+                _mapping_get(
+                    otlp,
+                    "retry_backoff_seconds",
+                    _DEFAULT_OTLP_RETRY_BACKOFF_SECONDS,
+                )
+            ),
+        ),
+        "otlp_max_retry_delay_seconds": max(
+            0.0,
+            float(
+                _mapping_get(
+                    otlp,
+                    "max_retry_delay_seconds",
+                    _DEFAULT_OTLP_MAX_RETRY_DELAY_SECONDS,
+                )
+            ),
+        ),
+        "otlp_retry_jitter_ratio": min(
+            1.0,
+            max(
+                0.0,
+                float(
+                    _mapping_get(
+                        otlp,
+                        "retry_jitter_ratio",
+                        _DEFAULT_OTLP_RETRY_JITTER_RATIO,
+                    )
+                ),
+            ),
+        ),
         "otlp_service_name": str(_mapping_get(otlp, "service_name", "ctx")),
         "otlp_service_namespace": str(_mapping_get(otlp, "service_namespace", "ctx")),
         "otlp_deployment_environment": str(_mapping_get(otlp, "deployment_environment", "local")),
         "histogram_bounds": _histogram_bounds(metrics),
+        "max_payload_keys": int(
+            _mapping_get(limits, "max_payload_keys", _MAX_PAYLOAD_KEYS),
+        ),
+        "max_payload_value_chars": int(
+            _mapping_get(limits, "max_payload_value_chars", _MAX_PAYLOAD_VALUE_LEN),
+        ),
+    }
+
+
+def _trace_settings(config: Mapping[str, Any] | None) -> dict[str, Any]:
+    raw = dict(config or _config_get("telemetry", {}) or {})
+    raw_traces = raw.get("traces")
+    traces: Mapping[str, Any] = raw_traces if isinstance(raw_traces, Mapping) else {}
+    limits = raw.get("limits") if isinstance(raw.get("limits"), Mapping) else {}
+    raw_privacy = raw.get("privacy")
+    privacy: Mapping[str, Any] = raw_privacy if isinstance(raw_privacy, Mapping) else {}
+    raw_export = traces.get("export")
+    export: Mapping[str, Any] = raw_export if isinstance(raw_export, Mapping) else {}
+    raw_otlp = export.get("otlp")
+    otlp: Mapping[str, Any] = raw_otlp if isinstance(raw_otlp, Mapping) else {}
+    otlp_allowed_hosts = _otlp_allowed_hosts(_mapping_get(otlp, "allowed_hosts", ()))
+    export_enabled = bool(_mapping_get(export, "enabled", False))
+    export_sink = str(_mapping_get(export, "sink", "otlp_http"))
+    otlp_endpoint = _otlp_traces_endpoint(str(_mapping_get(otlp, "endpoint", "")))
+    if export_enabled and export_sink == "otlp_http":
+        otlp_endpoint = _validate_otlp_endpoint(
+            otlp_endpoint,
+            allowed_hosts=otlp_allowed_hosts,
+        )
+    mode = str(raw.get("mode", DEFAULT_PRIVACY_MODE)).strip().lower()
+    if mode not in ALLOWED_MODES:
+        allowed = ", ".join(sorted(ALLOWED_MODES))
+        raise ValueError(f"telemetry.mode must be one of: {allowed}")
+    return {
+        "enabled": bool(raw.get("enabled", True)) and bool(_mapping_get(traces, "enabled", True)),
+        "mode": mode,
+        "path": str(raw.get("path", DEFAULT_TELEMETRY_PATH)),
+        "hash_salt": _resolve_hash_salt(privacy),
+        "export_enabled": export_enabled,
+        "export_sink": export_sink,
+        "export_path": "",
+        "export_checkpoint_path": str(_mapping_get(export, "checkpoint_path", "")),
+        "export_status_path": str(_mapping_get(export, "status_path", "")),
+        "export_checkpoint_suffix": ".trace-export-checkpoint.json",
+        "export_status_suffix": ".trace-export-status.json",
+        "export_signal": "traces",
+        "trace_maturity_seconds": min(
+            _MAX_TRACE_MATURITY_SECONDS,
+            max(
+                0.0,
+                float(
+                    _mapping_get(
+                        export,
+                        "span_maturity_seconds",
+                        _DEFAULT_TRACE_MATURITY_SECONDS,
+                    )
+                ),
+            ),
+        ),
+        "otlp_endpoint": otlp_endpoint,
+        "otlp_allowed_hosts": sorted(otlp_allowed_hosts),
+        "otlp_headers": _mapping_get(otlp, "headers", {}),
+        "otlp_timeout_seconds": float(_mapping_get(otlp, "timeout_seconds", 5.0)),
+        "otlp_max_retries": max(
+            0,
+            int(_mapping_get(otlp, "max_retries", _DEFAULT_OTLP_MAX_RETRIES)),
+        ),
+        "otlp_retry_backoff_seconds": max(
+            0.0,
+            float(
+                _mapping_get(
+                    otlp,
+                    "retry_backoff_seconds",
+                    _DEFAULT_OTLP_RETRY_BACKOFF_SECONDS,
+                )
+            ),
+        ),
+        "otlp_max_retry_delay_seconds": max(
+            0.0,
+            float(
+                _mapping_get(
+                    otlp,
+                    "max_retry_delay_seconds",
+                    _DEFAULT_OTLP_MAX_RETRY_DELAY_SECONDS,
+                )
+            ),
+        ),
+        "otlp_retry_jitter_ratio": min(
+            1.0,
+            max(
+                0.0,
+                float(
+                    _mapping_get(
+                        otlp,
+                        "retry_jitter_ratio",
+                        _DEFAULT_OTLP_RETRY_JITTER_RATIO,
+                    )
+                ),
+            ),
+        ),
+        "otlp_service_name": str(_mapping_get(otlp, "service_name", "ctx")),
+        "otlp_service_namespace": str(_mapping_get(otlp, "service_namespace", "ctx")),
+        "otlp_deployment_environment": str(_mapping_get(otlp, "deployment_environment", "local")),
         "max_payload_keys": int(
             _mapping_get(limits, "max_payload_keys", _MAX_PAYLOAD_KEYS),
         ),
@@ -1845,6 +2247,16 @@ def _otlp_metrics_endpoint(configured: str) -> str:
     return configured or DEFAULT_OTLP_METRICS_ENDPOINT
 
 
+def _otlp_traces_endpoint(configured: str) -> str:
+    traces_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+    if traces_endpoint:
+        return traces_endpoint
+    base_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
+    if base_endpoint:
+        return base_endpoint.rstrip("/") + "/v1/traces"
+    return configured or DEFAULT_OTLP_TRACES_ENDPOINT
+
+
 def _otlp_allowed_hosts(raw: object) -> frozenset[str]:
     if raw in (None, ""):
         return frozenset()
@@ -1994,6 +2406,133 @@ def _export_events(
     return ExportResult(attempted=len(events), exported=len(events), failed=0, sink=sink)
 
 
+def _export_traces(
+    events: list[TelemetryEvent],
+    *,
+    settings: Mapping[str, Any],
+) -> ExportResult:
+    sink = str(settings["export_sink"])
+    if not events:
+        return ExportResult(attempted=0, exported=0, failed=0, sink=sink, status="noop")
+    attempted = _trace_group_count(events)
+    if sink != "otlp_http":
+        return ExportResult(
+            attempted=attempted,
+            exported=0,
+            failed=attempted,
+            sink=sink,
+            status="failed",
+            error_kind="unsupported_sink",
+        )
+    try:
+        sanitized_events = [_sanitize_event_for_export(event, settings) for event in events]
+        payload = _otlp_traces_payload(sanitized_events, settings)
+        attempted = _otlp_trace_span_count(payload)
+        response = _post_otlp_http(payload, settings)
+        if response is None:
+            response = _OTLPResponse()
+        if response.rejected_records > attempted:
+            raise RuntimeError("OTLP rejected count exceeded the submitted span count")
+        if response.rejected_records:
+            return ExportResult(
+                attempted=attempted,
+                exported=attempted - response.rejected_records,
+                failed=response.rejected_records,
+                sink=sink,
+                status="partial_success",
+                error_kind="otlp_partial_success",
+                error_message=response.error_message,
+            )
+    except Exception as exc:  # noqa: BLE001 - exporters are best effort.
+        print(f"ctx telemetry: trace export failed ({type(exc).__name__})", file=sys.stderr)
+        return ExportResult(
+            attempted=attempted,
+            exported=0,
+            failed=attempted,
+            sink=sink,
+            status="failed",
+            error_kind=type(exc).__name__,
+        )
+    return ExportResult(
+        attempted=attempted,
+        exported=attempted,
+        failed=0,
+        sink=sink,
+        status="ok",
+    )
+
+
+def _trace_export_batch(
+    pending: _PendingExport,
+    *,
+    settings: Mapping[str, Any],
+) -> _TraceExportBatch:
+    events = pending.events
+    if not events:
+        return _TraceExportBatch(events=[], retained_events=0, late_span_events=0)
+
+    keys = [_trace_group_key(event) for event in events]
+    first_indexes: dict[tuple[str, str], int] = {}
+    latest_timestamps: dict[tuple[str, str], datetime] = {}
+    for index, (event, key) in enumerate(zip(events, keys, strict=True)):
+        first_indexes.setdefault(key, index)
+        event_ts = datetime.fromisoformat(event.ts.replace("Z", "+00:00"))
+        if event_ts.tzinfo is None:
+            event_ts = event_ts.replace(tzinfo=timezone.utc)
+        latest_timestamps[key] = max(
+            latest_timestamps.get(key, event_ts),
+            event_ts,
+        )
+
+    maturity_seconds = float(settings["trace_maturity_seconds"])
+    high_water = datetime.now(timezone.utc) - timedelta(seconds=maturity_seconds)
+    late_keys = set(keys).intersection(pending.exported_span_keys)
+    mature_keys = {
+        key
+        for key, latest_ts in latest_timestamps.items()
+        if latest_ts <= high_water and key not in late_keys
+    }
+
+    boundary = len(events)
+    for index, key in enumerate(keys):
+        if key not in mature_keys:
+            boundary = index
+            break
+    while boundary:
+        crossing_first_indexes = [
+            first_indexes[key] for key in set(keys[boundary:]) if first_indexes[key] < boundary
+        ]
+        if not crossing_first_indexes:
+            break
+        boundary = min(crossing_first_indexes)
+
+    return _TraceExportBatch(
+        events=events[:boundary],
+        retained_events=len(events) - boundary,
+        late_span_events=sum(1 for key in keys[boundary:] if key in late_keys),
+    )
+
+
+def _validate_trace_context(events: list[TelemetryEvent]) -> None:
+    parent_ids_by_span: dict[tuple[str, str], set[str]] = {}
+    for event in events:
+        trace_id = _otlp_trace_id(event)
+        span_id = _otlp_span_id(event)
+        if event.parent_span_id is not None:
+            if not _valid_span_id(event.parent_span_id):
+                raise ValueError(f"invalid parent_span_id for telemetry span {span_id}")
+            parent_ids_by_span.setdefault((trace_id, span_id), set()).add(event.parent_span_id)
+    for (_, span_id), parent_ids in parent_ids_by_span.items():
+        if len(parent_ids) > 1:
+            raise ValueError(f"inconsistent parent_span_id for telemetry span {span_id}")
+
+
+def _trace_group_key(event: TelemetryEvent) -> tuple[str, str]:
+    if event.trace_id is None or event.span_id is None:
+        return "", event.event_id
+    return event.trace_id, event.span_id
+
+
 def _export_recorded_metric(
     metric: TelemetryMetric,
     *,
@@ -2129,6 +2668,7 @@ def _events_pending_export(
     checkpoint_event_id = None
     checkpoint_found = False
     pending_events = spool.events
+    exported_events: list[TelemetryEvent] = []
     pending_start_line = 1
     if not include_exported:
         checkpoint_event_id = _read_export_checkpoint(
@@ -2140,6 +2680,7 @@ def _events_pending_export(
         for index, event in enumerate(spool.events):
             if event.event_id == checkpoint_event_id:
                 checkpoint_found = True
+                exported_events = spool.events[: index + 1]
                 pending_events = spool.events[index + 1 :]
                 pending_start_line = spool.event_line_numbers.get(event.event_id, 0) + 1
                 break
@@ -2158,6 +2699,11 @@ def _events_pending_export(
         malformed_pending_records=len(pending_malformed_lines),
         malformed_first_line=pending_malformed_lines[0] if pending_malformed_lines else None,
         malformed_last_line=pending_malformed_lines[-1] if pending_malformed_lines else None,
+        exported_span_keys=frozenset(
+            (event.trace_id, event.span_id)
+            for event in exported_events
+            if event.trace_id is not None and event.span_id is not None
+        ),
     )
 
 
@@ -2345,7 +2891,8 @@ def _export_checkpoint_path(
     trusted_root: Path | None,
 ) -> Path:
     configured = str(settings.get("export_checkpoint_path") or "")
-    raw = Path(configured) if configured else Path(str(source_path) + ".export-checkpoint.json")
+    suffix = str(settings.get("export_checkpoint_suffix") or ".export-checkpoint.json")
+    raw = Path(configured) if configured else Path(str(source_path) + suffix)
     return _resolve_path(raw, trusted_root=trusted_root)
 
 
@@ -2356,7 +2903,8 @@ def _export_status_path(
     trusted_root: Path | None,
 ) -> Path:
     configured = str(settings.get("export_status_path") or "")
-    raw = Path(configured) if configured else Path(str(source_path) + ".export-status.json")
+    suffix = str(settings.get("export_status_suffix") or ".export-status.json")
+    raw = Path(configured) if configured else Path(str(source_path) + suffix)
     return _resolve_path(raw, trusted_root=trusted_root)
 
 
@@ -2426,6 +2974,7 @@ def _write_export_status(
     payload = {
         "schema_version": EXPORT_STATUS_SCHEMA_VERSION,
         "event_schema_version": SCHEMA_VERSION,
+        "signal": str(settings.get("export_signal") or "events"),
         "run_id": uuid.uuid4().hex,
         "status": result.status,
         "started_at": started_at,
@@ -2438,6 +2987,9 @@ def _write_export_status(
         "exported": result.exported,
         "failed": result.failed,
         "error_kind": result.error_kind,
+        "error_message": result.error_message,
+        "retained_events": result.retained_events,
+        "late_span_events": result.late_span_events,
         "checkpoint_path": result.checkpoint_path,
         "checkpoint_before_event_id": result.checkpoint_before_event_id,
         "checkpoint_after_event_id": result.checkpoint_after_event_id,
@@ -2533,6 +3085,26 @@ def _export_status(result: ExportResult, *, pending: _PendingExport) -> str:
     return "ok"
 
 
+def _trace_export_status(
+    result: ExportResult,
+    *,
+    pending: _PendingExport,
+    batch: _TraceExportBatch,
+) -> str:
+    if result.status == "partial_success":
+        return "partial_success"
+    if result.failed:
+        return "failed"
+    checkpoint_anomaly = (
+        pending.checkpoint_before_event_id is not None and not pending.checkpoint_found
+    )
+    if pending.malformed_pending_records or checkpoint_anomaly or batch.late_span_events:
+        return "degraded"
+    if result.attempted == 0:
+        return "pending" if batch.retained_events else "noop"
+    return "ok"
+
+
 def _export_local_metrics_jsonl(
     metrics: list[TelemetryMetric],
     path: Path,
@@ -2561,21 +3133,172 @@ def _export_local_jsonl(
                 fh.write("\n")
 
 
-def _post_otlp_http(payload: Mapping[str, Any], settings: Mapping[str, Any]) -> None:
+def _post_otlp_http(
+    payload: Mapping[str, Any],
+    settings: Mapping[str, Any],
+) -> _OTLPResponse:
     body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    headers = {"Content-Type": "application/json"}
+    headers: dict[str, str] = {}
     configured_headers = settings.get("otlp_headers")
     if isinstance(configured_headers, Mapping):
-        headers.update({str(key): str(value) for key, value in configured_headers.items()})
-    request = Request(str(settings["otlp_endpoint"]), data=body, headers=headers, method="POST")
+        headers.update(
+            {
+                str(key): str(value)
+                for key, value in configured_headers.items()
+                if str(key).lower() not in {"content-type", "content-encoding"}
+            }
+        )
+    headers["Content-Type"] = "application/json"
+    headers["Content-Encoding"] = "identity"
     opener = build_opener(_NoRedirectHandler)
+    max_retries = max(0, int(settings.get("otlp_max_retries", _DEFAULT_OTLP_MAX_RETRIES)))
+    for attempt in range(max_retries + 1):
+        request = Request(
+            str(settings["otlp_endpoint"]),
+            data=body,
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with opener.open(request, timeout=float(settings["otlp_timeout_seconds"])) as response:
+                status = int(getattr(response, "status", response.getcode()))
+                response_body = response.read(_MAX_OTLP_RESPONSE_BYTES + 1)
+                if len(response_body) > _MAX_OTLP_RESPONSE_BYTES:
+                    raise RuntimeError("OTLP HTTP response exceeded the size limit")
+                retry_after = _otlp_retry_after_header(response)
+        except HTTPError as exc:
+            status = int(exc.code)
+            if status in _RETRYABLE_OTLP_STATUS_CODES and attempt < max_retries:
+                _sleep_before_otlp_retry(
+                    attempt=attempt,
+                    retry_after=_otlp_retry_after_header(exc),
+                    settings=settings,
+                )
+                continue
+            raise RuntimeError(f"OTLP HTTP export failed with status {status}") from exc
+        except (URLError, RemoteDisconnected, ConnectionError, TimeoutError) as exc:
+            if attempt < max_retries:
+                _sleep_before_otlp_retry(
+                    attempt=attempt,
+                    retry_after=None,
+                    settings=settings,
+                )
+                continue
+            raise RuntimeError("OTLP HTTP export failed") from exc
+        if status in _RETRYABLE_OTLP_STATUS_CODES and attempt < max_retries:
+            _sleep_before_otlp_retry(
+                attempt=attempt,
+                retry_after=retry_after,
+                settings=settings,
+            )
+            continue
+        if status != 200:
+            raise RuntimeError(f"OTLP HTTP export failed with status {status}")
+        return _validate_otlp_response(response_body, settings=settings)
+    raise RuntimeError("OTLP HTTP export retry budget exhausted")
+
+
+def _otlp_retry_after_header(response: Any) -> str | None:
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        return None
+    value = headers.get("Retry-After")
+    return str(value) if value is not None else None
+
+
+def _sleep_before_otlp_retry(
+    *,
+    attempt: int,
+    retry_after: str | None,
+    settings: Mapping[str, Any],
+) -> None:
+    backoff = max(
+        0.0,
+        float(
+            settings.get(
+                "otlp_retry_backoff_seconds",
+                _DEFAULT_OTLP_RETRY_BACKOFF_SECONDS,
+            )
+        ),
+    )
+    delay = backoff * (2**attempt)
+    used_retry_after = False
+    if retry_after:
+        try:
+            delay = max(0.0, float(retry_after))
+            used_retry_after = True
+        except ValueError:
+            try:
+                retry_at = parsedate_to_datetime(retry_after)
+                if retry_at.tzinfo is None:
+                    retry_at = retry_at.replace(tzinfo=timezone.utc)
+                delay = max(0.0, (retry_at - datetime.now(timezone.utc)).total_seconds())
+                used_retry_after = True
+            except (TypeError, ValueError, OverflowError):
+                pass
+    if not used_retry_after and delay:
+        jitter_ratio = min(
+            1.0,
+            max(
+                0.0,
+                float(
+                    settings.get(
+                        "otlp_retry_jitter_ratio",
+                        _DEFAULT_OTLP_RETRY_JITTER_RATIO,
+                    )
+                ),
+            ),
+        )
+        if jitter_ratio:
+            jitter_unit = secrets.randbelow(1_000_001) / 1_000_000
+            delay *= 1.0 + ((2.0 * jitter_unit) - 1.0) * jitter_ratio
+    max_delay = max(
+        0.0,
+        float(
+            settings.get(
+                "otlp_max_retry_delay_seconds",
+                _DEFAULT_OTLP_MAX_RETRY_DELAY_SECONDS,
+            )
+        ),
+    )
+    time.sleep(min(delay, max_delay))
+
+
+def _validate_otlp_response(
+    body: bytes,
+    *,
+    settings: Mapping[str, Any],
+) -> _OTLPResponse:
+    if not body.strip():
+        return _OTLPResponse()
     try:
-        with opener.open(request, timeout=float(settings["otlp_timeout_seconds"])) as response:
-            status = int(getattr(response, "status", response.getcode()))
-            if status != 200:
-                raise RuntimeError(f"OTLP HTTP export failed with status {status}")
-    except (HTTPError, URLError) as exc:
-        raise RuntimeError(f"OTLP HTTP export failed: {exc}") from exc
+        payload = json.loads(body)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("OTLP HTTP response was not valid JSON") from exc
+    if not isinstance(payload, Mapping):
+        raise RuntimeError("OTLP HTTP response must be a JSON object")
+    partial_success = payload.get("partialSuccess")
+    if not isinstance(partial_success, Mapping):
+        return _OTLPResponse()
+    raw_rejected = partial_success.get("rejectedSpans", 0)
+    try:
+        rejected = int(raw_rejected)
+    except (TypeError, ValueError):
+        raise RuntimeError("OTLP partial-success count was invalid") from None
+    if rejected < 0:
+        raise RuntimeError("OTLP partial-success count was invalid")
+    raw_message = partial_success.get("errorMessage")
+    error_message = None
+    if rejected and isinstance(raw_message, str):
+        error_message = _sanitize_otlp_text(
+            raw_message,
+            str(settings["mode"]),
+            settings,
+        )
+    return _OTLPResponse(
+        rejected_records=rejected,
+        error_message=error_message,
+    )
 
 
 class _NoRedirectHandler(HTTPRedirectHandler):
@@ -2584,11 +3307,15 @@ class _NoRedirectHandler(HTTPRedirectHandler):
 
 
 def _otlp_logs_payload(events: list[TelemetryEvent], settings: Mapping[str, Any]) -> dict[str, Any]:
-    resource_attributes = {
-        "service.name": str(settings["otlp_service_name"]),
-        "service.namespace": str(settings["otlp_service_namespace"]),
-        "deployment.environment": str(settings["otlp_deployment_environment"]),
-    }
+    resource_attributes = _sanitize_otlp_attributes(
+        {
+            "service.name": str(settings["otlp_service_name"]),
+            "service.namespace": str(settings["otlp_service_namespace"]),
+            "deployment.environment": str(settings["otlp_deployment_environment"]),
+        },
+        privacy_mode=str(settings["mode"]),
+        settings=settings,
+    )
     return {
         "resourceLogs": [
             {
@@ -2610,11 +3337,15 @@ def _otlp_metrics_payload(
     metrics: list[TelemetryMetric],
     settings: Mapping[str, Any],
 ) -> dict[str, Any]:
-    resource_attributes = {
-        "service.name": str(settings["otlp_service_name"]),
-        "service.namespace": str(settings["otlp_service_namespace"]),
-        "deployment.environment": str(settings["otlp_deployment_environment"]),
-    }
+    resource_attributes = _sanitize_otlp_attributes(
+        {
+            "service.name": str(settings["otlp_service_name"]),
+            "service.namespace": str(settings["otlp_service_namespace"]),
+            "deployment.environment": str(settings["otlp_deployment_environment"]),
+        },
+        privacy_mode=str(settings["mode"]),
+        settings=settings,
+    )
     return {
         "resourceMetrics": [
             {
@@ -2636,15 +3367,217 @@ def _otlp_metrics_payload(
     }
 
 
+def _otlp_traces_payload(
+    events: list[TelemetryEvent],
+    settings: Mapping[str, Any],
+) -> dict[str, Any]:
+    resource_attributes = _sanitize_otlp_attributes(
+        {
+            "service.name": str(settings["otlp_service_name"]),
+            "service.namespace": str(settings["otlp_service_namespace"]),
+            "deployment.environment": str(settings["otlp_deployment_environment"]),
+        },
+        privacy_mode=str(settings["mode"]),
+        settings=settings,
+    )
+    grouped: dict[tuple[str, str], list[TelemetryEvent]] = {}
+    for event in events:
+        trace_id = _otlp_trace_id(event)
+        span_id = _otlp_span_id(event)
+        grouped.setdefault((trace_id, span_id), []).append(event)
+    return {
+        "resourceSpans": [
+            {
+                "resource": {"attributes": _otlp_attributes(resource_attributes)},
+                "scopeSpans": [
+                    {
+                        "scope": {"name": "ctx.telemetry", "version": SCHEMA_VERSION},
+                        "spans": [
+                            _otlp_span_record(
+                                span_events,
+                                trace_id=trace_id,
+                                span_id=span_id,
+                                settings=settings,
+                            )
+                            for (trace_id, span_id), span_events in grouped.items()
+                        ],
+                    }
+                ],
+            }
+        ]
+    }
+
+
+def _trace_group_count(events: list[TelemetryEvent]) -> int:
+    return len({_trace_group_key(event) for event in events})
+
+
+def _otlp_trace_span_count(payload: Mapping[str, Any]) -> int:
+    return sum(
+        len(scope_spans.get("spans", ()))
+        for resource_spans in payload.get("resourceSpans", ())
+        if isinstance(resource_spans, Mapping)
+        for scope_spans in resource_spans.get("scopeSpans", ())
+        if isinstance(scope_spans, Mapping)
+    )
+
+
+def _otlp_trace_id(event: TelemetryEvent) -> str:
+    if event.trace_id is None:
+        raise ValueError(f"missing trace_id for telemetry event {event.event_id}")
+    if not _valid_trace_id(event.trace_id):
+        raise ValueError(f"invalid trace_id for telemetry event {event.event_id}")
+    return event.trace_id
+
+
+def _otlp_span_id(event: TelemetryEvent) -> str:
+    if event.span_id is None:
+        raise ValueError(f"missing span_id for telemetry event {event.event_id}")
+    if not _valid_span_id(event.span_id):
+        raise ValueError(f"invalid span_id for telemetry event {event.event_id}")
+    return event.span_id
+
+
+def _otlp_span_record(
+    events: list[TelemetryEvent],
+    *,
+    trace_id: str,
+    span_id: str,
+    settings: Mapping[str, Any],
+) -> dict[str, Any]:
+    first = events[0]
+    intervals = [_otlp_event_interval(event) for event in events]
+    parent_ids = {event.parent_span_id for event in events if event.parent_span_id is not None}
+    if any(not _valid_span_id(parent_id) for parent_id in parent_ids):
+        raise ValueError(f"invalid parent_span_id for telemetry span {span_id}")
+    if len(parent_ids) > 1:
+        raise ValueError(f"inconsistent parent_span_id for telemetry span {span_id}")
+    error_event = next((event for event in events if event.outcome == "error"), None)
+    attributes = _otlp_trace_event_attributes(first, settings=settings)
+    attributes["ctx.trace.event_count"] = len(events)
+    span: dict[str, Any] = {
+        "traceId": trace_id,
+        "spanId": span_id,
+        "name": _sanitize_otlp_text(first.event_name, first.privacy_mode, settings),
+        "kind": 1,
+        "startTimeUnixNano": str(min(start for start, _ in intervals)),
+        "endTimeUnixNano": str(max(end for _, end in intervals)),
+        "attributes": _otlp_attributes(attributes),
+        "events": [
+            {
+                "timeUnixNano": str(_iso_to_unix_nanos(event.ts)),
+                "name": _sanitize_otlp_text(event.event_name, event.privacy_mode, settings),
+                "attributes": _otlp_attributes(
+                    _otlp_trace_event_attributes(event, settings=settings)
+                ),
+            }
+            for event in events
+        ],
+        "status": {"code": 2 if error_event is not None else 1},
+    }
+    if parent_ids:
+        span["parentSpanId"] = next(iter(parent_ids))
+    if error_event is not None and error_event.error_kind:
+        span["status"]["message"] = _sanitize_otlp_text(
+            error_event.error_kind,
+            error_event.privacy_mode,
+            settings,
+        )
+    return span
+
+
+def _otlp_event_interval(event: TelemetryEvent) -> tuple[int, int]:
+    end_nanos = _iso_to_unix_nanos(event.ts)
+    duration_nanos = max(0, int(round(float(event.duration_ms or 0.0) * 1_000_000)))
+    return max(0, end_nanos - duration_nanos), end_nanos
+
+
+def _otlp_trace_event_attributes(
+    event: TelemetryEvent,
+    *,
+    settings: Mapping[str, Any],
+) -> dict[str, Any]:
+    session_hash = event.session_hash
+    if session_hash is None and event.session_id:
+        session_hash = hash_identifier(event.session_id, salt=settings["hash_salt"])
+    payload = _sanitize_payload(
+        dict(event.payload),
+        privacy_mode=event.privacy_mode,
+        hash_salt=settings["hash_salt"],
+        max_keys=int(settings["max_payload_keys"]),
+        max_value_len=int(settings["max_payload_value_chars"]),
+    )
+    attributes: dict[str, Any] = {
+        "event.name": event.event_name,
+        "ctx.schema_version": event.schema_version,
+        "ctx.event_id": event.event_id,
+        "ctx.source": event.source,
+        "ctx.outcome": event.outcome,
+        "ctx.privacy_mode": event.privacy_mode,
+        **{f"ctx.payload.{key}": value for key, value in payload.items()},
+    }
+    optional = {
+        "ctx.session.hash": session_hash,
+        "ctx.transport": event.transport,
+        "ctx.actor": event.actor,
+        "ctx.duration_ms": event.duration_ms,
+        "error.type": event.error_kind,
+        "ctx.repo_hash": event.repo_hash,
+        "ctx.cwd_hash": event.cwd_hash,
+        "ctx.graph_export_id": event.graph_export_id,
+        "ctx.wiki_export_id": event.wiki_export_id,
+        "ctx.version": event.ctx_version,
+    }
+    attributes.update({key: value for key, value in optional.items() if value is not None})
+    return _sanitize_otlp_attributes(
+        attributes,
+        privacy_mode=event.privacy_mode,
+        settings=settings,
+    )
+
+
+def _sanitize_otlp_text(
+    value: str,
+    privacy_mode: str,
+    settings: Mapping[str, Any],
+) -> str:
+    sanitized = _sanitize_value(
+        value,
+        privacy_mode=privacy_mode,
+        hash_salt=settings["hash_salt"],
+        max_value_len=int(settings["max_payload_value_chars"]),
+        depth=0,
+    )
+    return str(sanitized)
+
+
+def _sanitize_otlp_attributes(
+    attributes: Mapping[str, Any],
+    *,
+    privacy_mode: str,
+    settings: Mapping[str, Any],
+) -> dict[str, Any]:
+    return {
+        key: _sanitize_value(
+            value,
+            privacy_mode=privacy_mode,
+            hash_salt=settings["hash_salt"],
+            max_value_len=int(settings["max_payload_value_chars"]),
+            depth=0,
+        )
+        for key, value in attributes.items()
+    }
+
+
 def _otlp_metric_record(
     metric: TelemetryMetric,
     *,
     settings: Mapping[str, Any],
 ) -> dict[str, Any]:
-    data_point = _otlp_metric_data_point(metric)
+    data_point = _otlp_metric_data_point(metric, settings=settings)
     record: dict[str, Any] = {
-        "name": metric.name,
-        "unit": metric.unit,
+        "name": _sanitize_otlp_text(metric.name, metric.privacy_mode, settings),
+        "unit": _sanitize_otlp_text(metric.unit, metric.privacy_mode, settings),
     }
     if metric.instrument == "counter":
         record["sum"] = {
@@ -2657,16 +3590,20 @@ def _otlp_metric_record(
     bounds = tuple(settings.get("histogram_bounds") or _DEFAULT_HISTOGRAM_BOUNDS)
     record["histogram"] = {
         "aggregationTemporality": _OTEL_AGGREGATION_TEMPORALITY_DELTA,
-        "dataPoints": [_otlp_histogram_data_point(metric, bounds=bounds)],
+        "dataPoints": [_otlp_histogram_data_point(metric, bounds=bounds, settings=settings)],
     }
     return record
 
 
-def _otlp_metric_data_point(metric: TelemetryMetric) -> dict[str, Any]:
+def _otlp_metric_data_point(
+    metric: TelemetryMetric,
+    *,
+    settings: Mapping[str, Any],
+) -> dict[str, Any]:
     observed_nanos = _iso_to_unix_nanos(metric.ts)
     data_point: dict[str, Any] = {
         "timeUnixNano": str(observed_nanos),
-        "attributes": _otlp_metric_attributes(metric),
+        "attributes": _otlp_metric_attributes(metric, settings=settings),
     }
     if float(metric.value).is_integer():
         data_point["asInt"] = str(int(metric.value))
@@ -2679,6 +3616,7 @@ def _otlp_histogram_data_point(
     metric: TelemetryMetric,
     *,
     bounds: tuple[float, ...],
+    settings: Mapping[str, Any],
 ) -> dict[str, Any]:
     observed_nanos = _iso_to_unix_nanos(metric.ts)
     bucket_counts = [0 for _ in range(len(bounds) + 1)]
@@ -2698,11 +3636,15 @@ def _otlp_histogram_data_point(
         "max": metric.value,
         "bucketCounts": [str(count) for count in bucket_counts],
         "explicitBounds": list(bounds),
-        "attributes": _otlp_metric_attributes(metric),
+        "attributes": _otlp_metric_attributes(metric, settings=settings),
     }
 
 
-def _otlp_metric_attributes(metric: TelemetryMetric) -> list[dict[str, Any]]:
+def _otlp_metric_attributes(
+    metric: TelemetryMetric,
+    *,
+    settings: Mapping[str, Any],
+) -> list[dict[str, Any]]:
     attributes = {
         "ctx.metric_id": metric.metric_id,
         "ctx.schema_version": metric.schema_version,
@@ -2718,7 +3660,13 @@ def _otlp_metric_attributes(metric: TelemetryMetric) -> list[dict[str, Any]]:
         "ctx.version": metric.ctx_version,
     }
     attributes.update({key: value for key, value in optional.items() if value is not None})
-    return _otlp_attributes(attributes)
+    return _otlp_attributes(
+        _sanitize_otlp_attributes(
+            attributes,
+            privacy_mode=metric.privacy_mode,
+            settings=settings,
+        )
+    )
 
 
 def _otlp_log_record(event: TelemetryEvent, *, settings: Mapping[str, Any]) -> dict[str, Any]:
@@ -2758,16 +3706,27 @@ def _otlp_log_record(event: TelemetryEvent, *, settings: Mapping[str, Any]) -> d
         "ctx.version": event.ctx_version,
     }
     attributes.update({key: value for key, value in optional.items() if value is not None})
+    sanitized_attributes = _sanitize_otlp_attributes(
+        attributes,
+        privacy_mode=event.privacy_mode,
+        settings=settings,
+    )
     record = {
         "timeUnixNano": str(observed_nanos),
         "observedTimeUnixNano": str(observed_nanos),
         "severityText": "ERROR" if event.outcome == "error" else "INFO",
-        "body": {"stringValue": event.event_name},
-        "attributes": _otlp_attributes(attributes),
+        "body": {
+            "stringValue": _sanitize_otlp_text(
+                event.event_name,
+                event.privacy_mode,
+                settings,
+            )
+        },
+        "attributes": _otlp_attributes(sanitized_attributes),
     }
-    if event.trace_id:
+    if event.trace_id and _valid_trace_id(event.trace_id):
         record["traceId"] = event.trace_id
-    if event.span_id:
+    if event.span_id and _valid_span_id(event.span_id):
         record["spanId"] = event.span_id
     return record
 

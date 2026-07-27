@@ -11,6 +11,8 @@ import sys
 import unittest.mock as mock
 from pathlib import Path
 
+import pytest
+
 # Ensure the project root is importable regardless of working directory.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -45,6 +47,41 @@ def _minimal_wiki_for_orchestrator(tmp_path: Path) -> Path:
     )
     (wiki / "SCHEMA.md").write_text(schema_text, encoding="utf-8")
     return wiki
+
+
+def _complete_sync_modules() -> dict[str, mock.Mock]:
+    wiki_sync = mock.Mock(spec=["ensure_wiki", "upsert_skill_page", "update_index", "append_log"])
+    batch_convert = mock.Mock(spec=["convert_skill"])
+    link_conversions = mock.Mock(spec=["run"])
+    link_conversions.run.return_value = mock.Mock(errors=[])
+    catalog_builder = mock.Mock(spec=["build_catalog", "update_wiki_index"])
+    catalog_builder.build_catalog.return_value = {"total": 0}
+    versions_catalog = mock.Mock(spec=["find_dual_version_skills", "build_versions_catalog"])
+    versions_catalog.find_dual_version_skills.return_value = []
+    wiki_lint = mock.Mock(spec=["run_lint"])
+    wiki_lint.run_lint.return_value = []
+    return {
+        "wiki_sync": wiki_sync,
+        "batch_convert": batch_convert,
+        "link_conversions": link_conversions,
+        "catalog_builder": catalog_builder,
+        "versions_catalog": versions_catalog,
+        "wiki_lint": wiki_lint,
+    }
+
+
+def _run_sync_with_modules(
+    wiki: Path,
+    modules: dict[str, mock.Mock],
+) -> wo.HealthReport:
+    with (
+        mock.patch.object(wo, "_try_import", side_effect=lambda name, _report: modules[name]),
+        mock.patch.object(wo.cfg, "all_skill_dirs", return_value=[]),
+        mock.patch.object(wo, "_skill_names_on_disk", return_value=[]),
+        mock.patch.object(wo, "_actual_page_count", return_value=0),
+        mock.patch.object(wo, "run_check", return_value=wo.HealthReport()),
+    ):
+        return wo.run_sync(wiki)
 
 
 class TestOrchestratorHealthScorePerfect:
@@ -200,3 +237,323 @@ class TestOrchestratorStatusReturnsCounts:
         assert any(
             "[lint]" in warning and "no-frontmatter" in warning for warning in report.warnings
         )
+
+
+class TestOrchestratorAddFallback:
+    def test_canonical_runtime_failure_exits_without_legacy_fallback(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        canonical = mock.Mock()
+        canonical.add_skill.side_effect = RuntimeError("canonical boom")
+
+        with (
+            mock.patch.object(
+                wo,
+                "_resolve_add_source",
+                return_value=(Path("valid-skill"), "valid-skill"),
+            ),
+            mock.patch.object(
+                wo,
+                "_load_module",
+                return_value=wo.ModuleLoadResult(canonical),
+            ) as load_module,
+            mock.patch.object(wo, "_try_import") as try_import,
+        ):
+            with pytest.raises(SystemExit) as exc_info:
+                wo.run_add(tmp_path / "wiki", "valid-skill")
+
+        assert exc_info.value.code == 1
+        load_module.assert_called_once()
+        try_import.assert_not_called()
+        canonical.add_skill.assert_called_once_with(
+            source_path=Path("valid-skill"),
+            name="valid-skill",
+            wiki_path=tmp_path / "wiki",
+            skills_dir=wo.cfg.skills_dir,
+        )
+        captured = capsys.readouterr()
+        assert "skill_add.add_skill raised: canonical boom" in captured.err
+        assert "Entity page" not in captured.out
+
+    def test_absent_canonical_module_uses_legacy_fallback(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        wiki = tmp_path / "wiki"
+        legacy = mock.Mock()
+        legacy.upsert_skill_page.return_value = True
+
+        with (
+            mock.patch.object(
+                wo,
+                "_resolve_add_source",
+                return_value=(Path("valid-skill"), "valid-skill"),
+            ),
+            mock.patch.object(wo, "SCRIPT_DIR", tmp_path),
+            mock.patch.object(wo, "_try_import", return_value=legacy) as try_import,
+        ):
+            wo.run_add(wiki, "valid-skill")
+
+        try_import.assert_called_once()
+        legacy.upsert_skill_page.assert_called_once_with(
+            str(wiki),
+            "valid-skill",
+            {"path": "valid-skill", "reason": "manually added via orchestrator"},
+        )
+        legacy.update_index.assert_called_once_with(str(wiki), ["valid-skill"])
+        legacy.append_log.assert_called_once_with(
+            str(wiki), "add-skill", "valid-skill", ["Path: valid-skill"]
+        )
+        assert "Entity page created: valid-skill" in capsys.readouterr().out
+
+    def test_canonical_import_failure_exits_without_legacy_fallback(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        (tmp_path / "skill_add.py").write_text(
+            'raise RuntimeError("loader boom")\n', encoding="utf-8"
+        )
+
+        with (
+            mock.patch.object(
+                wo,
+                "_resolve_add_source",
+                return_value=(Path("valid-skill"), "valid-skill"),
+            ),
+            mock.patch.object(wo, "SCRIPT_DIR", tmp_path),
+            mock.patch.object(wo, "_try_import") as try_import,
+        ):
+            with pytest.raises(SystemExit) as exc_info:
+                wo.run_add(tmp_path / "wiki", "valid-skill")
+
+        assert exc_info.value.code == 1
+        try_import.assert_not_called()
+        assert "skill_add load failed: import error: loader boom" in capsys.readouterr().err
+
+
+class TestOrchestratorSyncFailures:
+    def test_try_import_uses_canonical_wiki_sync_package(self) -> None:
+        from ctx.core.wiki import wiki_sync
+
+        report = wo.HealthReport()
+
+        assert wo._try_import("wiki_sync", report) is wiki_sync
+        assert report.skipped_modules == []
+
+    def test_run_sync_uses_link_conversions_run(self, tmp_path: Path) -> None:
+        modules = _complete_sync_modules()
+
+        report = _run_sync_with_modules(tmp_path / "wiki", modules)
+
+        modules["link_conversions"].run.assert_called_once_with(
+            tmp_path / "wiki", wo.cfg.skills_dir
+        )
+        assert report.sync_failures == []
+
+    def test_run_sync_reports_missing_step_capability(self, tmp_path: Path) -> None:
+        modules = _complete_sync_modules()
+        modules["wiki_sync"] = mock.Mock(spec=["upsert_skill_page", "update_index", "append_log"])
+
+        report = _run_sync_with_modules(tmp_path / "wiki", modules)
+
+        expected = "[wiki_sync.ensure_wiki] unavailable; step skipped"
+        assert report.sync_failures == [expected]
+        assert report.score == 99
+        assert any(expected in warning for warning in report.warnings)
+        modules["link_conversions"].run.assert_not_called()
+        modules["wiki_sync"].upsert_skill_page.assert_not_called()
+        modules["wiki_sync"].update_index.assert_not_called()
+        modules["wiki_sync"].append_log.assert_not_called()
+
+    def test_run_sync_records_ensure_wiki_exception_and_aborts(self, tmp_path: Path) -> None:
+        modules = _complete_sync_modules()
+        modules["wiki_sync"].ensure_wiki.side_effect = RuntimeError("init boom")
+
+        report = _run_sync_with_modules(tmp_path / "wiki", modules)
+
+        expected = "[wiki_sync.ensure_wiki] init boom"
+        assert report.sync_failures == [expected]
+        assert report.score == 99
+        assert any(expected in warning for warning in report.warnings)
+        modules["batch_convert"].convert_skill.assert_not_called()
+        modules["link_conversions"].run.assert_not_called()
+        modules["wiki_sync"].upsert_skill_page.assert_not_called()
+        modules["wiki_sync"].update_index.assert_not_called()
+        modules["wiki_sync"].append_log.assert_not_called()
+
+    def test_run_sync_surfaces_link_conversion_result_errors(self, tmp_path: Path) -> None:
+        modules = _complete_sync_modules()
+        modules["link_conversions"].run.return_value = mock.Mock(
+            errors=["demo-skill: pipeline boom"]
+        )
+
+        report = _run_sync_with_modules(tmp_path / "wiki", modules)
+
+        expected = "[link_conversions] demo-skill: pipeline boom"
+        assert report.sync_failures == [expected]
+        assert report.score == 99
+        assert any(expected in warning for warning in report.warnings)
+
+    def test_sync_cli_exits_nonzero_for_partial_failure(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capfd: pytest.CaptureFixture[str],
+    ) -> None:
+        report = wo.HealthReport(
+            score=100,
+            warnings=["  [link_conversions] pipeline boom"],
+            sync_failures=["[link_conversions] pipeline boom"],
+        )
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["wiki_orchestrator.py", "--wiki", str(tmp_path / "wiki"), "--sync"],
+        )
+
+        with mock.patch.object(wo, "run_sync", return_value=report):
+            with pytest.raises(SystemExit) as exc_info:
+                wo.main()
+
+        assert exc_info.value.code == 1
+        captured = capfd.readouterr()
+        assert "Health Score: 99/100" in captured.out
+        assert "Health Score: 100/100" not in captured.out
+        assert "Sync Status: FAILED (1 failure)" in captured.out
+
+
+def test_run_status_missing_wiki_exits_nonzero_without_creating_it(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    missing_wiki = tmp_path / "missing-wiki"
+
+    with pytest.raises(SystemExit) as exc_info:
+        wo.run_status(missing_wiki)
+
+    assert exc_info.value.code == 1
+    assert not missing_wiki.exists()
+    assert f"Wiki not found at {missing_wiki}" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("argument_kind", ["name", "directory", "file"])
+def test_run_add_resolves_installed_skill_sources(
+    tmp_path: Path,
+    argument_kind: str,
+) -> None:
+    skills_dir = tmp_path / "skills"
+    source = skills_dir / "demo-skill" / "SKILL.md"
+    source.parent.mkdir(parents=True)
+    source.write_text("# demo\n", encoding="utf-8")
+    argument = {
+        "name": "demo-skill",
+        "directory": str(source.parent),
+        "file": str(source),
+    }[argument_kind]
+    canonical = mock.Mock(spec=["add_skill"])
+    test_cfg = mock.Mock(skills_dir=skills_dir)
+
+    with (
+        mock.patch.object(wo, "cfg", test_cfg),
+        mock.patch.object(wo, "_load_module", return_value=wo.ModuleLoadResult(canonical)),
+    ):
+        wo.run_add(tmp_path / "wiki", argument)
+
+    canonical.add_skill.assert_called_once_with(
+        source_path=source,
+        name="demo-skill",
+        wiki_path=tmp_path / "wiki",
+        skills_dir=skills_dir,
+    )
+
+
+def test_run_add_rejects_missing_installed_skill(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    test_cfg = mock.Mock(skills_dir=tmp_path / "skills")
+
+    with (
+        mock.patch.object(wo, "cfg", test_cfg),
+        mock.patch.object(wo, "_load_module") as load_module,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        wo.run_add(tmp_path / "wiki", "missing-skill")
+
+    assert exc_info.value.code == 1
+    load_module.assert_not_called()
+    assert "installed SKILL.md not found" in capsys.readouterr().err
+
+
+def test_install_skill_same_source_and_destination_is_noop(tmp_path: Path) -> None:
+    import skill_add
+
+    skills_dir = tmp_path / "skills"
+    source = skills_dir / "demo-skill" / "SKILL.md"
+    source.parent.mkdir(parents=True)
+    source.write_text("unchanged\n", encoding="utf-8")
+
+    with mock.patch.object(skill_add, "safe_copy_file") as safe_copy_file:
+        installed = skill_add.install_skill(source, skills_dir, "demo-skill")
+
+    assert installed == source
+    assert source.read_text(encoding="utf-8") == "unchanged\n"
+    safe_copy_file.assert_not_called()
+
+
+def _symlink_or_skip(target: Path, link: Path, *, target_is_directory: bool) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"symlinks unavailable: {exc}")
+
+
+def test_link_conversions_rejects_symlinked_entity_page(tmp_path: Path) -> None:
+    import link_conversions
+
+    wiki = tmp_path / "wiki"
+    (wiki / "entities" / "skills").mkdir(parents=True)
+    (wiki / "converted" / "demo-skill").mkdir(parents=True)
+    (wiki / "index.md").write_text("# Index\n\n## Skills\n", encoding="utf-8")
+    (wiki / "log.md").write_text("# Log\n", encoding="utf-8")
+    outside = tmp_path / "outside.md"
+    outside.write_text("outside\n", encoding="utf-8")
+    _symlink_or_skip(
+        outside,
+        wiki / "entities" / "skills" / "demo-skill.md",
+        target_is_directory=False,
+    )
+
+    result = link_conversions.run(wiki, tmp_path / "skills")
+
+    assert result.created == []
+    assert result.updated == []
+    assert any("symlinked path" in error for error in result.errors)
+    assert outside.read_text(encoding="utf-8") == "outside\n"
+
+
+def test_link_conversions_rejects_symlinked_wiki_root_before_mkdir(tmp_path: Path) -> None:
+    import link_conversions
+
+    real_wiki = tmp_path / "real-wiki"
+    real_wiki.mkdir()
+    linked_wiki = tmp_path / "linked-wiki"
+    _symlink_or_skip(real_wiki, linked_wiki, target_is_directory=True)
+
+    result = link_conversions.run(linked_wiki, tmp_path / "skills")
+
+    assert any("symlinked path" in error for error in result.errors)
+    assert not (real_wiki / "entities").exists()
+
+
+def test_visualizer_default_degree_filter_keeps_singletons() -> None:
+    import networkx as nx
+    import wiki_visualize
+
+    graph = nx.Graph()
+    graph.add_node("skill:solo", label="solo", type="skill", tags=[])
+    rendered = wiki_visualize.build_html_with_filters(
+        graph,
+        {"skill:solo": (0.0, 0.0)},
+        communities={},
+    )
+
+    assert '<span id="deg-val">0</span>' in rendered
+    assert 'id="min-degree" min="0" max="50" value="0"' in rendered

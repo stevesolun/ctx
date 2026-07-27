@@ -44,6 +44,46 @@ generic MCP router calls an external MCP server, it records
 correlator into JSON-RPC `_meta`, and the ctx MCP server parents request spans
 to valid inbound trace metadata.
 
+## Trace Shape
+
+`export_traces()` projects the redacted event spool into a real OTLP/HTTP traces
+signal at `/v1/traces`. The payload uses
+`resourceSpans[].scopeSpans[].spans[]` with hexadecimal `traceId`, `spanId`, and
+optional `parentSpanId`, nanosecond start/end timestamps, span status, resource
+attributes, and sanitized span attributes.
+
+Events that share one `trace_id` and `span_id` are emitted as one OTLP span.
+Trace export preserves those original ids, including `parent_span_id`, so trace
+spans correlate exactly with OTLP log records and retain their parent topology.
+The first event names the span and every grouped record appears under its
+`events` array. Start time is derived from each record's timestamp and
+`duration_ms`; end time is the latest grouped event timestamp. ctx never
+invents trace context during export: records with missing or invalid trace/span
+ids fail both preview and export without advancing the checkpoint.
+
+Because the local event envelope has no explicit span-close marker, trace
+export uses a deterministic maturity high-water mark. A span is eligible only
+after its latest event is at least five seconds old. The delay is configured as
+`traces.export.span_maturity_seconds`, is capped at 300 seconds, and can be set
+to zero only when an operator explicitly accepts immediate maturity. Export
+advances across a complete prefix of mature span groups; younger or crossing
+groups remain in the tail with `status: pending` and a `retained_events` count.
+The high-water mark is evaluated on each preview or export invocation; ctx does
+not start a background timer.
+
+If an event later reuses a span id already before the checkpoint, ctx does not
+emit that span a second time: it retains the event, reports `status: degraded`,
+and increments `late_span_events`.
+
+Trace export reads the same retained event spool but has independent delivery
+state:
+
+- `~/.ctx/telemetry/events.jsonl.trace-export-checkpoint.json`
+- `~/.ctx/telemetry/events.jsonl.trace-export-status.json`
+
+Log, trace, and metric retries therefore cannot advance one another's
+checkpoints.
+
 ## Metric Shape
 
 Metrics use the `ctx.telemetry.metrics.v1` envelope and the same local redaction
@@ -65,13 +105,20 @@ Runtime lifecycle token usage emits OTel-style metric names when a host records
 `ctx__mark_entity_used.token_usage`:
 
 - `ctx.tool_usage.records` counts usage records by entity type and attribution.
+- `ctx.tool_usage.input_tokens` and `ctx.tool_usage.output_tokens` count reported
+  provider input and output tokens.
+- `ctx.tool_usage.cached_input_tokens` and
+  `ctx.tool_usage.uncached_input_tokens` split reported input usage when the
+  provider exposes cache-read counts.
 - `ctx.tool_usage.tokens` counts total tokens when the record has a
   non-negative `total_tokens` value.
 - `ctx.tool_usage.tokens_per_record` observes the same total as a histogram.
 
 Those metric points are recorded inside the same telemetry span as the
 `ctx.runtime_lifecycle.record` event that describes the usage, so trace/span
-correlation stays aligned across event and metric signals.
+correlation stays aligned across event and metric signals. The low-cardinality
+`ctx.usage.tokens_reported` attribute distinguishes explicit zero usage from an
+unavailable provider report.
 
 Attribution is always explicit through `ctx.usage.attribution`:
 `exact`, `estimated`, or `unavailable`. The built-in `ctx run` provider totals
@@ -81,7 +128,8 @@ the host or runner to provide usage for that specific entity.
 
 ## Privacy Defaults
 
-The shipped config keeps telemetry local:
+The shipped config keeps telemetry local. The optional trace block shown here
+also defaults to export disabled:
 
 ```json
 {
@@ -95,6 +143,18 @@ The shipped config keeps telemetry local:
       "otlp": {
         "endpoint": "http://localhost:4318/v1/logs",
         "allowed_hosts": []
+      }
+    },
+    "traces": {
+      "enabled": true,
+      "export": {
+        "enabled": false,
+        "span_maturity_seconds": 5,
+        "sink": "otlp_http",
+        "otlp": {
+          "endpoint": "http://localhost:4318/v1/traces",
+          "allowed_hosts": []
+        }
       }
     },
     "metrics": {
@@ -209,6 +269,85 @@ ctx-telemetry-export \
   --otlp-allowed-host collector.example
 ```
 
+Preview or export traces with the same CLI:
+
+```bash
+ctx-telemetry-export \
+  --signal traces \
+  --dry-run \
+  --sink otlp_http \
+  --otlp-endpoint https://collector.example:4318/v1/traces \
+  --otlp-allowed-host collector.example \
+  --json
+
+ctx-telemetry-export \
+  --signal traces \
+  --sink otlp_http \
+  --otlp-endpoint https://collector.example:4318/v1/traces \
+  --otlp-allowed-host collector.example
+```
+
+The equivalent Python API is:
+
+```python
+from pathlib import Path
+
+from ctx.telemetry import export_traces, preview_traces_export
+
+config = {
+    "traces": {
+        "enabled": True,
+        "export": {
+            "enabled": True,
+            "sink": "otlp_http",
+            "otlp": {
+                "endpoint": "https://collector.example:4318/v1/traces",
+                "allowed_hosts": ["collector.example"],
+            },
+        },
+    },
+}
+
+preview = preview_traces_export(
+    Path("~/.ctx/telemetry/events.jsonl"),
+    config=config,
+)
+result = export_traces(
+    Path("~/.ctx/telemetry/events.jsonl"),
+    config=config,
+)
+```
+
+Both trace export surfaces build and validate the real OTLP payload. They
+re-sanitize every outbound string and attribute at the network boundary, hash
+raw legacy session ids, and apply the same HTTPS, host allow-list, header,
+timeout, and no-redirect policy as logs and metrics. `Content-Type:
+application/json` and `Content-Encoding: identity` are mandatory and cannot be
+overridden through configured headers. Trace export is disabled when
+`traces.export.enabled` is absent or false for direct API calls. An explicit
+`ctx-telemetry-export --signal traces` invocation enables the trace exporter for
+that run, matching the existing event and metric CLI behavior.
+
+Trace `attempted`, `exported`, and `failed` counts are mature OTLP spans, not
+source events. `ctx.trace.event_count` records how many source events are inside
+each span. A populated `200` OTLP
+`partialSuccess.rejectedSpans` response is non-retryable: ctx records
+`exported = attempted - rejectedSpans`, `failed = rejectedSpans`,
+`status: partial_success`, a sanitized collector message when present, and
+advances the checkpoint for the acknowledged request only when no malformed
+pending local records exist. With malformed pending records, ctx preserves the
+prior checkpoint so those records remain visible and repairable; accepted spans
+may be resent after repair.
+
+The direct OTLP client retries `429`, `502`, `503`, `504`, `URLError`, timeout,
+and connection-disconnect failures up to two times by default. It honors
+`Retry-After`; otherwise it uses bounded exponential backoff with jitter. Each
+delay is capped at five seconds. Override these limits with
+`max_retries`, `retry_backoff_seconds`, `retry_jitter_ratio`, and
+`max_retry_delay_seconds` inside the signal's `export.otlp` block.
+Collector response bodies are read through a 64 KiB limit and oversized
+responses fail closed.
+
 Export metrics from Python:
 
 ```python
@@ -242,27 +381,35 @@ Metrics export uses its own checkpoint and status files next to
 variable overrides the configured metrics endpoint. `OTEL_EXPORTER_OTLP_ENDPOINT`
 is also supported and automatically appends `/v1/metrics` for metric exports.
 
+`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` overrides the configured traces endpoint.
+`OTEL_EXPORTER_OTLP_ENDPOINT` appends `/v1/traces` for trace exports.
+
 Successful exports advance an owner-only checkpoint file. By default it lives
 next to the spool as `events.jsonl.export-checkpoint.json`, so later runs export
 only new events. Use `--checkpoint /path/to/checkpoint.json` to choose another
 checkpoint file, or `--all` when you intentionally want to replay the full spool.
 
-The command exits non-zero if the selected exporter fails. Use
+The command exits non-zero if the selected exporter or trace preview validation
+fails. Use
 `--fail-on-degraded` when running from cron or CI and you also want malformed
 pending records or checkpoint anomalies to fail the command. Real export
 attempts also write an owner-only status file next to the spool as
 `events.jsonl.export-status.json`. It records an explicit `status` of `ok`,
-`noop`, `failed`, or `degraded`, plus the sink, destination hash,
+`noop`, `pending`, `partial_success`, `failed`, or `degraded`, plus the
+sink, destination hash,
 attempted/exported/failed counts, checkpoint-before/checkpoint-after ids,
 whether the checkpoint advanced, malformed pending record counts, and the last
-exporter error kind.
+exporter error kind. Trace status also records `retained_events`,
+`late_span_events`, and only a sanitized collector `error_message`.
 
 `degraded` means the exporter delivered the well-formed events it could, but ctx
 detected a condition an operator should inspect, such as malformed pending local
-records or a checkpoint id that no longer appears in the spool. ctx does not
-advance the checkpoint past malformed pending records; retrying after repair may
-re-export already delivered events, so downstream collectors should deduplicate
-by `event_id`.
+records or a checkpoint id that no longer appears in the spool. A fully
+accepted trace request does not advance past malformed pending records; retrying
+after repair may re-export already delivered spans, so downstream collectors
+should deduplicate by `ctx.event_id`. The same checkpoint barrier applies to
+`partial_success`: accepted spans may be resent, but malformed local evidence
+cannot be stranded behind an advanced checkpoint.
 
 Manual and continuous exporters re-sanitize legacy local records at the export
 boundary before writing `local_jsonl` or sending OTLP, so older spool entries
@@ -315,12 +462,16 @@ overrides live at `~/.claude/skill-system-config.json`.
 `OTEL_EXPORTER_OTLP_ENDPOINT` is also supported and automatically appends
 `/v1/logs`.
 
-Continuous export drains the pending spool before advancing the checkpoint, not
-just the event or metric that triggered the write. If all pending well-formed
-records export successfully and no malformed pending records remain, the
-checkpoint advances to the last exported id. If malformed pending records or a
-checkpoint anomaly are present, ctx records `status: degraded` and leaves the
-checkpoint in place so an operator can repair or intentionally replay.
+Continuous log and metric export drains the pending spool before advancing the
+checkpoint, not just the record that triggered the write. Trace export advances
+only through the mature high-water prefix. A fully or partially accepted request
+advances to that prefix's final event only when no malformed pending records
+exist. Younger trace events stay pending. With malformed pending records, ctx
+keeps its prior checkpoint; a fully accepted request reports `status: degraded`
+and a populated partial-success response reports `status: partial_success`. A
+checkpoint anomaly is reported as degraded while a successful mature prefix can
+establish a replacement checkpoint. Reopened closed-span events remain in the
+tail for operator inspection.
 
 ## Collector Examples
 
@@ -347,6 +498,10 @@ exporters:
 service:
   pipelines:
     logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]
+    traces:
       receivers: [otlp]
       processors: [batch]
       exporters: [debug]
@@ -393,6 +548,16 @@ allow-list only that host:
           "allowed_hosts": ["otel-gateway.example.com"]
         }
       }
+    },
+    "traces": {
+      "export": {
+        "enabled": true,
+        "sink": "otlp_http",
+        "otlp": {
+          "endpoint": "https://otel-gateway.example.com:4318/v1/traces",
+          "allowed_hosts": ["otel-gateway.example.com"]
+        }
+      }
     }
   }
 }
@@ -425,6 +590,10 @@ service:
       receivers: [otlp]
       processors: [memory_limiter, batch]
       exporters: [otlphttp/vendor]
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp/vendor]
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, batch]
@@ -445,6 +614,7 @@ raw message text:
 | Request volume | count logs grouped by `event.name`, `ctx.source`, `ctx.operation` |
 | Error rate | count logs where `otel.status_code = ERROR`, grouped by `ctx.source` |
 | Exception fingerprints | count logs grouped by `ctx.exception.fingerprint`, `ctx.exception.type` |
+| Request traces | trace spans grouped by `service.name`, span name, status, and `ctx.source` |
 | API latency | histogram metric `ctx.api.duration` by `ctx.operation` |
 | CLI/runtime usage | count logs for `ctx.cli.run`, `ctx.cli.resume`, `ctx.runtime_lifecycle.record`, `ctx.mcp.external_tool_call` |
 | Exporter health | status JSON fields `status`, `attempted`, `exported`, `failed`, `malformed_pending_records`, `error_kind` |
@@ -478,7 +648,8 @@ checkpoint presence, exporter attempted/exported/failed counts, and exporter
 2. Inspect dashboard health:
    `curl -fsS http://127.0.0.1:8765/api/status.json`.
 3. Inspect exporter status:
-   `cat ~/.ctx/telemetry/events.jsonl.export-status.json` and
+   `cat ~/.ctx/telemetry/events.jsonl.export-status.json`,
+   `cat ~/.ctx/telemetry/events.jsonl.trace-export-status.json`, and
    `cat ~/.ctx/telemetry/metrics.jsonl.export-status.json`.
 4. Repair malformed local records by preserving the original file, removing only
    invalid JSON lines, and rerunning export with `--fail-on-degraded`.

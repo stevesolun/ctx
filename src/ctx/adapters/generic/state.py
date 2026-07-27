@@ -38,7 +38,8 @@ Event types this module emits:
                      system prompt, model, provider, budget caps.
     iteration_start  per iteration. Marks the boundary for --resume.
     model_response   the CompletionResponse from the provider.
-    tool_call        one per tool invocation. Has result + error.
+    tool_call        one per tool invocation. Has result + error;
+                     ephemeral wiki bodies are omitted.
     message          every Message appended to the conversation —
                      the canonical replay substrate.
     stop             one per session, last line. LoopResult summary.
@@ -50,6 +51,10 @@ Resume semantics (H4 v1):
     the original ``system_prompt``/``task`` to continue the run.
   * Sessions with a ``stop`` event are resumable — resume appends a
     new task and keeps going. Plan 001 Phase H7 wires the CLI flag.
+
+Only raw ``ctx__wiki_get`` tool calls and result messages are removed
+from durable replay and raw result payloads. Model-authored assistant
+text is not classified as an echo and remains ordinary session history.
 
 Plan 001 Phase H4.
 """
@@ -67,7 +72,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, TextIO, cast
 
-from ctx.adapters.generic.loop import LoopResult, LoopObserver
+from ctx.adapters.generic.loop import (
+    EPHEMERAL_WIKI_TOOL_NAME,
+    LoopObserver,
+    LoopResult,
+    ProviderFailure,
+    _prune_all_ephemeral_wiki_context,
+)
 from ctx.adapters.generic.providers import (
     CompletionResponse,
     Message,
@@ -193,6 +204,73 @@ def _dict_to_message(d: dict[str, Any]) -> Message:
     )
 
 
+def _durable_messages(messages: list[Message]) -> list[Message]:
+    """Return history without raw wiki tool calls/results.
+
+    Assistant-authored content is retained even when its original response also
+    requested ``ctx__wiki_get``; generated echoes cannot be identified safely.
+    """
+    durable = list(messages)
+    _prune_all_ephemeral_wiki_context(durable)
+    return durable
+
+
+def _durable_seed_messages(raw: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+    messages: list[Message] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        try:
+            messages.append(_dict_to_message(item))
+        except (AttributeError, TypeError, ValueError):
+            continue
+    return [_message_to_dict(message) for message in _durable_messages(messages)]
+
+
+def _raw_message_references_ephemeral_wiki(payload: dict[str, Any]) -> bool:
+    if payload.get("name") == EPHEMERAL_WIKI_TOOL_NAME:
+        return True
+    raw_tool_calls = payload.get("tool_calls")
+    if isinstance(raw_tool_calls, dict):
+        raw_tool_calls = [raw_tool_calls]
+    if not isinstance(raw_tool_calls, (list, tuple)):
+        return False
+    return any(
+        isinstance(call, dict) and call.get("name") == EPHEMERAL_WIKI_TOOL_NAME
+        for call in raw_tool_calls
+    )
+
+
+def _durable_event_payload(
+    event_type: str,
+    payload: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Enforce raw wiki record ephemerality at the lowest writer boundary."""
+    durable_payload = dict(payload)
+    if event_type == "session_start" and "seed_messages" in durable_payload:
+        durable_payload["seed_messages"] = _durable_seed_messages(durable_payload["seed_messages"])
+    elif event_type == "message":
+        try:
+            message = _dict_to_message(durable_payload)
+        except (AttributeError, TypeError, ValueError):
+            if _raw_message_references_ephemeral_wiki(durable_payload):
+                return None
+        else:
+            durable_messages = _durable_messages([message])
+            if not durable_messages:
+                return None
+            durable_payload = _message_to_dict(durable_messages[0])
+    elif event_type == "tool_call":
+        call = durable_payload.get("call")
+        call_name = call.get("name") if isinstance(call, dict) else None
+        if call_name == EPHEMERAL_WIKI_TOOL_NAME:
+            durable_payload["result"] = ""
+            durable_payload["result_ephemeral"] = True
+    return durable_payload
+
+
 def _repair_unresolved_tool_call_tail(
     messages: list[Message],
     *,
@@ -244,6 +322,8 @@ def _usage_to_dict(usage: Usage) -> dict[str, Any]:
         "input_tokens": usage.input_tokens,
         "output_tokens": usage.output_tokens,
         "cost_usd": usage.cost_usd,
+        "cached_input_tokens": usage.cached_input_tokens,
+        "tokens_reported": usage.tokens_reported,
     }
 
 
@@ -251,11 +331,30 @@ def _usage_from_dict(raw: Any) -> Usage | None:
     if not isinstance(raw, dict):
         return None
     cost_raw = raw.get("cost_usd")
-    cost = float(cost_raw) if isinstance(cost_raw, int | float) else None
+    cost = (
+        float(cost_raw)
+        if not isinstance(cost_raw, bool) and isinstance(cost_raw, int | float)
+        else None
+    )
+    cached_raw = raw.get("cached_input_tokens")
+    cached = (
+        _usage_int(cached_raw)
+        if not isinstance(cached_raw, bool) and isinstance(cached_raw, int)
+        else None
+    )
+    tokens_reported_raw = raw.get("tokens_reported")
+    if "tokens_reported" not in raw:
+        tokens_reported = True
+    elif isinstance(tokens_reported_raw, bool):
+        tokens_reported = tokens_reported_raw
+    else:
+        tokens_reported = False
     return Usage(
         input_tokens=_usage_int(raw.get("input_tokens")),
         output_tokens=_usage_int(raw.get("output_tokens")),
         cost_usd=cost,
+        cached_input_tokens=cached,
+        tokens_reported=tokens_reported,
     )
 
 
@@ -267,16 +366,25 @@ def _usage_int(raw: Any) -> int:
     return 0
 
 
-def _combine_usage(left: Usage, right: Usage) -> Usage:
-    cost: float | None
-    if left.cost_usd is None and right.cost_usd is None:
-        cost = None
-    else:
-        cost = (left.cost_usd or 0.0) + (right.cost_usd or 0.0)
+def _combine_usage(left: Usage | None, right: Usage | None) -> Usage | None:
+    if left is None:
+        return right
+    if right is None:
+        return left
     return Usage(
         input_tokens=left.input_tokens + right.input_tokens,
         output_tokens=left.output_tokens + right.output_tokens,
-        cost_usd=cost,
+        cost_usd=(
+            left.cost_usd + right.cost_usd
+            if left.cost_usd is not None and right.cost_usd is not None
+            else None
+        ),
+        cached_input_tokens=(
+            left.cached_input_tokens + right.cached_input_tokens
+            if left.cached_input_tokens is not None and right.cached_input_tokens is not None
+            else None
+        ),
+        tokens_reported=left.tokens_reported and right.tokens_reported,
     )
 
 
@@ -388,14 +496,17 @@ class SessionStore:
     # ── write primitives ────────────────────────────────────────────────
 
     def write_event(self, event_type: str, payload: dict[str, Any]) -> None:
-        """Write one event as a single JSONL line. Thread-safe, atomic-per-line."""
+        """Write one durable JSONL event, filtering raw wiki records by name."""
         if self._closed:
             raise RuntimeError(f"session {self._session_id!r} is closed")
+        durable_payload = _durable_event_payload(event_type, payload)
+        if durable_payload is None:
+            return
         event = {
             "type": event_type,
             "ts": _now_iso(),
             "session_id": self._session_id,
-            **payload,
+            **durable_payload,
         }
         line = json.dumps(event, ensure_ascii=False, default=_json_default) + "\n"
         with self._lock:
@@ -406,6 +517,9 @@ class SessionStore:
 
     def write_session_start(self, payload: dict[str, Any]) -> None:
         self.write_event("session_start", payload)
+
+    def write_session_config(self, payload: dict[str, Any]) -> None:
+        self.write_event("session_config", payload)
 
     def write_iteration_start(self, iteration: int) -> None:
         self.write_event("iteration_start", {"iteration": iteration})
@@ -431,6 +545,9 @@ class SessionStore:
                 "usage": _usage_to_dict(response.usage),
                 "provider": response.provider,
                 "model": response.model,
+                "response_model": response.response_model,
+                "authentication_submitted": response.authentication_submitted,
+                "request_endpoint_hash": response.request_endpoint_hash,
             },
         )
 
@@ -515,9 +632,15 @@ class JsonlObserver(LoopObserver):
         self._emit_session_start = emit_session_start
         self._persisted_message_count = persisted_message_count
         self._session_started = False
+        self._last_provider_failure: ProviderFailure | None = None
         # Track previous-iteration message count so we only persist
         # messages appended this iteration (not the full snapshot).
         self._last_message_count = 0
+
+    @property
+    def last_provider_failure(self) -> ProviderFailure | None:
+        """Return the provider failure correlated with its persisted stop."""
+        return self._last_provider_failure
 
     def _emit_start_if_needed(self, messages: list[Message]) -> None:
         if self._session_started:
@@ -531,11 +654,12 @@ class JsonlObserver(LoopObserver):
         # Capture the seed conversation (system prompt + task + any
         # resumed messages) in the session_start event so a reader
         # can reconstruct the prior state without grepping messages.
-        payload["seed_messages"] = [_message_to_dict(m) for m in messages]
+        durable_messages = _durable_messages(messages)
+        payload["seed_messages"] = [_message_to_dict(m) for m in durable_messages]
         self._store.write_session_start(payload)
         # Persist each seed message as its own message event so
         # load_session()'s replay path produces the full conversation.
-        for msg in messages:
+        for msg in durable_messages:
             self._store.write_message(msg)
         self._last_message_count = len(messages)
         self._session_started = True
@@ -549,7 +673,7 @@ class JsonlObserver(LoopObserver):
         # practice only the first iteration has pre-existing messages
         # that weren't recorded; subsequent iterations append through
         # on_model_response + on_tool_call).
-        new_msgs = messages[self._last_message_count :]
+        new_msgs = _durable_messages(messages[self._last_message_count :])
         for msg in new_msgs:
             self._store.write_message(msg)
         self._last_message_count = len(messages)
@@ -561,7 +685,7 @@ class JsonlObserver(LoopObserver):
     ) -> None:
         self._store.write_model_response(iteration, response)
         # The loop appends an assistant Message directly after — we
-        # mirror that here so load_session replay has the full list.
+        # mirror it through SessionStore's fail-closed writer boundary.
         assistant = Message(
             role="assistant",
             content=response.content,
@@ -587,8 +711,22 @@ class JsonlObserver(LoopObserver):
         self._store.write_message(tool_msg)
         self._last_message_count += 1
 
+    def on_ephemeral_context_pruned(
+        self,
+        call_ids: frozenset[str],
+        removed_message_count: int,
+    ) -> None:
+        del call_ids
+        self._last_message_count = max(
+            0,
+            self._last_message_count - removed_message_count,
+        )
+
     def on_stop(self, result: LoopResult) -> None:
         self._store.write_stop(result)
+
+    def on_provider_failure(self, failure: ProviderFailure) -> None:
+        self._last_provider_failure = failure
 
 
 # ── Reader / replay ──────────────────────────────────────────────────────
@@ -642,7 +780,8 @@ def load_session(
 
     The replay walks every ``message`` event in order — this is the
     single source of truth for "what did the conversation look like".
-    Metadata comes from the first ``session_start`` event (if any).
+    Metadata starts with ``session_start`` and is updated by later
+    ``session_config`` events written by explicit resume overrides.
     """
     sdir = sessions_dir if sessions_dir is not None else default_sessions_dir()
     path = sdir / f"{_safe_session_id(session_id)}.jsonl"
@@ -656,8 +795,8 @@ def load_session(
     stopped = False
     stop_reason: str | None = None
     event_count = 0
-    usage_total = Usage()
-    current_run_usage = Usage()
+    usage_total: Usage | None = None
+    current_run_usage: Usage | None = None
 
     for event in _iter_events(path):
         event_count += 1
@@ -668,6 +807,10 @@ def load_session(
                 for k, v in event.items()
                 if k not in ("type", "ts", "session_id", "seed_messages")
             }
+        elif etype == "session_config":
+            metadata.update(
+                {k: v for k, v in event.items() if k not in ("type", "ts", "session_id")}
+            )
         elif etype == "message":
             try:
                 messages.append(_dict_to_message(event))
@@ -685,13 +828,14 @@ def load_session(
             stopped = True
             stop_reason = event.get("stop_reason")
             usage = _usage_from_dict(event.get("usage"))
-            usage_total = _combine_usage(
-                usage_total,
-                usage if usage is not None else current_run_usage,
-            )
-            current_run_usage = Usage()
+            if usage is not None:
+                usage_total = usage
+            else:
+                usage_total = _combine_usage(usage_total, current_run_usage)
+            current_run_usage = None
 
     usage_total = _combine_usage(usage_total, current_run_usage)
+    messages = _durable_messages(messages)
 
     return ReplayState(
         session_id=session_id,
@@ -706,7 +850,7 @@ def load_session(
         stopped=stopped,
         stop_reason=stop_reason,
         event_count=event_count,
-        usage=usage_total,
+        usage=usage_total or Usage(tokens_reported=False),
     )
 
 

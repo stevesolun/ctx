@@ -90,6 +90,7 @@ _ALLOWED_CMD_EXECS: frozenset[str] = frozenset(
         "python3",
         "deno",
         "bunx",
+        "ctx-mcp-server",
     }
 )
 
@@ -123,6 +124,10 @@ def _rejects_banned_args(tokens: list[str]) -> str | None:
     if not tokens:
         return None
     exe = _normalized_executable(tokens[0])
+    if exe == "ctx-mcp-server":
+        if tokens != ["ctx-mcp-server"]:
+            return "'ctx-mcp-server' must be a bare, argument-free install_cmd"
+        return None
     banned = _BANNED_INTERPRETER_ARGS.get(exe)
     if banned is None:
         return None

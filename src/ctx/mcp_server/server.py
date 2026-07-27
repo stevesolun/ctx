@@ -28,8 +28,23 @@ expose only selected ctx tools and entity types.
 Tools exposed (same as ctx.adapters.generic.ctx_core_tools — that
 module is the source of truth for the tool catalogue):
 
-    ctx__recommend_bundle(query, top_k=5, selected=None, rejected=None, ...)
-    ctx__recommend_related(selected, rejected=None, max_hops=2, top_n=5)
+    ctx__recommend_bundle(
+        query,
+        top_k=5,
+        selected=None,
+        rejected=None,
+        session_id=None,
+        rejection_mode="use",
+        ...,
+    )
+    ctx__recommend_related(
+        selected,
+        rejected=None,
+        max_hops=2,
+        top_n=5,
+        session_id=None,
+        rejection_mode="use",
+    )
     ctx__graph_query(seeds, max_hops=2, top_n=10)
     ctx__wiki_search(query, top_n=15)
     ctx__wiki_get(slug)
@@ -68,9 +83,11 @@ import json
 import logging
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, BinaryIO, Iterable
+from uuid import uuid4
 
+from ctx import __version__
 from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox
 from ctx.adapters.generic.providers import ToolCall
 from ctx.core.entity_types import RECOMMENDABLE_ENTITY_TYPES, normalize_entity_type
@@ -87,7 +104,7 @@ _logger = logging.getLogger(__name__)
 
 _PROTOCOL_VERSION = "2024-11-05"
 _SERVER_NAME = "ctx-wiki"
-_SERVER_VERSION = "0.1.0"
+_SERVER_VERSION = __version__
 
 
 # JSON-RPC error codes per the MCP / JSON-RPC 2.0 spec.
@@ -107,10 +124,12 @@ class _ServerState:
     toolbox: CtxCoreToolbox | None = None
     allowed_tool_names: frozenset[str] | None = None
     allowed_entity_types: frozenset[str] | None = None
+    recommendation_session_id: str = field(default_factory=lambda: f"mcp-{uuid4().hex}")
 
     def ensure_toolbox(self) -> CtxCoreToolbox:
         if self.toolbox is None:
             self.toolbox = CtxCoreToolbox(
+                recommendation_session_id=self.recommendation_session_id,
                 allowed_tool_names=self.allowed_tool_names,
                 allowed_entity_types=self.allowed_entity_types,
             )

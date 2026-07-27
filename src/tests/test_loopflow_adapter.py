@@ -2,18 +2,25 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import shlex
 from pathlib import Path
+import threading
 from typing import Any
 
 import networkx as nx
 import pytest
 import ctx.api as ctx_api
-from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox
+from ctx.adapters.generic.ctx_core_tools import (
+    CtxCoreToolbox,
+    _infer_no_api_keys_constraint,
+    _recommendation_context_from_args,
+)
 from ctx.adapters.generic.providers import ToolCall
 from ctx.adapters import loopflow
+from ctx.core.entity_types import entity_page_path
 
 
 _EXPECTED_READ_ONLY_MCP_TOOL_NAMES = [
@@ -37,6 +44,69 @@ def _expected_scoped_mcp_args(*entity_types: str) -> list[str]:
 class _FakeGraph:
     def number_of_nodes(self) -> int:
         return 10
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "Run with no API key",
+        "Run with no API keys",
+        "Run with no API-key",
+        "Run without API keys",
+        "Run without an API key",
+        "Run without any API keys",
+        "Run with no local API key",
+        "Run without any local API-keys",
+        "Run with no external API",
+        "Run because no API key is available",
+        "Run because no API key may be available",
+        "Run because no API key might be required",
+        "Run because no API key is configured",
+        "Run because no API key exists",
+    ],
+)
+def test_shared_no_api_key_inference_recognizes_runtime_constraints(query: str) -> None:
+    assert _infer_no_api_keys_constraint(query) is True
+    assert _recommendation_context_from_args(query, {})["no_api_keys"] is True
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "Ensure no API key is logged",
+        "Ensure no API key is printed",
+        "Ensure no API key is exposed",
+        "Ensure no API key is stored",
+        "Ensure no API key is leaked",
+        "Verify no API-key gets accidentally leaked",
+        "Continue without API keys being exposed in logs",
+        "Ensure no API key leaks into logs",
+        "Ensure no API key logging occurs",
+        "Ensure no API key exposure happens",
+        "Ensure no API key may be logged",
+        "Ensure no API key might be printed",
+    ],
+)
+def test_shared_no_api_key_inference_ignores_privacy_observations(query: str) -> None:
+    assert _infer_no_api_keys_constraint(query) is False
+    assert _recommendation_context_from_args(query, {})["no_api_keys"] is False
+
+
+def test_core_no_api_key_override_takes_precedence_over_inference() -> None:
+    assert (
+        _recommendation_context_from_args(
+            "Implement without any API keys",
+            {"no_api_keys": False},
+        )["no_api_keys"]
+        is False
+    )
+    assert (
+        _recommendation_context_from_args(
+            "Ensure no API key is logged",
+            {"no_api_keys": True},
+        )["no_api_keys"]
+        is True
+    )
 
 
 def test_parse_loop_file_reads_loopflow_context(tmp_path: Path) -> None:
@@ -190,6 +260,120 @@ def test_loopflow_excludes_bare_selection_names_and_backfills(monkeypatch) -> No
     assert calls == [50]
     assert payload["capabilities"]["skills"] == [
         {"id": "skill:python-patterns", "name": "python-patterns", "type": "skill", "score": 80}
+    ]
+
+
+def test_loopflow_session_rejections_filter_primary_capabilities(monkeypatch) -> None:
+    memory: dict[str, list[str]] = {}
+
+    def fake_recommend_rows(
+        query: str,
+        *,
+        permissions: set[str],
+        top_k: int,
+    ) -> list[dict[str, Any]]:
+        del query, permissions, top_k
+        return [
+            {
+                "id": "skill:rejected-helper",
+                "name": "rejected-helper",
+                "type": "skill",
+                "score": 99,
+                "installable": True,
+                "load_status": "local-wiki",
+            },
+            {
+                "id": "skill:accepted-helper",
+                "name": "accepted-helper",
+                "type": "skill",
+                "score": 90,
+                "installable": True,
+                "load_status": "local-wiki",
+            },
+        ]
+
+    def fake_rejections(
+        rejected: list[str] | None = None,
+        *,
+        session_id: str | None = None,
+        rejection_mode: str = "use",
+    ) -> list[str]:
+        assert session_id is not None
+        explicit = list(rejected or [])
+        if rejection_mode == "ignore":
+            return explicit
+        if rejection_mode == "replace":
+            memory[session_id] = explicit
+        else:
+            memory[session_id] = list(dict.fromkeys(memory.get(session_id, []) + explicit))
+        return memory[session_id]
+
+    monkeypatch.setattr(loopflow, "_recommend_capability_rows", fake_recommend_rows)
+    monkeypatch.setattr(loopflow.ctx_api, "recommendation_rejections", fake_rejections)
+
+    first = loopflow.recommend_for_loop(
+        goal="python api",
+        permissions={"skills"},
+        rejected=["skill:rejected-helper"],
+        session_id="loop-session",
+        top_k=2,
+    )
+    remembered = loopflow.recommend_for_loop(
+        goal="python api",
+        permissions={"skills"},
+        session_id="loop-session",
+        top_k=2,
+    )
+    stateless = loopflow.recommend_for_loop(
+        goal="python api",
+        permissions={"skills"},
+        top_k=2,
+    )
+
+    assert first["selection"] == {
+        "selected": [],
+        "rejected": ["skill:rejected-helper"],
+        "session_bound": True,
+        "rejection_mode": "use",
+    }
+    assert [row["id"] for row in remembered["capabilities"]["skills"]] == ["skill:accepted-helper"]
+    assert [row["id"] for row in stateless["capabilities"]["skills"]] == [
+        "skill:rejected-helper",
+        "skill:accepted-helper",
+    ]
+
+
+def test_loopflow_session_rejections_filter_and_backfill_harnesses(monkeypatch) -> None:
+    monkeypatch.setattr(
+        loopflow.ctx_api,
+        "recommendation_rejections",
+        lambda rejected=None, **kwargs: list(rejected or []),
+    )
+    requested_top_k: list[int] = []
+
+    def fake_harnesses(goal: str, *, top_k: int, **kwargs: Any) -> list[dict[str, Any]]:
+        del goal, kwargs
+        requested_top_k.append(top_k)
+        return [
+            {"id": "harness:rejected-runner", "name": "rejected-runner", "type": "harness"},
+            {"id": "harness:accepted-runner", "name": "accepted-runner", "type": "harness"},
+        ]
+
+    monkeypatch.setattr(loopflow, "recommend_harnesses", fake_harnesses)
+
+    payload = loopflow.recommend_for_loop(
+        goal="run a local agent loop",
+        permissions={"harnesses"},
+        own_llm=True,
+        model_provider="ollama",
+        rejected=["harness:rejected-runner"],
+        session_id="harness-session",
+        top_k=1,
+    )
+
+    assert requested_top_k == [7]
+    assert [row["id"] for row in payload["capabilities"]["harnesses"]] == [
+        "harness:accepted-runner"
     ]
 
 
@@ -540,6 +724,198 @@ def test_loopflow_language_context_overfetches_primary_candidates(monkeypatch) -
     ]
 
 
+def test_project_owned_fallback_survives_context_filtering_and_owned_llm(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    wiki = tmp_path / "wiki"
+    converted = wiki / "converted" / "ctx-python-testing"
+    converted.mkdir(parents=True)
+    (converted / "SKILL.md").write_text("# Python testing\n", encoding="utf-8")
+
+    graph = nx.Graph()
+    for index in range(60):
+        graph.add_node(
+            f"skill:remote-{index}",
+            label=f"remote-{index}",
+            type="skill",
+            tags=["python", "api"],
+            source_catalog="skills.sh",
+            status="remote-cataloged",
+        )
+    graph.add_node(
+        "skill:ctx-python-testing",
+        label="ctx-python-testing",
+        type="skill",
+        tags=["python", "testing"],
+        source="ctx-runtime-availability",
+        status="local-wiki",
+    )
+
+    ranked_queries: list[str] = []
+
+    def fake_recommend_by_tags(
+        candidate_graph: Any,
+        tags: list[str],
+        *,
+        top_n: int,
+        query: str | None,
+        entity_types: tuple[str, ...] | set[str] | None,
+        min_normalized_score: float,
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        del tags, entity_types, min_normalized_score, kwargs
+        assert query is not None
+        ranked_queries.append(query)
+        if candidate_graph.number_of_nodes() == 1:
+            return [
+                {
+                    "name": "ctx-python-testing",
+                    "type": "skill",
+                    "score": 80,
+                    "source": "ctx-runtime-availability",
+                    "status": "local-wiki",
+                }
+            ]
+        return [
+            {
+                "name": f"remote-{index}",
+                "type": "skill",
+                "score": 100 - index,
+                "source_catalog": "skill-index",
+                "status": "available",
+                "install_command": f"ctx-skill-install remote-{index}",
+            }
+            for index in range(min(top_n, 50))
+        ]
+
+    monkeypatch.setattr(loopflow, "_recommendation_graph", lambda: graph)
+    monkeypatch.setattr(loopflow.ctx_api, "default_wiki_dir", lambda: wiki)
+    monkeypatch.setattr(loopflow, "recommend_by_tags", fake_recommend_by_tags)
+
+    plain = loopflow.recommend_for_loop(
+        goal="Implement and test a local Python API feature with no API key",
+        permissions={"skills"},
+        top_k=1,
+    )
+    owned = loopflow.recommend_for_loop(
+        goal="Implement and test a local Python API feature with no API keys",
+        permissions={"skills"},
+        own_llm=True,
+        model_provider="openai",
+        model="gpt-5.5",
+        top_k=1,
+    )
+
+    expected = [
+        {
+            "id": "skill:ctx-python-testing",
+            "name": "ctx-python-testing",
+            "type": "skill",
+            "score": 80,
+            "source": "ctx-runtime-availability",
+            "status": "local-wiki",
+            "installable": True,
+            "load_status": "local-wiki",
+            "source_path": "converted/ctx-python-testing/SKILL.md",
+        }
+    ]
+    assert plain["capabilities"]["skills"] == expected
+    assert owned["capabilities"]["skills"] == expected
+    assert all("openai" not in query and "gpt-5.5" not in query for query in ranked_queries)
+    assert "model: openai gpt-5.5" in owned["context"]["query"]
+
+
+def test_real_capability_rows_receive_stable_ids(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    graph = nx.Graph()
+    graph.add_node("skill:one", label="one", type="skill", tags=["local"])
+    skill_body = tmp_path / "converted" / "testing" / "SKILL.md"
+    skill_body.parent.mkdir(parents=True)
+    skill_body.write_text("# Testing\n", encoding="utf-8")
+    for entity_type, slug in (("agent", "reviewer"), ("mcp-server", "filesystem")):
+        page = entity_page_path(tmp_path, entity_type, slug)
+        assert page is not None
+        page.parent.mkdir(parents=True, exist_ok=True)
+        page.write_text(f"# {slug}\n", encoding="utf-8")
+    monkeypatch.setattr(loopflow, "_recommendation_graph", lambda: graph)
+    monkeypatch.setattr(loopflow.ctx_api, "default_wiki_dir", lambda: tmp_path)
+    monkeypatch.setattr(loopflow, "query_to_tags", lambda query: ["local"])
+    monkeypatch.setattr(
+        loopflow,
+        "recommend_by_tags",
+        lambda *args, **kwargs: [
+            {"name": "testing", "type": "skill", "score": 3},
+            {"name": "reviewer", "type": "agent", "score": 2},
+            {"name": "filesystem", "type": "mcp-server", "score": 1},
+        ],
+    )
+
+    rows = loopflow._recommend_capability_rows(
+        "local recommendations",
+        permissions={"skills", "agents", "mcps"},
+        top_k=1,
+    )
+
+    assert [row["id"] for row in rows] == [
+        "skill:testing",
+        "agent:reviewer",
+        "mcp-server:filesystem",
+    ]
+
+
+def test_capability_rows_filter_unavailable_before_ranking(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    graph = nx.Graph()
+    graph.add_node("skill:one", label="one", type="skill", tags=["python"])
+    agent_page = entity_page_path(tmp_path, "agent", "local-reviewer")
+    assert agent_page is not None
+    agent_page.parent.mkdir(parents=True)
+    agent_page.write_text("# Local reviewer\n", encoding="utf-8")
+    candidates = [
+        {
+            "name": "missing-reviewer",
+            "type": "agent",
+            "score": 100,
+        },
+        {
+            "name": "external-python",
+            "type": "skill",
+            "score": 90,
+            "status": "available",
+            "install_command": "ctx-skill-install external-python",
+        },
+        {
+            "name": "local-reviewer",
+            "type": "agent",
+            "score": 80,
+        },
+    ]
+
+    def fake_recommend_by_tags(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        del args
+        candidate_filter = kwargs["candidate_filter"]
+        return [row for row in candidates if candidate_filter(row)][: kwargs["top_n"]]
+
+    monkeypatch.setattr(loopflow, "_recommendation_graph", lambda: graph)
+    monkeypatch.setattr(loopflow.ctx_api, "default_wiki_dir", lambda: tmp_path)
+    monkeypatch.setattr(loopflow, "query_to_tags", lambda query: ["python"])
+    monkeypatch.setattr(loopflow, "recommend_by_tags", fake_recommend_by_tags)
+
+    rows = loopflow._recommend_capability_rows(
+        "python review",
+        permissions={"skills", "agents"},
+        top_k=1,
+    )
+
+    assert [row["name"] for row in rows] == ["external-python", "local-reviewer"]
+    assert all(row["load_status"] != "not-in-wiki" for row in rows)
+
+
 def test_loopflow_local_no_key_loop_filters_related_recommendations(monkeypatch) -> None:
     monkeypatch.setattr(loopflow, "_recommend_capability_rows", lambda *args, **kwargs: [])
 
@@ -603,6 +979,68 @@ def test_loopflow_local_no_key_loop_filters_related_recommendations(monkeypatch)
             "selection_state": "suggested_related",
         }
     ]
+
+
+def test_loopflow_no_api_key_override_controls_filters_without_query_leak(
+    monkeypatch,
+) -> None:
+    calls: list[bool | None] = []
+
+    def fake_recommend_rows(
+        query: str,
+        *,
+        permissions: set[str],
+        top_k: int,
+        no_api_keys: bool | None = None,
+    ) -> list[dict[str, Any]]:
+        del query, permissions, top_k
+        calls.append(no_api_keys)
+        return [
+            {
+                "id": "mcp-server:remote-openai",
+                "name": "remote-openai",
+                "type": "mcp-server",
+                "installable": False,
+                "external": True,
+                "status": "available",
+            },
+            {
+                "id": "skill:local-helper",
+                "name": "local-helper",
+                "type": "skill",
+                "installable": True,
+                "external": False,
+                "load_status": "local-wiki",
+            },
+        ]
+
+    monkeypatch.setattr(loopflow, "_recommend_capability_rows", fake_recommend_rows)
+
+    observational_goal = "Ensure no API key is logged while reviewing this feature"
+    inferred = loopflow.recommend_for_loop(
+        goal=observational_goal,
+        permissions={"skills", "mcps"},
+    )
+    forced_keyless = loopflow.recommend_for_loop(
+        goal=observational_goal,
+        permissions={"skills", "mcps"},
+        no_api_keys=True,
+    )
+    forced_available = loopflow.recommend_for_loop(
+        goal="Implement without any API keys",
+        permissions={"skills", "mcps"},
+        no_api_keys=False,
+    )
+
+    assert [row["id"] for row in inferred["capabilities"]["mcps"]] == ["mcp-server:remote-openai"]
+    assert forced_keyless["capabilities"]["mcps"] == []
+    assert [row["id"] for row in forced_keyless["capabilities"]["skills"]] == ["skill:local-helper"]
+    assert [row["id"] for row in forced_available["capabilities"]["mcps"]] == [
+        "mcp-server:remote-openai"
+    ]
+    assert forced_keyless["context"]["query"] == inferred["context"]["query"]
+    assert "--no-api-keys" not in forced_keyless["context"]["query"]
+    assert calls == [None, True, False]
 
 
 def test_related_recommendations_include_availability_metadata(tmp_path: Path) -> None:
@@ -693,6 +1131,7 @@ def test_loopflow_local_filter_uses_enriched_wiki_availability(
 
     assert payload["capabilities"]["skills"] == [
         {
+            "id": "skill:local-helper",
             "name": "local-helper",
             "type": "skill",
             "score": 80,
@@ -883,7 +1322,10 @@ def test_done_when_signals_feed_recommendation_queries(monkeypatch) -> None:
         'done when: "pytest src/tests/test_loopflow_adapter.py -q" passes, pnpm lint passes'
         in payload["context"]["query"]
     )
-    assert capability_queries == [payload["context"]["query"]]
+    assert capability_queries == [
+        "fix checkout e2e loopflow done when: "
+        '"pytest src/tests/test_loopflow_adapter.py -q" passes, pnpm lint passes'
+    ]
     assert (
         'done when: "pytest src/tests/test_loopflow_adapter.py -q" passes, pnpm lint passes'
         in harness_queries[0]
@@ -1183,6 +1625,83 @@ def test_main_emits_json_from_loop_file(tmp_path: Path, monkeypatch, capsys) -> 
     assert payload["loopflow"]["use_skills"] == "use skills: security-review"
 
 
+def test_main_forwards_rejection_session_flags(monkeypatch, capsys) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_recommend_for_loop(**kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return {"ok": True}
+
+    monkeypatch.setattr(loopflow, "recommend_for_loop", fake_recommend_for_loop)
+
+    assert (
+        loopflow.main(
+            [
+                "--goal",
+                "review api",
+                "--permissions",
+                "skills",
+                "--rejected",
+                "skill:legacy-helper",
+                "--session-id",
+                "loop-cli-session",
+                "--rejection-mode",
+                "replace",
+                "--compact",
+            ]
+        )
+        == 0
+    )
+
+    assert json.loads(capsys.readouterr().out) == {"ok": True}
+    assert captured["rejected"] == ["skill:legacy-helper"]
+    assert captured["session_id"] == "loop-cli-session"
+    assert captured["rejection_mode"] == "replace"
+
+
+@pytest.mark.parametrize(
+    ("flag", "expected"),
+    [
+        ("--no-api-keys", True),
+        ("--api-keys-available", False),
+    ],
+)
+def test_main_forwards_explicit_no_api_key_override(
+    flag: str,
+    expected: bool,
+    monkeypatch,
+    capsys,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_recommend_for_loop(**kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return {"ok": True}
+
+    monkeypatch.setattr(loopflow, "recommend_for_loop", fake_recommend_for_loop)
+
+    assert loopflow.main(["--goal", "review API logging", flag, "--compact"]) == 0
+
+    assert json.loads(capsys.readouterr().out) == {"ok": True}
+    assert captured["goal"] == "review API logging"
+    assert captured["no_api_keys"] is expected
+
+
+def test_main_rejects_conflicting_no_api_key_overrides(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        loopflow.main(
+            [
+                "--goal",
+                "review API logging",
+                "--no-api-keys",
+                "--api-keys-available",
+            ]
+        )
+
+    assert exc_info.value.code == 2
+    assert "not allowed with argument" in capsys.readouterr().err
+
+
 def test_main_uses_loop_file_ctx_grants_when_cli_permissions_absent(
     tmp_path: Path,
     monkeypatch,
@@ -1466,3 +1985,338 @@ def test_main_empty_permissions_fail_closed(monkeypatch, capsys) -> None:
         }
         assert payload["loopflow"]["use_tools"] is None
         assert payload["loopflow"]["use_skills"] is None
+
+
+def test_activation_leases_share_context_until_last_loop_releases() -> None:
+    leases = loopflow.ActivationLeaseRegistry()
+    applied: list[loopflow.ActivationLeaseActions] = []
+
+    outer = leases.sync(
+        "session.outer",
+        desired=["skill:security-review", "mcp:filesystem"],
+        permissions={"skills", "mcps"},
+        apply=applied.append,
+        used=["mcp-server:filesystem"],
+    )
+    nested = leases.sync(
+        "session.inner",
+        desired=["skill:security-review"],
+        permissions={"skills"},
+        apply=applied.append,
+        used=["skill:security-review"],
+    )
+
+    assert outer.as_dict() == {
+        "keep": [],
+        "load": ["mcp-server:filesystem", "skill:security-review"],
+        "use": ["mcp-server:filesystem"],
+        "unload": [],
+    }
+    assert nested.as_dict() == {
+        "keep": ["skill:security-review"],
+        "load": [],
+        "use": ["skill:security-review"],
+        "unload": [],
+    }
+    assert leases.active_context() == (
+        "mcp-server:filesystem",
+        "skill:security-review",
+    )
+
+    outer_release = leases.release("session.outer", apply=applied.append)
+
+    assert outer_release.as_dict() == {
+        "keep": ["skill:security-review"],
+        "load": [],
+        "use": [],
+        "unload": ["mcp-server:filesystem"],
+    }
+    assert leases.active_context() == ("skill:security-review",)
+
+    nested_release = leases.release("session.inner", apply=applied.append)
+
+    assert nested_release.as_dict() == {
+        "keep": [],
+        "load": [],
+        "use": [],
+        "unload": ["skill:security-review"],
+    }
+    assert leases.active_context() == ()
+    assert (
+        leases.release("session.inner", apply=applied.append) == loopflow.ActivationLeaseActions()
+    )
+    assert applied == [
+        outer,
+        nested,
+        outer_release,
+        nested_release,
+        loopflow.ActivationLeaseActions(),
+    ]
+
+
+def test_activation_lease_permissions_fail_closed_without_changing_ownership() -> None:
+    leases = loopflow.ActivationLeaseRegistry()
+    initial = leases.sync(
+        "session.owner",
+        desired=["skill:security-review"],
+        permissions={"skills"},
+        apply=lambda _actions: None,
+    )
+    assert initial.load == ("skill:security-review",)
+
+    with pytest.raises(ValueError, match="not granted by permissions"):
+        leases.sync(
+            "session.blocked",
+            desired=["skill:security-review"],
+            permissions={"mcps"},
+            apply=lambda _actions: None,
+        )
+    with pytest.raises(ValueError, match="used entities must also be desired"):
+        leases.sync(
+            "session.owner",
+            desired=["skill:security-review"],
+            permissions={"skills", "agents"},
+            apply=lambda _actions: None,
+            used=["agent:reviewer"],
+        )
+
+    assert leases.active_context() == ("skill:security-review",)
+    assert leases.release("session.owner", apply=lambda _actions: None).unload == (
+        "skill:security-review",
+    )
+
+
+def test_activation_lease_failed_actions_leave_truthful_retryable_state() -> None:
+    leases = loopflow.ActivationLeaseRegistry()
+
+    def fail(_actions: loopflow.ActivationLeaseActions) -> None:
+        raise RuntimeError("host action failed")
+
+    with pytest.raises(RuntimeError, match="host action failed"):
+        leases.sync(
+            "session.owner",
+            desired=["skill:security-review"],
+            permissions={"skills"},
+            apply=fail,
+        )
+    assert leases.active_context() == ()
+    retry = leases.sync(
+        "session.owner",
+        desired=["skill:security-review"],
+        permissions={"skills"},
+        apply=lambda _actions: None,
+    )
+    assert retry.load == ("skill:security-review",)
+
+    with pytest.raises(RuntimeError, match="host action failed"):
+        leases.release("session.owner", apply=fail)
+    assert leases.active_context() == ("skill:security-review",)
+    assert leases.release("session.owner", apply=lambda _actions: None).unload == (
+        "skill:security-review",
+    )
+
+
+def test_activation_lease_context_releases_after_loop_failure() -> None:
+    leases = loopflow.ActivationLeaseRegistry()
+    applied: list[loopflow.ActivationLeaseActions] = []
+    used = ["agent:reviewer"]
+
+    with pytest.raises(RuntimeError, match="loop failed"):
+        with leases.lease(
+            "session.owner",
+            desired=["agent:reviewer"],
+            permissions={"agents"},
+            apply=applied.append,
+            used=lambda: used,
+        ):
+            raise RuntimeError("loop failed")
+
+    assert applied[0].load == ("agent:reviewer",)
+    assert applied[1].use == ("agent:reviewer",)
+    assert applied[2].unload == ("agent:reviewer",)
+    assert leases.active_context() == ()
+
+
+def test_activation_lease_context_rejects_duplicate_live_id() -> None:
+    leases = loopflow.ActivationLeaseRegistry()
+    applied: list[loopflow.ActivationLeaseActions] = []
+
+    with leases.lease(
+        "session.same",
+        desired=["skill:reviewer"],
+        permissions={"skills"},
+        apply=applied.append,
+    ):
+        with pytest.raises(ValueError, match="already active"):
+            with leases.lease(
+                "session.same",
+                desired=["skill:reviewer"],
+                permissions={"skills"},
+                apply=applied.append,
+            ):
+                pytest.fail("duplicate lease context entered")
+        with pytest.raises(RuntimeError, match="active context manager"):
+            leases.release("session.same", apply=applied.append)
+        assert leases.active_context() == ("skill:reviewer",)
+
+    assert [actions.load for actions in applied] == [("skill:reviewer",), ()]
+    assert [actions.unload for actions in applied] == [(), ("skill:reviewer",)]
+    assert leases.active_context() == ()
+
+
+@pytest.mark.parametrize(
+    ("lease_id", "entity_id", "error"),
+    [
+        (None, "skill:security-review", TypeError),
+        ("session.owner", None, TypeError),
+        ("session.owner", "skill:../escape", ValueError),
+        ("session.owner", "skill:CON", ValueError),
+    ],
+)
+def test_activation_lease_rejects_unsafe_boundary_ids(
+    lease_id: object,
+    entity_id: object,
+    error: type[Exception],
+) -> None:
+    leases = loopflow.ActivationLeaseRegistry()
+
+    with pytest.raises(error):
+        leases.sync(
+            lease_id,  # type: ignore[arg-type]
+            desired=[entity_id],  # type: ignore[list-item]
+            permissions={"skills"},
+            apply=lambda _actions: None,
+        )
+
+    assert leases.active_context() == ()
+
+
+def test_activation_leases_serialize_parallel_shared_context() -> None:
+    leases = loopflow.ActivationLeaseRegistry()
+    owners = 16
+    entered = threading.Barrier(owners)
+    applied: list[loopflow.ActivationLeaseActions] = []
+
+    def run(index: int) -> None:
+        with leases.lease(
+            f"session.{index}",
+            desired=["mcp-server:filesystem"],
+            permissions={"mcps"},
+            apply=applied.append,
+        ):
+            entered.wait(timeout=5)
+
+    with ThreadPoolExecutor(max_workers=owners) as pool:
+        list(pool.map(run, range(owners)))
+
+    assert sum(bool(actions.load) for actions in applied) == 1
+    assert sum(bool(actions.unload) for actions in applied) == 1
+    assert leases.active_context() == ()
+
+
+def test_activation_lease_callback_cannot_reenter_registry() -> None:
+    leases = loopflow.ActivationLeaseRegistry()
+
+    def reenter(_actions: loopflow.ActivationLeaseActions) -> None:
+        leases.sync(
+            "session.inner",
+            desired=["skill:reviewer"],
+            permissions={"skills"},
+            apply=lambda _nested: None,
+        )
+
+    with pytest.raises(RuntimeError, match="must not invoke or wait"):
+        leases.sync(
+            "session.outer",
+            desired=["skill:reviewer"],
+            permissions={"skills"},
+            apply=reenter,
+        )
+
+    assert leases.active_context() == ()
+
+
+def test_activation_lease_callback_worker_reentry_fails_without_deadlock() -> None:
+    leases = loopflow.ActivationLeaseRegistry()
+    nested_errors: list[Exception] = []
+
+    def reenter_from_worker(_actions: loopflow.ActivationLeaseActions) -> None:
+        def nested() -> None:
+            try:
+                leases.sync(
+                    "session.inner",
+                    desired=["skill:reviewer"],
+                    permissions={"skills"},
+                    apply=lambda _nested: None,
+                )
+            except Exception as exc:  # noqa: BLE001 - asserted below.
+                nested_errors.append(exc)
+
+        worker = threading.Thread(target=nested)
+        worker.start()
+        worker.join(timeout=1)
+        assert not worker.is_alive()
+
+    leases.sync(
+        "session.outer",
+        desired=["skill:reviewer"],
+        permissions={"skills"},
+        apply=reenter_from_worker,
+    )
+
+    assert len(nested_errors) == 1
+    assert isinstance(nested_errors[0], loopflow.ActivationLeaseBusyError)
+    assert "busy" in str(nested_errors[0])
+    assert leases.active_context() == ("skill:reviewer",)
+
+
+def test_activation_lease_independent_waiter_serializes_after_slow_callback() -> None:
+    leases = loopflow.ActivationLeaseRegistry()
+    callback_started = threading.Event()
+    callback_continue = threading.Event()
+    waiter_done = threading.Event()
+    errors: list[Exception] = []
+
+    def slow_apply(_actions: loopflow.ActivationLeaseActions) -> None:
+        callback_started.set()
+        assert callback_continue.wait(timeout=2)
+
+    def first() -> None:
+        try:
+            leases.sync(
+                "session.first",
+                desired=["skill:first"],
+                permissions={"skills"},
+                apply=slow_apply,
+            )
+        except Exception as exc:  # noqa: BLE001 - asserted below.
+            errors.append(exc)
+
+    def independent() -> None:
+        try:
+            assert callback_started.wait(timeout=2)
+            leases.sync(
+                "session.parallel",
+                desired=["skill:parallel"],
+                permissions={"skills"},
+                apply=lambda _actions: None,
+                wait_for_transition=True,
+            )
+            waiter_done.set()
+        except Exception as exc:  # noqa: BLE001 - asserted below.
+            errors.append(exc)
+
+    first_thread = threading.Thread(target=first)
+    waiter_thread = threading.Thread(target=independent)
+    first_thread.start()
+    waiter_thread.start()
+    assert callback_started.wait(timeout=2)
+    assert not waiter_done.wait(timeout=0.05)
+    callback_continue.set()
+    first_thread.join(timeout=2)
+    waiter_thread.join(timeout=2)
+
+    assert not first_thread.is_alive()
+    assert not waiter_thread.is_alive()
+    assert errors == []
+    assert leases.active_context() == ("skill:first", "skill:parallel")

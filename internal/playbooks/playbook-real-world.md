@@ -14,21 +14,19 @@ fresh. First project on ctx: a **PCI-compliant checkout microservice**
 (FastAPI + SQLAlchemy + PostgreSQL + Stripe + pytest). Target: working
 endpoint + council-signed commit by end of day.
 
-She has `~/.claude/skills/` with 1,789 skills and `~/.claude/agents/`
-with 464 agents pre-installed (extracted from `graph/wiki-graph.tar.gz`).
-Graph is pre-built (2,253 nodes / 454K edges / 93 communities). She has
-never run ctx before.
+She has skills and agents pre-installed from the shipped graph artifact, and
+the graph is pre-built. She has never run ctx before.
 
 ## Environment precondition
 
 ```
-~/.claude/skill-wiki/graphify-out/graph.json   # pre-built, 454K edges
-~/.claude/skill-wiki/entities/                 # 2,253 entity pages
-~/.claude/skill-wiki/converted/                # 952 compressed skills
-~/.claude/skill-quality/                       # 1,891 sidecars
+~/.claude/skill-wiki/graphify-out/graph.json   # pre-built
+~/.claude/skill-wiki/entities/                 # entity pages
+~/.claude/skill-wiki/converted/                # converted skills
+~/.claude/skill-quality/                       # sidecars
 ```
 
-`pip install claude-ctx` is done. The four console scripts are on PATH.
+The current checkout is installed and its console scripts are on `PATH`.
 
 ---
 
@@ -84,13 +82,13 @@ Maya asks Claude: *"scaffold the checkout endpoint with Stripe payment
 intents".*
 
 **Expected ctx behavior during the session**
-1. **PostToolUse** fires `context_monitor.py --from-stdin` on every
-   tool call. The monitor reads the tool input, detects signals:
+1. **PostToolUse** fires the packaged context-monitor hook on every tool call.
+   The monitor reads the tool input and detects signals:
    - file path `app/api/checkout.py` → stack signal `python`, `fastapi`
    - content containing `stripe.PaymentIntent` → new signal `stripe`
 2. When an unmatched signal accumulates past threshold (3 by default),
-   `context_monitor` writes to `~/.claude/pending-skills.json` and
-   `skill_suggest.py` surfaces it to Claude's context as a
+   the context monitor writes to `~/.claude/pending-skills.json` and
+   the bundle orchestrator surfaces it to Claude's context as a
    `hookSpecificOutput.additionalContext` blob.
 3. Claude reads the suggestion ("You may want to load `stripe-integration`
    and `pci-compliance`") and asks Maya to confirm.
@@ -131,9 +129,9 @@ She runs `pytest` (no tests yet) → exits 0 (no-op). She realizes she
 needs test coverage.
 
 **Expected ctx behavior**
-1. Editing files under `tests/` triggers `context_monitor` to detect
+1. Editing files under `tests/` triggers the context monitor to detect
    the `testing` signal.
-2. `skill_suggest` surfaces `test-driven-development`,
+2. The bundle orchestrator surfaces `test-driven-development`,
    `python-testing`, `pytest-patterns` from the graph.
 3. Maya loads `python-testing`. Sidecar updates.
 
@@ -223,12 +221,15 @@ python -m skill_add --skill-path .skills/stripe-error-mapping/SKILL.md
 ## Phase 6 — Session end + lifecycle pruning
 
 End of day. Claude's `Stop` hook fires:
-1. `usage_tracker.py --sync` updates skill usage stats from
+1. The packaged usage-tracker command updates skill usage stats from
    `skill-events.jsonl`.
-2. `hooks/quality_on_session_end.py` recomputes sidecars for only
-   the slugs touched this session (incremental).
+2. The lifecycle hook's `quality-on-session-end` command recomputes sidecars
+   for only the slugs touched this session (incremental).
 3. `ctx_lifecycle` reviews sidecars; any skill that sat in `_demoted`
    past the 14-day archive threshold is moved to `_archive`.
+
+The authoritative installed hook commands are in
+[Live load / unload verification — Hook registration](playbook-live-load-unload.md#1-hook-registration).
 
 Maya runs:
 

@@ -24,8 +24,7 @@ from batch_convert import convert_skill
 from ctx.core.entity_update import build_update_review, render_update_review
 from ctx.core.quality.skillspector_service import SkillSpectorResult
 from ctx.core.quality.skillspector_service import render_scan_report
-from ctx.core.quality.skillspector_service import run_skillspector_scan
-from ctx.core.quality.skillspector_service import skill_scan_target
+from ctx.core.quality.skillspector_service import run_skillspector_scan_text
 from ctx_config import cfg
 from intake_pipeline import IntakeRejected, check_intake, record_embedding
 from ctx.adapters.claude_code.install.install_utils import safe_copy_file
@@ -36,9 +35,28 @@ from ctx.core.wiki.wiki_packs import (
 )
 from ctx.core.wiki.wiki_sync import append_log, ensure_wiki, update_index
 from ctx.core.wiki.wiki_utils import parse_frontmatter, validate_skill_name
-from ctx.utils._fs_utils import reject_symlink_path, safe_atomic_write_text
+from ctx.utils._fs_utils import reject_symlink_path, safe_atomic_write_text, secure_directory
 
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def run_skillspector_scan(
+    markdown_text: str,
+    *,
+    slug: str = "skill",
+    command: list[str] | None = None,
+    binary: str | None = None,
+    use_llm: bool = False,
+    timeout_seconds: int = 120,
+) -> SkillSpectorResult:
+    return run_skillspector_scan_text(
+        slug,
+        markdown_text,
+        command=command,
+        binary=binary,
+        use_llm=use_llm,
+        timeout_seconds=timeout_seconds,
+    )
 
 
 # ── Tag inference ─────────────────────────────────────────────────────────────
@@ -55,11 +73,39 @@ def infer_tags(name: str, content: str) -> list[str]:
 
 
 def install_skill(source: Path, skills_dir: Path, name: str) -> Path:
-    """Copy SKILL.md into skills_dir/<name>/SKILL.md. Returns the installed path."""
+    """Install SKILL.md; no-op when source already resolves to the destination."""
     dest_dir = skills_dir / name
     dest = dest_dir / "SKILL.md"
+    if source.is_file() and dest.is_file():
+        reject_symlink_path(source)
+        reject_symlink_path(dest)
+        try:
+            if source.resolve(strict=True) == dest.resolve(strict=True):
+                return dest
+        except (OSError, RuntimeError):
+            pass
     safe_copy_file(source, dest, dest_root=skills_dir)
     return dest
+
+
+def _read_skill_snapshot(source: Path) -> str:
+    reject_symlink_path(source)
+    with secure_directory(source.parent) as directory:
+        return directory.read_text(
+            source.name,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+
+def _install_skill_snapshot(
+    content: str,
+    skills_dir: Path,
+    name: str,
+) -> Path:
+    destination = skills_dir / name / "SKILL.md"
+    safe_atomic_write_text(destination, content, encoding="utf-8")
+    return destination
 
 
 def mirror_install_body(installed_path: Path, name: str, converted_root: Path) -> Path:
@@ -394,17 +440,15 @@ def add_skill(
     Returns a result dict with keys: name, installed, converted, is_new_page.
     """
     validate_skill_name(name)
-    reject_symlink_path(source_path)
-
-    # Reject oversized files before reading into memory
-    file_size = source_path.stat().st_size
+    snapshot_content = _read_skill_snapshot(source_path)
+    file_size = len(snapshot_content.encode("utf-8"))
     if file_size > 1_048_576:  # 1 MB
         raise ValueError(
             f"SKILL.md too large ({file_size:,} bytes). Max 1 MB. "
             f"Split the skill or trim content before ingestion."
         )
 
-    content = source_path.read_text(encoding="utf-8-sig", errors="replace")
+    content = snapshot_content.removeprefix("\ufeff")
     line_count = len(content.splitlines())
 
     installed_path = skills_dir / name / "SKILL.md"
@@ -439,7 +483,8 @@ def add_skill(
     scan_result = None
     if security_scan:
         scan_result = run_skillspector_scan(
-            skill_scan_target(source_path),
+            content,
+            slug=name,
             command=security_scan_command,
             binary=skillspector_bin,
             use_llm=security_scan_use_llm,
@@ -460,7 +505,11 @@ def add_skill(
             raise IntakeRejected(decision)
 
     # 1. Install original into skills-dir (never modified after this)
-    installed_path = install_skill(source_path, skills_dir, name)
+    installed_path = _install_skill_snapshot(
+        snapshot_content,
+        skills_dir,
+        name,
+    )
 
     # Record the candidate's embedding so future intake checks can
     # rank against it. Failure here is non-fatal — the install already
