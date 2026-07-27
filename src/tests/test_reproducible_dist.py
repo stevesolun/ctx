@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import tarfile
+import tomllib
 from hashlib import sha256
 from pathlib import Path
 
@@ -431,6 +432,14 @@ def test_git_tree_export_disables_lfs_smudging(
     ]
     assert isinstance(captured["env"], dict)
     assert captured["env"]["GIT_LFS_SKIP_SMUDGE"] == "1"
+
+
+def test_dev_dependencies_include_no_isolation_build_backend() -> None:
+    config = tomllib.loads((_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert set(config["build-system"]["requires"]) <= set(
+        config["project"]["optional-dependencies"]["dev"]
+    )
 
 
 @pytest.mark.integration

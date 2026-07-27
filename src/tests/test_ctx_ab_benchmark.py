@@ -16,6 +16,8 @@ from typing import Any
 import pytest
 import yaml
 
+from ctx.adapters.generic.adaptive_runtime import secure_skill_reads_available
+
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "ctx_ab_benchmark.py"
@@ -1858,7 +1860,7 @@ def completion(**params):
                 scenario,
                 lifecycle_root=lifecycle_root,
                 session_id=session_id,
-                expect_selected_cycle=with_ctx,
+                expect_selected_cycle=with_ctx and secure_skill_reads_available(),
             )
             provider_provenance = benchmark.extract_provider_response_provenance(
                 sessions_dir=sessions_dir,
@@ -1904,12 +1906,15 @@ def completion(**params):
     assert baseline_lifecycle["selected_id"] is None
     assert baseline_lifecycle["actions"] == []
     assert baseline_lifecycle["final_loaded"] == []
-    assert treatment_lifecycle["actions"] == [
-        "load_requested",
-        "load_applied",
-        "used",
-        "unload_applied",
-    ]
+    expected_treatment_actions = (
+        ["load_requested", "load_applied", "used", "unload_applied"]
+        if secure_skill_reads_available()
+        else []
+    )
+    assert treatment_lifecycle["actions"] == expected_treatment_actions
+    assert treatment_lifecycle["selected_id"] == (
+        "skill:click-public-api-feature" if secure_skill_reads_available() else None
+    )
     assert treatment_lifecycle["session_status"] == "completed"
     assert treatment_lifecycle["final_loaded"] == []
     assert len(observed_requests) == 2
