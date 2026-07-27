@@ -1074,6 +1074,208 @@ def _policy_initial_load_ids(policy: dict[str, Any]) -> tuple[list[str], str]:
     return ids, field
 
 
+def decide_deferred_activation(
+    *,
+    stage: str,
+    candidates: list[dict[str, Any]],
+    context_policy: Mapping[str, Any],
+    task_evidence: Mapping[str, Any],
+    activation_policy: Mapping[str, Any] | None = None,
+    run_evidence: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    oracle = (
+        "evaluator",
+        "hidden",
+        "oracle",
+        "reference_patch",
+        "reference.patch",
+        "test_body",
+    )
+    if stage not in {"pre-solve", "post-solve"}:
+        raise ValueError("stage must be pre-solve or post-solve")
+    policy = dict(activation_policy or {})
+
+    def validate_payload(
+        value: object,
+        *,
+        allowed: set[str],
+        field: str,
+    ) -> None:
+        if not isinstance(value, Mapping):
+            raise ValueError(f"{field} must be an object")
+
+        def reject_oracle(item: object) -> None:
+            if isinstance(item, Mapping):
+                for key, nested in item.items():
+                    if any(marker in str(key).lower() for marker in oracle):
+                        raise ValueError("deferred activation rejects hidden-oracle evidence")
+                    reject_oracle(nested)
+            elif isinstance(item, (list, tuple)):
+                for nested in item:
+                    reject_oracle(nested)
+            elif isinstance(item, str) and any(marker in item.lower() for marker in oracle):
+                raise ValueError("deferred activation rejects hidden-oracle evidence")
+
+        reject_oracle(value)
+        unknown = {str(key) for key in value} - allowed
+        if unknown:
+            raise ValueError(f"{field} contains unsupported keys: {sorted(unknown)}")
+
+    validate_payload(
+        task_evidence,
+        allowed={
+            "language",
+            "task_category",
+            "predeclared_risks",
+            "local_code_task",
+            "no_api_keys",
+            "repository_paths",
+            "tags",
+        },
+        field="task_evidence",
+    )
+    validate_payload(
+        policy,
+        allowed={
+            "enabled",
+            "allowed_entity_types",
+            "allowed_tools",
+            "allowed_permissions",
+            "max_risk",
+        },
+        field="activation_policy",
+    )
+    validate_payload(
+        run_evidence or {},
+        allowed={"diff_non_empty", "changed_paths"},
+        field="run_evidence",
+    )
+    validate_payload(
+        context_policy,
+        allowed={
+            "baseline",
+            "keep",
+            "load",
+            "initial_load",
+            "deferred",
+            "manual",
+            "unload",
+            "replace",
+        },
+        field="context_policy",
+    )
+
+    def strings(value: object, field: str) -> list[str]:
+        if not isinstance(value, (list, tuple)) or not all(
+            isinstance(item, str) and item.strip() for item in value
+        ):
+            raise ValueError(f"{field} must be a string list")
+        return [item.strip().lower() for item in value]
+
+    if stage == "pre-solve" and run_evidence is not None:
+        raise ValueError("pre-solve does not accept run evidence")
+    deferred = context_policy.get("deferred") or []
+    if not isinstance(deferred, list) or not all(isinstance(item, str) for item in deferred):
+        raise ValueError("context_policy.deferred must be a string list")
+    candidate_ids: list[str] = []
+    for row in candidates:
+        entity_id = str(row.get("id") or "").strip()
+        entity_type = str(row.get("type") or "").lower()
+        if not entity_id or entity_type not in {"agent", "mcp-server", "skill"}:
+            raise ValueError("deferred activation candidate has invalid id or type")
+        if not entity_id.startswith(f"{entity_type}:"):
+            raise ValueError(f"invalid deferred candidate type: {entity_id}")
+        candidate_ids.append(entity_id)
+    if len(candidate_ids) != len(set(candidate_ids)) or len(deferred) != len(set(deferred)):
+        raise ValueError("deferred activation candidate ids must be unique")
+    by_id = dict(zip(candidate_ids, candidates, strict=True))
+    retained: list[dict[str, Any]] = []
+    for entity_id in deferred:
+        if entity_id not in by_id:
+            raise ValueError(f"deferred candidate is missing: {entity_id}")
+        row = by_id[entity_id]
+        entity_type = str(row.get("type") or "").lower()
+        tags = strings(row.get("tags") or [], f"{entity_id}.tags")
+        permissions = strings(row.get("permissions") or [], f"{entity_id}.permissions")
+        source = str(row.get("source") or "")
+        raw_source_path = row.get("source_path")
+        source_path = (
+            _safe_relative_path(raw_source_path, field=f"{entity_id}.source_path")
+            if isinstance(raw_source_path, str) and raw_source_path.strip()
+            else None
+        )
+        status = str(row.get("load_status") or row.get("status") or "unknown").lower()
+        retained.append(
+            {
+                "id": entity_id,
+                "type": entity_type,
+                "loadability": row.get("installable") is True
+                and status in {"active", "available", "installed", "loaded", "local-wiki"}
+                and bool(source and source_path),
+                "permissions": permissions,
+                "risk": str(row.get("risk") or "unknown").lower(),
+                "tags": tags,
+                "external": row.get("external"),
+                "requires_api_keys": row.get("requires_api_keys"),
+                "provenance": {"source": source, "source_path": source_path},
+            }
+        )
+    result: dict[str, Any] = dict(
+        decision="deny",
+        selected_ids=[],
+        reason="policy_disabled_default_deny",
+        deferred_candidates=retained,
+    )
+    if policy.get("enabled") is not True:
+        return result
+    allowed_types = set(strings(policy.get("allowed_entity_types", []), "allowed types"))
+    allowed_tools = set(strings(policy.get("allowed_tools", []), "allowed tools"))
+    allowed_permissions = set(strings(policy.get("allowed_permissions", []), "permissions"))
+    risk_order = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+    max_risk = str(policy.get("max_risk") or "")
+    if max_risk not in risk_order:
+        raise ValueError("max_risk must be low, medium, high, or critical")
+    risks = strings(task_evidence.get("predeclared_risks", []), "predeclared risks")
+    terms = set(strings(task_evidence.get("tags", []), "tags") + risks)
+    terms.add(str(task_evidence.get("language") or "").lower())
+    expected_type = "mcp-server" if stage == "pre-solve" else "agent"
+    if not all(task_evidence.get(key) is True for key in ("local_code_task", "no_api_keys")):
+        result["reason"] = "task_not_local_no_key"
+        return result
+    if stage == "post-solve" and not (
+        risks
+        and run_evidence
+        and run_evidence.get("diff_non_empty") is True
+        and run_evidence.get("changed_paths")
+    ):
+        result["reason"] = "post_solve_requires_diff_and_predeclared_risk"
+        return result
+    for row in retained:
+        risk_allowed = row["risk"] in risk_order and risk_order[row["risk"]] <= risk_order[max_risk]
+        checks = (
+            (row["type"] == expected_type, "wrong_stage_type"),
+            (row["type"] in allowed_types, "type_not_allowed"),
+            (row["id"].lower() in allowed_tools, "tool_not_allowed"),
+            (row["loadability"], "not_loadable"),
+            (
+                row["external"] is False
+                and row["requires_api_keys"] is False
+                and {"local", "no-api-key"} <= set(row["tags"]),
+                "not_local_no_key",
+            ),
+            (set(row["permissions"]) <= allowed_permissions, "permission_denied"),
+            (row["risk"] in risk_order, "risk_unknown"),
+            (risk_allowed, "risk_exceeds_policy"),
+            (bool(set(row["tags"]) & terms), "no_public_evidence_match"),
+        )
+        reason = next((reason for allowed, reason in checks if not allowed), None)
+        if reason is None:
+            result.update(decision="select", selected_ids=[row["id"]], reason=f"selected_{stage}")
+            return result
+        result["reason"] = reason
+    return result
+
+
 def recommend_production_catalog(
     scenario: Scenario,
     *,
@@ -1116,7 +1318,16 @@ def recommend_production_catalog(
         candidate_ids = [str(row.get("id") or "").strip() for row in candidates]
         if any(not entity_id for entity_id in candidate_ids):
             raise RuntimeError("production catalog returned a candidate without an id")
-
+        deferred_activation = decide_deferred_activation(
+            stage="pre-solve",
+            candidates=candidates,
+            context_policy=policy,
+            task_evidence={
+                "language": scenario.language,
+                "local_code_task": True,
+                "no_api_keys": True,
+            },
+        )
         initial_load_ids, policy_field = _policy_initial_load_ids(policy)
         by_id = {str(row["id"]): row for row in candidates}
         selected_row = next(
@@ -1196,6 +1407,7 @@ def recommend_production_catalog(
         "context_policy": dict(policy),
         "policy_field": policy_field,
         "policy_initial_load_ids": initial_load_ids,
+        "deferred_activation": deferred_activation,
         "selected_item": selected_item,
         "selected_ids": [selected_item["id"]] if selected_item is not None else [],
         "body_provenance": body_provenance,
@@ -1250,6 +1462,7 @@ def write_catalog_recommendation_evidence(
                 "context_policy": catalog["context_policy"],
                 "policy_field": catalog["policy_field"],
                 "policy_initial_load_ids": catalog["policy_initial_load_ids"],
+                "deferred_activation": catalog.get("deferred_activation"),
                 "selection_skip_reason": catalog["selection_skip_reason"],
                 "body_provenance": catalog["body_provenance"],
                 "recommendation_response_sha256": catalog["recommendation_response_sha256"],

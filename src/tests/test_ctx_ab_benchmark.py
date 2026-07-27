@@ -592,6 +592,14 @@ def test_production_catalog_recommendation_records_candidates_selection_and_body
                                 "name": "ctx-python-reviewer",
                                 "type": "agent",
                                 "installable": True,
+                                "load_status": "available",
+                                "tags": ["local", "no-api-key", "python", "security"],
+                                "permissions": ["diff:read"],
+                                "risk": "low",
+                                "external": False,
+                                "requires_api_keys": False,
+                                "source": "ctx-runtime-availability",
+                                "source_path": "entities/agents/ctx-python-reviewer.md",
                             },
                         ],
                         "context_policy": {
@@ -646,6 +654,28 @@ def test_production_catalog_recommendation_records_candidates_selection_and_body
     ]
     assert evidence["selected_ids"] == ["skill:ctx-python-testing"]
     assert evidence["used_ids"] == []
+    assert evidence["deferred_activation"] == catalog["deferred_activation"]
+    assert catalog["deferred_activation"] == {
+        "decision": "deny",
+        "selected_ids": [],
+        "reason": "policy_disabled_default_deny",
+        "deferred_candidates": [
+            {
+                "id": "agent:ctx-python-reviewer",
+                "type": "agent",
+                "loadability": True,
+                "permissions": ["diff:read"],
+                "risk": "low",
+                "tags": ["local", "no-api-key", "python", "security"],
+                "external": False,
+                "requires_api_keys": False,
+                "provenance": {
+                    "source": "ctx-runtime-availability",
+                    "source_path": "entities/agents/ctx-python-reviewer.md",
+                },
+            }
+        ],
+    }
     assert catalog["selected_item"]["body"] == body
     assert catalog["body_provenance"] == {
         "surface": "ctx MCP ctx__wiki_get",
@@ -673,6 +703,313 @@ def test_production_catalog_recommendation_records_candidates_selection_and_body
         "catalog_archive_sha256": "a" * 64,
         "catalog_graph_export_id": "export-1",
     }
+
+
+def _deferred_candidate(
+    entity_id: str = "mcp-server:ctx-core",
+    *,
+    entity_type: str = "mcp-server",
+    tags: list[str] | None = None,
+    permissions: list[str] | None = None,
+    risk: str = "low",
+) -> dict[str, object]:
+    return {
+        "id": entity_id,
+        "type": entity_type,
+        "installable": True,
+        "load_status": "available",
+        "tags": tags or ["lifecycle", "local", "no-api-key"],
+        "permissions": permissions or ["graph:read"],
+        "risk": risk,
+        "external": False,
+        "requires_api_keys": False,
+        "source": "ctx-runtime-availability",
+        "source_path": f"entities/{entity_type}s/{entity_id.partition(':')[2]}.md",
+    }
+
+
+def _activation_policy(
+    *entity_ids: str,
+    entity_type: str = "mcp-server",
+    permissions: list[str] | None = None,
+    max_risk: str = "medium",
+) -> dict[str, object]:
+    return {
+        "enabled": True,
+        "allowed_entity_types": [entity_type],
+        "allowed_tools": list(entity_ids),
+        "allowed_permissions": permissions or ["graph:read"],
+        "max_risk": max_risk,
+    }
+
+
+def _public_task_evidence(*, risks: list[str] | None = None) -> dict[str, object]:
+    return {
+        "language": "python",
+        "task_category": "lifecycle",
+        "predeclared_risks": risks or [],
+        "local_code_task": True,
+        "no_api_keys": True,
+        "repository_paths": ["src/package.py"],
+        "tags": ["lifecycle"],
+    }
+
+
+def test_deferred_activation_defaults_to_deny_and_retains_normalized_evidence() -> None:
+    candidate = _deferred_candidate()
+
+    decision = benchmark.decide_deferred_activation(
+        stage="pre-solve",
+        candidates=[candidate],
+        context_policy={"deferred": [candidate["id"]]},
+        task_evidence=_public_task_evidence(),
+    )
+
+    assert decision["decision"] == "deny"
+    assert decision["reason"] == "policy_disabled_default_deny"
+    assert decision["selected_ids"] == []
+    assert decision["deferred_candidates"][0] == {
+        "id": "mcp-server:ctx-core",
+        "type": "mcp-server",
+        "loadability": True,
+        "permissions": ["graph:read"],
+        "risk": "low",
+        "tags": ["lifecycle", "local", "no-api-key"],
+        "external": False,
+        "requires_api_keys": False,
+        "provenance": {
+            "source": "ctx-runtime-availability",
+            "source_path": "entities/mcp-servers/ctx-core.md",
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    ("candidate_updates", "policy_updates", "reason"),
+    [
+        ({"installable": False}, {}, "not_loadable"),
+        ({"load_status": "external-install-required"}, {}, "not_loadable"),
+        ({"tags": ["lifecycle"]}, {}, "not_local_no_key"),
+        ({"external": True}, {}, "not_local_no_key"),
+        ({"external": "false"}, {}, "not_local_no_key"),
+        ({"requires_api_keys": True}, {}, "not_local_no_key"),
+        ({"requires_api_keys": 0}, {}, "not_local_no_key"),
+        ({"permissions": ["repo:write"]}, {}, "permission_denied"),
+        ({"risk": "high"}, {"max_risk": "low"}, "risk_exceeds_policy"),
+        ({}, {"allowed_entity_types": []}, "type_not_allowed"),
+        ({}, {"allowed_tools": []}, "tool_not_allowed"),
+    ],
+)
+def test_deferred_activation_enforces_host_gates(
+    candidate_updates: dict[str, object],
+    policy_updates: dict[str, object],
+    reason: str,
+) -> None:
+    candidate = _deferred_candidate()
+    candidate.update(candidate_updates)
+    policy = _activation_policy(str(candidate["id"]))
+    policy.update(policy_updates)
+
+    decision = benchmark.decide_deferred_activation(
+        stage="pre-solve",
+        candidates=[candidate],
+        context_policy={"deferred": [candidate["id"]]},
+        task_evidence=_public_task_evidence(),
+        activation_policy=policy,
+    )
+
+    assert decision["decision"] == "deny"
+    assert decision["reason"] == reason
+    assert decision["selected_ids"] == []
+
+
+def test_deferred_activation_denies_missing_explicit_safety_flags() -> None:
+    candidate = _deferred_candidate()
+    candidate.pop("requires_api_keys")
+
+    decision = benchmark.decide_deferred_activation(
+        stage="pre-solve",
+        candidates=[candidate],
+        context_policy={"deferred": [candidate["id"]]},
+        task_evidence=_public_task_evidence(),
+        activation_policy=_activation_policy(str(candidate["id"])),
+    )
+
+    assert decision["decision"] == "deny"
+    assert decision["reason"] == "not_local_no_key"
+
+
+def test_deferred_activation_rejects_duplicate_and_malformed_candidate_ids() -> None:
+    candidate = _deferred_candidate()
+
+    with pytest.raises(ValueError, match="must be unique"):
+        benchmark.decide_deferred_activation(
+            stage="pre-solve",
+            candidates=[candidate, dict(candidate)],
+            context_policy={"deferred": [candidate["id"]]},
+            task_evidence=_public_task_evidence(),
+        )
+    with pytest.raises(ValueError, match="invalid id or type"):
+        benchmark.decide_deferred_activation(
+            stage="pre-solve",
+            candidates=[candidate, {"id": "", "type": "agent"}],
+            context_policy={"deferred": [candidate["id"]]},
+            task_evidence=_public_task_evidence(),
+        )
+
+
+def test_deferred_activation_retains_null_provenance_as_unloadable() -> None:
+    candidate = _deferred_candidate()
+    candidate["source_path"] = None
+
+    decision = benchmark.decide_deferred_activation(
+        stage="pre-solve",
+        candidates=[candidate],
+        context_policy={"deferred": [candidate["id"]]},
+        task_evidence=_public_task_evidence(),
+        activation_policy=_activation_policy(str(candidate["id"])),
+    )
+
+    assert decision["decision"] == "deny"
+    assert decision["reason"] == "not_loadable"
+    assert decision["deferred_candidates"][0]["loadability"] is False
+    assert decision["deferred_candidates"][0]["provenance"]["source_path"] is None
+
+
+def test_deferred_activation_selects_at_most_one_natural_mcp() -> None:
+    first = _deferred_candidate()
+    second = _deferred_candidate("mcp-server:ctx-secondary")
+
+    decision = benchmark.decide_deferred_activation(
+        stage="pre-solve",
+        candidates=[first, second],
+        context_policy={"deferred": [first["id"], second["id"]]},
+        task_evidence=_public_task_evidence(),
+        activation_policy=_activation_policy(str(first["id"]), str(second["id"])),
+    )
+
+    assert decision["decision"] == "select"
+    assert decision["reason"] == "selected_pre-solve"
+    assert decision["selected_ids"] == ["mcp-server:ctx-core"]
+
+
+def test_deferred_activation_requires_diff_and_risk_for_natural_reviewer() -> None:
+    reviewer = _deferred_candidate(
+        "agent:ctx-python-reviewer",
+        entity_type="agent",
+        tags=["local", "no-api-key", "python", "security"],
+        permissions=["diff:read"],
+        risk="medium",
+    )
+    policy = _activation_policy(
+        str(reviewer["id"]),
+        entity_type="agent",
+        permissions=["diff:read"],
+    )
+    denied = benchmark.decide_deferred_activation(
+        stage="post-solve",
+        candidates=[reviewer],
+        context_policy={"deferred": [reviewer["id"]]},
+        task_evidence=_public_task_evidence(risks=["security"]),
+        activation_policy=policy,
+        run_evidence={"diff_non_empty": False, "changed_paths": []},
+    )
+    selected = benchmark.decide_deferred_activation(
+        stage="post-solve",
+        candidates=[reviewer],
+        context_policy={"deferred": [reviewer["id"]]},
+        task_evidence=_public_task_evidence(risks=["security"]),
+        activation_policy=policy,
+        run_evidence={"diff_non_empty": True, "changed_paths": ["src/package.py"]},
+    )
+
+    assert denied["reason"] == "post_solve_requires_diff_and_predeclared_risk"
+    assert denied["selected_ids"] == []
+    assert selected["reason"] == "selected_post-solve"
+    assert selected["selected_ids"] == ["agent:ctx-python-reviewer"]
+
+
+def test_deferred_activation_rejects_hidden_oracle_keys() -> None:
+    candidate = _deferred_candidate()
+
+    with pytest.raises(ValueError, match="hidden-oracle"):
+        benchmark.decide_deferred_activation(
+            stage="pre-solve",
+            candidates=[candidate],
+            context_policy={"deferred": [candidate["id"]]},
+            task_evidence={
+                **_public_task_evidence(),
+                "tags": [{"reference_patch": "secret"}],
+            },
+        )
+    with pytest.raises(ValueError, match="hidden-oracle"):
+        benchmark.decide_deferred_activation(
+            stage="pre-solve",
+            candidates=[candidate],
+            context_policy={"deferred": [candidate["id"]]},
+            task_evidence={
+                **_public_task_evidence(),
+                "repository_paths": ["hidden/reference.patch"],
+            },
+        )
+    with pytest.raises(ValueError, match="hidden-oracle"):
+        benchmark.decide_deferred_activation(
+            stage="post-solve",
+            candidates=[candidate],
+            context_policy={"deferred": [candidate["id"]]},
+            task_evidence=_public_task_evidence(risks=["security"]),
+            run_evidence={"hidden_tests": ["secret"]},
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "updates"),
+    [
+        ("task", {"unknown_task_field": True}),
+        ("activation", {"unknown_policy_field": True}),
+        ("context", {"unknown_context_field": []}),
+    ],
+)
+def test_deferred_activation_rejects_unknown_policy_fields(
+    field: str,
+    updates: dict[str, object],
+) -> None:
+    candidate = _deferred_candidate()
+    task_evidence = _public_task_evidence()
+    activation_policy: dict[str, object] = {}
+    context_policy: dict[str, object] = {"deferred": [candidate["id"]]}
+    target = {
+        "task": task_evidence,
+        "activation": activation_policy,
+        "context": context_policy,
+    }[field]
+    target.update(updates)
+
+    with pytest.raises(ValueError, match="unsupported keys"):
+        benchmark.decide_deferred_activation(
+            stage="pre-solve",
+            candidates=[candidate],
+            context_policy=context_policy,
+            task_evidence=task_evidence,
+            activation_policy=activation_policy,
+        )
+
+
+def test_deferred_policy_does_not_change_production_task_prompt_hash() -> None:
+    scenario = benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0]
+    candidate = _deferred_candidate()
+    before = hashlib.sha256(benchmark.production_catalog_task_prompt(scenario).encode()).hexdigest()
+
+    benchmark.decide_deferred_activation(
+        stage="pre-solve",
+        candidates=[candidate],
+        context_policy={"deferred": [candidate["id"]]},
+        task_evidence=_public_task_evidence(),
+        activation_policy=_activation_policy(str(candidate["id"])),
+    )
+    after = hashlib.sha256(benchmark.production_catalog_task_prompt(scenario).encode()).hexdigest()
+
+    assert before == after == "edec6d52378da164473ea090c12bf19b1ca4173d1c257e5278fd91575d60f90e"
 
 
 def test_production_catalog_recommendation_allows_no_selection(
