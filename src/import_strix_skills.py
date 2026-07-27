@@ -288,9 +288,7 @@ def _read_preflight_destination(
                 )
             except FileNotFoundError:
                 return None, None, None
-            if not stat.S_ISDIR(parent_metadata.st_mode) or stat.S_ISLNK(
-                parent_metadata.st_mode
-            ):
+            if not stat.S_ISDIR(parent_metadata.st_mode) or stat.S_ISLNK(parent_metadata.st_mode):
                 raise ValueError(f"skill dir {destination.parent} must be a real directory")
             parent_fd = os.open(
                 destination.parent.name,
@@ -410,12 +408,8 @@ def _prepare_entry(entry: dict, manifest: dict, target_dir: Path) -> PreparedEnt
         dest,
     )
     existed = destination_metadata is not None
-    destination_identity = (
-        None if destination_metadata is None else _identity(destination_metadata)
-    )
-    destination_link_count = (
-        0 if destination_metadata is None else destination_metadata.st_nlink
-    )
+    destination_identity = None if destination_metadata is None else _identity(destination_metadata)
+    destination_link_count = 0 if destination_metadata is None else destination_metadata.st_nlink
     changed = existing != content
 
     return PreparedEntry(

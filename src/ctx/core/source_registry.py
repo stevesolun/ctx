@@ -514,8 +514,12 @@ def _canonical_evidence_path(value: object, field: str) -> str:
 @functools.cache
 def _packaged_evidence() -> dict[str, bytes]:
     try:
-        raw = resources.files("ctx.assets").joinpath("license-evidence.json").read_text(
-            encoding="utf-8",
+        raw = (
+            resources.files("ctx.assets")
+            .joinpath("license-evidence.json")
+            .read_text(
+                encoding="utf-8",
+            )
         )
         packaged = json.loads(raw)
         if not isinstance(packaged, dict) or not isinstance(packaged.get("gzip_base64"), str):

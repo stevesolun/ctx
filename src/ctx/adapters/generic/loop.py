@@ -365,9 +365,7 @@ def _validate_budgets(
         ):
             raise ValueError("budget_usd must be a non-negative finite number or None")
     if budget_tokens is not None and (
-        isinstance(budget_tokens, bool)
-        or not isinstance(budget_tokens, int)
-        or budget_tokens < 0
+        isinstance(budget_tokens, bool) or not isinstance(budget_tokens, int) or budget_tokens < 0
     ):
         raise ValueError("budget_tokens must be a non-negative integer or None")
 
