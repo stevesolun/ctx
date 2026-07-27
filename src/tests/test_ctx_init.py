@@ -866,7 +866,7 @@ def test_runtime_graph_install_seeds_actionable_local_availability_pack(
         )
         assert page["slug"] == slug
         assert page["entity_type"] == "skill"
-        assert page["path"] == f"entities/skills/{slug}.md"
+        assert page["path"] == f"converted/{slug}/SKILL.md"
         assert page["frontmatter"]["source"] == "ctx-runtime-availability"
         assert page["body"]
 

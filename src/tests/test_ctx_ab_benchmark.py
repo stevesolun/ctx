@@ -3,12 +3,15 @@ from __future__ import annotations
 import csv
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import subprocess
 import sys
+import tarfile
 import threading
 import time
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -72,7 +75,10 @@ def test_ctx_env_preserves_windows_process_plumbing(
 def test_scenarios_are_pinned_and_have_all_ctx_entity_types() -> None:
     scenarios = benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")
 
-    assert [scenario.id for scenario in scenarios] == ["click-echo-json", "requests-json-or"]
+    assert [scenario.id for scenario in scenarios] == [
+        "click-echo-json",
+        "requests-json-or",
+    ]
     assert all(len(scenario.commit) == 40 for scenario in scenarios)
     assert {scenario.benchmark_class for scenario in scenarios} == {"trivial"}
     assert all(
@@ -81,6 +87,14 @@ def test_scenarios_are_pinned_and_have_all_ctx_entity_types() -> None:
     )
     assert [scenario.expected_test_count for scenario in scenarios] == [5, 3]
     assert all(scenario.reference_patch and scenario.allowed_changes for scenario in scenarios)
+
+
+def test_click_regression_verification_covers_import_contract() -> None:
+    scenario = benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0]
+
+    assert any("tests/test_imports.py" in command for command in scenario.regression_verify)
+    assert "+    import json" in scenario.reference_patch
+    assert "\n+import json\n" not in scenario.reference_patch
 
 
 def test_task_prompt_is_stable_when_ctx_treatment_is_added() -> None:
@@ -115,6 +129,22 @@ def test_three_arm_schedule_is_stable_and_counterbalanced() -> None:
         assert benchmark.trial_schedule([scenario], benchmark.TREATMENT_ARMS, trials=6) == [
             row for row in full_schedule if row["scenario"] == scenario.id
         ]
+
+
+def test_two_arm_schedule_alternates_order_three_times_each() -> None:
+    scenario = benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0]
+    arms = ("baseline", "ctx-light")
+
+    orders = [tuple(row["arms"]) for row in benchmark.trial_schedule([scenario], arms, trials=6)]
+
+    assert orders == [
+        ("baseline", "ctx-light"),
+        ("ctx-light", "baseline"),
+        ("baseline", "ctx-light"),
+        ("ctx-light", "baseline"),
+        ("baseline", "ctx-light"),
+        ("ctx-light", "baseline"),
+    ]
 
 
 def test_adaptive_policy_uses_expensive_tools_only_for_full_or_escalation() -> None:
@@ -236,6 +266,72 @@ def test_extract_token_usage_rejects_partial_terminal_record() -> None:
         "attribution": "unavailable",
         "reason": "terminal turn.completed usage was incomplete",
     }
+
+
+def test_trace_efficiency_counts_tool_output_and_failures() -> None:
+    output = "\n".join(
+        [
+            json.dumps(
+                {
+                    "type": "item.completed",
+                    "item": {
+                        "type": "command_execution",
+                        "command": "rg  src",
+                        "exit_code": 0,
+                        "aggregated_output": "abc",
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "item.completed",
+                    "item": {
+                        "type": "command_execution",
+                        "command": "rg src",
+                        "exit_code": 1,
+                        "aggregated_output": "failure",
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "item.completed",
+                    "item": {"type": "agent_message", "text": "done"},
+                }
+            ),
+        ]
+    )
+
+    assert benchmark.extract_trace_efficiency(output) == {
+        "completed_item_count": 3,
+        "tool_command_count": 2,
+        "tool_failure_count": 1,
+        "tool_output_bytes": 10,
+        "max_tool_output_bytes": 7,
+        "oversized_tool_output_count": 0,
+        "repeated_tool_command_count": 1,
+        "agent_message_count": 1,
+        "agent_message_bytes": 4,
+    }
+
+
+def test_trace_efficiency_flags_oversized_tool_output() -> None:
+    output = json.dumps(
+        {
+            "type": "item.completed",
+            "item": {
+                "type": "command_execution",
+                "command": "rg everything",
+                "exit_code": 0,
+                "aggregated_output": "x" * (benchmark.PRODUCTION_TOOL_OUTPUT_LIMIT_BYTES + 1),
+            },
+        }
+    )
+
+    metrics = benchmark.extract_trace_efficiency(output)
+
+    assert metrics["max_tool_output_bytes"] == benchmark.PRODUCTION_TOOL_OUTPUT_LIMIT_BYTES + 1
+    assert metrics["oversized_tool_output_count"] == 1
 
 
 def test_mcp_use_requires_an_mcp_typed_json_event() -> None:
@@ -438,6 +534,505 @@ def test_ctx_fixture_contains_loadable_skill_agent_and_graph(tmp_path: Path) -> 
     assert len(graph["edges"]) == 2
 
 
+def _catalog_snapshot(tmp_path: Path) -> Any:
+    wiki = tmp_path / "catalog" / ".claude" / "skill-wiki"
+    wiki.mkdir(parents=True)
+    wiki.chmod(0o550)
+    return benchmark.CatalogSnapshot(
+        wiki_dir=wiki,
+        provenance={
+            "archive_sha256": "a" * 64,
+            "runtime_availability_sha256": "d" * 64,
+            "graph_export_id": "export-1",
+            "graph_export_manifest_sha256": "b" * 64,
+            "overlay_sha256": "c" * 64,
+            "overlay_records": [
+                {
+                    "overlay_id": "ctx-runtime-availability-v1",
+                    "source": "ctx-runtime-availability",
+                }
+            ],
+        },
+    )
+
+
+def test_production_catalog_recommendation_records_candidates_selection_and_body_provenance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scenario = benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0]
+    snapshot = _catalog_snapshot(tmp_path)
+    body = "Use focused pytest, then run the repository import contract."
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    class Client:
+        def __enter__(self) -> "Client":
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+        def call_tool(self, name: str, arguments: dict[str, object]) -> str:
+            calls.append((name, arguments))
+            if name == "ctx__recommend_bundle":
+                return json.dumps(
+                    {
+                        "results": [
+                            {
+                                "id": "skill:ctx-python-testing",
+                                "name": "ctx-python-testing",
+                                "type": "skill",
+                                "installable": True,
+                                "load_status": "local-wiki",
+                                "source": "ctx-runtime-availability",
+                                "source_path": "converted/ctx-python-testing/SKILL.md",
+                            },
+                            {
+                                "id": "agent:ctx-python-reviewer",
+                                "name": "ctx-python-reviewer",
+                                "type": "agent",
+                                "installable": True,
+                            },
+                        ],
+                        "context_policy": {
+                            "initial_load": ["skill:ctx-python-testing"],
+                            "deferred": ["agent:ctx-python-reviewer"],
+                        },
+                    }
+                )
+            assert name == "ctx__wiki_get"
+            return json.dumps(
+                {
+                    "slug": "ctx-python-testing",
+                    "entity_type": "skill",
+                    "path": "entities/skills/ctx-python-testing.md",
+                    "frontmatter": {
+                        "source": "ctx-runtime-availability",
+                        "license": "MIT",
+                    },
+                    "body": body,
+                }
+            )
+
+    monkeypatch.setattr(benchmark, "_catalog_mcp_client", lambda **_kwargs: Client())
+    catalog = benchmark.recommend_production_catalog(
+        scenario,
+        home=tmp_path / "home",
+        lifecycle_root=tmp_path / "lifecycle",
+        session_id="catalog-session",
+        snapshot=snapshot,
+    )
+    evidence_path = tmp_path / "recommendations.json"
+    benchmark.write_catalog_recommendation_evidence(
+        evidence_path,
+        catalog,
+        used_ids=[],
+        snapshot=snapshot,
+    )
+    evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+
+    assert [name for name, _arguments in calls] == [
+        "ctx__recommend_bundle",
+        "ctx__wiki_get",
+    ]
+    recommendation_args = calls[0][1]
+    assert recommendation_args["local_code_task"] is True
+    assert recommendation_args["no_api_keys"] is True
+    assert recommendation_args["language"] == "python"
+    assert "session_id" not in recommendation_args
+    assert evidence["candidate_ids"] == [
+        "skill:ctx-python-testing",
+        "agent:ctx-python-reviewer",
+    ]
+    assert evidence["selected_ids"] == ["skill:ctx-python-testing"]
+    assert evidence["used_ids"] == []
+    assert catalog["selected_item"]["body"] == body
+    assert catalog["body_provenance"] == {
+        "surface": "ctx MCP ctx__wiki_get",
+        "wiki_path": "entities/skills/ctx-python-testing.md",
+        "wiki_response_sha256": hashlib.sha256(
+            json.dumps(
+                {
+                    "slug": "ctx-python-testing",
+                    "entity_type": "skill",
+                    "path": "entities/skills/ctx-python-testing.md",
+                    "frontmatter": {
+                        "source": "ctx-runtime-availability",
+                        "license": "MIT",
+                    },
+                    "body": body,
+                }
+            ).encode("utf-8")
+        ).hexdigest(),
+        "body_sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
+        "body_bytes": len(body.encode("utf-8")),
+        "frontmatter_source": "ctx-runtime-availability",
+        "frontmatter_license": "MIT",
+        "candidate_source": "ctx-runtime-availability",
+        "candidate_source_path": "converted/ctx-python-testing/SKILL.md",
+        "catalog_archive_sha256": "a" * 64,
+        "catalog_graph_export_id": "export-1",
+    }
+
+
+def test_production_catalog_recommendation_allows_no_selection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scenario = benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0]
+    calls: list[str] = []
+
+    class Client:
+        def __enter__(self) -> "Client":
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+        def call_tool(self, name: str, _arguments: dict[str, object]) -> str:
+            calls.append(name)
+            return json.dumps(
+                {
+                    "results": [
+                        {
+                            "id": "agent:ctx-python-reviewer",
+                            "name": "ctx-python-reviewer",
+                            "type": "agent",
+                            "installable": True,
+                        }
+                    ],
+                    "context_policy": {"initial_load": []},
+                }
+            )
+
+    monkeypatch.setattr(benchmark, "_catalog_mcp_client", lambda **_kwargs: Client())
+    catalog = benchmark.recommend_production_catalog(
+        scenario,
+        home=tmp_path / "home",
+        lifecycle_root=tmp_path / "lifecycle",
+        session_id="no-selection",
+        snapshot=_catalog_snapshot(tmp_path),
+    )
+
+    assert calls == ["ctx__recommend_bundle"]
+    assert catalog["candidate_ids"] == ["agent:ctx-python-reviewer"]
+    assert catalog["selected_ids"] == []
+    assert catalog["selected_item"] is None
+    assert catalog["body_provenance"] is None
+    assert benchmark.production_catalog_context_prompt(catalog) == ""
+
+
+def test_production_catalog_dry_run_never_writes_scenario_fixture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scenario = benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0]
+    snapshot = _catalog_snapshot(tmp_path)
+    production_body = "Production catalog body, not scenario fixture text."
+
+    def fake_prepare(
+        _scenario: object,
+        _cache: Path,
+        destination: Path,
+        *,
+        include_evaluator_test: bool,
+    ) -> str:
+        assert include_evaluator_test is False
+        destination.mkdir(parents=True)
+        return hashlib.sha256(scenario.test_body.encode("utf-8")).hexdigest()
+
+    def fixture_forbidden(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("write_ctx_fixture must not run for the production catalog engine")
+
+    catalog = {
+        "query": scenario.query,
+        "candidates": [
+            {
+                "id": "skill:ctx-python-testing",
+                "name": "ctx-python-testing",
+                "type": "skill",
+                "installable": True,
+            },
+            {
+                "id": "agent:ctx-python-reviewer",
+                "name": "ctx-python-reviewer",
+                "type": "agent",
+                "installable": True,
+            },
+        ],
+        "candidate_ids": [
+            "skill:ctx-python-testing",
+            "agent:ctx-python-reviewer",
+        ],
+        "context_policy": {"initial_load": ["skill:ctx-python-testing"]},
+        "policy_field": "initial_load",
+        "policy_initial_load_ids": ["skill:ctx-python-testing"],
+        "selected_item": {
+            "id": "skill:ctx-python-testing",
+            "type": "skill",
+            "slug": "ctx-python-testing",
+            "body": production_body,
+        },
+        "selected_ids": ["skill:ctx-python-testing"],
+        "body_provenance": {
+            "surface": "ctx MCP ctx__wiki_get",
+            "body_sha256": hashlib.sha256(production_body.encode()).hexdigest(),
+        },
+        "selection_skip_reason": None,
+        "recommendation_response_sha256": "d" * 64,
+        "recommendation_seconds": 0.01,
+        "body_fetch_seconds": 0.02,
+        "surface_seconds": 0.03,
+    }
+    monkeypatch.setattr(benchmark, "prepare_workspace", fake_prepare)
+    monkeypatch.setattr(benchmark, "write_ctx_fixture", fixture_forbidden)
+    monkeypatch.setattr(
+        benchmark,
+        "recommend_production_catalog",
+        lambda *_args, **_kwargs: catalog,
+    )
+
+    result = benchmark.run_trial(
+        scenario,
+        arm="ctx-light",
+        treatment_level="ctx-light",
+        attempt=1,
+        trial=1,
+        retry=0,
+        cache=tmp_path / "cache",
+        output=tmp_path / "output",
+        codex="codex",
+        model="gpt-test",
+        timeout=10,
+        dry_run=True,
+        incidents=benchmark.IncidentLog(tmp_path / "incidents.csv"),
+        catalog_snapshot=snapshot,
+    )
+    prompt = Path(result["artifact_dir"], "prompt.txt").read_text(encoding="utf-8")
+
+    assert result["engine"] == benchmark.PRODUCTION_CATALOG_ENGINE
+    assert result["candidate_ids"] == catalog["candidate_ids"]
+    assert result["selected_ids"] == ["skill:ctx-python-testing"]
+    assert result["used_ids"] == []
+    assert production_body in prompt
+    fixture_body = next(item["body"] for item in scenario.context if item["type"] == "skill")
+    assert fixture_body.strip() not in prompt
+    assert scenario.test_path not in prompt
+    assert result["lifecycle_actions"] == [
+        "dev_event",
+        "load_requested",
+        "load_applied",
+        "unload_requested",
+        "unload_applied",
+        "session_end",
+    ]
+    assert result["final_loaded"] == []
+
+
+def test_catalog_archive_validation_rejects_traversal(tmp_path: Path) -> None:
+    archive = tmp_path / "wiki-graph.tar.gz"
+    with tarfile.open(archive, "w:gz") as tf:
+        member = tarfile.TarInfo("../outside.txt")
+        payload = b"escape"
+        member.size = len(payload)
+        tf.addfile(member, io.BytesIO(payload))
+
+    with pytest.raises(ValueError, match="unsafe graph archive path"):
+        benchmark.validate_catalog_archive(archive)
+
+
+def _write_runtime_availability(
+    path: Path,
+    *,
+    content: str,
+    version: int = 1,
+) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "version": version,
+                "entries": [
+                    {
+                        "id": "skill:ctx-python-testing",
+                        "files": [
+                            {
+                                "path": "converted/ctx-python-testing/SKILL.md",
+                                "content": content,
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def test_production_catalog_cache_uses_shipped_installer_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive = tmp_path / "wiki-graph.tar.gz"
+    with tarfile.open(archive, "w:gz") as tf:
+        member = tarfile.TarInfo("index.md")
+        payload = b"# catalog\n"
+        member.size = len(payload)
+        tf.addfile(member, io.BytesIO(payload))
+    availability = tmp_path / "runtime-availability.json"
+    runtime_content = "source: ctx-runtime-availability\n"
+    _write_runtime_availability(availability, content=runtime_content)
+    monkeypatch.setattr(benchmark, "PRODUCTION_RUNTIME_AVAILABILITY", availability)
+    install_calls: list[Path] = []
+
+    def install(claude_dir: Path, *, archive: Path) -> int:
+        assert archive == tmp_path / "wiki-graph.tar.gz"
+        install_calls.append(claude_dir)
+        wiki = claude_dir / "skill-wiki"
+        graph = wiki / "graphify-out"
+        runtime_skill = wiki / "converted" / "ctx-python-testing" / "SKILL.md"
+        graph.mkdir(parents=True)
+        runtime_skill.parent.mkdir(parents=True)
+        (graph / "graph-export-manifest.json").write_text(
+            json.dumps({"version": 1, "export_id": "frozen-export"}),
+            encoding="utf-8",
+        )
+        (graph / "entity-overlays.jsonl").write_text(
+            json.dumps(
+                {
+                    "overlay_id": "ctx-runtime-availability-v1",
+                    "source": "ctx-runtime-availability",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (graph / "graph-store.sqlite3").write_bytes(b"graph-store")
+        runtime_skill.write_text(runtime_content, encoding="utf-8")
+        return 0
+
+    monkeypatch.setattr(benchmark, "_install_shipped_catalog", install)
+    cache_root = tmp_path / "cache"
+    first = benchmark.prepare_production_catalog(cache_root, archive=archive)
+    second = benchmark.prepare_production_catalog(cache_root, archive=archive)
+
+    assert len(install_calls) == 1
+    assert first.wiki_dir == second.wiki_dir
+    assert first.provenance["installer"] == "ctx_init.build_graph"
+    assert first.provenance["install_mode"] == "runtime"
+    assert first.provenance["archive_sha256"] == hashlib.sha256(archive.read_bytes()).hexdigest()
+    assert (
+        first.provenance["runtime_availability_sha256"]
+        == hashlib.sha256(availability.read_bytes()).hexdigest()
+    )
+    assert first.provenance["graph_export_id"] == "frozen-export"
+    assert first.provenance["overlay_records"] == [
+        {
+            "overlay_id": "ctx-runtime-availability-v1",
+            "source": "ctx-runtime-availability",
+        }
+    ]
+    assert first.provenance["runtime_availability_files"] == [
+        {
+            "path": "converted/ctx-python-testing/SKILL.md",
+            "sha256": hashlib.sha256(runtime_content.encode()).hexdigest(),
+            "size_bytes": len(runtime_content.encode()),
+        }
+    ]
+    assert not first.wiki_dir.stat().st_mode & 0o222
+    _write_runtime_availability(availability, content=runtime_content, version=2)
+    third = benchmark.prepare_production_catalog(cache_root, archive=archive)
+    assert len(install_calls) == 2
+    assert third.wiki_dir != first.wiki_dir
+    benchmark._remove_catalog_staging(cache_root / "production-catalog")
+
+
+def test_production_catalog_cache_rejects_content_tampering(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive = tmp_path / "wiki-graph.tar.gz"
+    with tarfile.open(archive, "w:gz") as tf:
+        member = tarfile.TarInfo("index.md")
+        payload = b"# catalog\n"
+        member.size = len(payload)
+        tf.addfile(member, io.BytesIO(payload))
+    availability = tmp_path / "runtime-availability.json"
+    runtime_content = "# testing\n"
+    _write_runtime_availability(availability, content=runtime_content)
+    monkeypatch.setattr(benchmark, "PRODUCTION_RUNTIME_AVAILABILITY", availability)
+
+    def install(claude_dir: Path, *, archive: Path) -> int:
+        assert archive.is_file()
+        wiki = claude_dir / "skill-wiki"
+        graph = wiki / "graphify-out"
+        skill = wiki / "converted" / "ctx-python-testing" / "SKILL.md"
+        graph.mkdir(parents=True)
+        skill.parent.mkdir(parents=True)
+        (graph / "graph-export-manifest.json").write_text(
+            json.dumps({"export_id": "frozen-export"}),
+            encoding="utf-8",
+        )
+        (graph / "entity-overlays.jsonl").write_text(
+            json.dumps({"overlay_id": "runtime"}) + "\n",
+            encoding="utf-8",
+        )
+        (graph / "graph-store.sqlite3").write_bytes(b"graph-store")
+        skill.write_text(runtime_content, encoding="utf-8")
+        return 0
+
+    monkeypatch.setattr(benchmark, "_install_shipped_catalog", install)
+    cache_root = tmp_path / "cache"
+    snapshot = benchmark.prepare_production_catalog(cache_root, archive=archive)
+    skill = snapshot.wiki_dir / "converted" / "ctx-python-testing" / "SKILL.md"
+    skill.chmod(0o600)
+    skill.write_text("# tampered\n", encoding="utf-8")
+    skill.chmod(0o440)
+
+    with pytest.raises(ValueError, match="does not match availability pack"):
+        benchmark.prepare_production_catalog(cache_root, archive=archive)
+
+    benchmark._remove_catalog_staging(snapshot.wiki_dir.parents[1])
+
+
+def test_production_catalog_rejects_installer_availability_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive = tmp_path / "wiki-graph.tar.gz"
+    with tarfile.open(archive, "w:gz") as tf:
+        member = tarfile.TarInfo("index.md")
+        member.size = 0
+        tf.addfile(member, io.BytesIO())
+    availability = tmp_path / "runtime-availability.json"
+    _write_runtime_availability(availability, content="# expected\n")
+    monkeypatch.setattr(benchmark, "PRODUCTION_RUNTIME_AVAILABILITY", availability)
+
+    def install(claude_dir: Path, *, archive: Path) -> int:
+        assert archive.is_file()
+        wiki = claude_dir / "skill-wiki"
+        graph = wiki / "graphify-out"
+        skill = wiki / "converted" / "ctx-python-testing" / "SKILL.md"
+        graph.mkdir(parents=True)
+        skill.parent.mkdir(parents=True)
+        (graph / "graph-export-manifest.json").write_text(
+            json.dumps({"export_id": "frozen-export"}),
+            encoding="utf-8",
+        )
+        (graph / "entity-overlays.jsonl").write_text(
+            json.dumps({"overlay_id": "runtime"}) + "\n",
+            encoding="utf-8",
+        )
+        (graph / "graph-store.sqlite3").write_bytes(b"graph-store")
+        skill.write_text("# installed package copy\n", encoding="utf-8")
+        return 0
+
+    monkeypatch.setattr(benchmark, "_install_shipped_catalog", install)
+
+    with pytest.raises(ValueError, match="does not match availability pack"):
+        benchmark.prepare_production_catalog(tmp_path / "cache", archive=archive)
+
+
 def test_incident_log_appends_machine_readable_rows(tmp_path: Path) -> None:
     path = tmp_path / "incidents.csv"
     incidents = benchmark.IncidentLog(path)
@@ -483,9 +1078,12 @@ def test_performance_gate_rejects_slow_evidence_run() -> None:
                         "arm": arm,
                         "trial": trial,
                         "status": "passed",
+                        "measured_phase_seconds": 10 * ratio,
                         "total_seconds": 10 * ratio,
                         "token_attribution": "exact",
                         "total_tokens": int(1000 * ratio),
+                        "uncached_input_tokens": int(800 * ratio),
+                        "team_token_completeness": "not_applicable",
                         "production_efficiency_eligible": True,
                     }
                 )
@@ -520,6 +1118,145 @@ def test_performance_gate_rejects_slow_evidence_run() -> None:
     assert incomplete["evidence_complete"] is False
 
 
+def test_production_catalog_benefit_verdict_is_stricter_than_non_regression() -> None:
+    def rows(time_ratio: float, token_ratio: float) -> list[dict[str, object]]:
+        values: list[dict[str, object]] = []
+        for trial in range(1, 7):
+            for arm, seconds, tokens in (
+                ("baseline", 10.0, 1000),
+                ("ctx-light", 10.0 * time_ratio, int(1000 * token_ratio)),
+            ):
+                values.append(
+                    {
+                        "scenario": "scenario",
+                        "arm": arm,
+                        "trial": trial,
+                        "engine": benchmark.PRODUCTION_CATALOG_ENGINE,
+                        "status": "passed",
+                        "repo_url": "https://example.test/repo.git",
+                        "measured_phase_seconds": seconds,
+                        "total_seconds": seconds,
+                        "token_attribution": "exact",
+                        "total_tokens": tokens,
+                        "uncached_input_tokens": tokens,
+                        "team_token_completeness": "not_applicable",
+                        "production_efficiency_eligible": True,
+                        "evaluator_isolation_verified": True,
+                        "context_delivery_verified": arm == "ctx-light",
+                    }
+                )
+        return values
+
+    beneficial = benchmark.build_performance_report(
+        rows(0.85, 1.05),
+        scenario_ids=["scenario"],
+        trials=6,
+        arms=("baseline", "ctx-light"),
+    )
+    non_regressing = benchmark.build_performance_report(
+        rows(1.05, 1.05),
+        scenario_ids=["scenario"],
+        trials=6,
+        arms=("baseline", "ctx-light"),
+    )
+    tradeoff_too_large = benchmark.build_performance_report(
+        rows(0.80, 1.11),
+        scenario_ids=["scenario"],
+        trials=6,
+        arms=("baseline", "ctx-light"),
+    )
+
+    assert beneficial["gate_passed"] is True
+    assert beneficial["benefit_verdict"] == "beneficial"
+    assert beneficial["beneficial"] is True
+    assert non_regressing["gate_passed"] is True
+    assert non_regressing["benefit_verdict"] == "not_beneficial"
+    assert non_regressing["beneficial"] is False
+    assert tradeoff_too_large["gate_passed"] is False
+    assert tradeoff_too_large["benefit_verdict"] == "not_beneficial"
+
+
+def test_production_report_keeps_asymmetric_failure_in_intent_to_treat() -> None:
+    rows: list[dict[str, object]] = []
+    for trial in range(1, 7):
+        for arm in ("baseline", "ctx-light"):
+            rows.append(
+                {
+                    "scenario": "scenario",
+                    "repo_url": "https://example.test/repo.git",
+                    "arm": arm,
+                    "trial": trial,
+                    "engine": benchmark.PRODUCTION_CATALOG_ENGINE,
+                    "status": "failed" if arm == "ctx-light" and trial == 3 else "passed",
+                    "measured_phase_seconds": 10.0,
+                    "harness_total_seconds": 11.0,
+                    "token_attribution": "exact",
+                    "total_tokens": 1000,
+                    "uncached_input_tokens": 800,
+                    "team_token_completeness": "not_applicable",
+                    "production_efficiency_eligible": True,
+                    "evaluator_isolation_verified": True,
+                    "context_delivery_verified": arm == "ctx-light",
+                }
+            )
+
+    report = benchmark.build_performance_report(
+        rows,
+        scenario_ids=["scenario"],
+        trials=6,
+        arms=("baseline", "ctx-light"),
+    )
+
+    assert report["assignment_complete"] is True
+    assert report["intent_to_treat"]["baseline"]["pass_rate"] == 1.0
+    assert report["intent_to_treat"]["ctx-light"]["pass_rate"] == pytest.approx(5 / 6)
+    assert report["quality_preserved"] is False
+    assert report["benefit_verdict"] == "not_beneficial"
+    assert report["beneficial"] is False
+
+
+def test_production_report_excludes_ctx_noop_and_missing_measured_phase() -> None:
+    common = {
+        "scenario": "scenario",
+        "repo_url": "https://example.test/repo.git",
+        "trial": 1,
+        "engine": benchmark.PRODUCTION_CATALOG_ENGINE,
+        "status": "passed",
+        "token_attribution": "exact",
+        "total_tokens": 100,
+        "uncached_input_tokens": 80,
+        "team_token_completeness": "not_applicable",
+        "production_efficiency_eligible": True,
+        "evaluator_isolation_verified": True,
+    }
+    rows = [
+        {
+            **common,
+            "arm": "baseline",
+            "total_seconds": 10.0,
+        },
+        {
+            **common,
+            "arm": "ctx-light",
+            "measured_phase_seconds": 9.0,
+            "total_seconds": 9.0,
+            "context_delivery_verified": False,
+            "evidence_level": "production_catalog_ctx_noop",
+        },
+    ]
+
+    report = benchmark.build_performance_report(
+        rows,
+        scenario_ids=["scenario"],
+        trials=1,
+        arms=("baseline", "ctx-light"),
+    )
+
+    assert report["production_efficiency_claim_allowed"] is False
+    assert report["excluded_result_count"] == 2
+    assert report["pairs"][0]["reason"] == "paired evidence ineligible"
+
+
 def test_unverified_custom_endpoint_evidence_is_excluded_from_efficiency_aggregates(
     tmp_path: Path,
 ) -> None:
@@ -533,6 +1270,7 @@ def test_unverified_custom_endpoint_evidence_is_excluded_from_efficiency_aggrega
             "arm": arm,
             "trial": 1,
             "status": "passed",
+            "measured_phase_seconds": 1.0,
             "total_seconds": 1.0,
             "token_attribution": "exact",
             "total_tokens": 10,
@@ -593,6 +1331,19 @@ def test_codex_controlled_evidence_never_claims_shipped_provider_proof() -> None
     }
 
 
+def test_codex_production_catalog_evidence_is_scored_only_for_live_runs() -> None:
+    assert benchmark.classify_codex_production_catalog_evidence(dry_run=False) == {
+        "endpoint_class": "codex_cli_oauth",
+        "evidence_level": "production_catalog_context_delivery",
+        "production_efficiency_eligible": True,
+    }
+    assert benchmark.classify_codex_production_catalog_evidence(dry_run=True) == {
+        "endpoint_class": "codex_cli_oauth",
+        "evidence_level": "production_catalog_wiring_only",
+        "production_efficiency_eligible": False,
+    }
+
+
 def test_codex_controlled_dry_run_result_is_explicitly_non_production(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -646,6 +1397,22 @@ def test_codex_controlled_dry_run_is_accepted_as_complete() -> None:
     )
 
 
+def test_production_catalog_dry_run_requires_catalog_evidence_level() -> None:
+    result = {
+        "scenario": "scenario-a",
+        "arm": "baseline",
+        "trial": 1,
+        "status": "wiring_only",
+        "evidence_level": "production_catalog_wiring_only",
+    }
+
+    assert benchmark.dry_run_results_complete(
+        [result],
+        expected_keys={("scenario-a", "baseline", 1)},
+        engine=benchmark.PRODUCTION_CATALOG_ENGINE,
+    )
+
+
 def test_no_base_url_and_success_do_not_infer_live_provider() -> None:
     assert benchmark.classify_production_evidence(
         base_url=None,
@@ -676,6 +1443,7 @@ def test_aggregation_excludes_missing_and_error_eligibility(tmp_path: Path) -> N
             "arm": "baseline",
             "trial": 1,
             "status": "passed",
+            "measured_phase_seconds": 1.0,
             "total_seconds": 1.0,
             "token_attribution": "exact",
             "total_tokens": 10,
@@ -722,9 +1490,10 @@ def test_codex_command_keeps_control_flags_equal(tmp_path: Path) -> None:
         codex="codex", model="model", workspace=tmp_path, prompt="task", with_ctx=True
     )
 
-    assert treated[-len(baseline) + 5 :] == baseline[5:]
+    assert treated[treated.index("exec") :] == baseline[baseline.index("exec") :]
     assert baseline[:5] == ["codex", "-a", "never", "--disable", "multi_agent"]
     assert treated[:5] == ["codex", "-a", "never", "--enable", "multi_agent"]
+    assert baseline[5:7] == ["-c", 'web_search="disabled"']
     assert "--ephemeral" in baseline
     assert "--ignore-user-config" in baseline
     assert "ctx-wiki" not in " ".join(baseline)
@@ -733,6 +1502,336 @@ def test_codex_command_keeps_control_flags_equal(tmp_path: Path) -> None:
     assert 'default_tools_approval_mode="approve"' in treated_config
     assert 'enabled_tools=["ctx__wiki_get"]' in treated_config
     assert "mcp_servers.ctx-wiki.required=true" in treated_config
+
+
+def test_agent_command_uses_isolated_named_profile(tmp_path: Path) -> None:
+    workspace = tmp_path / "repo"
+    home = tmp_path / "home"
+    workspace.mkdir()
+    home.mkdir()
+    command = benchmark.codex_command(
+        codex="codex",
+        model="model",
+        workspace=workspace,
+        prompt="task",
+        with_ctx=False,
+        agent_home=home,
+        isolate_evaluator=True,
+    )
+
+    assert command[:5] == ["codex", "-a", "never", "--disable", "multi_agent"]
+    assert command[command.index("exec") + 1] == "--strict-config"
+    assert "--ignore-user-config" not in command
+    assert "--sandbox" not in command
+    assert command[-1] == "task"
+    assert 'web_search="disabled"' in command
+
+
+def test_isolated_codex_home_denies_credentials_oracles_and_network(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = tmp_path / "original-codex"
+    original.mkdir()
+    (original / "auth.json").write_text('{"token":"secret"}\n', encoding="utf-8")
+    monkeypatch.setattr(benchmark, "ORIGINAL_CODEX_HOME", str(original))
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    forbidden = tmp_path / "private-scenarios.yaml"
+    forbidden.write_text("oracle\n", encoding="utf-8")
+    home = tmp_path / "agent-home"
+
+    benchmark.prepare_isolated_codex_home(
+        home,
+        workspace=workspace,
+        forbidden_reads={"scenario_source": forbidden},
+    )
+
+    config = (home / "config.toml").read_text(encoding="utf-8")
+    assert 'default_permissions = "ctx_benchmark"' in config
+    assert f'{json.dumps(str(workspace))} = "write"' in config
+    assert f'{benchmark._toml_key(forbidden)} = "deny"' in config
+    assert f'{benchmark._toml_key(home / "auth.json")} = "deny"' in config
+    assert f'{benchmark._toml_key(home / "config.toml")} = "deny"' in config
+    assert "[permissions.ctx_benchmark.network]\nenabled = false" in config
+    assert home.stat().st_mode & 0o777 == 0o700
+    assert (home / "auth.json").stat().st_mode & 0o777 == 0o600
+    assert (home / "config.toml").stat().st_mode & 0o777 == 0o600
+
+
+def test_production_agent_env_prefers_checkout_and_neutralizes_color_flags(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "codex-home"
+    workspace = tmp_path / "repo"
+
+    env = benchmark.production_agent_env(
+        {"PATH": "/usr/bin", "NO_COLOR": "1", "FORCE_COLOR": "1"},
+        home=home,
+        workspace=workspace,
+    )
+
+    assert env["PYTHONPATH"].split(os.pathsep) == [
+        str(workspace / "src"),
+        str(workspace),
+    ]
+    assert env["NO_COLOR"] == ""
+    assert env["FORCE_COLOR"] == ""
+    assert env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] == "1"
+    assert env["PATH"].split(os.pathsep)[0] == str(Path(sys.executable).parent)
+
+
+def test_agent_sandbox_preflight_requires_allowed_write_and_denied_oracle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "repo"
+    home = tmp_path / "home"
+    forbidden = tmp_path / "private" / "reference.patch"
+    workspace.mkdir()
+    home.mkdir()
+    forbidden.parent.mkdir()
+    (workspace / "source.py").write_text("VALUE = 1\n", encoding="utf-8")
+    forbidden.write_text("secret\n", encoding="utf-8")
+    (home / "auth.json").write_text("secret\n", encoding="utf-8")
+    (home / "config.toml").write_text("profile\n", encoding="utf-8")
+    observed: list[list[str]] = []
+    sensitive = {forbidden, home / "auth.json", home / "config.toml"}
+
+    def fake_run(argv: list[str], **_kwargs: object) -> object:
+        observed.append(argv)
+        if "/usr/bin/touch" in argv:
+            Path(argv[-1]).touch()
+            return benchmark.CommandResult(0, "", "", 0.01)
+        if Path(argv[-1]) in sensitive:
+            return benchmark.CommandResult(1, "", "Operation not permitted", 0.01)
+        return benchmark.CommandResult(0, "", "", 0.01)
+
+    monkeypatch.setattr(benchmark, "run_process", fake_run)
+    monkeypatch.setattr(
+        benchmark,
+        "_probe_loopback_network",
+        lambda **_kwargs: {
+            "parent_returncode": 0,
+            "parent_connected": True,
+            "sandbox_returncode": 1,
+            "sandbox_connected": False,
+        },
+    )
+    evidence = benchmark.verify_agent_sandbox_isolation(
+        codex="codex",
+        workspace=workspace,
+        home=home,
+        env={},
+        forbidden_reads={"oracle": forbidden},
+        project_check=("python", "-m", "pytest", "-q"),
+    )
+
+    assert evidence["verified"] is True
+    assert all(argv[argv.index("-P") + 1] == "ctx_benchmark" for argv in observed)
+    assert evidence["git_canary_returncode"] == 0
+    assert evidence["project_canary_returncode"] == 0
+    assert evidence["network"] == "restricted"
+    assert evidence["network_canary_returncode"] == 1
+    assert evidence["forbidden_reads"] == [
+        {"label": "credentials", "denied": True, "returncode": 1},
+        {"label": "sandbox_config", "denied": True, "returncode": 1},
+        {"label": "oracle", "denied": True, "returncode": 1},
+    ]
+    assert str(forbidden) not in json.dumps(evidence)
+
+
+def test_agent_sandbox_preflight_rejects_unrelated_command_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "repo"
+    home = tmp_path / "home"
+    forbidden = tmp_path / "private-scenarios.yaml"
+    workspace.mkdir()
+    home.mkdir()
+    (workspace / "source.py").write_text("VALUE = 1\n", encoding="utf-8")
+    forbidden.write_text("oracle\n", encoding="utf-8")
+    (home / "auth.json").write_text("secret\n", encoding="utf-8")
+    (home / "config.toml").write_text("profile\n", encoding="utf-8")
+
+    def fake_run(argv: list[str], **_kwargs: object) -> object:
+        if "/usr/bin/touch" in argv:
+            Path(argv[-1]).touch()
+            return benchmark.CommandResult(0, "", "", 0.01)
+        if argv[-1] == str(workspace / "source.py"):
+            return benchmark.CommandResult(0, "", "", 0.01)
+        return benchmark.CommandResult(1, "", "No such file or directory", 0.01)
+
+    monkeypatch.setattr(benchmark, "run_process", fake_run)
+    monkeypatch.setattr(
+        benchmark,
+        "_probe_loopback_network",
+        lambda **_kwargs: {
+            "parent_returncode": 0,
+            "parent_connected": True,
+            "sandbox_returncode": 1,
+            "sandbox_connected": False,
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="isolation preflight failed"):
+        benchmark.verify_agent_sandbox_isolation(
+            codex="codex",
+            workspace=workspace,
+            home=home,
+            env={},
+            forbidden_reads={"scenario_source": forbidden},
+            project_check=("python", "-m", "pytest", "-q"),
+        )
+
+
+def test_production_output_must_use_private_gate_root() -> None:
+    private_output = benchmark.PRODUCTION_PRIVATE_RUN_ROOT / "unit-run"
+
+    assert benchmark._validate_production_output_path(private_output) == private_output.resolve()
+    assert benchmark._is_system_temp_path(Path("/tmp/private-scenarios.yaml"))
+    assert not benchmark._is_system_temp_path(ROOT / "benchmarks/ctx_ab/scenarios.yaml")
+    with pytest.raises(ValueError, match="output must be beneath"):
+        benchmark._validate_production_output_path(Path("/tmp/ctx-ab-run"))
+
+
+def test_live_production_scenarios_are_private_and_owner_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    private_root = tmp_path / "private"
+    private_root.mkdir()
+    private_root.chmod(0o700)
+    source = private_root / "scenarios.yaml"
+    source.write_text("version: 1\nscenarios: []\n", encoding="utf-8")
+    source.chmod(0o600)
+    monkeypatch.setattr(benchmark, "PRODUCTION_PRIVATE_SCENARIO_ROOT", private_root)
+    monkeypatch.setattr(benchmark, "_is_system_temp_path", lambda _path: False)
+
+    assert benchmark._validate_production_scenarios_path(source, live=True) == source.resolve()
+
+    source.chmod(0o644)
+    with pytest.raises(ValueError, match="owner-only"):
+        benchmark._validate_production_scenarios_path(source, live=True)
+    private_root.chmod(0o755)
+    with pytest.raises(ValueError, match="root must be an owner-only directory"):
+        benchmark._validate_production_scenarios_path(source, live=True)
+    private_root.chmod(0o700)
+    with pytest.raises(ValueError, match="must be beneath"):
+        benchmark._validate_production_scenarios_path(tmp_path / "public.yaml", live=True)
+
+
+def test_live_production_requires_clean_committed_harness() -> None:
+    dirty = {"clean": False, "status": [" M scripts/ctx_ab_benchmark.py"]}
+
+    with pytest.raises(ValueError, match="clean committed harness"):
+        benchmark.require_clean_production_repository(dirty, live=True)
+
+    benchmark.require_clean_production_repository(dirty, live=False)
+    benchmark.require_clean_production_repository({"clean": True, "status": []}, live=True)
+
+
+def test_evaluator_controls_scrub_solved_workspaces_and_reference_patch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scenario = benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0]
+
+    def fake_prepare(
+        _scenario: object,
+        _cache: Path,
+        workspace: Path,
+        **_kwargs: object,
+    ) -> str:
+        workspace.mkdir(parents=True)
+        (workspace / "marker.txt").write_text("workspace\n", encoding="utf-8")
+        return "test-hash"
+
+    monkeypatch.setattr(benchmark, "prepare_workspace", fake_prepare)
+    monkeypatch.setattr(
+        benchmark,
+        "_focused_verification",
+        lambda *_args, **_kwargs: benchmark.CommandResult(
+            1,
+            scenario.red_failure_contains,
+            "",
+            0.1,
+        ),
+    )
+    monkeypatch.setattr(
+        benchmark,
+        "verify_workspace",
+        lambda *_args, **_kwargs: benchmark.CommandResult(0, "passed\n", "", 0.2),
+    )
+    monkeypatch.setattr(
+        benchmark,
+        "run_process",
+        lambda *_args, **_kwargs: benchmark.CommandResult(0, "", "", 0.01),
+    )
+
+    result = benchmark.validate_evaluator_controls(
+        scenario,
+        cache=tmp_path / "cache",
+        output=tmp_path / "output",
+    )
+    controls = tmp_path / "output" / scenario.id / "controls"
+
+    assert result["status"] == "passed"
+    assert (controls / "control.json").is_file()
+    assert not (controls / "reference.patch").exists()
+    assert not (controls / "reference").exists()
+    assert not (controls / "red").exists()
+
+
+def test_isolated_codex_home_cleanup_removes_credentials_and_rejects_symlink(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "codex-home"
+    home.mkdir()
+    (home / "auth.json").write_text("secret\n", encoding="utf-8")
+
+    benchmark.remove_isolated_codex_home(home)
+
+    assert not home.exists()
+    target = tmp_path / "target"
+    target.mkdir()
+    home.symlink_to(target, target_is_directory=True)
+    with pytest.raises(RuntimeError, match="replaced by a symlink"):
+        benchmark.remove_isolated_codex_home(home)
+    assert target.is_dir()
+    assert not home.exists()
+
+
+def test_pinned_head_guard_rejects_agent_commit(tmp_path: Path) -> None:
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+    subprocess.run(["git", "config", "user.email", "ctx@example.test"], cwd=workspace, check=True)
+    subprocess.run(["git", "config", "user.name", "ctx benchmark"], cwd=workspace, check=True)
+    source = workspace / "source.py"
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "source.py"], cwd=workspace, check=True)
+    subprocess.run(["git", "commit", "-qm", "parent"], cwd=workspace, check=True)
+    pinned = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    scenario = replace(
+        benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0],
+        commit=pinned,
+    )
+
+    assert benchmark._verify_pinned_head(scenario, workspace).returncode == 0
+    source.write_text("VALUE = 2\n", encoding="utf-8")
+    subprocess.run(["git", "commit", "-qam", "agent commit"], cwd=workspace, check=True)
+
+    result = benchmark._verify_pinned_head(scenario, workspace)
+    assert result.returncode == 1
+    assert "agent changed pinned HEAD" in result.stderr
 
 
 def test_production_ctx_command_uses_shipped_cli_with_equal_controls(tmp_path: Path) -> None:
@@ -765,6 +1864,12 @@ def test_production_ctx_command_uses_shipped_cli_with_equal_controls(tmp_path: P
     assert (
         benchmark.build_parser().parse_args(["--engine", "production-ctx-run"]).engine
         == "production-ctx-run"
+    )
+    assert (
+        benchmark.build_parser()
+        .parse_args(["--engine", benchmark.PRODUCTION_CATALOG_ENGINE])
+        .engine
+        == benchmark.PRODUCTION_CATALOG_ENGINE
     )
 
 
@@ -1491,7 +2596,7 @@ def test_production_patch_is_limited_to_scenario_allowlist(tmp_path: Path) -> No
     workspace.mkdir()
     benchmark.run_process(["git", "init", "-q"], cwd=workspace)
     source = workspace / scenario.allowed_changes[0]
-    source.parent.mkdir(parents=True)
+    source.parent.mkdir(parents=True, exist_ok=True)
     source.write_text("old\n", encoding="utf-8")
     patch = (
         f"diff --git a/{scenario.allowed_changes[0]} b/{scenario.allowed_changes[0]}\n"

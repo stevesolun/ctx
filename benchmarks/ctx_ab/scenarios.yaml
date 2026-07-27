@@ -56,6 +56,7 @@ scenarios:
     expected_test_count: 5
     regression_verify:
       - ["{python}", -m, pytest, -q, tests/test_utils/test_echo.py]
+      - ["{python}", -m, pytest, -q, tests/test_imports.py]
     red_failure_contains: "AttributeError: echo_json"
     allowed_changes:
       - src/click/__init__.py
@@ -75,14 +76,7 @@ scenarios:
       diff --git a/src/click/utils.py b/src/click/utils.py
       --- a/src/click/utils.py
       +++ b/src/click/utils.py
-      @@ -2,5 +2,6 @@ from __future__ import annotations
-
-       import collections.abc as cabc
-      +import json
-       import os
-       import re
-       import sys
-      @@ -346,5 +347,16 @@ def echo(
+      @@ -346,5 +346,18 @@ def echo(
            file.flush()
 
 
@@ -94,6 +88,8 @@ scenarios:
       +    ensure_ascii: bool = False,
       +) -> None:
       +    """Serialize one JSON value and write it through :func:`echo`."""
+      +    import json
+      +
       +    echo(json.dumps(value, sort_keys=sort_keys, ensure_ascii=ensure_ascii), file=file)
       +
       +

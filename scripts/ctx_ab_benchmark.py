@@ -14,9 +14,13 @@ import secrets
 import shlex
 import shutil
 import signal
+import socket
+import stat
 import subprocess
 import sys
+import tarfile
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -42,7 +46,16 @@ INCIDENT_FIELDS = (
 )
 PROCESS_MARKER = "CTX_BENCHMARK_PROCESS_TOKEN"
 TREATMENT_ARMS = ("baseline", "ctx-light", "ctx-full")
-BENCHMARK_ENGINES = ("codex-controlled", "production-ctx-run")
+PRODUCTION_CATALOG_ENGINE = "codex-production-catalog"
+BENCHMARK_ENGINES = ("codex-controlled", "production-ctx-run", PRODUCTION_CATALOG_ENGINE)
+PRODUCTION_CATALOG_ARCHIVE = ROOT / "graph" / "wiki-graph-runtime.tar.gz"
+PRODUCTION_RUNTIME_AVAILABILITY = ROOT / "src" / "ctx" / "assets" / "runtime-availability.json"
+PRODUCTION_PRIVATE_RUN_ROOT = ROOT / ".gate" / "ctx-ab-runs"
+PRODUCTION_PRIVATE_SCENARIO_ROOT = ROOT / ".gate" / "ctx-ab-private"
+PRODUCTION_CATALOG_CACHE_VERSION = 2
+PRODUCTION_CATALOG_BODY_MAX_BYTES = 16 * 1024
+PRODUCTION_TOOL_OUTPUT_LIMIT_BYTES = 32 * 1024
+PRODUCTION_CATALOG_MCP_TOOLS = ("ctx__recommend_bundle", "ctx__wiki_get")
 SUCCESSFUL_CTX_RUN_STOP_REASONS = frozenset({"completed"})
 SUCCESSFUL_LIFECYCLE_STATUSES = frozenset({"completed", "successful"})
 ENTITY_TRANSITION_ACTIONS = frozenset(
@@ -106,6 +119,14 @@ class CommandResult:
     timed_out: bool = False
     reaped_descendants: int = 0
     residual_descendants: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True)
+class CatalogSnapshot:
+    wiki_dir: Path
+    provenance: dict[str, Any]
+    cache_hit: bool = False
+    prepare_seconds: float = 0.0
 
 
 def _safe_relative_path(value: object, *, field: str) -> str:
@@ -214,8 +235,15 @@ def load_scenarios(path: Path) -> list[Scenario]:
         verify = row.get("verify")
         regression_verify = row.get("regression_verify")
         allowed_changes = row.get("allowed_changes")
-        if not isinstance(context, list) or not isinstance(regression_verify, list):
-            raise ValueError(f"{scenario_id}: ctx_context and verify must be lists")
+        if (
+            not isinstance(context, list)
+            or not isinstance(regression_verify, list)
+            or not regression_verify
+        ):
+            raise ValueError(
+                f"{scenario_id}: ctx_context must be a list and regression_verify "
+                "must be a non-empty list"
+            )
         if not isinstance(allowed_changes, list) or not allowed_changes:
             raise ValueError(f"{scenario_id}: allowed_changes must be a non-empty list")
         expected_test_count = row.get("expected_test_count")
@@ -228,8 +256,10 @@ def load_scenarios(path: Path) -> list[Scenario]:
         if not re.fullmatch(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\.git", repo_url):
             raise ValueError(f"{scenario_id}: repo_url must be an HTTPS GitHub .git URL")
         benchmark_class = str(row.get("benchmark_class") or "").strip()
-        if benchmark_class not in {"trivial", "escalation"}:
-            raise ValueError(f"{scenario_id}: benchmark_class must be 'trivial' or 'escalation'")
+        if benchmark_class not in {"trivial", "historical", "escalation"}:
+            raise ValueError(
+                f"{scenario_id}: benchmark_class must be 'trivial', 'historical', or 'escalation'"
+            )
         validated_context: list[dict[str, Any]] = []
         for item in context:
             if not isinstance(item, dict) or item.get("type") not in {
@@ -508,7 +538,13 @@ def ensure_repo_cache(scenario: Scenario, cache_root: Path) -> Path:
     return cache
 
 
-def prepare_workspace(scenario: Scenario, cache: Path, destination: Path) -> str:
+def prepare_workspace(
+    scenario: Scenario,
+    cache: Path,
+    destination: Path,
+    *,
+    include_evaluator_test: bool = True,
+) -> str:
     cloned = run_process(["git", "clone", str(cache), str(destination)], cwd=destination.parent)
     if cloned.returncode:
         raise RuntimeError(f"local clone failed: {cloned.stderr.strip()}")
@@ -517,10 +553,304 @@ def prepare_workspace(scenario: Scenario, cache: Path, destination: Path) -> str
     )
     if checked_out.returncode:
         raise RuntimeError(f"checkout failed: {checked_out.stderr.strip()}")
-    test_path = destination / scenario.test_path
+    test_hash = hashlib.sha256(scenario.test_body.encode("utf-8")).hexdigest()
+    if include_evaluator_test:
+        materialize_evaluator_test(scenario, destination, expected_hash=test_hash)
+    return test_hash
+
+
+def materialize_evaluator_test(
+    scenario: Scenario,
+    workspace: Path,
+    *,
+    expected_hash: str,
+) -> None:
+    if hashlib.sha256(scenario.test_body.encode("utf-8")).hexdigest() != expected_hash:
+        raise RuntimeError("benchmark-owned test definition changed during the trial")
+    test_path = workspace / scenario.test_path
     test_path.parent.mkdir(parents=True, exist_ok=True)
     test_path.write_text(scenario.test_body, encoding="utf-8")
-    return hashlib.sha256(test_path.read_bytes()).hexdigest()
+    if hashlib.sha256(test_path.read_bytes()).hexdigest() != expected_hash:
+        raise RuntimeError("benchmark-owned test could not be materialized exactly")
+
+
+def _sha256_file(path: Path) -> str:
+    hasher = hashlib.sha256()
+    with path.open("rb") as fh:
+        while chunk := fh.read(1024 * 1024):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def validate_catalog_archive(archive: Path) -> None:
+    """Validate every member with the shipped graph installer's safety policy."""
+    from ctx_init import _validate_graph_tar_member  # noqa: PLC0415
+
+    if not archive.is_file() or archive.is_symlink():
+        raise ValueError(f"catalog archive must be a regular file: {archive}")
+    with tarfile.open(archive, "r:gz") as tf:
+        for member in tf:
+            _validate_graph_tar_member(member)
+
+
+def _install_shipped_catalog(claude_dir: Path, *, archive: Path) -> int:
+    from ctx_init import build_graph  # noqa: PLC0415
+
+    if archive.resolve() != PRODUCTION_CATALOG_ARCHIVE.resolve():
+        raise ValueError("custom production catalog archives are not supported by ctx_init")
+    return build_graph(claude=claude_dir, force=True, install_mode="runtime")
+
+
+def _catalog_overlay_records(path: Path) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        if not isinstance(row, dict):
+            raise ValueError(f"catalog overlay line {line_number} is not an object")
+        records.append(
+            {
+                key: row.get(key)
+                for key in ("overlay_id", "replace_scope", "source", "provenance")
+                if row.get(key) is not None
+            }
+        )
+    if not records:
+        raise ValueError("installed catalog has no graph overlays")
+    return records
+
+
+def _validate_runtime_availability_files(
+    wiki_dir: Path,
+    *,
+    availability_path: Path | None = None,
+) -> list[dict[str, Any]]:
+    availability_path = availability_path or PRODUCTION_RUNTIME_AVAILABILITY
+    payload = json.loads(availability_path.read_text(encoding="utf-8"))
+    entries = payload.get("entries") if isinstance(payload, dict) else None
+    if not isinstance(entries, list) or not entries:
+        raise ValueError("runtime availability pack has no entries")
+    declared: dict[str, bytes] = {}
+    for entry_index, entry in enumerate(entries):
+        files = entry.get("files") if isinstance(entry, dict) else None
+        if not isinstance(files, list) or not files:
+            raise ValueError(f"runtime availability entry {entry_index} has no files")
+        for file_index, file_spec in enumerate(files):
+            if not isinstance(file_spec, dict) or not isinstance(file_spec.get("content"), str):
+                raise ValueError(
+                    f"runtime availability entry {entry_index} file {file_index} is invalid"
+                )
+            relative = _safe_relative_path(
+                file_spec.get("path"),
+                field=f"runtime availability entry {entry_index} file {file_index}",
+            )
+            if relative in declared:
+                raise ValueError(f"runtime availability file is declared twice: {relative}")
+            declared[relative] = file_spec["content"].encode("utf-8")
+    records: list[dict[str, Any]] = []
+    for relative, expected in sorted(declared.items()):
+        installed = wiki_dir / relative
+        if installed.is_symlink() or not installed.is_file() or installed.read_bytes() != expected:
+            raise ValueError(
+                f"installed catalog runtime file does not match availability pack: {relative}"
+            )
+        records.append(
+            {
+                "path": relative,
+                "sha256": hashlib.sha256(expected).hexdigest(),
+                "size_bytes": len(expected),
+            }
+        )
+    return records
+
+
+def _catalog_provenance(
+    archive: Path,
+    wiki_dir: Path,
+    *,
+    runtime_availability_sha256: str,
+) -> dict[str, Any]:
+    graph_dir = wiki_dir / "graphify-out"
+    manifest_path = graph_dir / "graph-export-manifest.json"
+    overlay_path = graph_dir / "entity-overlays.jsonl"
+    graph_store_path = graph_dir / "graph-store.sqlite3"
+    runtime_skill_path = wiki_dir / "converted" / "ctx-python-testing" / "SKILL.md"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(manifest, dict) or not str(manifest.get("export_id") or "").strip():
+        raise ValueError("installed catalog graph export manifest is invalid")
+    required = (overlay_path, graph_store_path, runtime_skill_path)
+    if missing := [
+        path.relative_to(wiki_dir).as_posix() for path in required if not path.is_file()
+    ]:
+        raise ValueError(f"installed catalog provenance files are missing: {missing}")
+    try:
+        availability_path = PRODUCTION_RUNTIME_AVAILABILITY.relative_to(ROOT).as_posix()
+    except ValueError:
+        availability_path = str(PRODUCTION_RUNTIME_AVAILABILITY.resolve())
+    return {
+        "cache_version": PRODUCTION_CATALOG_CACHE_VERSION,
+        "installer": "ctx_init.build_graph",
+        "install_mode": "runtime",
+        "archive_path": str(archive),
+        "archive_sha256": _sha256_file(archive),
+        "archive_size_bytes": archive.stat().st_size,
+        "runtime_availability_path": availability_path,
+        "runtime_availability_sha256": runtime_availability_sha256,
+        "runtime_availability_files": _validate_runtime_availability_files(wiki_dir),
+        "graph_export_id": str(manifest["export_id"]),
+        "graph_export_manifest_path": "graphify-out/graph-export-manifest.json",
+        "graph_export_manifest_sha256": _sha256_file(manifest_path),
+        "graph_store_path": "graphify-out/graph-store.sqlite3",
+        "graph_store_sha256": _sha256_file(graph_store_path),
+        "overlay_path": "graphify-out/entity-overlays.jsonl",
+        "overlay_sha256": _sha256_file(overlay_path),
+        "overlay_records": _catalog_overlay_records(overlay_path),
+        "runtime_skill_path": "converted/ctx-python-testing/SKILL.md",
+        "runtime_skill_sha256": _sha256_file(runtime_skill_path),
+    }
+
+
+def _freeze_catalog_tree(root: Path) -> None:
+    paths = sorted(root.rglob("*"), key=lambda path: len(path.parts), reverse=True)
+    for path in paths:
+        if path.is_symlink():
+            raise ValueError(f"installed catalog contains a symlink: {path}")
+        if path.is_dir():
+            path.chmod(stat.S_IRUSR | stat.S_IXUSR | stat.S_IRGRP | stat.S_IXGRP)
+        elif path.is_file():
+            path.chmod(stat.S_IRUSR | stat.S_IRGRP)
+        else:
+            raise ValueError(f"installed catalog contains an unsupported path: {path}")
+    root.chmod(stat.S_IRUSR | stat.S_IXUSR | stat.S_IRGRP | stat.S_IXGRP)
+
+
+def _remove_catalog_staging(path: Path) -> None:
+    if not path.exists():
+        return
+    for directory in [path, *(item for item in path.rglob("*") if item.is_dir())]:
+        directory.chmod(stat.S_IRWXU)
+    shutil.rmtree(path)
+
+
+def _load_catalog_snapshot(
+    snapshot_root: Path,
+    *,
+    archive_sha256: str,
+    runtime_availability_sha256: str,
+) -> CatalogSnapshot:
+    provenance_path = snapshot_root / "catalog-provenance.json"
+    provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    if (
+        not isinstance(provenance, dict)
+        or provenance.get("cache_version") != PRODUCTION_CATALOG_CACHE_VERSION
+        or provenance.get("archive_sha256") != archive_sha256
+        or provenance.get("runtime_availability_sha256") != runtime_availability_sha256
+    ):
+        raise ValueError("cached production catalog provenance does not match shipped inputs")
+    wiki_dir = snapshot_root / ".claude" / "skill-wiki"
+    runtime_files = _validate_runtime_availability_files(wiki_dir)
+    if provenance.get("runtime_availability_files") != runtime_files:
+        raise ValueError("cached production catalog runtime files do not match provenance")
+    critical = (
+        wiki_dir,
+        wiki_dir / "graphify-out" / "graph-export-manifest.json",
+        wiki_dir / "graphify-out" / "entity-overlays.jsonl",
+        wiki_dir / "converted" / "ctx-python-testing" / "SKILL.md",
+    )
+    if any(not path.exists() or path.is_symlink() for path in critical):
+        raise ValueError("cached production catalog is incomplete or symlinked")
+    if any(path.stat().st_mode & (stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH) for path in critical):
+        raise ValueError("cached production catalog is not read-only")
+    digest_paths = {
+        "graph_export_manifest_sha256": wiki_dir / str(provenance["graph_export_manifest_path"]),
+        "graph_store_sha256": wiki_dir / str(provenance["graph_store_path"]),
+        "overlay_sha256": wiki_dir / str(provenance["overlay_path"]),
+        "runtime_skill_sha256": wiki_dir / str(provenance["runtime_skill_path"]),
+    }
+    if any(_sha256_file(path) != provenance.get(field) for field, path in digest_paths.items()):
+        raise ValueError("cached production catalog content does not match its provenance")
+    return CatalogSnapshot(wiki_dir=wiki_dir, provenance=dict(provenance))
+
+
+def prepare_production_catalog(
+    cache_root: Path,
+    *,
+    archive: Path = PRODUCTION_CATALOG_ARCHIVE,
+) -> CatalogSnapshot:
+    """Build and freeze one product-installed runtime catalog cache."""
+    started = time.perf_counter()
+    validate_catalog_archive(archive)
+    archive_sha256 = _sha256_file(archive)
+    runtime_availability_sha256 = _sha256_file(PRODUCTION_RUNTIME_AVAILABILITY)
+    catalog_root = cache_root / "production-catalog"
+    cache_key = (
+        f"v{PRODUCTION_CATALOG_CACHE_VERSION}-{archive_sha256}-{runtime_availability_sha256}"
+    )
+    snapshot_root = catalog_root / cache_key
+    if snapshot_root.is_dir():
+        snapshot = _load_catalog_snapshot(
+            snapshot_root,
+            archive_sha256=archive_sha256,
+            runtime_availability_sha256=runtime_availability_sha256,
+        )
+        return CatalogSnapshot(
+            wiki_dir=snapshot.wiki_dir,
+            provenance=snapshot.provenance,
+            cache_hit=True,
+            prepare_seconds=time.perf_counter() - started,
+        )
+
+    catalog_root.mkdir(parents=True, exist_ok=True)
+    staging = catalog_root / f".{cache_key}.{os.getpid()}.{secrets.token_hex(4)}"
+    staging.mkdir()
+    try:
+        claude_dir = staging / ".claude"
+        if _install_shipped_catalog(claude_dir, archive=archive):
+            raise RuntimeError("ctx_init.build_graph failed to install the shipped runtime catalog")
+        wiki_dir = claude_dir / "skill-wiki"
+        provenance = _catalog_provenance(
+            archive,
+            wiki_dir,
+            runtime_availability_sha256=runtime_availability_sha256,
+        )
+        (staging / "catalog-provenance.json").write_text(
+            json.dumps(provenance, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        _freeze_catalog_tree(wiki_dir)
+        try:
+            staging.rename(snapshot_root)
+        except FileExistsError:
+            _remove_catalog_staging(staging)
+        snapshot = _load_catalog_snapshot(
+            snapshot_root,
+            archive_sha256=archive_sha256,
+            runtime_availability_sha256=runtime_availability_sha256,
+        )
+        return CatalogSnapshot(
+            wiki_dir=snapshot.wiki_dir,
+            provenance=snapshot.provenance,
+            cache_hit=False,
+            prepare_seconds=time.perf_counter() - started,
+        )
+    except BaseException:
+        if staging.exists():
+            _remove_catalog_staging(staging)
+        raise
+
+
+def bind_catalog_snapshot(home: Path, snapshot: CatalogSnapshot) -> Path:
+    """Point one isolated HOME at the immutable cache without symlinking data."""
+    config = home / ".claude" / "skill-system-config.json"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    if snapshot.wiki_dir.is_symlink() or snapshot.wiki_dir.stat().st_mode & stat.S_IWUSR:
+        raise ValueError("production catalog snapshot must be a read-only regular directory")
+    config.write_text(
+        json.dumps({"paths": {"wiki_dir": str(snapshot.wiki_dir)}}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return config
 
 
 def write_ctx_fixture(scenario: Scenario, home: Path) -> Path:
@@ -708,6 +1038,248 @@ def recommend_context(
     return rows
 
 
+def _catalog_mcp_client(
+    *,
+    home: Path,
+    lifecycle_root: Path,
+    session_id: str,
+) -> Any:
+    from ctx.adapters.generic.tools import McpClient, McpServerConfig  # noqa: PLC0415
+
+    config = McpServerConfig(
+        name="ctx-production-catalog",
+        command=sys.executable,
+        args=(
+            "-m",
+            "ctx.mcp_server.server",
+            "--allow-tools",
+            ",".join(PRODUCTION_CATALOG_MCP_TOOLS),
+        ),
+        env=_ctx_env(home, lifecycle_root),
+        startup_timeout=30.0,
+        request_timeout=90.0,
+    )
+    return McpClient(config, session_id=session_id)
+
+
+def _policy_initial_load_ids(policy: dict[str, Any]) -> tuple[list[str], str]:
+    field = "initial_load" if "initial_load" in policy else "load"
+    raw = policy.get(field) or []
+    values = raw if isinstance(raw, list) else [raw]
+    ids: list[str] = []
+    for value in values:
+        entity_id = value.get("id") if isinstance(value, dict) else value
+        if isinstance(entity_id, str) and entity_id.strip():
+            ids.append(entity_id.strip())
+    return ids, field
+
+
+def recommend_production_catalog(
+    scenario: Scenario,
+    *,
+    home: Path,
+    lifecycle_root: Path,
+    session_id: str,
+    snapshot: CatalogSnapshot,
+) -> dict[str, Any]:
+    """Query the shipped MCP surface and optionally fetch one policy-selected skill."""
+    surface_started = time.perf_counter()
+    recommendation_seconds = 0.0
+    body_fetch_seconds = 0.0
+    with _catalog_mcp_client(
+        home=home,
+        lifecycle_root=lifecycle_root,
+        session_id=session_id,
+    ) as client:
+        recommendation_started = time.perf_counter()
+        raw_recommendation = client.call_tool(
+            "ctx__recommend_bundle",
+            {
+                "query": scenario.query,
+                "top_k": 5,
+                "local_code_task": True,
+                "no_api_keys": True,
+                "language": scenario.language,
+            },
+        )
+        recommendation_seconds = time.perf_counter() - recommendation_started
+        payload = json.loads(raw_recommendation)
+        if not isinstance(payload, dict) or payload.get("error"):
+            raise RuntimeError(f"production catalog recommendation failed: {payload!r}")
+        raw_candidates = payload.get("results")
+        policy = payload.get("context_policy")
+        if not isinstance(raw_candidates, list) or not isinstance(policy, dict):
+            raise RuntimeError("production catalog response omitted results or context_policy")
+        candidates = [dict(row) for row in raw_candidates if isinstance(row, dict)]
+        if len(candidates) != len(raw_candidates):
+            raise RuntimeError("production catalog returned a malformed candidate")
+        candidate_ids = [str(row.get("id") or "").strip() for row in candidates]
+        if any(not entity_id for entity_id in candidate_ids):
+            raise RuntimeError("production catalog returned a candidate without an id")
+
+        initial_load_ids, policy_field = _policy_initial_load_ids(policy)
+        by_id = {str(row["id"]): row for row in candidates}
+        selected_row = next(
+            (
+                by_id[entity_id]
+                for entity_id in initial_load_ids
+                if entity_id in by_id
+                and str(by_id[entity_id].get("type") or "").strip().lower() == "skill"
+                and by_id[entity_id].get("installable") is True
+            ),
+            None,
+        )
+        selected_item: dict[str, Any] | None = None
+        body_provenance: dict[str, Any] | None = None
+        selection_skip_reason: str | None = None
+        raw_wiki = ""
+        if selected_row is not None:
+            entity_id = str(selected_row["id"])
+            slug = str(selected_row.get("name") or entity_id.partition(":")[2]).strip()
+            body_started = time.perf_counter()
+            raw_wiki = client.call_tool(
+                "ctx__wiki_get",
+                {"slug": slug, "entity_type": "skill"},
+            )
+            body_fetch_seconds = time.perf_counter() - body_started
+            wiki_payload = json.loads(raw_wiki)
+            if (
+                not isinstance(wiki_payload, dict)
+                or wiki_payload.get("error")
+                or wiki_payload.get("slug") != slug
+                or wiki_payload.get("entity_type") != "skill"
+            ):
+                raise RuntimeError(f"production catalog wiki lookup failed for {entity_id}")
+            body = str(wiki_payload.get("body") or "").strip()
+            body_bytes = body.encode("utf-8")
+            if not body:
+                selection_skip_reason = "selected skill body was empty"
+            elif len(body_bytes) > PRODUCTION_CATALOG_BODY_MAX_BYTES:
+                selection_skip_reason = (
+                    f"selected skill body exceeded {PRODUCTION_CATALOG_BODY_MAX_BYTES} bytes"
+                )
+            else:
+                wiki_path = _safe_relative_path(
+                    wiki_payload.get("path"),
+                    field=f"{entity_id}.wiki_path",
+                )
+                frontmatter = wiki_payload.get("frontmatter")
+                frontmatter = dict(frontmatter) if isinstance(frontmatter, dict) else {}
+                selected_item = {
+                    "id": entity_id,
+                    "type": "skill",
+                    "slug": slug,
+                    "body": body,
+                }
+                body_provenance = {
+                    "surface": "ctx MCP ctx__wiki_get",
+                    "wiki_path": wiki_path,
+                    "wiki_response_sha256": hashlib.sha256(raw_wiki.encode("utf-8")).hexdigest(),
+                    "body_sha256": hashlib.sha256(body_bytes).hexdigest(),
+                    "body_bytes": len(body_bytes),
+                    "frontmatter_source": frontmatter.get("source"),
+                    "frontmatter_license": frontmatter.get("license"),
+                    "candidate_source": selected_row.get("source"),
+                    "candidate_source_path": selected_row.get("source_path"),
+                    "catalog_archive_sha256": snapshot.provenance["archive_sha256"],
+                    "catalog_graph_export_id": snapshot.provenance["graph_export_id"],
+                }
+        elif initial_load_ids:
+            selection_skip_reason = (
+                "context_policy initial load contained no loadable skill candidate"
+            )
+
+    return {
+        "query": scenario.query,
+        "candidates": candidates,
+        "candidate_ids": candidate_ids,
+        "context_policy": dict(policy),
+        "policy_field": policy_field,
+        "policy_initial_load_ids": initial_load_ids,
+        "selected_item": selected_item,
+        "selected_ids": [selected_item["id"]] if selected_item is not None else [],
+        "body_provenance": body_provenance,
+        "selection_skip_reason": selection_skip_reason,
+        "recommendation_response_sha256": hashlib.sha256(
+            raw_recommendation.encode("utf-8")
+        ).hexdigest(),
+        "recommendation_seconds": recommendation_seconds,
+        "body_fetch_seconds": body_fetch_seconds,
+        "surface_seconds": time.perf_counter() - surface_started,
+    }
+
+
+def production_catalog_context_prompt(catalog: dict[str, Any]) -> str:
+    selected = catalog.get("selected_item")
+    if not isinstance(selected, dict):
+        return ""
+    body = str(selected.get("body") or "").strip()
+    if not body or len(body.encode("utf-8")) > PRODUCTION_CATALOG_BODY_MAX_BYTES:
+        raise ValueError("production catalog selected body is missing or exceeds the prompt bound")
+    return f"\n\nCTX SELECTED PRODUCTION CATALOG CONTEXT\n[SKILL {selected['slug']}]\n{body}\n"
+
+
+def write_catalog_recommendation_evidence(
+    path: Path,
+    catalog: dict[str, Any],
+    *,
+    used_ids: list[str],
+    snapshot: CatalogSnapshot,
+) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "query": catalog["query"],
+                "candidate_ids": catalog["candidate_ids"],
+                "selected_ids": catalog["selected_ids"],
+                "used_ids": used_ids,
+                "candidates": catalog["candidates"],
+                "context_policy": catalog["context_policy"],
+                "policy_field": catalog["policy_field"],
+                "policy_initial_load_ids": catalog["policy_initial_load_ids"],
+                "selection_skip_reason": catalog["selection_skip_reason"],
+                "body_provenance": catalog["body_provenance"],
+                "recommendation_response_sha256": catalog["recommendation_response_sha256"],
+                "catalog_provenance": snapshot.provenance,
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def catalog_lifecycle_evidence(
+    lifecycle_root: Path,
+    *,
+    session_id: str,
+    store: Any,
+) -> dict[str, Any]:
+    path = lifecycle_root / "events.jsonl"
+    if not path.is_file():
+        raise RuntimeError("production catalog treatment produced no lifecycle ledger")
+    content = path.read_bytes()
+    events: list[dict[str, Any]] = []
+    for line_number, line in enumerate(content.decode("utf-8").splitlines(), start=1):
+        row = json.loads(line)
+        if not isinstance(row, dict):
+            raise RuntimeError(f"catalog lifecycle line {line_number} is not an object")
+        if row.get("session_id") == session_id:
+            events.append(row)
+    if not events or events[-1].get("action") != "session_end":
+        raise RuntimeError("production catalog lifecycle did not end the selected session")
+    state = store.session_state(session_id=session_id)
+    loaded = state.get("loaded") if isinstance(state, dict) else None
+    if loaded:
+        raise RuntimeError("production catalog lifecycle ended with loaded context")
+    return {
+        "actions": [str(event.get("action") or "") for event in events],
+        "sha256": hashlib.sha256(content).hexdigest(),
+        "final_loaded": [],
+        "session_status": events[-1].get("status"),
+    }
+
+
 def arms_for_mode(mode: str) -> tuple[str, ...]:
     if mode == "both":
         return ("baseline", "ctx-light")
@@ -877,6 +1449,20 @@ def task_prompt(scenario: Scenario) -> str:
     )
 
 
+def production_catalog_task_prompt(scenario: Scenario) -> str:
+    return (
+        "Implement the feature below in this repository.\n\n"
+        f"TASK\n{scenario.task}\n\n"
+        "REQUIRED LOOP\n"
+        "1. Plan: inspect the relevant code and state a short implementation plan.\n"
+        "2. Code: implement the smallest complete change that follows repository conventions.\n"
+        "3. Test: run the repository tests that are relevant to the changed behavior.\n"
+        "4. Check: review the final diff and run git diff --check.\n\n"
+        "Do not modify any test, test configuration, or import configuration. "
+        "Finish only when the implementation and the repository checks you selected pass."
+    )
+
+
 def context_prompt(scenario: Scenario, treatment_level: str) -> str:
     skill = next(item for item in scenario.context if item["type"] == "skill")
     if treatment_level == "ctx-light":
@@ -951,6 +1537,35 @@ def extract_token_usage(stdout: str) -> dict[str, Any]:
         "attribution_source": "terminal turn.completed.usage",
         "usage_event_index": event_index,
         **normalized,
+    }
+
+
+def extract_trace_efficiency(stdout: str) -> dict[str, int]:
+    completed_items = [
+        event["item"]
+        for event in _jsonl_events(stdout)
+        if event.get("type") == "item.completed" and isinstance(event.get("item"), dict)
+    ]
+    commands = [item for item in completed_items if item.get("type") == "command_execution"]
+    messages = [item for item in completed_items if item.get("type") == "agent_message"]
+    command_outputs = [
+        len(str(item.get("aggregated_output") or "").encode("utf-8")) for item in commands
+    ]
+    normalized_commands = [" ".join(str(item.get("command") or "").split()) for item in commands]
+    return {
+        "completed_item_count": len(completed_items),
+        "tool_command_count": len(commands),
+        "tool_failure_count": sum(item.get("exit_code") not in {0, None} for item in commands),
+        "tool_output_bytes": sum(command_outputs),
+        "max_tool_output_bytes": max(command_outputs, default=0),
+        "oversized_tool_output_count": sum(
+            size > PRODUCTION_TOOL_OUTPUT_LIMIT_BYTES for size in command_outputs
+        ),
+        "repeated_tool_command_count": len(normalized_commands) - len(set(normalized_commands)),
+        "agent_message_count": len(messages),
+        "agent_message_bytes": sum(
+            len(str(item.get("text") or "").encode("utf-8")) for item in messages
+        ),
     }
 
 
@@ -1092,10 +1707,14 @@ def close_context_session(
     model: str,
     status: str,
     usage_evidence: dict[str, str],
-) -> None:
+    mark_applied: bool = False,
+) -> dict[str, float]:
+    use_seconds = 0.0
+    unload_seconds = 0.0
     for item in selected_items:
         entity_type = str(item["type"])
         if evidence := usage_evidence.get(entity_type):
+            used_started = time.perf_counter()
             store.mark_entity_used(
                 session_id=session_id,
                 entity_type=entity_type,
@@ -1107,21 +1726,344 @@ def close_context_session(
                     "model": model,
                 },
             )
+            use_seconds += time.perf_counter() - used_started
+        unload_started = time.perf_counter()
         store.unload_entity(
             session_id=session_id,
             entity_type=entity_type,
             slug=str(item["slug"]),
             reason="ephemeral benchmark process ended",
         )
+        if mark_applied:
+            store.mark_entity_unloaded(
+                session_id=session_id,
+                entity_type=entity_type,
+                slug=str(item["slug"]),
+                reason="selected body removed from the bounded benchmark prompt",
+            )
+        unload_seconds += time.perf_counter() - unload_started
+    session_end_started = time.perf_counter()
     store.end_session(
         session_id=session_id,
         status=status,
         summary="A/B benchmark arm completed",
     )
+    return {
+        "use_seconds": use_seconds,
+        "unload_seconds": unload_seconds,
+        "session_end_seconds": time.perf_counter() - session_end_started,
+    }
+
+
+def _agent_runtime_roots() -> list[Path]:
+    runtime_roots = {
+        (ROOT / ".venv").resolve(),
+        Path(sys.executable).resolve().parent.parent,
+    }
+    runtime_roots.update(
+        path
+        for path in (
+            Path("/Library/Developer/CommandLineTools"),
+            Path("/Applications/Xcode.app/Contents/Developer"),
+        )
+        if path.is_dir()
+    )
+    return [path for path in sorted(runtime_roots) if path.is_dir()]
+
+
+def _toml_key(path: Path) -> str:
+    return json.dumps(str(path.resolve()))
+
+
+def prepare_isolated_codex_home(
+    home: Path,
+    *,
+    workspace: Path,
+    forbidden_reads: Mapping[str, Path],
+) -> Path:
+    if not forbidden_reads:
+        raise ValueError("production benchmark requires explicit evaluator source paths")
+    source = Path(ORIGINAL_CODEX_HOME) / "auth.json"
+    if not source.is_file():
+        raise RuntimeError(f"Codex authentication file is missing: {source}")
+    if home.exists() or home.is_symlink():
+        raise RuntimeError(f"isolated Codex home already exists: {home}")
+    home.mkdir(mode=stat.S_IRWXU, parents=True)
+    home.chmod(stat.S_IRWXU)
+    temp = home / "tmp"
+    temp.mkdir(mode=stat.S_IRWXU)
+    destination = home / "auth.json"
+    config = home / "config.toml"
+    shutil.copyfile(source, destination)
+    destination.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    filesystem = [
+        '":minimal" = "read"',
+        f'{_toml_key(workspace)} = "write"',
+        f'{_toml_key(temp)} = "write"',
+        *(f'{_toml_key(path)} = "read"' for path in _agent_runtime_roots()),
+        *(f'{_toml_key(path)} = "deny"' for path in forbidden_reads.values()),
+        f'{_toml_key(destination)} = "deny"',
+        f'{_toml_key(config)} = "deny"',
+    ]
+    config.write_text(
+        "\n".join(
+            [
+                'default_permissions = "ctx_benchmark"',
+                'web_search = "disabled"',
+                "",
+                "[permissions.ctx_benchmark]",
+                'description = "Isolated CTX A/B benchmark agent."',
+                "",
+                "[permissions.ctx_benchmark.filesystem]",
+                *filesystem,
+                "",
+                "[permissions.ctx_benchmark.network]",
+                "enabled = false",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    config.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    return destination
+
+
+def remove_isolated_codex_home(home: Path) -> None:
+    if not home.exists() and not home.is_symlink():
+        return
+    if home.is_symlink():
+        home.unlink()
+        raise RuntimeError("isolated Codex home was replaced by a symlink")
+    shutil.rmtree(home)
+    if home.exists():
+        raise RuntimeError("isolated Codex home cleanup failed")
+
+
+def production_agent_env(
+    base_env: Mapping[str, str],
+    *,
+    home: Path,
+    workspace: Path,
+) -> dict[str, str]:
+    temp = home / "tmp"
+    env = dict(base_env)
+    env.update(
+        {
+            "CODEX_HOME": str(home),
+            "HOME": str(home),
+            "USERPROFILE": str(home),
+            "TEMP": str(temp),
+            "TMP": str(temp),
+            "TMPDIR": str(temp),
+            "NO_COLOR": "",
+            "FORCE_COLOR": "",
+            "PYTHONPATH": os.pathsep.join((str(workspace / "src"), str(workspace))),
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+            "PATH": os.pathsep.join(
+                (
+                    str(Path(sys.executable).parent),
+                    env.get("PATH", ""),
+                )
+            ),
+        }
+    )
+    return env
+
+
+def _probe_loopback_network(
+    *,
+    sandbox_prefix: list[str],
+    workspace: Path,
+    env: dict[str, str],
+) -> dict[str, Any]:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(2)
+        host, port = listener.getsockname()
+        network_probe = [
+            sys.executable,
+            "-c",
+            (
+                "import socket; "
+                f"s = socket.create_connection(({host!r}, {port}), timeout=2); "
+                "s.close()"
+            ),
+        ]
+        parent = run_process(
+            network_probe,
+            cwd=workspace,
+            env=env,
+            timeout=5,
+        )
+        listener.settimeout(1)
+        try:
+            parent_connection, _ = listener.accept()
+        except TimeoutError:
+            parent_connected = False
+        else:
+            parent_connected = True
+            parent_connection.close()
+        sandbox = run_process(
+            [*sandbox_prefix, *network_probe],
+            cwd=workspace,
+            env=env,
+            timeout=5,
+        )
+        listener.settimeout(0.25)
+        try:
+            sandbox_connection, _ = listener.accept()
+        except TimeoutError:
+            sandbox_connected = False
+        else:
+            sandbox_connected = True
+            sandbox_connection.close()
+    return {
+        "parent_returncode": parent.returncode,
+        "parent_connected": parent_connected,
+        "sandbox_returncode": sandbox.returncode,
+        "sandbox_connected": sandbox_connected,
+    }
+
+
+def verify_agent_sandbox_isolation(
+    *,
+    codex: str,
+    workspace: Path,
+    home: Path,
+    env: dict[str, str],
+    forbidden_reads: Mapping[str, Path],
+    project_check: tuple[str, ...],
+) -> dict[str, Any]:
+    if not forbidden_reads:
+        raise ValueError("production benchmark requires explicit evaluator source paths")
+    if not project_check:
+        raise ValueError("production benchmark requires an agent project check")
+    allowed_source = next(
+        (path for path in workspace.rglob("*") if path.is_file() and ".git" not in path.parts),
+        None,
+    )
+    if allowed_source is None:
+        raise RuntimeError("benchmark workspace has no source file for sandbox preflight")
+
+    def sandboxed(command: list[str]) -> list[str]:
+        return [
+            codex,
+            "sandbox",
+            "-P",
+            "ctx_benchmark",
+            "-C",
+            str(workspace),
+            "--",
+            *command,
+        ]
+
+    allowed = run_process(
+        sandboxed(["/bin/cat", str(allowed_source)]),
+        cwd=workspace,
+        env=env,
+        timeout=30,
+    )
+    canary = workspace / ".ctx-agent-sandbox-write-canary"
+    writable = run_process(
+        sandboxed(["/usr/bin/touch", str(canary)]),
+        cwd=workspace,
+        env=env,
+        timeout=30,
+    )
+    canary_created = canary.is_file()
+    canary.unlink(missing_ok=True)
+    git_canary = run_process(
+        sandboxed(["/usr/bin/git", "status", "--short"]),
+        cwd=workspace,
+        env=env,
+        timeout=30,
+    )
+    project_canary = run_process(
+        sandboxed(list(project_check)),
+        cwd=workspace,
+        env=env,
+        timeout=180,
+        contain_descendants=True,
+    )
+    sensitive_reads = {
+        "credentials": home / "auth.json",
+        "sandbox_config": home / "config.toml",
+        **forbidden_reads,
+    }
+    denied: list[dict[str, Any]] = []
+    for label, path in sensitive_reads.items():
+        resolved = path.resolve()
+        if not resolved.is_file():
+            raise ValueError(f"sensitive benchmark file is missing: {label}")
+        with resolved.open("rb") as fh:
+            fh.read(1)
+        result = run_process(
+            sandboxed(["/bin/cat", str(resolved)]),
+            cwd=workspace,
+            env=env,
+            timeout=30,
+        )
+        denial_text = f"{result.stdout}\n{result.stderr}".lower()
+        denied.append(
+            {
+                "label": label,
+                "denied": result.returncode == 1
+                and (
+                    "operation not permitted" in denial_text or "permission denied" in denial_text
+                ),
+                "returncode": result.returncode,
+            }
+        )
+    network = _probe_loopback_network(
+        sandbox_prefix=sandboxed([]),
+        workspace=workspace,
+        env=env,
+    )
+    verified = (
+        allowed.returncode == 0
+        and writable.returncode == 0
+        and canary_created
+        and git_canary.returncode == 0
+        and project_canary.returncode == 0
+        and all(row["denied"] for row in denied)
+        and network["parent_returncode"] == 0
+        and network["parent_connected"]
+        and network["sandbox_returncode"] != 0
+        and not network["sandbox_connected"]
+    )
+    if not verified:
+        raise RuntimeError(
+            "agent sandbox isolation preflight failed: "
+            f"allowed={allowed.returncode}, writable={writable.returncode}, "
+            f"canary={canary_created}, git={git_canary.returncode}, "
+            f"project={project_canary.returncode}, denied={denied}, "
+            f"parent_network={network['parent_returncode']}/{network['parent_connected']}, "
+            f"sandbox_network={network['sandbox_returncode']}/{network['sandbox_connected']}"
+        )
+    return {
+        "verified": True,
+        "profile": "ctx_benchmark",
+        "profile_sha256": _sha256_file(home / "config.toml"),
+        "network": "restricted",
+        "parent_network_canary_returncode": network["parent_returncode"],
+        "network_canary_returncode": network["sandbox_returncode"],
+        "git_canary_returncode": git_canary.returncode,
+        "project_canary_returncode": project_canary.returncode,
+        "allowed_source": str(allowed_source.relative_to(workspace)),
+        "forbidden_reads": denied,
+    }
 
 
 def codex_command(
-    *, codex: str, model: str, workspace: Path, prompt: str, with_ctx: bool
+    *,
+    codex: str,
+    model: str,
+    workspace: Path,
+    prompt: str,
+    with_ctx: bool,
+    agent_home: Path | None = None,
+    isolate_evaluator: bool = False,
 ) -> list[str]:
     command = [
         codex,
@@ -1129,6 +2071,8 @@ def codex_command(
         "never",
         "--enable" if with_ctx else "--disable",
         "multi_agent",
+        "-c",
+        'web_search="disabled"',
     ]
     if with_ctx:
         command.extend(mcp_config(sys.executable))
@@ -1137,18 +2081,25 @@ def codex_command(
             "exec",
             "--json",
             "--ephemeral",
-            "--ignore-user-config",
             "--ignore-rules",
             "--skip-git-repo-check",
             "--model",
             model,
-            "--sandbox",
-            "workspace-write",
             "--cd",
             str(workspace),
             prompt,
         ]
     )
+    if isolate_evaluator:
+        if agent_home is None:
+            raise ValueError("isolated agent command requires an isolated Codex home")
+        command.insert(command.index("exec") + 1, "--strict-config")
+    else:
+        command.insert(command.index("exec") + 1, "--ignore-user-config")
+        command[command.index("--cd") : command.index("--cd")] = [
+            "--sandbox",
+            "workspace-write",
+        ]
     return command
 
 
@@ -1361,6 +2312,16 @@ def classify_codex_controlled_evidence(*, dry_run: bool) -> dict[str, Any]:
         "endpoint_class": "codex_controlled",
         "evidence_level": ("controlled_wiring_only" if dry_run else "controlled_context_delivery"),
         "production_efficiency_eligible": False,
+    }
+
+
+def classify_codex_production_catalog_evidence(*, dry_run: bool) -> dict[str, Any]:
+    return {
+        "endpoint_class": "codex_cli_oauth",
+        "evidence_level": (
+            "production_catalog_wiring_only" if dry_run else "production_catalog_context_delivery"
+        ),
+        "production_efficiency_eligible": not dry_run,
     }
 
 
@@ -1829,6 +2790,21 @@ def _focused_verification(scenario: Scenario, workspace: Path, test_hash: str) -
     return focused
 
 
+def _verify_pinned_head(scenario: Scenario, workspace: Path) -> CommandResult:
+    started = time.perf_counter()
+    current = run_process(["git", "rev-parse", "HEAD"], cwd=workspace, timeout=30)
+    observed = current.stdout.strip()
+    if current.returncode or observed != scenario.commit:
+        return CommandResult(
+            1,
+            current.stdout,
+            current.stderr
+            + f"\nagent changed pinned HEAD: expected {scenario.commit}, observed {observed or 'unknown'}",
+            time.perf_counter() - started,
+        )
+    return CommandResult(0, current.stdout, current.stderr, time.perf_counter() - started)
+
+
 def _materialize_untracked_changes(scenario: Scenario, workspace: Path) -> CommandResult:
     started = time.perf_counter()
     indexed_test = run_process(
@@ -1863,7 +2839,11 @@ def _materialize_untracked_changes(scenario: Scenario, workspace: Path) -> Comma
                 added.stderr,
                 time.perf_counter() - started,
             )
-    changed = run_process(["git", "diff", "--name-only", "-z", "HEAD"], cwd=workspace, timeout=30)
+    changed = run_process(
+        ["git", "diff", "--name-only", "-z", scenario.commit],
+        cwd=workspace,
+        timeout=30,
+    )
     if changed.returncode:
         return CommandResult(
             changed.returncode,
@@ -1907,7 +2887,11 @@ def verify_workspace(scenario: Scenario, workspace: Path, test_hash: str) -> Com
             elapsed + materialized.elapsed,
         )
     elapsed += materialized.elapsed
-    diff_check = run_process(["git", "diff", "--check", "HEAD"], cwd=workspace, timeout=30)
+    diff_check = run_process(
+        ["git", "diff", "--check", scenario.commit],
+        cwd=workspace,
+        timeout=30,
+    )
     return CommandResult(
         diff_check.returncode,
         stdout + diff_check.stdout,
@@ -1923,52 +2907,91 @@ def validate_evaluator_controls(
     output: Path,
 ) -> dict[str, Any]:
     controls = output / scenario.id / "controls"
-    red_workspace = controls / "red" / "repo"
-    red_workspace.parent.mkdir(parents=True, exist_ok=True)
-    red_hash = prepare_workspace(scenario, cache, red_workspace)
-    red = _focused_verification(scenario, red_workspace, red_hash)
-    (controls / "red.log").write_text(
-        f"returncode={red.returncode}\n{red.stdout}{red.stderr}", encoding="utf-8"
-    )
-    if red.returncode in {70, 71} and "sandbox" in red.stderr.lower():
-        raise RuntimeError("verification sandbox could not be applied")
-    if not red.returncode or scenario.red_failure_contains not in red.stdout + red.stderr:
-        raise RuntimeError(
-            "evaluator red control did not fail for the expected missing feature: "
-            f"{scenario.red_failure_contains!r}"
+    red_root = controls / "red"
+    reference_root = controls / "reference"
+    red_workspace = red_root / "repo"
+    reference_workspace = reference_root / "repo"
+    try:
+        red_workspace.parent.mkdir(parents=True, exist_ok=True)
+        red_hash = prepare_workspace(scenario, cache, red_workspace)
+        red = _focused_verification(scenario, red_workspace, red_hash)
+        (controls / "red.log").write_text(
+            f"returncode={red.returncode}\n{red.stdout}{red.stderr}", encoding="utf-8"
         )
+        if red.returncode in {70, 71} and "sandbox" in red.stderr.lower():
+            raise RuntimeError("verification sandbox could not be applied")
+        if not red.returncode or scenario.red_failure_contains not in red.stdout + red.stderr:
+            raise RuntimeError(
+                "evaluator red control did not fail for the expected missing feature: "
+                f"{scenario.red_failure_contains!r}"
+            )
 
-    reference_workspace = controls / "reference" / "repo"
-    reference_workspace.parent.mkdir(parents=True, exist_ok=True)
-    reference_hash = prepare_workspace(scenario, cache, reference_workspace)
-    applied = run_process(
-        ["git", "apply", "--whitespace=nowarn", "-"],
-        cwd=reference_workspace,
-        input_text=scenario.reference_patch,
-        timeout=30,
-    )
-    if applied.returncode:
-        raise RuntimeError(f"reference patch failed: {applied.stderr.strip()}")
-    reference = verify_workspace(scenario, reference_workspace, reference_hash)
-    (controls / "reference.log").write_text(reference.stdout + reference.stderr, encoding="utf-8")
-    if reference.returncode:
-        raise RuntimeError(f"evaluator reference control failed: {reference.stderr.strip()}")
-    result = {
-        "status": "passed",
-        "red_failure_observed": scenario.red_failure_contains,
-        "red_seconds": round(red.elapsed, 6),
-        "reference_seconds": round(reference.elapsed, 6),
-        "expected_focused_tests": scenario.expected_test_count,
-        "regression_commands": [list(command) for command in scenario.regression_verify],
-        "reference_patch_sha256": hashlib.sha256(scenario.reference_patch.encode()).hexdigest(),
-    }
-    (controls / "control.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
-    return result
+        reference_workspace.parent.mkdir(parents=True, exist_ok=True)
+        reference_hash = prepare_workspace(scenario, cache, reference_workspace)
+        applied = run_process(
+            ["git", "apply", "--whitespace=nowarn", "-"],
+            cwd=reference_workspace,
+            input_text=scenario.reference_patch,
+            timeout=30,
+        )
+        if applied.returncode:
+            raise RuntimeError(f"reference patch failed: {applied.stderr.strip()}")
+        reference = verify_workspace(scenario, reference_workspace, reference_hash)
+        (controls / "reference.log").write_text(
+            reference.stdout + reference.stderr, encoding="utf-8"
+        )
+        if reference.returncode:
+            raise RuntimeError(f"evaluator reference control failed: {reference.stderr.strip()}")
+        result = {
+            "status": "passed",
+            "red_failure_observed": scenario.red_failure_contains,
+            "red_seconds": round(red.elapsed, 6),
+            "reference_seconds": round(reference.elapsed, 6),
+            "expected_focused_tests": scenario.expected_test_count,
+            "regression_commands": [list(command) for command in scenario.regression_verify],
+            "reference_patch_sha256": hashlib.sha256(scenario.reference_patch.encode()).hexdigest(),
+        }
+        (controls / "control.json").write_text(
+            json.dumps(result, indent=2) + "\n", encoding="utf-8"
+        )
+        return result
+    finally:
+        for private_root in (red_root, reference_root):
+            if private_root.exists():
+                shutil.rmtree(private_root)
+            if private_root.exists():
+                raise RuntimeError(f"evaluator control cleanup failed: {private_root.name}")
 
 
 def _command_version(argv: list[str]) -> str:
     result = run_process(argv, cwd=ROOT, timeout=30)
     return (result.stdout or result.stderr).strip() if not result.returncode else "unavailable"
+
+
+def collect_repository_state() -> dict[str, Any]:
+    status = run_process(
+        ["git", "status", "--porcelain=v1", "--untracked-files=all"], cwd=ROOT, timeout=30
+    )
+    tracked_diff = run_process(["git", "diff", "--binary", "HEAD"], cwd=ROOT, timeout=30)
+    return {
+        "clean": not status.returncode and not status.stdout.strip(),
+        "status": status.stdout.splitlines(),
+        "tracked_diff_sha256": (
+            hashlib.sha256(tracked_diff.stdout.encode()).hexdigest()
+            if not tracked_diff.returncode
+            else "unavailable"
+        ),
+    }
+
+
+def require_clean_production_repository(repository_state: Mapping[str, Any], *, live: bool) -> None:
+    if live and repository_state.get("clean") is not True:
+        status = repository_state.get("status")
+        changes = ", ".join(str(item) for item in status) if isinstance(status, list) else "unknown"
+        raise ValueError(
+            f"live {PRODUCTION_CATALOG_ENGINE} requires a clean committed harness; "
+            f"commit or restore the listed changes before running: {changes}"
+        )
 
 
 def write_environment_manifest(
@@ -1980,12 +3003,9 @@ def write_environment_manifest(
     model: str,
     run_config: dict[str, Any],
     schedule: list[dict[str, Any]],
+    repository_state: dict[str, Any] | None = None,
 ) -> None:
     revision = run_process(["git", "rev-parse", "HEAD"], cwd=ROOT, timeout=30)
-    repository_status = run_process(
-        ["git", "status", "--porcelain=v1", "--untracked-files=all"], cwd=ROOT, timeout=30
-    )
-    tracked_diff = run_process(["git", "diff", "--binary", "HEAD"], cwd=ROOT, timeout=30)
     dependencies = run_process(
         [sys.executable, "-m", "pip", "freeze", "--all"], cwd=ROOT, timeout=60
     )
@@ -2001,15 +3021,7 @@ def write_environment_manifest(
         "codex_version": _command_version([codex, "--version"]),
         "model": model,
         "ctx_revision": revision.stdout.strip() if not revision.returncode else "unavailable",
-        "repository_state": {
-            "clean": not repository_status.returncode and not repository_status.stdout.strip(),
-            "status": repository_status.stdout.splitlines(),
-            "tracked_diff_sha256": (
-                hashlib.sha256(tracked_diff.stdout.encode()).hexdigest()
-                if not tracked_diff.returncode
-                else "unavailable"
-            ),
-        },
+        "repository_state": repository_state or collect_repository_state(),
         "benchmark_script_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "scenarios_sha256": hashlib.sha256(scenario_bytes).hexdigest(),
         "scenario_ids": [scenario.id for scenario in scenarios],
@@ -2332,26 +3344,62 @@ def run_trial(
     timeout: float,
     dry_run: bool,
     incidents: IncidentLog,
+    catalog_snapshot: CatalogSnapshot | None = None,
+    forbidden_agent_reads: Mapping[str, Path] | None = None,
 ) -> dict[str, Any]:
     trial_started = time.perf_counter()
-    evidence_classification = classify_codex_controlled_evidence(dry_run=dry_run)
+    production_catalog = catalog_snapshot is not None
+    engine_name = PRODUCTION_CATALOG_ENGINE if production_catalog else "codex-controlled"
+    evidence_classification = (
+        classify_codex_production_catalog_evidence(dry_run=dry_run)
+        if production_catalog
+        else classify_codex_controlled_evidence(dry_run=dry_run)
+    )
     run_dir = output / scenario.id / arm / f"attempt-{attempt}"
     workspace = run_dir / "repo"
     run_dir.mkdir(parents=True, exist_ok=True)
-    test_hash = prepare_workspace(scenario, cache, workspace)
+    workspace_setup_started = time.perf_counter()
+    test_hash = (
+        prepare_workspace(
+            scenario,
+            cache,
+            workspace,
+            include_evaluator_test=False,
+        )
+        if production_catalog
+        else prepare_workspace(scenario, cache, workspace)
+    )
+    workspace_setup_seconds = time.perf_counter() - workspace_setup_started
     home = run_dir / "home"
+    agent_home = run_dir / "codex-home"
     lifecycle_root = run_dir / "lifecycle"
     env = _ctx_env(home, lifecycle_root)
-    base_prompt = task_prompt(scenario)
+    agent_env = env
+    isolation_evidence: dict[str, Any] | None = None
+    task_only_prompt = (
+        production_catalog_task_prompt(scenario) if production_catalog else task_prompt(scenario)
+    )
+    base_prompt = task_only_prompt
     recommendations: list[dict[str, Any]] = []
     recommended_ids: list[str] = []
     selected_ids: list[str] = []
     selected_items: list[dict[str, Any]] = []
+    catalog: dict[str, Any] | None = None
     ctx_setup_seconds = 0.0
+    recommendation_seconds = 0.0
+    body_fetch_seconds = 0.0
+    load_seconds = 0.0
+    lifecycle_timings = {
+        "use_seconds": 0.0,
+        "unload_seconds": 0.0,
+        "session_end_seconds": 0.0,
+    }
     ctx_enabled = treatment_level != "baseline"
     full_treatment = treatment_level == "ctx-full"
     if treatment_level not in TREATMENT_ARMS:
         raise ValueError(f"unsupported treatment level: {treatment_level}")
+    if production_catalog and full_treatment:
+        raise ValueError(f"{PRODUCTION_CATALOG_ENGINE} does not support ctx-full")
     store = make_lifecycle_store(lifecycle_root) if ctx_enabled else None
     session_id = f"ctx-ab-{scenario.id}-{attempt}"
     usage_evidence: dict[str, str] = {}
@@ -2360,55 +3408,120 @@ def run_trial(
     teardown_seconds = 0.0
 
     def close_session() -> None:
-        nonlocal session_closed, teardown_seconds
+        nonlocal lifecycle_timings, session_closed, teardown_seconds
         if not ctx_enabled or store is None or session_closed:
             return
         session_closed = True
         teardown_started = time.perf_counter()
-        close_context_session(
+        lifecycle_timings = close_context_session(
             store,
             selected_items,
             session_id=session_id,
             status=session_status,
             model=model,
             usage_evidence=usage_evidence,
+            mark_applied=production_catalog,
         )
         teardown_seconds = time.perf_counter() - teardown_started
+
+    def catalog_result_fields() -> dict[str, Any]:
+        if catalog_snapshot is None:
+            return {}
+        return {
+            "catalog_archive_sha256": catalog_snapshot.provenance["archive_sha256"],
+            "catalog_runtime_availability_sha256": catalog_snapshot.provenance[
+                "runtime_availability_sha256"
+            ],
+            "catalog_graph_export_id": catalog_snapshot.provenance["graph_export_id"],
+            "catalog_graph_export_manifest_sha256": catalog_snapshot.provenance[
+                "graph_export_manifest_sha256"
+            ],
+            "catalog_overlay_sha256": catalog_snapshot.provenance["overlay_sha256"],
+            "catalog_overlay_records": catalog_snapshot.provenance["overlay_records"],
+            "catalog_snapshot_path": str(catalog_snapshot.wiki_dir),
+            "catalog_binding": "isolated_home_read_only_config",
+            "catalog_cache_hit": catalog_snapshot.cache_hit,
+            "catalog_prepare_seconds": round(catalog_snapshot.prepare_seconds, 6),
+            "evaluator_visibility": "materialized_after_agent",
+            "repair_policy": "fail_closed_no_retries",
+        }
 
     try:
         if ctx_enabled:
             assert store is not None
             setup_started = time.perf_counter()
-            write_ctx_fixture(scenario, home)
-            recommendations = recommend_context(scenario, home=home, lifecycle_root=lifecycle_root)
-            configured = {f"{item['type']}:{item['slug']}": item for item in scenario.context}
-            recommended_ids = [
-                str(row.get("id")) for row in recommendations if row.get("id") in configured
-            ]
-            if full_treatment:
-                selected_items = [dict(item) for item in scenario.context]
-            else:
-                selected_skill_id = next(
-                    entity_id
-                    for entity_id in recommended_ids
-                    if configured[entity_id]["type"] == "skill"
+            if production_catalog:
+                assert catalog_snapshot is not None
+                bind_catalog_snapshot(home, catalog_snapshot)
+                catalog = recommend_production_catalog(
+                    scenario,
+                    home=home,
+                    lifecycle_root=lifecycle_root,
+                    session_id=session_id,
+                    snapshot=catalog_snapshot,
                 )
-                selected_items = [dict(configured[selected_skill_id])]
-            selected_ids = [f"{item['type']}:{item['slug']}" for item in selected_items]
-            (run_dir / "recommendations.json").write_text(
-                json.dumps(
-                    {
-                        "query": scenario.query,
-                        "treatment_level": treatment_level,
-                        "recommended_ids": recommended_ids,
+                recommendations = list(catalog["candidates"])
+                recommended_ids = list(catalog["candidate_ids"])
+                selected_ids = list(catalog["selected_ids"])
+                selected_item = catalog.get("selected_item")
+                selected_items = [dict(selected_item)] if isinstance(selected_item, dict) else []
+                recommendation_seconds = float(catalog["recommendation_seconds"])
+                body_fetch_seconds = float(catalog["body_fetch_seconds"])
+                store.record_dev_event(
+                    session_id=session_id,
+                    event_type="catalog_recommendation",
+                    host="codex-cli",
+                    cwd=str(workspace),
+                    payload={
+                        "candidate_ids": recommended_ids,
                         "selected_ids": selected_ids,
-                        "recommendations": recommendations,
+                        "context_policy": catalog["context_policy"],
+                        "archive_sha256": catalog_snapshot.provenance["archive_sha256"],
+                        "graph_export_id": catalog_snapshot.provenance["graph_export_id"],
                     },
-                    indent=2,
                 )
-                + "\n",
-                encoding="utf-8",
-            )
+                write_catalog_recommendation_evidence(
+                    run_dir / "recommendations.json",
+                    catalog,
+                    used_ids=[],
+                    snapshot=catalog_snapshot,
+                )
+            else:
+                write_ctx_fixture(scenario, home)
+                recommendations = recommend_context(
+                    scenario,
+                    home=home,
+                    lifecycle_root=lifecycle_root,
+                )
+                configured = {f"{item['type']}:{item['slug']}": item for item in scenario.context}
+                recommended_ids = [
+                    str(row.get("id")) for row in recommendations if row.get("id") in configured
+                ]
+                if full_treatment:
+                    selected_items = [dict(item) for item in scenario.context]
+                else:
+                    selected_skill_id = next(
+                        entity_id
+                        for entity_id in recommended_ids
+                        if configured[entity_id]["type"] == "skill"
+                    )
+                    selected_items = [dict(configured[selected_skill_id])]
+                selected_ids = [f"{item['type']}:{item['slug']}" for item in selected_items]
+                (run_dir / "recommendations.json").write_text(
+                    json.dumps(
+                        {
+                            "query": scenario.query,
+                            "treatment_level": treatment_level,
+                            "recommended_ids": recommended_ids,
+                            "selected_ids": selected_ids,
+                            "recommendations": recommendations,
+                        },
+                        indent=2,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+            load_started = time.perf_counter()
             for item in selected_items:
                 store.load_entity(
                     session_id=session_id,
@@ -2423,6 +3536,14 @@ def run_trial(
                         "treatment_level": treatment_level,
                     },
                 )
+                if production_catalog:
+                    store.mark_entity_loaded(
+                        session_id=session_id,
+                        entity_type=str(item["type"]),
+                        slug=str(item["slug"]),
+                        reason="exact bounded body fetched through ctx__wiki_get",
+                    )
+            load_seconds = time.perf_counter() - load_started
             if full_treatment:
                 preflight = preflight_ctx_mcp(
                     scenario,
@@ -2433,42 +3554,109 @@ def run_trial(
                 (run_dir / "mcp-preflight.json").write_text(
                     json.dumps(preflight, indent=2) + "\n", encoding="utf-8"
                 )
-            base_prompt += context_prompt(scenario, treatment_level)
+            base_prompt += (
+                production_catalog_context_prompt(catalog)
+                if production_catalog and catalog is not None
+                else context_prompt(scenario, treatment_level)
+            )
             ctx_setup_seconds = time.perf_counter() - setup_started
-        prompt_hash = hashlib.sha256(task_prompt(scenario).encode()).hexdigest()
+        prompt_hash = hashlib.sha256(task_only_prompt.encode()).hexdigest()
         treatment_hash = hashlib.sha256(base_prompt.encode()).hexdigest()
         (run_dir / "prompt.txt").write_text(base_prompt, encoding="utf-8")
         if dry_run:
             session_status = "preflight"
             close_session()
+            lifecycle = (
+                catalog_lifecycle_evidence(
+                    lifecycle_root,
+                    session_id=session_id,
+                    store=store,
+                )
+                if production_catalog and ctx_enabled and store is not None
+                else None
+            )
             return {
                 "scenario": scenario.id,
+                "repo_url": scenario.repo_url,
                 "arm": arm,
                 "trial": trial,
                 "retry": retry,
                 "attempt": attempt,
-                "engine": "codex-controlled",
+                "engine": engine_name,
                 "treatment_level": treatment_level,
                 "status": "wiring_only",
                 **evidence_classification,
                 "verification_passed": None,
                 "task_prompt_sha256": prompt_hash,
                 "delivered_prompt_sha256": treatment_hash,
+                "prompt_bytes": len(base_prompt.encode("utf-8")),
                 "recommended_ids": recommended_ids,
+                "candidate_ids": recommended_ids if production_catalog else None,
                 "selected_ids": selected_ids,
+                "delivered_ids": [],
+                "adopted_ids": [],
                 "used_ids": [],
+                "context_delivery_verified": False,
+                "evaluator_isolation_verified": False,
+                "workspace_setup_seconds": round(workspace_setup_seconds, 6),
                 "ctx_setup_seconds": round(ctx_setup_seconds, 6),
+                "recommendation_seconds": round(recommendation_seconds, 6),
+                "body_fetch_seconds": round(body_fetch_seconds, 6),
+                "load_seconds": round(load_seconds, 6),
+                "use_seconds": round(lifecycle_timings["use_seconds"], 6),
+                "unload_seconds": round(lifecycle_timings["unload_seconds"], 6),
                 "teardown_seconds": round(teardown_seconds, 6),
                 "total_seconds": round(time.perf_counter() - trial_started, 6),
                 "token_attribution": "unavailable",
+                "lifecycle_actions": lifecycle["actions"] if lifecycle else [],
+                "lifecycle_sha256": lifecycle["sha256"] if lifecycle else None,
+                "final_loaded": lifecycle["final_loaded"] if lifecycle else [],
+                **catalog_result_fields(),
                 "artifact_dir": str(run_dir),
             }
+        if production_catalog:
+            sensitive_reads = dict(forbidden_agent_reads or {})
+            sensitive_reads["delivered_prompt_artifact"] = run_dir / "prompt.txt"
+            sibling_prompts = [
+                path
+                for path in sorted((output / scenario.id).glob("*/attempt-*/prompt.txt"))
+                if path.parent != run_dir
+            ]
+            for index, sibling_prompt in enumerate(sibling_prompts, start=1):
+                sensitive_reads[f"sibling_arm_{index}"] = sibling_prompt
+            prepare_isolated_codex_home(
+                agent_home,
+                workspace=workspace,
+                forbidden_reads=sensitive_reads,
+            )
+            agent_env = production_agent_env(
+                env,
+                home=agent_home,
+                workspace=workspace,
+            )
+            isolation_evidence = verify_agent_sandbox_isolation(
+                codex=codex,
+                workspace=workspace,
+                home=agent_home,
+                env=agent_env,
+                forbidden_reads=sensitive_reads,
+                project_check=tuple(
+                    part.replace("{python}", sys.executable)
+                    for part in scenario.regression_verify[0]
+                ),
+            )
+            (run_dir / "evaluator-isolation.json").write_text(
+                json.dumps(isolation_evidence, indent=2) + "\n",
+                encoding="utf-8",
+            )
         command = codex_command(
             codex=codex,
             model=model,
             workspace=workspace,
             prompt=base_prompt,
             with_ctx=full_treatment,
+            agent_home=agent_home if production_catalog else None,
+            isolate_evaluator=production_catalog,
         )
         (run_dir / "command.json").write_text(
             json.dumps(
@@ -2480,7 +3668,7 @@ def run_trial(
         agent = run_process(
             command,
             cwd=workspace,
-            env=env,
+            env=agent_env,
             timeout=timeout,
             contain_descendants=True,
         )
@@ -2492,7 +3680,25 @@ def run_trial(
             timeout=30,
         )
         (run_dir / "post-agent-status.txt").write_text(pre_status.stdout, encoding="utf-8")
+        head_check = _verify_pinned_head(scenario, workspace)
+        (run_dir / "post-agent-head.log").write_text(
+            head_check.stdout + head_check.stderr,
+            encoding="utf-8",
+        )
+        if production_catalog:
+            materialize_evaluator_test(
+                scenario,
+                workspace,
+                expected_hash=test_hash,
+            )
         verification = verify_workspace(scenario, workspace, test_hash)
+        if head_check.returncode:
+            verification = CommandResult(
+                1,
+                head_check.stdout + verification.stdout,
+                head_check.stderr + verification.stderr,
+                head_check.elapsed + verification.elapsed,
+            )
         (run_dir / "verification.log").write_text(
             verification.stdout + verification.stderr, encoding="utf-8"
         )
@@ -2502,15 +3708,28 @@ def run_trial(
             timeout=30,
         )
         (run_dir / "git-status.txt").write_text(status.stdout, encoding="utf-8")
-        diff = run_process(["git", "diff", "--binary", "HEAD"], cwd=workspace, timeout=30)
+        diff = run_process(
+            ["git", "diff", "--binary", scenario.commit],
+            cwd=workspace,
+            timeout=30,
+        )
         (run_dir / "changes.patch").write_text(diff.stdout, encoding="utf-8")
         usage = extract_token_usage(agent.stdout)
-        skill = next(item for item in scenario.context if item["type"] == "skill")
-        mcp_used = observed_mcp_tool_use(
-            agent.stdout,
-            slug=str(skill["slug"]),
-            entity_type=str(skill["type"]),
-            expected_body=str(skill["body"]),
+        trace_efficiency = extract_trace_efficiency(agent.stdout)
+        scenario_skill = next(item for item in scenario.context if item["type"] == "skill")
+        selected_skill = next(
+            (item for item in selected_items if item.get("type") == "skill"),
+            None,
+        )
+        mcp_used = (
+            False
+            if production_catalog
+            else observed_mcp_tool_use(
+                agent.stdout,
+                slug=str(scenario_skill["slug"]),
+                entity_type=str(scenario_skill["type"]),
+                expected_body=str(scenario_skill["body"]),
+            )
         )
         reviewer = next(item for item in scenario.context if item["type"] == "agent")
         agent_attempted = observed_agent_attempt(agent.stdout)
@@ -2519,8 +3738,24 @@ def run_trial(
             reviewer_slug=str(reviewer["slug"]),
             expected_instructions=str(reviewer["body"]),
         )
-        skill_used = (
-            mcp_used if full_treatment else ctx_enabled and observed_model_turn(agent.stdout)
+        model_turn_observed = observed_model_turn(agent.stdout)
+        body_provenance = catalog.get("body_provenance") if catalog is not None else None
+        context_delivery_verified = bool(
+            production_catalog
+            and ctx_enabled
+            and len(selected_ids) == 1
+            and isinstance(body_provenance, dict)
+            and isinstance(body_provenance.get("body_sha256"), str)
+            and prompt_hash != treatment_hash
+            and model_turn_observed
+            and isolation_evidence
+            and isolation_evidence.get("verified") is True
+        )
+        delivered_ids = selected_ids if context_delivery_verified else []
+        skill_used = bool(
+            not production_catalog
+            and selected_skill
+            and (mcp_used if full_treatment else ctx_enabled and model_turn_observed)
         )
         used_ids: list[str] = []
         if ctx_enabled:
@@ -2531,7 +3766,7 @@ def run_trial(
                 )
                 used_ids.extend(
                     [
-                        f"skill:{skill['slug']}",
+                        f"skill:{scenario_skill['slug']}",
                         next(
                             entity_id
                             for entity_id in selected_ids
@@ -2539,9 +3774,10 @@ def run_trial(
                         ),
                     ]
                 )
-            elif skill_used:
+            elif skill_used and not production_catalog:
                 usage_evidence["skill"] = "selected skill body supplied in treatment prompt"
-                used_ids.append(f"skill:{skill['slug']}")
+                assert selected_skill is not None
+                used_ids.append(str(selected_skill.get("id") or f"skill:{selected_skill['slug']}"))
             if full_treatment and agent_used:
                 usage_evidence["agent"] = (
                     "Codex JSONL recorded matching spawn, completed wait, and close events"
@@ -2549,12 +3785,16 @@ def run_trial(
                 used_ids.append(
                     next(entity_id for entity_id in selected_ids if entity_id.startswith("agent:"))
                 )
-        policy_valid = treatment_policy_valid(
-            treatment_level,
-            skill_used=skill_used,
-            mcp_used=mcp_used,
-            agent_attempted=agent_attempted,
-            agent_used=agent_used,
+        policy_valid = (
+            not mcp_used and not agent_attempted and (not ctx_enabled or context_delivery_verified)
+            if production_catalog
+            else treatment_policy_valid(
+                treatment_level,
+                skill_used=skill_used,
+                mcp_used=mcp_used,
+                agent_attempted=agent_attempted,
+                agent_used=agent_used,
+            )
         )
         tool_failures = required_tool_failures(agent.stdout) if full_treatment else []
         for failure in tool_failures:
@@ -2584,25 +3824,83 @@ def run_trial(
                 reasons.append("completed delegated reviewer loop absent")
             if treatment_level == "ctx-light" and (mcp_used or agent_attempted):
                 reasons.append("ctx-light used an unselected expensive tool")
-            if ctx_enabled and not skill_used:
-                reasons.append("selected skill use was not observed")
+            if (
+                ctx_enabled
+                and selected_items
+                and not (context_delivery_verified if production_catalog else skill_used)
+            ):
+                reasons.append(
+                    "selected skill context delivery was not verified"
+                    if production_catalog
+                    else "selected skill use was not observed"
+                )
             incidents.add(
                 scenario=scenario.id,
                 arm=arm,
                 attempt=attempt,
-                stage="live-trial",
+                stage=PRODUCTION_CATALOG_ENGINE if production_catalog else "live-trial",
                 message="benchmark arm failed",
                 evidence="; ".join(reasons),
             )
         close_session()
+        lifecycle = (
+            catalog_lifecycle_evidence(
+                lifecycle_root,
+                session_id=session_id,
+                store=store,
+            )
+            if production_catalog and ctx_enabled and store is not None
+            else None
+        )
+        if production_catalog and catalog is not None:
+            assert catalog_snapshot is not None
+            if context_delivery_verified and store is not None:
+                assert isinstance(body_provenance, dict)
+                store.record_dev_event(
+                    session_id=session_id,
+                    event_type="context_delivered",
+                    host="codex-cli",
+                    cwd=str(workspace),
+                    payload={
+                        "delivered_ids": delivered_ids,
+                        "prompt_sha256": treatment_hash,
+                        "body_sha256": body_provenance["body_sha256"],
+                    },
+                )
+            write_catalog_recommendation_evidence(
+                run_dir / "recommendations.json",
+                catalog,
+                used_ids=used_ids,
+                snapshot=catalog_snapshot,
+            )
+        evaluator_isolation_verified = bool(
+            isolation_evidence and isolation_evidence.get("verified") is True
+        )
+        production_efficiency_eligible = bool(
+            evidence_classification["production_efficiency_eligible"]
+            and evaluator_isolation_verified
+            and model_turn_observed
+            and (not ctx_enabled or context_delivery_verified)
+        )
+        evidence_level = str(evidence_classification["evidence_level"])
+        if production_catalog and ctx_enabled and not context_delivery_verified:
+            evidence_level = "production_catalog_ctx_noop"
+        elif production_catalog and not production_efficiency_eligible:
+            evidence_level = "production_catalog_unverified"
+        measured_phase_seconds = (
+            ctx_setup_seconds + agent.elapsed + verification.elapsed + teardown_seconds
+        )
         return {
             "scenario": scenario.id,
+            "repo_url": scenario.repo_url,
             "arm": arm,
             "trial": trial,
             "retry": retry,
             "attempt": attempt,
-            "engine": "codex-controlled",
+            "engine": engine_name,
             **evidence_classification,
+            "evidence_level": evidence_level,
+            "production_efficiency_eligible": production_efficiency_eligible,
             "benchmark_class": scenario.benchmark_class,
             "treatment_level": treatment_level,
             "escalated": treatment_level != arm,
@@ -2614,35 +3912,58 @@ def run_trial(
             "agent_timed_out": agent.timed_out,
             "task_prompt_sha256": prompt_hash,
             "delivered_prompt_sha256": treatment_hash,
+            "prompt_bytes": len(base_prompt.encode("utf-8")),
             "recommended_ids": recommended_ids,
+            "candidate_ids": recommended_ids if production_catalog else None,
             "selected_ids": selected_ids,
+            "delivered_ids": delivered_ids,
+            "adopted_ids": used_ids,
             "used_ids": used_ids,
+            "context_delivery_verified": (context_delivery_verified if ctx_enabled else None),
+            "evaluator_isolation_verified": evaluator_isolation_verified,
+            "pinned_head_verified": not head_check.returncode,
             "policy_valid": policy_valid,
+            "workspace_setup_seconds": round(workspace_setup_seconds, 6),
             "ctx_setup_seconds": round(ctx_setup_seconds, 6),
+            "recommendation_seconds": round(recommendation_seconds, 6),
+            "body_fetch_seconds": round(body_fetch_seconds, 6),
+            "load_seconds": round(load_seconds, 6),
             "agent_seconds": round(agent.elapsed, 6),
             "verification_seconds": round(verification.elapsed, 6),
+            "use_seconds": round(lifecycle_timings["use_seconds"], 6),
+            "unload_seconds": round(lifecycle_timings["unload_seconds"], 6),
             "teardown_seconds": round(teardown_seconds, 6),
-            "measured_phase_seconds": round(
-                ctx_setup_seconds + agent.elapsed + verification.elapsed + teardown_seconds,
-                6,
-            ),
-            "total_seconds": round(time.perf_counter() - trial_started, 6),
+            "measured_phase_seconds": round(measured_phase_seconds, 6),
+            "total_seconds": round(measured_phase_seconds, 6),
+            "harness_total_seconds": round(time.perf_counter() - trial_started, 6),
             "token_attribution": usage.pop("attribution"),
             "token_scope": "terminal_codex_turn",
             "team_token_completeness": "unknown" if agent_attempted else "not_applicable",
-            "skill_use_observed": skill_used if ctx_enabled else None,
+            "skill_use_observed": (
+                None if production_catalog else skill_used if ctx_enabled else None
+            ),
             "mcp_tool_use_observed": mcp_used if ctx_enabled else None,
             "review_agent_use_observed": agent_used if ctx_enabled else None,
             "review_agent_attempt_observed": agent_attempted if ctx_enabled else None,
             "required_tool_failures": tool_failures,
+            "lifecycle_actions": lifecycle["actions"] if lifecycle else [],
+            "lifecycle_sha256": lifecycle["sha256"] if lifecycle else None,
+            "lifecycle_session_status": lifecycle["session_status"] if lifecycle else None,
+            "final_loaded": lifecycle["final_loaded"] if lifecycle else [],
             "reaped_descendants": agent.reaped_descendants,
             "residual_descendants": list(agent.residual_descendants),
+            **trace_efficiency,
             **usage,
+            **catalog_result_fields(),
             "artifact_dir": str(run_dir),
             "lifecycle_events": str(lifecycle_root / "events.jsonl") if ctx_enabled else None,
         }
     finally:
-        close_session()
+        try:
+            close_session()
+        finally:
+            if production_catalog:
+                remove_isolated_codex_home(agent_home)
 
 
 def write_summary(output: Path, results: list[dict[str, Any]]) -> None:
@@ -2698,48 +4019,110 @@ def build_performance_report(
     trials: int,
     arms: tuple[str, ...],
 ) -> dict[str, Any]:
-    eligible_results = [row for row in results if row.get("production_efficiency_eligible") is True]
-    excluded_results = [
-        row for row in results if row.get("production_efficiency_eligible") is not True
-    ]
+    def eligible(row: dict[str, Any]) -> bool:
+        measured = row.get("measured_phase_seconds")
+        if (
+            row.get("production_efficiency_eligible") is not True
+            or not isinstance(measured, int | float)
+            or isinstance(measured, bool)
+            or measured <= 0
+        ):
+            return False
+        if row.get("engine") != PRODUCTION_CATALOG_ENGINE:
+            return True
+        if row.get("evaluator_isolation_verified") is not True:
+            return False
+        return row.get("arm") == "baseline" or row.get("context_delivery_verified") is True
+
+    eligible_results = [row for row in results if eligible(row)]
+    excluded_results = [row for row in results if not eligible(row)]
     efficiency_claim_allowed = bool(results) and len(eligible_results) == len(results)
+    assigned: dict[tuple[str, str, int], list[dict[str, Any]]] = {}
+    for row in results:
+        key = (str(row.get("scenario")), str(row.get("arm")), int(row.get("trial", 0)))
+        assigned.setdefault(key, []).append(row)
     attempts: dict[tuple[str, str, int], list[dict[str, Any]]] = {}
     for row in eligible_results:
         key = (str(row.get("scenario")), str(row.get("arm")), int(row.get("trial", 0)))
         attempts.setdefault(key, []).append(row)
+
+    def summed(rows: list[dict[str, Any]], field: str) -> float | None:
+        if not rows:
+            return None
+        total = 0.0
+        for row in rows:
+            value = row.get(field)
+            if not isinstance(value, int | float) or isinstance(value, bool):
+                return None
+            total += value
+        return total
+
+    def exact_tokens(rows: list[dict[str, Any]], field: str) -> int | None:
+        if not rows:
+            return None
+        total = 0
+        for row in rows:
+            value = row.get(field) if row.get("token_attribution") == "exact" else None
+            if not isinstance(value, int) or isinstance(value, bool):
+                return None
+            total += value
+        return total
+
     pairs: list[dict[str, Any]] = []
     for scenario_id in scenario_ids:
         for trial in range(1, trials + 1):
+            baseline_assigned = assigned.get((scenario_id, "baseline", trial), [])
+            light_assigned = assigned.get((scenario_id, "ctx-light", trial), [])
             baseline = attempts.get((scenario_id, "baseline", trial), [])
             light = attempts.get((scenario_id, "ctx-light", trial), [])
-            pair: dict[str, Any] = {"scenario": scenario_id, "trial": trial}
-            if not baseline or not light:
+            baseline_passed = bool(
+                baseline_assigned and baseline_assigned[-1].get("status") == "passed"
+            )
+            light_passed = bool(light_assigned and light_assigned[-1].get("status") == "passed")
+            pair: dict[str, Any] = {
+                "scenario": scenario_id,
+                "trial": trial,
+                "baseline_status": (
+                    baseline_assigned[-1].get("status") if baseline_assigned else "missing"
+                ),
+                "ctx_light_status": (
+                    light_assigned[-1].get("status") if light_assigned else "missing"
+                ),
+                "baseline_passed": baseline_passed,
+                "ctx_light_passed": light_passed,
+                "paired_quality_preserved": not baseline_passed or light_passed,
+            }
+            if not baseline_assigned or not light_assigned:
                 pair.update({"complete": False, "reason": "paired arms missing"})
                 pairs.append(pair)
                 continue
-            baseline_seconds = sum(float(row.get("total_seconds", 0.0)) for row in baseline)
-            light_seconds = sum(float(row.get("total_seconds", 0.0)) for row in light)
-            baseline_tokens = [
-                int(row["total_tokens"])
-                for row in baseline
-                if row.get("token_attribution") == "exact"
-                and isinstance(row.get("total_tokens"), int)
-            ]
-            light_tokens = [
-                int(row["total_tokens"])
-                for row in light
-                if row.get("token_attribution") == "exact"
-                and isinstance(row.get("total_tokens"), int)
-            ]
+            if not baseline or not light:
+                pair.update({"complete": False, "reason": "paired evidence ineligible"})
+                pairs.append(pair)
+                continue
+            baseline_seconds = summed(baseline, "measured_phase_seconds")
+            light_seconds = summed(light, "measured_phase_seconds")
+            baseline_harness_seconds = summed(baseline, "harness_total_seconds")
+            light_harness_seconds = summed(light, "harness_total_seconds")
+            baseline_tokens = exact_tokens(baseline, "total_tokens")
+            light_tokens = exact_tokens(light, "total_tokens")
+            baseline_uncached = exact_tokens(baseline, "uncached_input_tokens")
+            light_uncached = exact_tokens(light, "uncached_input_tokens")
             complete = (
-                baseline[-1].get("status") == "passed"
-                and light[-1].get("status") == "passed"
+                baseline_passed
+                and light_passed
+                and baseline_seconds is not None
+                and light_seconds is not None
                 and baseline_seconds > 0
                 and light_seconds > 0
-                and len(baseline_tokens) == len(baseline)
-                and len(light_tokens) == len(light)
-                and sum(baseline_tokens) > 0
-                and sum(light_tokens) > 0
+                and baseline_tokens is not None
+                and light_tokens is not None
+                and baseline_tokens > 0
+                and light_tokens > 0
+                and baseline_uncached is not None
+                and light_uncached is not None
+                and baseline_uncached > 0
+                and light_uncached > 0
                 and all(
                     row.get("team_token_completeness") != "unknown" for row in [*baseline, *light]
                 )
@@ -2753,25 +4136,41 @@ def build_performance_report(
                 )
                 pairs.append(pair)
                 continue
+            assert baseline_seconds is not None
+            assert light_seconds is not None
+            assert baseline_tokens is not None
+            assert light_tokens is not None
+            assert baseline_uncached is not None
+            assert light_uncached is not None
             pair.update(
                 {
                     "complete": True,
                     "baseline_first_attempt_passed": baseline[0].get("status") == "passed",
                     "ctx_light_first_attempt_passed": light[0].get("status") == "passed",
                     "time_ratio": round(light_seconds / baseline_seconds, 6),
-                    "reported_token_ratio": round(sum(light_tokens) / sum(baseline_tokens), 6),
+                    "reported_token_ratio": round(light_tokens / baseline_tokens, 6),
+                    "exact_token_ratio": round(light_tokens / baseline_tokens, 6),
+                    "uncached_token_ratio": round(light_uncached / baseline_uncached, 6),
+                    "harness_time_ratio": (
+                        round(light_harness_seconds / baseline_harness_seconds, 6)
+                        if baseline_harness_seconds and light_harness_seconds is not None
+                        else None
+                    ),
                 }
             )
             pairs.append(pair)
     complete_pairs = [pair for pair in pairs if pair.get("complete")]
     expected_pairs = len(scenario_ids) * trials
+    assignment_complete = len(pairs) == expected_pairs and all(
+        pair["baseline_status"] != "missing" and pair["ctx_light_status"] != "missing"
+        for pair in pairs
+    )
     evidence_required = (
         trials >= 6 and {"baseline", "ctx-light"}.issubset(set(arms)) and efficiency_claim_allowed
     )
     evidence_complete = efficiency_claim_allowed and len(complete_pairs) == expected_pairs
-    quality_preserved = evidence_complete and all(
-        not pair["baseline_first_attempt_passed"] or pair["ctx_light_first_attempt_passed"]
-        for pair in complete_pairs
+    quality_preserved = assignment_complete and all(
+        pair["paired_quality_preserved"] for pair in pairs
     )
     median_time_ratio = (
         round(median(float(pair["time_ratio"]) for pair in complete_pairs), 6)
@@ -2781,6 +4180,14 @@ def build_performance_report(
     median_token_ratio = (
         round(
             median(float(pair["reported_token_ratio"]) for pair in complete_pairs),
+            6,
+        )
+        if complete_pairs
+        else None
+    )
+    median_uncached_token_ratio = (
+        round(
+            median(float(pair["uncached_token_ratio"]) for pair in complete_pairs),
             6,
         )
         if complete_pairs
@@ -2796,6 +4203,64 @@ def build_performance_report(
             and median_token_ratio is not None
             and median_token_ratio <= 1.10
         )
+    production_catalog_scored = bool(eligible_results) and all(
+        row.get("engine") == PRODUCTION_CATALOG_ENGINE for row in eligible_results
+    )
+    benefit_evidence_required = bool(
+        production_catalog_scored
+        and {"baseline", "ctx-light"}.issubset(set(arms))
+        and expected_pairs >= 6
+    )
+    benefit_evidence_complete = bool(
+        benefit_evidence_required and assignment_complete and efficiency_claim_allowed
+    )
+    beneficial = (
+        bool(
+            quality_preserved
+            and evidence_complete
+            and median_time_ratio is not None
+            and median_uncached_token_ratio is not None
+            and (
+                (median_time_ratio <= 0.85 and median_uncached_token_ratio <= 1.10)
+                or (median_uncached_token_ratio <= 0.85 and median_time_ratio <= 1.10)
+            )
+        )
+        if benefit_evidence_complete
+        else None
+    )
+    benefit_verdict = (
+        "beneficial"
+        if beneficial is True
+        else "not_beneficial"
+        if beneficial is False
+        else "insufficient_evidence"
+        if production_catalog_scored
+        else "not_applicable"
+    )
+    repositories = sorted(
+        {
+            str(row["repo_url"])
+            for row in results
+            if isinstance(row.get("repo_url"), str) and row["repo_url"]
+        }
+    )
+    product_claim_eligible = len(scenario_ids) >= 6 and len(repositories) >= 3 and trials >= 3
+    arm_outcomes = {}
+    for arm in ("baseline", "ctx-light"):
+        rows = [
+            pair
+            for pair in pairs
+            if pair[f"{'ctx_light' if arm == 'ctx-light' else 'baseline'}_status"] != "missing"
+        ]
+        passed = sum(
+            bool(pair[f"{'ctx_light' if arm == 'ctx-light' else 'baseline'}_passed"])
+            for pair in rows
+        )
+        arm_outcomes[arm] = {
+            "assigned": len(rows),
+            "passed": passed,
+            "pass_rate": round(passed / len(rows), 6) if rows else None,
+        }
     return {
         "status": (
             "functional_only"
@@ -2812,14 +4277,37 @@ def build_performance_report(
             {str(row.get("evidence_level") or "unspecified") for row in excluded_results}
         ),
         "evidence_required": evidence_required,
+        "assignment_complete": assignment_complete,
         "evidence_complete": evidence_complete,
         "quality_preserved": quality_preserved,
+        "benefit_evidence_required": benefit_evidence_required,
+        "benefit_evidence_complete": benefit_evidence_complete,
+        "beneficial": beneficial,
+        "benefit_verdict": benefit_verdict,
+        "claim_scope": "product_pilot" if product_claim_eligible else "scenario_set_only",
+        "product_claim_eligible": product_claim_eligible,
+        "product_benefit_verdict": (
+            benefit_verdict if product_claim_eligible else "insufficient_cross_repo_evidence"
+        ),
+        "distinct_scenario_count": len(set(scenario_ids)),
+        "distinct_repository_count": len(repositories),
+        "repositories": repositories,
+        "intent_to_treat": arm_outcomes,
         "thresholds": {
             "median_time_ratio_max": 1.10,
             "median_reported_token_ratio_max": 1.10,
         },
+        "benefit_thresholds": {
+            "minimum_complete_pairs": 6,
+            "improvement_ratio_max": 0.85,
+            "other_ratio_max": 1.10,
+            "primary_token_metric": "uncached_input_tokens",
+            "quality_preserved_required": True,
+        },
         "median_time_ratio": median_time_ratio,
         "median_reported_token_ratio": median_token_ratio,
+        "median_exact_token_ratio": median_token_ratio,
+        "median_uncached_token_ratio": median_uncached_token_ratio,
         "gate_passed": gate_passed,
         "evidence_trust_boundary": EVIDENCE_TRUST_BOUNDARY,
         "cryptographic_independence": False,
@@ -2882,9 +4370,10 @@ def dry_run_results_complete(
     expected_keys: set[tuple[str, str, int]],
     engine: str,
 ) -> bool:
-    expected_evidence_level = (
-        "controlled_wiring_only" if engine == "codex-controlled" else "wiring_only"
-    )
+    expected_evidence_level = {
+        "codex-controlled": "controlled_wiring_only",
+        PRODUCTION_CATALOG_ENGINE: "production_catalog_wiring_only",
+    }.get(engine, "wiring_only")
     observed_keys = {
         (
             str(row.get("scenario")),
@@ -2899,8 +4388,65 @@ def dry_run_results_complete(
     )
 
 
+def _is_system_temp_path(path: Path) -> bool:
+    resolved = path.resolve()
+    roots = {Path(value).resolve() for value in ("/tmp", "/private/tmp", "/var/tmp")}
+    return any(resolved == root or root in resolved.parents for root in roots)
+
+
+def _validate_production_output_path(path: Path) -> Path:
+    gate = ROOT / ".gate"
+    if gate.is_symlink() or PRODUCTION_PRIVATE_RUN_ROOT.is_symlink():
+        raise ValueError("production benchmark private root must not be a symlink")
+    resolved = path.resolve()
+    private_root = PRODUCTION_PRIVATE_RUN_ROOT.resolve()
+    if resolved == private_root or private_root not in resolved.parents:
+        raise ValueError(
+            f"{PRODUCTION_CATALOG_ENGINE} output must be beneath {PRODUCTION_PRIVATE_RUN_ROOT}"
+        )
+    return resolved
+
+
+def _validate_production_scenarios_path(path: Path, *, live: bool) -> Path:
+    if _is_system_temp_path(path):
+        raise ValueError(
+            f"{PRODUCTION_CATALOG_ENGINE} scenario source must not be under a system "
+            "temporary directory"
+        )
+    resolved = path.resolve()
+    if not live:
+        return resolved
+    private_root = PRODUCTION_PRIVATE_SCENARIO_ROOT.resolve()
+    if not private_root.is_dir() or stat.S_IMODE(private_root.stat().st_mode) & (
+        stat.S_IRWXG | stat.S_IRWXO
+    ):
+        raise ValueError("live production scenario root must be an owner-only directory")
+    if (
+        PRODUCTION_PRIVATE_SCENARIO_ROOT.is_symlink()
+        or resolved == private_root
+        or private_root not in resolved.parents
+    ):
+        raise ValueError(
+            f"live {PRODUCTION_CATALOG_ENGINE} scenarios must be beneath "
+            f"{PRODUCTION_PRIVATE_SCENARIO_ROOT}"
+        )
+    if path.is_symlink() or not resolved.is_file():
+        raise ValueError("live production scenario source must be a regular file")
+    if stat.S_IMODE(resolved.stat().st_mode) & (stat.S_IRWXG | stat.S_IRWXO):
+        raise ValueError("live production scenario source must be owner-only")
+    return resolved
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.engine == PRODUCTION_CATALOG_ENGINE:
+        try:
+            args.scenarios = _validate_production_scenarios_path(
+                args.scenarios,
+                live=not args.dry_run and not args.list,
+            )
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
     scenarios = load_scenarios(args.scenarios)
     if args.scenario:
         requested = set(args.scenario)
@@ -2922,14 +4468,46 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("production ctx limits must be positive")
     if sys.platform != "darwin":
         raise SystemExit("benchmark execution currently requires macOS sandbox-exec")
-    output = args.output or Path("/tmp") / f"ctx-ab-{datetime.now(UTC):%Y%m%dT%H%M%SZ}"
+    repository_state = collect_repository_state()
+    try:
+        require_clean_production_repository(
+            repository_state,
+            live=args.engine == PRODUCTION_CATALOG_ENGINE and not args.dry_run,
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    run_name = f"ctx-ab-{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{secrets.token_hex(4)}"
+    output = args.output or (
+        PRODUCTION_PRIVATE_RUN_ROOT / run_name
+        if args.engine == PRODUCTION_CATALOG_ENGINE
+        else Path("/tmp") / run_name
+    )
+    if args.engine == PRODUCTION_CATALOG_ENGINE:
+        try:
+            output = _validate_production_output_path(output)
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
+        PRODUCTION_PRIVATE_RUN_ROOT.mkdir(
+            mode=stat.S_IRWXU,
+            parents=True,
+            exist_ok=True,
+        )
+        PRODUCTION_PRIVATE_RUN_ROOT.chmod(stat.S_IRWXU)
     if output.exists() and any(output.iterdir()):
         raise SystemExit(f"output directory must be empty: {output}")
-    output.mkdir(parents=True, exist_ok=True)
+    output.mkdir(mode=stat.S_IRWXU, parents=True, exist_ok=True)
+    if args.engine == PRODUCTION_CATALOG_ENGINE:
+        output.chmod(stat.S_IRWXU)
     incidents = IncidentLog(output / "incidents.csv")
     arms = arms_for_mode(args.arm)
-    if args.engine == "production-ctx-run" and "ctx-full" in arms:
-        raise SystemExit("production-ctx-run supports only baseline, ctx-light, or both")
+    if args.engine in {"production-ctx-run", PRODUCTION_CATALOG_ENGINE} and "ctx-full" in arms:
+        raise SystemExit(f"{args.engine} supports only baseline, ctx-light, or both")
+    if args.engine == PRODUCTION_CATALOG_ENGINE and args.retries:
+        raise SystemExit(
+            f"{PRODUCTION_CATALOG_ENGINE} currently requires --retries 0: repair retries "
+            "must continue from the prior workspace with evaluator failure evidence; "
+            "fresh silent retries are an explicit follow-up blocker"
+        )
     if (
         args.engine == "production-ctx-run"
         and args.api_key_env
@@ -2937,6 +4515,22 @@ def main(argv: list[str] | None = None) -> int:
         and not args.dry_run
     ):
         raise SystemExit(f"provider key environment variable is not set: {args.api_key_env}")
+    catalog_snapshot: CatalogSnapshot | None = None
+    if args.engine == PRODUCTION_CATALOG_ENGINE:
+        try:
+            catalog_snapshot = prepare_production_catalog(args.cache_root)
+        except Exception as exc:  # noqa: BLE001 - persist catalog install failures.
+            incidents.add(
+                scenario="control",
+                arm="control",
+                attempt=1,
+                stage="production-catalog-cache",
+                message=type(exc).__name__,
+                evidence=str(exc),
+            )
+            write_summary(output, [])
+            print(output)
+            return 1
     schedule = trial_schedule(scenarios, arms, args.trials)
     write_environment_manifest(
         output=output,
@@ -2959,8 +4553,23 @@ def main(argv: list[str] | None = None) -> int:
             "dry_run": args.dry_run,
             "cache_root": str(args.cache_root),
             "scenario_filters": list(args.scenario),
+            "catalog_provenance": (
+                catalog_snapshot.provenance if catalog_snapshot is not None else None
+            ),
+            "catalog_cache_hit": (
+                catalog_snapshot.cache_hit if catalog_snapshot is not None else None
+            ),
+            "catalog_prepare_seconds": (
+                round(catalog_snapshot.prepare_seconds, 6) if catalog_snapshot is not None else None
+            ),
+            "repair_policy": (
+                "fail_closed_no_retries"
+                if args.engine == PRODUCTION_CATALOG_ENGINE
+                else "engine_default"
+            ),
         },
         schedule=schedule,
+        repository_state=repository_state,
     )
     results: list[dict[str, Any]] = []
     schedule_by_key = {
@@ -3045,6 +4654,22 @@ def main(argv: list[str] | None = None) -> int:
                                 timeout=args.timeout,
                                 dry_run=args.dry_run,
                                 incidents=incidents,
+                                catalog_snapshot=(
+                                    catalog_snapshot
+                                    if args.engine == PRODUCTION_CATALOG_ENGINE
+                                    else None
+                                ),
+                                forbidden_agent_reads=(
+                                    {
+                                        "scenario_source": args.scenarios.resolve(),
+                                        "evaluator_control": output
+                                        / scenario.id
+                                        / "controls"
+                                        / "control.json",
+                                    }
+                                    if args.engine == PRODUCTION_CATALOG_ENGINE and not args.dry_run
+                                    else None
+                                ),
                             )
                     except Exception as exc:  # noqa: BLE001 - persist harness failures.
                         incidents.add(

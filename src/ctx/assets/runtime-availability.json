@@ -16,7 +16,7 @@
         "label": "ctx-python-testing",
         "title": "ctx Python Testing",
         "type": "skill",
-        "description": "Project-owned local Python testing workflow for focused regressions and configured quality gates.",
+        "description": "Project-owned context-efficient Python workflow for focused regressions and configured quality gates.",
         "tags": ["ctx", "python", "testing", "pytest", "local", "no-api-key"],
         "source": "ctx-runtime-availability",
         "source_keys": ["https://github.com/stevesolun/ctx"],
@@ -106,7 +106,7 @@
       "files": [
         {
           "path": "converted/ctx-python-testing/SKILL.md",
-          "content": "---\nname: ctx-python-testing\ndescription: Project-owned local Python testing with pytest, focused regressions, and configured quality gates.\nsource: ctx-runtime-availability\nlicense: MIT\nrequires_api_keys: false\n---\n\n# ctx Python Testing\n\nUse this skill for local Python test design and failure diagnosis.\n\n1. Read the behavior and nearby tests before changing code.\n2. Reproduce the failure with the narrowest deterministic pytest case.\n3. Implement the smallest behavior-preserving fix.\n4. Run the focused test, affected subsystem, and configured quality gates.\n5. Keep fixtures isolated from network and wall-clock dependencies.\n"
+          "content": "---\nname: ctx-python-testing\ndescription: Project-owned context-efficient Python testing with focused regressions and quality gates.\nsource: ctx-runtime-availability\nlicense: MIT\nrequires_api_keys: false\n---\n\n# ctx Python Testing\n\nKeep Python changes correct without bloating the working context.\n\n1. Search only task-relevant symbols and roots. Never combine explicit roots with `.` or dump the full repository; narrow or cap large results.\n2. Read the implementation and nearest tests before changing code.\n3. Reproduce failures with the narrowest deterministic pytest case.\n4. For environment-sensitive behavior, explicitly control the relevant variables.\n5. Run the affected suite and configured gates; avoid network and wall-clock dependencies.\n"
         }
       ]
     },
