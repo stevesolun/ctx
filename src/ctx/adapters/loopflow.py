@@ -553,6 +553,16 @@ def _is_loadable_skill_row(row: dict[str, Any]) -> bool:
     return _is_local_loadable_skill_row(row)
 
 
+def _is_actionable_capability_row(row: dict[str, Any]) -> bool:
+    if "installable" not in row and "load_status" not in row:
+        return True
+    if row.get("installable") is True:
+        return True
+    return row.get("load_status") == "external-install-required" and bool(
+        str(row.get("install_command") or "").strip()
+    )
+
+
 def _selection_key(value: str) -> str:
     item = value.strip().lower()
     if item.startswith("mcp:"):
@@ -640,6 +650,8 @@ def _filter_related_rows(
         if identity in seen:
             continue
         if _row_selection_keys(row, name) & excluded_keys:
+            continue
+        if not _is_actionable_capability_row(row):
             continue
         if group == "skills" and local_loadable_skills_only and not _is_loadable_skill_row(row):
             continue
@@ -800,6 +812,7 @@ def _recommend_capability_rows(
         return []
     from ctx_config import cfg  # noqa: PLC0415
 
+    wiki_dir = ctx_api.default_wiki_dir()
     raw_rows = recommend_by_tags(
         graph,
         tags,
@@ -807,8 +820,10 @@ def _recommend_capability_rows(
         query=query,
         entity_types=tuple(entity_types),
         min_normalized_score=cfg.recommendation_min_normalized_score,
+        candidate_filter=lambda row: _is_actionable_capability_row(
+            _capability_row(dict(row), wiki_dir=wiki_dir)
+        ),
     )
-    wiki_dir = ctx_api.default_wiki_dir()
     rows = [_capability_row(row, wiki_dir=wiki_dir) for row in raw_rows]
     recommendation_context = _loop_recommendation_context(
         query,

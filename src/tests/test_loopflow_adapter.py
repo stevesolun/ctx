@@ -20,6 +20,7 @@ from ctx.adapters.generic.ctx_core_tools import (
 )
 from ctx.adapters.generic.providers import ToolCall
 from ctx.adapters import loopflow
+from ctx.core.entity_types import entity_page_path
 
 
 _EXPECTED_READ_ONLY_MCP_TOOL_NAMES = [
@@ -831,6 +832,14 @@ def test_real_capability_rows_receive_stable_ids(
 ) -> None:
     graph = nx.Graph()
     graph.add_node("skill:one", label="one", type="skill", tags=["local"])
+    skill_body = tmp_path / "converted" / "testing" / "SKILL.md"
+    skill_body.parent.mkdir(parents=True)
+    skill_body.write_text("# Testing\n", encoding="utf-8")
+    for entity_type, slug in (("agent", "reviewer"), ("mcp-server", "filesystem")):
+        page = entity_page_path(tmp_path, entity_type, slug)
+        assert page is not None
+        page.parent.mkdir(parents=True, exist_ok=True)
+        page.write_text(f"# {slug}\n", encoding="utf-8")
     monkeypatch.setattr(loopflow, "_recommendation_graph", lambda: graph)
     monkeypatch.setattr(loopflow.ctx_api, "default_wiki_dir", lambda: tmp_path)
     monkeypatch.setattr(loopflow, "query_to_tags", lambda query: ["local"])
@@ -855,6 +864,56 @@ def test_real_capability_rows_receive_stable_ids(
         "agent:reviewer",
         "mcp-server:filesystem",
     ]
+
+
+def test_capability_rows_filter_unavailable_before_ranking(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    graph = nx.Graph()
+    graph.add_node("skill:one", label="one", type="skill", tags=["python"])
+    agent_page = entity_page_path(tmp_path, "agent", "local-reviewer")
+    assert agent_page is not None
+    agent_page.parent.mkdir(parents=True)
+    agent_page.write_text("# Local reviewer\n", encoding="utf-8")
+    candidates = [
+        {
+            "name": "missing-reviewer",
+            "type": "agent",
+            "score": 100,
+        },
+        {
+            "name": "external-python",
+            "type": "skill",
+            "score": 90,
+            "status": "available",
+            "install_command": "ctx-skill-install external-python",
+        },
+        {
+            "name": "local-reviewer",
+            "type": "agent",
+            "score": 80,
+        },
+    ]
+
+    def fake_recommend_by_tags(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        del args
+        candidate_filter = kwargs["candidate_filter"]
+        return [row for row in candidates if candidate_filter(row)][: kwargs["top_n"]]
+
+    monkeypatch.setattr(loopflow, "_recommendation_graph", lambda: graph)
+    monkeypatch.setattr(loopflow.ctx_api, "default_wiki_dir", lambda: tmp_path)
+    monkeypatch.setattr(loopflow, "query_to_tags", lambda query: ["python"])
+    monkeypatch.setattr(loopflow, "recommend_by_tags", fake_recommend_by_tags)
+
+    rows = loopflow._recommend_capability_rows(
+        "python review",
+        permissions={"skills", "agents"},
+        top_k=1,
+    )
+
+    assert [row["name"] for row in rows] == ["external-python", "local-reviewer"]
+    assert all(row["load_status"] != "not-in-wiki" for row in rows)
 
 
 def test_loopflow_local_no_key_loop_filters_related_recommendations(monkeypatch) -> None:
