@@ -129,7 +129,7 @@ def ensure_graph_store(
 
 def graph_store_stats(db_path: Path) -> dict[str, int]:
     """Return node/edge counts for an existing graph store."""
-    with _connect(db_path) as conn:
+    with closing(open_graph_store_readonly(db_path)) as conn:
         return {
             "nodes": int(conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]),
             "edges": int(conn.execute("SELECT COUNT(*) FROM edges").fetchone()[0]),

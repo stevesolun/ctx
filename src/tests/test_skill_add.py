@@ -129,6 +129,20 @@ for _name in (
         else:
             sys.modules[_name] = original
 
+
+@pytest.fixture(autouse=True)
+def _bind_skill_add_test_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep dependency bindings deterministic when skill_add was imported earlier."""
+    monkeypatch.setattr(_sa, "cfg", _FAKE_CFG)
+    monkeypatch.setattr(_sa, "convert_skill", _fake_batch_convert.convert_skill)
+    monkeypatch.setattr(_sa, "IntakeRejected", RuntimeError)
+    monkeypatch.setattr(_sa, "check_intake", _fake_intake.check_intake)
+    monkeypatch.setattr(_sa, "record_embedding", _fake_intake.record_embedding)
+    monkeypatch.setattr(_sa, "ensure_wiki", _fake_wiki_sync.ensure_wiki)
+    monkeypatch.setattr(_sa, "append_log", _fake_wiki_sync.append_log)
+    monkeypatch.setattr(_sa, "update_index", _fake_wiki_sync.update_index)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

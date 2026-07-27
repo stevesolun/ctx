@@ -564,6 +564,10 @@ def _verify_checked_in_evidence(path_value: str, digest: str, field: str) -> byt
     payload = resolved.read_bytes()
     actual = hashlib.sha256(payload).hexdigest()
     if not secrets.compare_digest(actual, digest):
+        canonical_payload = payload.replace(b"\r\n", b"\n")
+        canonical_actual = hashlib.sha256(canonical_payload).hexdigest()
+        if secrets.compare_digest(canonical_actual, digest):
+            return canonical_payload
         raise LicenseGateError(
             f"{field}: evidence sha256 mismatch; expected={digest}, actual={actual}",
         )

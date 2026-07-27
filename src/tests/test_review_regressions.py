@@ -237,6 +237,7 @@ def test_shared_scanner_does_not_deserialize_graph_before_recommending(
     assert calls
 
 
+@pytest.mark.skipif(os.name == "nt", reason="requires directory-fd filesystem support")
 def test_strix_preflight_rejects_destination_swap(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -291,6 +292,7 @@ def test_strix_preflight_rejects_destination_swap(
     assert outside.read_text(encoding="utf-8") == "sentinel\n"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="requires directory-fd filesystem support")
 def test_skill_snapshot_rejects_file_swap(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -337,9 +339,9 @@ def test_distribution_build_stages_on_output_filesystem(
     real_temporary_directory = reproducible.tempfile.TemporaryDirectory
     staging_parents: list[Path] = []
 
-    def temporary_directory(*args: object, **kwargs: object):
-        staging_parents.append(Path(str(kwargs["dir"])))
-        return real_temporary_directory(*args, **kwargs)
+    def temporary_directory(*, prefix: str, dir: Path):  # noqa: A002
+        staging_parents.append(dir)
+        return real_temporary_directory(prefix=prefix, dir=dir)
 
     def build(command: list[str], **_kwargs: object) -> SimpleNamespace:
         staging = Path(command[command.index("--outdir") + 1])

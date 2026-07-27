@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -2026,8 +2027,17 @@ def test_timeout_reaps_process_group(tmp_path: Path) -> None:
     assert result.timed_out
     if pid_file.exists():
         child_pid = int(pid_file.read_text())
-        with pytest.raises(ProcessLookupError):
-            os.kill(child_pid, 0)
+        if os.name == "nt":
+            listed = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {child_pid}", "/NH"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            assert str(child_pid) not in listed.stdout
+        else:
+            with pytest.raises(ProcessLookupError):
+                os.kill(child_pid, 0)
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="benchmark containment is macOS-only")

@@ -26,6 +26,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -762,10 +763,9 @@ def test_module_and_console_handshakes_have_current_version_and_clean_stderr(
     if entrypoint == "module":
         command = [sys.executable, "-m", "ctx.mcp_server.server"]
     else:
-        script_name = "ctx-mcp-server.exe" if os.name == "nt" else "ctx-mcp-server"
-        console_script = Path(sys.executable).with_name(script_name)
-        assert console_script.is_file()
-        command = [str(console_script)]
+        console_script = shutil.which("ctx-mcp-server")
+        assert console_script is not None
+        command = [console_script]
     env = {
         **os.environ,
         **_mcp_subprocess_env(wiki, graph_path),

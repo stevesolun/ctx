@@ -1394,7 +1394,19 @@ def _event_stat_metadata(
 def _event_file_id(event_stat: os.stat_result | None) -> tuple[int, int]:
     if event_stat is None:
         return 0, 0
-    return int(event_stat.st_dev), int(event_stat.st_ino)
+    return (
+        _stable_sqlite_integer(event_stat.st_dev),
+        _stable_sqlite_integer(event_stat.st_ino),
+    )
+
+
+def _stable_sqlite_integer(value: int) -> int:
+    """Fit platform file identifiers into SQLite's signed 64-bit integer."""
+    normalized = int(value)
+    if -(1 << 63) <= normalized < (1 << 63):
+        return normalized
+    digest = hashlib.sha256(str(normalized).encode("ascii")).digest()
+    return int.from_bytes(digest[:8], "big") & ((1 << 63) - 1)
 
 
 def _stat_time_ns(event_stat: os.stat_result | None, field: str) -> int:

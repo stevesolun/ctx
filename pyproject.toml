@@ -15,7 +15,7 @@ dependencies = [
     "markdown>=3.6,<4",
     "networkx>=3,<4",
     "numpy>=1.24,<3",
-    "pymdown-extensions>=10,<11",
+    "pymdown-extensions>=11,<12",
     "pyyaml>=6,<7",
 ]
 
@@ -102,7 +102,7 @@ dev = [
     "mypy>=1.8",
     "numpy<2.5",
     "types-PyYAML>=6.0",
-    "ruff>=0.4",
+    "ruff==0.15.20",
 ]
 browser = [
     "playwright>=1.52",
@@ -111,7 +111,8 @@ viz = [
     "plotly>=5,<7",
 ]
 embeddings = [
-    "sentence-transformers>=2,<4",
+    "sentence-transformers>=5.5,<6",
+    "transformers>=5.3,<6",
     "torch>=2,<3",
 ]
 ann = [
@@ -129,10 +130,9 @@ harness = [
     # dep optional means users who only want the Claude Code
     # integration (ctx-skill-install, the hooks pipeline) don't pay
     # the LiteLLM dependency-tree cost.
-    # LiteLLM 1.83.x pins click==8.1.8. Typer 0.17+ requires newer
-    # click, so cap Typer for users who install [embeddings,harness]
-    # together through sentence-transformers/transformers.
-    "click==8.1.8",
+    # Keep Click on a patched release while remaining compatible with
+    # current LiteLLM and the intentionally capped Typer CLI surface.
+    "click>=8.3.3,<9",
     "typer>=0.16,<0.17",
     "litellm>=1.40,<2",
 ]

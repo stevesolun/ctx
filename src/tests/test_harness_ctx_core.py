@@ -2650,6 +2650,7 @@ class TestRecommendBundle:
             store.recommendation_rejections(session_id="private-index")
         assert victim.read_bytes() == b"untouched"
 
+    @pytest.mark.no_cover
     def test_rejection_index_100k_session_hot_path_budget(self, tmp_path: Path) -> None:
         from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
 

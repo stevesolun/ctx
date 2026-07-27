@@ -89,6 +89,7 @@ def install_skill(source: Path, skills_dir: Path, name: str) -> Path:
 
 
 def _read_skill_snapshot(source: Path) -> str:
+    reject_symlink_path(source)
     with secure_directory(source.parent) as directory:
         return directory.read_text(
             source.name,

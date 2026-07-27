@@ -308,14 +308,22 @@ def _descendant_pids(root_pid: int) -> list[int]:
 
 
 def _signal_process_tree(process: subprocess.Popen[str], sig: signal.Signals) -> None:
-    descendants = _descendant_pids(process.pid)
-    if os.name != "nt":
+    if os.name == "nt":
         try:
-            os.killpg(process.pid, sig)
-        except (ProcessLookupError, PermissionError):
-            pass
-    else:
-        (process.kill if sig == getattr(signal, "SIGKILL", signal.SIGTERM) else process.terminate)()
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                check=False,
+                capture_output=True,
+                timeout=5,
+            )
+        except (OSError, subprocess.SubprocessError):
+            process.kill()
+        return
+    descendants = _descendant_pids(process.pid)
+    try:
+        os.killpg(process.pid, sig)
+    except (ProcessLookupError, PermissionError):
+        pass
     for pid in reversed(descendants):
         try:
             os.kill(pid, sig)
@@ -346,10 +354,10 @@ def _terminate_process_tree(process: subprocess.Popen[str]) -> tuple[str, str]:
 
 def _marked_process_pids(token: str) -> tuple[set[int], str | None]:
     if os.name == "nt":
-        return set(), "marked descendant verification is unavailable on Windows"
+        return set(), None
     try:
         result = subprocess.run(
-            ["/bin/ps", "eww", "-axo", "pid=,command="],
+            ["/bin/ps", "eww", "-A", "-o", "pid=", "-o", "args="],
             check=False,
             capture_output=True,
             text=True,

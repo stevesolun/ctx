@@ -322,8 +322,8 @@ def _read_preflight_destination(
     if _supports_windows_path_guards():
         if not _validate_real_directory(target_root, label="target directory"):
             return None, None, None
-        parent_metadata = _lstat_optional(destination.parent)
-        if parent_metadata is None:
+        windows_parent_metadata = _lstat_optional(destination.parent)
+        if windows_parent_metadata is None:
             return None, None, None
         with _guard_windows_directories(
             target_root,
@@ -331,11 +331,11 @@ def _read_preflight_destination(
             create_missing=False,
         ):
             guarded_parent = destination.parent.stat(follow_symlinks=False)
-            if not os.path.samestat(parent_metadata, guarded_parent):
+            if not os.path.samestat(windows_parent_metadata, guarded_parent):
                 raise ValueError(f"skill dir {destination.parent} changed while opening")
             metadata = _lstat_optional(destination)
             if metadata is None:
-                return _identity(parent_metadata), None, None
+                return _identity(windows_parent_metadata), None, None
             if (
                 stat.S_ISLNK(metadata.st_mode)
                 or _is_reparse_point(destination, metadata)
@@ -349,7 +349,7 @@ def _read_preflight_destination(
                     raise ValueError(f"destination {destination} changed while opening")
                 with os.fdopen(fd, "r", encoding="utf-8") as handle:
                     fd = -1
-                    return _identity(parent_metadata), metadata, handle.read()
+                    return _identity(windows_parent_metadata), metadata, handle.read()
             finally:
                 if fd != -1:
                     os.close(fd)
@@ -403,10 +403,13 @@ def _prepare_entry(entry: dict, manifest: dict, target_dir: Path) -> PreparedEnt
     content = header + body
 
     parent_is_symlink = skill_dir.is_symlink()
-    parent_identity, destination_metadata, existing = _read_preflight_destination(
-        target_resolved,
-        dest,
-    )
+    if parent_is_symlink:
+        parent_identity, destination_metadata, existing = None, None, None
+    else:
+        parent_identity, destination_metadata, existing = _read_preflight_destination(
+            target_resolved,
+            dest,
+        )
     existed = destination_metadata is not None
     destination_identity = None if destination_metadata is None else _identity(destination_metadata)
     destination_link_count = 0 if destination_metadata is None else destination_metadata.st_nlink

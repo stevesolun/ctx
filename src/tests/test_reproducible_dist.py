@@ -402,6 +402,37 @@ def test_overlay_rejects_ignored_symlink_parent_escape(
     assert not (snapshot / "pkg" / "data.txt").exists()
 
 
+def test_git_tree_export_disables_lfs_smudging(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        captured["command"] = command
+        captured["env"] = kwargs["env"]
+        return subprocess.CompletedProcess(command, 0, stderr=b"")
+
+    def fake_extract(_archive: Path, target: Path) -> None:
+        (target / "source").mkdir()
+
+    monkeypatch.setattr(reproducible.subprocess, "run", fake_run)
+    monkeypatch.setattr(reproducible, "_extract_git_archive", fake_extract)
+
+    source = reproducible._export_git_tree(tmp_path, "HEAD", tmp_path / "snapshot")
+
+    assert source == tmp_path / "snapshot" / "source"
+    assert captured["command"] == [
+        "git",
+        "archive",
+        "--format=tar",
+        "--prefix=source/",
+        "HEAD",
+    ]
+    assert isinstance(captured["env"], dict)
+    assert captured["env"]["GIT_LFS_SKIP_SMUDGE"] == "1"
+
+
 @pytest.mark.integration
 def test_two_current_worktree_builds_are_byte_identical(tmp_path: Path) -> None:
     if importlib.util.find_spec("build") is None:
