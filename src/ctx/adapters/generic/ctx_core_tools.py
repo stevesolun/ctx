@@ -137,12 +137,45 @@ _LOCAL_CODE_QUERY_MARKERS = (
     "feature implementation",
     "codex cli",
 )
-_NO_API_KEY_QUERY_MARKERS = (
-    "no api keys",
-    "no local api keys",
-    "without api keys",
-    "no external api",
+_NO_API_KEY_CONSTRAINT_RE = re.compile(
+    r"\b(?:"
+    r"(?:no|without(?:\s+(?:an?|any))?)\s+(?:local\s+)?api(?:[\s-]+)keys?"
+    r"|(?:no|without)\s+external\s+apis?"
+    r")\b",
+    re.IGNORECASE,
 )
+_API_KEY_OBSERVATION_AUXILIARIES = frozenset(
+    {
+        "are",
+        "be",
+        "been",
+        "being",
+        "can",
+        "could",
+        "get",
+        "gets",
+        "got",
+        "is",
+        "may",
+        "might",
+        "must",
+        "should",
+        "was",
+        "were",
+        "will",
+        "would",
+    }
+)
+_API_KEY_OBSERVATION_TOKEN_RE = re.compile(
+    r"^(?:"
+    r"expos(?:e|es|ed|ing|ure)"
+    r"|leak(?:s|ed|ing|age)?"
+    r"|log(?:s|ged|ging)?"
+    r"|print(?:s|ed|ing)?"
+    r"|stor(?:e|es|ed|ing|age)"
+    r")$"
+)
+_API_KEY_OBSERVATION_MODIFIERS = frozenset({"ever", "never", "not"})
 _EXTERNAL_SERVICE_TOKENS = {
     "anthropic",
     "aws",
@@ -193,7 +226,8 @@ _RESPONSE_FORMAT_PROPERTY = {
 FileSignature = tuple[int, int, str]
 PackSignature = tuple[tuple[str, FileSignature | None], ...]
 GraphSignature = tuple[FileSignature | None, FileSignature | None, PackSignature]
-PageSignature = tuple[int, int, int, PackSignature]
+RuntimePageSignature = tuple[tuple[str, bool], ...]
+PageSignature = tuple[int, int, int, PackSignature, RuntimePageSignature]
 
 
 def _response_format_from_args(args: Mapping[str, Any]) -> str:
@@ -976,6 +1010,7 @@ class CtxCoreToolbox:
         if not baseline_context and not include_baseline:
             baseline_context = list(_DEFAULT_BASELINE_CONTEXT)
         recommendation_context = _recommendation_context_from_args(query, args)
+        wiki_dir = self._wiki_dir_resolved()
         external_catalog_path = self._external_catalog_path()
 
         graph: Any | None = None
@@ -1007,7 +1042,6 @@ class CtxCoreToolbox:
                             + active_context
                             + ([] if include_baseline else baseline_context)
                         )
-                        raw_top_n = min(50, top_k + len(excluded) + 25)
                         from ctx.core.resolve.recommendations import (  # noqa: PLC0415
                             recommend_by_tags_indexed,
                         )
@@ -1015,11 +1049,17 @@ class CtxCoreToolbox:
                         indexed_result = recommend_by_tags_indexed(
                             index_path,
                             tags,
-                            top_n=raw_top_n,
+                            top_n=top_k,
                             query=query,
                             entity_types=entity_types,
                             min_normalized_score=cfg.recommendation_min_normalized_score,
                             external_catalog_path=external_catalog_path,
+                            candidate_filter=lambda row: _recommendation_candidate_allowed(
+                                row,
+                                wiki_dir=wiki_dir,
+                                excluded=excluded,
+                                context=recommendation_context,
+                            ),
                         )
                         if indexed_result is not None and indexed_result[1] > 0:
                             raw = indexed_result[0]
@@ -1041,19 +1081,23 @@ class CtxCoreToolbox:
                 + active_context
                 + ([] if include_baseline else baseline_context)
             )
-            raw_top_n = min(50, top_k + len(excluded) + 25)
             raw = recommend_by_tags(
                 graph,
                 tags,
-                top_n=raw_top_n,
+                top_n=top_k,
                 query=query,
                 entity_types=entity_types,
                 min_normalized_score=cfg.recommendation_min_normalized_score,
                 use_semantic_query=use_semantic_query,
                 semantic_cache_dir=semantic_cache_dir,
+                candidate_filter=lambda row: _recommendation_candidate_allowed(
+                    row,
+                    wiki_dir=wiki_dir,
+                    excluded=excluded,
+                    context=recommendation_context,
+                ),
             )
         results: list[dict[str, Any]] = []
-        wiki_dir = self._wiki_dir_resolved()
         for r in raw:
             row = _with_recommendation_selection_metadata(
                 _base_recommendation_row(r, wiki_dir=wiki_dir)
@@ -1892,7 +1936,15 @@ def _wiki_pages_signature(wiki: Path) -> PageSignature:
             count += 1
             newest = max(newest, stat.st_mtime_ns)
             total_size += stat.st_size
-    return count, newest, total_size, _pack_dir_signature(wiki / "wiki-packs")
+    from ctx.core.wiki.wiki_query import _runtime_availability_page_signature  # noqa: PLC0415
+
+    return (
+        count,
+        newest,
+        total_size,
+        _pack_dir_signature(wiki / "wiki-packs"),
+        _runtime_availability_page_signature(wiki),
+    )
 
 
 def _semantic_cache_signature(
@@ -2112,9 +2164,7 @@ def _recommendation_context_from_args(query: str, args: Mapping[str, Any]) -> di
     include_unavailable = bool(_optional_bool(args.get("include_unavailable")) or False)
     return {
         "no_api_keys": (
-            no_api_keys
-            if no_api_keys is not None
-            else any(marker in query_lower for marker in _NO_API_KEY_QUERY_MARKERS)
+            no_api_keys if no_api_keys is not None else _infer_no_api_keys_constraint(query)
         ),
         "local_code_task": (
             local_code_task
@@ -2124,6 +2174,51 @@ def _recommendation_context_from_args(query: str, args: Mapping[str, Any]) -> di
         "language": language,
         "include_unavailable": include_unavailable,
     }
+
+
+def _infer_no_api_keys_constraint(query: str) -> bool:
+    """Infer a keyless runtime constraint without treating privacy prose as one."""
+    for match in _NO_API_KEY_CONSTRAINT_RE.finditer(query):
+        if not _is_api_key_observation_tail(query[match.end() :]):
+            return True
+    return False
+
+
+def _is_api_key_observation_tail(value: str) -> bool:
+    tokens = re.findall(r"[a-z]+", value.lower())[:8]
+    if not tokens:
+        return False
+    if _API_KEY_OBSERVATION_TOKEN_RE.fullmatch(tokens[0]):
+        return True
+    if tokens[0] not in _API_KEY_OBSERVATION_AUXILIARIES:
+        return False
+    for token in tokens[1:]:
+        if _API_KEY_OBSERVATION_TOKEN_RE.fullmatch(token):
+            return True
+        if (
+            token in _API_KEY_OBSERVATION_AUXILIARIES
+            or token in _API_KEY_OBSERVATION_MODIFIERS
+            or token.endswith("ly")
+        ):
+            continue
+        return False
+    return False
+
+
+def _recommendation_candidate_allowed(
+    row: Mapping[str, Any],
+    *,
+    wiki_dir: Path | None,
+    excluded: set[str],
+    context: Mapping[str, Any],
+) -> bool:
+    candidate = _base_recommendation_row(row, wiki_dir=wiki_dir)
+    candidate_keys = _recommendation_selection_keys(
+        [_recommendation_identity(candidate), str(candidate.get("name") or "")]
+    )
+    return not (candidate_keys & excluded) and (
+        _recommendation_context_skip_reason(candidate, context) is None
+    )
 
 
 def _normalize_language_hint(value: str | None) -> str | None:

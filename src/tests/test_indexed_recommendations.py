@@ -172,6 +172,52 @@ def _build_world(
     return wiki, graph_path, index_path, graph
 
 
+def _dispatch_policy_fixture(
+    tmp_path: Path,
+    *,
+    backend: str,
+    graph: nx.Graph,
+    arguments: dict[str, Any],
+    local_skills: tuple[str, ...] = (),
+) -> tuple[dict[str, Any], CtxCoreToolbox]:
+    wiki = tmp_path / "wiki"
+    graph_dir = wiki / "graphify-out"
+    graph_dir.mkdir(parents=True)
+    graph_path = graph_dir / "graph.json"
+    index_path = graph_dir / "graph-store.sqlite3"
+    graph.graph["ctx_graph_path"] = str(graph_path)
+    graph.graph["source_catalog_nodes"] = {"skills.sh": 1}
+    graph_path.write_text(
+        json.dumps(nx.node_link_data(graph, edges="edges")),
+        encoding="utf-8",
+    )
+    build_graph_store_from_graph_dir(graph_dir, index_path)
+    if backend == "graph":
+        index_path.unlink()
+    for slug in local_skills:
+        body = wiki / "converted" / slug / "SKILL.md"
+        body.parent.mkdir(parents=True, exist_ok=True)
+        body.write_text(f"# {slug}\n", encoding="utf-8")
+
+    toolbox = CtxCoreToolbox(
+        wiki_dir=wiki,
+        graph_path=graph_path,
+        lifecycle_dir=tmp_path / "runtime",
+        allowed_entity_types=["skill"],
+    )
+    payload = json.loads(
+        toolbox.dispatch(
+            ToolCall(
+                id=f"policy-{backend}",
+                name="ctx__recommend_bundle",
+                arguments=arguments,
+            )
+        )
+    )
+    assert (toolbox._graph is None) is (backend == "indexed")
+    return payload, toolbox
+
+
 @pytest.mark.parametrize(
     ("query", "entity_types", "minimum"),
     [
@@ -211,6 +257,162 @@ def test_indexed_ranker_matches_networkx_contract(
     actual, node_count = indexed
     assert node_count == graph.number_of_nodes()
     assert actual == expected
+
+
+@pytest.mark.parametrize("backend", ["indexed", "graph"])
+def test_policy_filters_before_normalized_score_threshold(
+    tmp_path: Path,
+    backend: str,
+) -> None:
+    graph = nx.Graph()
+    graph.add_node(
+        "skill:python-testing",
+        label="python-testing",
+        type="skill",
+        tags=["python", "testing"],
+        status="available",
+        source_catalog="skill-index",
+        install_command="ctx-skill-install python-testing",
+    )
+    graph.add_node(
+        "skill:ctx-python-testing",
+        label="ctx-python-testing",
+        type="skill",
+        tags=["python", "testing"],
+        source="ctx-runtime-availability",
+    )
+
+    payload, _ = _dispatch_policy_fixture(
+        tmp_path,
+        backend=backend,
+        graph=graph,
+        arguments={
+            "query": "python testing",
+            "top_k": 1,
+            "local_code_task": True,
+            "no_api_keys": True,
+            "language": "python",
+        },
+        local_skills=("ctx-python-testing",),
+    )
+
+    assert [row["id"] for row in payload["results"]] == ["skill:ctx-python-testing"]
+    assert payload["results"][0]["normalized_score"] == 1.0
+
+
+@pytest.mark.parametrize("backend", ["indexed", "graph"])
+def test_language_policy_backfills_beyond_wrong_language_candidates(
+    tmp_path: Path,
+    backend: str,
+) -> None:
+    graph = nx.Graph()
+    for index in range(60):
+        slug = f"aaa-rust-testing-{index:02d}"
+        graph.add_node(
+            f"skill:{slug}",
+            label=slug,
+            type="skill",
+            tags=["rust", "testing"],
+        )
+    graph.add_node(
+        "skill:zzz-python-testing",
+        label="zzz-python-testing",
+        type="skill",
+        tags=["python", "testing"],
+    )
+
+    payload, _ = _dispatch_policy_fixture(
+        tmp_path,
+        backend=backend,
+        graph=graph,
+        arguments={
+            "query": "testing",
+            "top_k": 1,
+            "language": "python",
+            "include_unavailable": True,
+        },
+    )
+
+    assert [row["id"] for row in payload["results"]] == ["skill:zzz-python-testing"]
+    assert payload["results"][0]["normalized_score"] == 1.0
+
+
+@pytest.mark.parametrize("backend", ["indexed", "graph"])
+def test_selection_policy_backfills_without_fixed_candidate_cap(
+    tmp_path: Path,
+    backend: str,
+) -> None:
+    graph = nx.Graph()
+    selected: list[str] = []
+    for index in range(60):
+        slug = f"aaa-testing-{index:02d}"
+        entity_id = f"skill:{slug}"
+        selected.append(entity_id)
+        graph.add_node(entity_id, label=slug, type="skill", tags=["testing"])
+    graph.add_node(
+        "skill:zzz-testing",
+        label="zzz-testing",
+        type="skill",
+        tags=["testing"],
+    )
+
+    payload, _ = _dispatch_policy_fixture(
+        tmp_path,
+        backend=backend,
+        graph=graph,
+        arguments={
+            "query": "testing",
+            "top_k": 1,
+            "selected": selected,
+            "include_unavailable": True,
+        },
+    )
+
+    assert [row["id"] for row in payload["results"]] == ["skill:zzz-testing"]
+    assert payload["results"][0]["normalized_score"] == 1.0
+
+
+@pytest.mark.parametrize("backend", ["indexed", "graph"])
+def test_natural_python_testing_reaches_local_runtime_skill(
+    tmp_path: Path,
+    backend: str,
+) -> None:
+    graph = nx.Graph()
+    for index in range(60):
+        slug = f"aaa-python-testing-{index:02d}"
+        graph.add_node(
+            f"skill:{slug}",
+            label=slug,
+            type="skill",
+            tags=["python", "testing"],
+            status="available",
+            source_catalog="skill-index",
+            install_command=f"ctx-skill-install {slug}",
+        )
+    graph.add_node(
+        "skill:ctx-python-testing",
+        label="ctx-python-testing",
+        type="skill",
+        tags=["ctx", "local", "no-api-key", "python", "testing"],
+        source="ctx-runtime-availability",
+    )
+
+    payload, _ = _dispatch_policy_fixture(
+        tmp_path,
+        backend=backend,
+        graph=graph,
+        arguments={
+            "query": "python testing",
+            "top_k": 1,
+            "local_code_task": True,
+            "no_api_keys": True,
+            "language": "python",
+        },
+        local_skills=("ctx-python-testing",),
+    )
+
+    assert [row["id"] for row in payload["results"]] == ["skill:ctx-python-testing"]
+    assert payload["results"][0]["installable"] is True
 
 
 def test_indexed_aliases_match_graph_identity_rules(tmp_path: Path) -> None:

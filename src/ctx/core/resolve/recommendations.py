@@ -11,7 +11,7 @@ import weakref
 from collections import defaultdict
 from contextlib import closing
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Mapping
 
 
 _INDEXED_RECOMMENDATION_GRAPH_MARKER = object()
@@ -360,6 +360,7 @@ def recommend_by_tags_indexed(
     entity_types: tuple[str, ...] | set[str] | None = None,
     min_normalized_score: float = 0.0,
     external_catalog_path: Path | None = None,
+    candidate_filter: Callable[[Mapping[str, Any]], bool] | None = None,
 ) -> tuple[list[dict[str, Any]], int] | None:
     """Rank from a validated graph-store snapshot without loading graph JSON.
 
@@ -406,6 +407,7 @@ def recommend_by_tags_indexed(
             min_normalized_score=min_normalized_score,
             use_semantic_query=False,
             external_catalog_path=external_catalog_path,
+            candidate_filter=candidate_filter,
         ),
         total_nodes,
     )
@@ -644,6 +646,7 @@ def recommend_by_tags(
     semantic_weight: float = 100.0,
     use_semantic_query: bool = False,
     external_catalog_path: Path | None = None,
+    candidate_filter: Callable[[Mapping[str, Any]], bool] | None = None,
 ) -> list[dict[str, Any]]:
     """Rank graph entities by name match, tag overlap, and graph degree.
 
@@ -757,64 +760,62 @@ def recommend_by_tags(
             item[2],
         ),
     )
-    top_score = ranked[0][1] if ranked else 0.0
-    graph_results: list[dict[str, Any]] = []
+    graph_candidates: list[tuple[float, dict[str, Any]]] = []
     for label, score, _node_id, node_data, matching_tags, node_tags in ranked:
-        normalized_score = round(score / top_score, 4) if top_score else 0.0
-        if normalized_score < min_score:
+        row = {
+            "name": _public_label(label),
+            "type": node_data.get("type", "skill"),
+            "score": round(score, 1),
+            "normalized_score": 0.0,
+            "matching_tags": sorted(matching_tags),
+            "tags": sorted(node_tags),
+            "external": node_data.get("external", False),
+            "external_catalog": node_data.get("external_catalog"),
+            "source_catalog": _public_source_catalog(node_data.get("source_catalog")),
+            "status": _public_status(node_data.get("status")),
+            "never_load": _truthy_flag(node_data.get("never_load")),
+            "source": node_data.get("source"),
+            "skill_id": node_data.get("skill_id"),
+            "installs": _safe_int(node_data.get("installs")),
+            "detail_url": node_data.get("detail_url"),
+            "install_command": node_data.get("install_command"),
+            "category": node_data.get("category"),
+            "invoke_command": node_data.get("invoke_command"),
+            "security_review": node_data.get("security_review"),
+        }
+        if candidate_filter is not None and not candidate_filter(row):
             continue
-        graph_results.append(
-            {
-                "name": _public_label(label),
-                "type": node_data.get("type", "skill"),
-                "score": round(score, 1),
-                "normalized_score": normalized_score,
-                "matching_tags": sorted(matching_tags),
-                "tags": sorted(node_tags),
-                "external": node_data.get("external", False),
-                "external_catalog": node_data.get("external_catalog"),
-                "source_catalog": _public_source_catalog(node_data.get("source_catalog")),
-                "status": _public_status(node_data.get("status")),
-                "never_load": _truthy_flag(node_data.get("never_load")),
-                "source": node_data.get("source"),
-                "skill_id": node_data.get("skill_id"),
-                "installs": _safe_int(node_data.get("installs")),
-                "detail_url": node_data.get("detail_url"),
-                "install_command": node_data.get("install_command"),
-                "category": node_data.get("category"),
-                "invoke_command": node_data.get("invoke_command"),
-                "security_review": node_data.get("security_review"),
-            }
-        )
-        if len(graph_results) >= top_n:
+        graph_candidates.append((score, row))
+        if len(graph_candidates) >= top_n:
             break
-    external_results: list[dict[str, Any]] = []
+    external_candidates: list[tuple[float, dict[str, Any]]] = []
     include_external_skills = entity_type_filter is None or "skill" in entity_type_filter
     if include_external_skills and not _graph_has_external_catalog_nodes(graph, "skills.sh"):
-        external_results = _recommend_external_catalog(
+        external_candidates = _recommend_external_catalog(
             graph,
             signals,
             top_n=top_n,
             query=query,
             catalog_path=external_catalog_path,
+            candidate_filter=candidate_filter,
         )
-    if not external_results:
-        return graph_results
     merged = sorted(
-        [*graph_results, *external_results],
+        [*graph_candidates, *external_candidates],
         key=lambda item: (
-            -float(item.get("score", 0.0)),
-            str(item.get("type", "skill")),
-            str(item.get("name", "")).lower(),
+            -item[0],
+            str(item[1].get("type", "skill")),
+            str(item[1].get("name", "")).lower(),
         ),
     )
-    merged_top = float(merged[0].get("score", 0.0)) if merged else 0.0
+    merged_top = merged[0][0] if merged else 0.0
     filtered: list[dict[str, Any]] = []
     if merged_top > 0:
-        for item in merged:
-            item["normalized_score"] = round(float(item.get("score", 0.0)) / merged_top, 4)
-            if float(item["normalized_score"]) >= min_score:
-                filtered.append(item)
+        for score, item in merged:
+            normalized_score = round(score / merged_top, 4)
+            if normalized_score >= min_score:
+                result = dict(item)
+                result["normalized_score"] = normalized_score
+                filtered.append(result)
             if len(filtered) >= top_n:
                 break
     return filtered
@@ -879,7 +880,8 @@ def _recommend_external_catalog(
     top_n: int,
     query: str | None,
     catalog_path: Path | None,
-) -> list[dict[str, Any]]:
+    candidate_filter: Callable[[Mapping[str, Any]], bool] | None = None,
+) -> list[tuple[float, dict[str, Any]]]:
     """Rank shipped skill-index entries alongside graph entities.
 
     These entries carry install instructions and detail URLs,
@@ -921,9 +923,10 @@ def _recommend_external_catalog(
             continue
         scored.append((score, skill, matching, tags))
 
-    ranked = sorted(scored, key=lambda item: -item[0])[:top_n]
-    return [
-        {
+    ranked = sorted(scored, key=lambda item: -item[0])
+    results: list[tuple[float, dict[str, Any]]] = []
+    for score, skill, matching, tags in ranked:
+        row = {
             "name": str(skill.get("id") or skill.get("name") or ""),
             "type": "skill",
             "score": round(score, 1),
@@ -943,8 +946,12 @@ def _recommend_external_catalog(
             "invoke_command": skill.get("invoke_command"),
             "security_review": skill.get("security_review"),
         }
-        for score, skill, matching, tags in ranked
-    ]
+        if candidate_filter is not None and not candidate_filter(row):
+            continue
+        results.append((score, row))
+        if len(results) >= top_n:
+            break
+    return results
 
 
 def _safe_int(value: Any) -> int:

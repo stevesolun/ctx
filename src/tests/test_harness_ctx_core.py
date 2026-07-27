@@ -403,6 +403,62 @@ def test_wiki_page_cache_reloads_when_wiki_pack_overlay_changes(tmp_path: Path) 
     assert second["results"][0]["slug"] == "pack-skill"
 
 
+def test_wiki_page_cache_reloads_for_attested_runtime_availability_page(
+    tmp_path: Path,
+) -> None:
+    from ctx.core.wiki.wiki_query import _runtime_availability_page_specs
+
+    wiki = tmp_path / "wiki"
+    write_wiki_base_pack(
+        pack_dir=wiki / "wiki-packs" / "base-export-1",
+        pack_id="base-export-1",
+        base_export_id="wiki-export-1",
+        pages={"entities/skills/pack-only.md": "# Pack only\n"},
+    )
+    spec = next(
+        spec
+        for spec in _runtime_availability_page_specs()
+        if spec.entity_type == "skill" and "nullable" in spec.content
+    )
+    source = wiki.joinpath(*spec.source_relpath.split("/"))
+    toolbox = CtxCoreToolbox(wiki_dir=wiki, graph_path=tmp_path / "missing.json")
+
+    before = json.loads(
+        toolbox.dispatch(
+            ToolCall(
+                id="before-runtime-page",
+                name="ctx__wiki_search",
+                arguments={"query": "nullable"},
+            )
+        )
+    )
+    source.parent.mkdir(parents=True)
+    source.write_text(spec.content, encoding="utf-8")
+    after_install = json.loads(
+        toolbox.dispatch(
+            ToolCall(
+                id="after-runtime-page",
+                name="ctx__wiki_search",
+                arguments={"query": "nullable"},
+            )
+        )
+    )
+    source.write_text(spec.content.replace("nullable", "nullablx"), encoding="utf-8")
+    after_tamper = json.loads(
+        toolbox.dispatch(
+            ToolCall(
+                id="after-runtime-tamper",
+                name="ctx__wiki_search",
+                arguments={"query": "nullable"},
+            )
+        )
+    )
+
+    assert before["results"] == []
+    assert [row["slug"] for row in after_install["results"]] == [spec.slug]
+    assert after_tamper["results"] == []
+
+
 def test_semantic_miss_cache_clears_when_embedding_artifacts_change(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1940,6 +1996,19 @@ class TestRecommendBundle:
         assert "skill:local-security" in filtered_ids
         assert "skill:remote-security" not in filtered_ids
 
+        inferred = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="c3",
+                    name="ctx__recommend_bundle",
+                    arguments={"query": "security with no API key", "top_k": 5},
+                )
+            )
+        )
+        inferred_ids = {row["id"] for row in inferred["results"]}
+        assert "skill:local-security" in inferred_ids
+        assert "skill:remote-security" not in inferred_ids
+
     def test_context_policy_starts_one_skill_and_defers_expensive_context(self) -> None:
         results: list[dict[str, Any]] = [
             {"id": "agent:reviewer", "type": "agent", "installable": True},
@@ -2815,6 +2884,63 @@ class TestRecommendBundle:
         assert "skill:generic-api-helper" not in {row["id"] for row in language_result["results"]}
         assert "skill:safe-api-helper" in {row["id"] for row in no_key_result["results"]}
         assert "skill:cloud-helper" not in {row["id"] for row in no_key_result["results"]}
+
+    def test_local_no_key_filters_do_not_starve_runtime_recommendations(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        graph = nx.Graph()
+        for index in range(60):
+            slug = f"aaa-python-testing-{index:02d}"
+            graph.add_node(
+                f"skill:{slug}",
+                label=slug,
+                type="skill",
+                tags=["python", "testing"],
+                status="available",
+                source_catalog="skill-index",
+                install_command=f"ctx-skill-install {slug}",
+            )
+        graph.add_node(
+            "skill:ctx-python-testing",
+            label="ctx-python-testing",
+            type="skill",
+            tags=["ctx", "local", "no-api-key", "python", "testing"],
+            source="ctx-runtime-availability",
+            project_owned=True,
+            requires_api_keys=False,
+        )
+        graph_path = tmp_path / "graph.json"
+        graph_path.write_text(json.dumps(nx.node_link_data(graph, edges="edges")), encoding="utf-8")
+        wiki = tmp_path / "wiki"
+        converted = wiki / "converted" / "ctx-python-testing"
+        converted.mkdir(parents=True)
+        (converted / "SKILL.md").write_text("# ctx Python testing\n", encoding="utf-8")
+        toolbox = CtxCoreToolbox(
+            wiki_dir=wiki,
+            graph_path=graph_path,
+            lifecycle_dir=tmp_path / "runtime",
+        )
+
+        result = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="local-no-key-backfill",
+                    name="ctx__recommend_bundle",
+                    arguments={
+                        "query": "python testing",
+                        "top_k": 1,
+                        "local_code_task": True,
+                        "no_api_keys": True,
+                        "language": "python",
+                    },
+                )
+            )
+        )
+
+        assert [row["id"] for row in result["results"]] == ["skill:ctx-python-testing"]
+        assert result["results"][0]["source"] == "ctx-runtime-availability"
+        assert result["results"][0]["installable"] is True
 
     def test_companion_harnesses_are_separate_from_dev_results(
         self,
