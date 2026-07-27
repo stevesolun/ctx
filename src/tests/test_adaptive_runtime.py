@@ -259,7 +259,10 @@ def test_selector_abstains_on_conflicting_slugs_and_unsafe_yaml(tmp_path: Path) 
 
 
 @pytest.mark.skipif(not _SECURE_DIRFD_READS, reason="secure dir_fd reads unavailable")
-def test_selector_rejects_deep_yaml_within_deadline(tmp_path: Path) -> None:
+def test_selector_rejects_deep_yaml_before_deserialization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     root = tmp_path / "skills"
     path = _write_skill(root, "deep-skill", "temporary")
     nested = "\n".join(f"{'  ' * depth}level_{depth}:" for depth in range(40))
@@ -269,9 +272,21 @@ def test_selector_rejects_deep_yaml_within_deadline(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    started = time.perf_counter()
-    assert select_installed_skill("deep skill", skill_roots=[root]) is None
-    assert time.perf_counter() - started < 0.1
+    def unexpected_safe_load(_frontmatter: str) -> None:
+        raise AssertionError("deep YAML reached safe_load")
+
+    monkeypatch.setattr(
+        "ctx.adapters.generic.adaptive_runtime.yaml.safe_load",
+        unexpected_safe_load,
+    )
+    assert (
+        select_installed_skill(
+            "deep skill",
+            skill_roots=[root],
+            selection_timeout_ms=5_000,
+        )
+        is None
+    )
 
 
 def test_selector_rejects_nonfinite_timeout() -> None:

@@ -1953,7 +1953,7 @@ def completion(**params):
     skill = next(item for item in scenario.context if item["type"] == "skill")
     skill_body = str(skill["body"]).strip()
     assert skill_body not in request_texts[0]
-    assert skill_body in request_texts[1]
+    assert (skill_body in request_texts[1]) is secure_skill_reads_available()
     for evidence in arm_evidence.values():
         provider_provenance = evidence["provider_provenance"]
         assert isinstance(provider_provenance, dict)
