@@ -87,6 +87,7 @@ from dataclasses import dataclass, field
 from typing import Any, BinaryIO, Iterable
 from uuid import uuid4
 
+from ctx import __version__
 from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox
 from ctx.adapters.generic.providers import ToolCall
 from ctx.core.entity_types import RECOMMENDABLE_ENTITY_TYPES, normalize_entity_type
@@ -103,7 +104,7 @@ _logger = logging.getLogger(__name__)
 
 _PROTOCOL_VERSION = "2024-11-05"
 _SERVER_NAME = "ctx-wiki"
-_SERVER_VERSION = "0.1.0"
+_SERVER_VERSION = __version__
 
 
 # JSON-RPC error codes per the MCP / JSON-RPC 2.0 spec.

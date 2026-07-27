@@ -26,12 +26,14 @@ from __future__ import annotations
 import io
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from ctx import __version__
 import ctx.mcp_server.server as mcp_server
 from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox
 from ctx.adapters.generic.tools import (
@@ -249,7 +251,7 @@ class TestInitialize:
         assert "protocolVersion" in result
         assert "capabilities" in result
         assert result["serverInfo"]["name"] == "ctx-wiki"
-        assert "version" in result["serverInfo"]
+        assert result["serverInfo"]["version"] == __version__
 
     def test_tools_capability_declared(self) -> None:
         frames = _drive(_encode_request(1, "initialize", {}))
@@ -718,6 +720,75 @@ class TestMultiRequestSession:
 
 
 # ── Subprocess round-trip via the H2 client ─────────────────────────────────
+
+
+def test_package_reexports_load_server_lazily() -> None:
+    code = "\n".join(
+        [
+            "import sys",
+            "import ctx.mcp_server",
+            "assert 'ctx.mcp_server.server' not in sys.modules",
+            "from ctx.mcp_server import main, run_server",
+            "assert callable(main)",
+            "assert callable(run_server)",
+            "assert 'ctx.mcp_server.server' in sys.modules",
+        ]
+    )
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(
+        part for part in (str(_SRC_DIR), env.get("PYTHONPATH", "")) if part
+    )
+
+    completed = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        check=False,
+        env=env,
+        text=True,
+        timeout=10,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stderr == ""
+
+
+@pytest.mark.parametrize("entrypoint", ["module", "console"])
+def test_module_and_console_handshakes_have_current_version_and_clean_stderr(
+    entrypoint: str,
+    tmp_path: Path,
+) -> None:
+    wiki = TestRoundTripWithH2Client._build_synthetic_wiki(tmp_path)
+    graph_path = TestRoundTripWithH2Client._build_synthetic_graph(tmp_path)
+    if entrypoint == "module":
+        command = [sys.executable, "-m", "ctx.mcp_server.server"]
+    else:
+        script_name = "ctx-mcp-server.exe" if os.name == "nt" else "ctx-mcp-server"
+        console_script = Path(sys.executable).with_name(script_name)
+        assert console_script.is_file()
+        command = [str(console_script)]
+    env = {
+        **os.environ,
+        **_mcp_subprocess_env(wiki, graph_path),
+    }
+
+    completed = subprocess.run(
+        command,
+        input=_encode_request(1, "initialize", {}),
+        capture_output=True,
+        check=False,
+        env=env,
+        timeout=10,
+    )
+
+    assert completed.returncode == 0, completed.stderr.decode("utf-8", errors="replace")
+    assert completed.stderr == b""
+    frames = [
+        json.loads(line) for line in completed.stdout.decode("utf-8").splitlines() if line.strip()
+    ]
+    assert frames[0]["result"]["serverInfo"] == {
+        "name": "ctx-wiki",
+        "version": __version__,
+    }
 
 
 class TestRoundTripWithH2Client:
