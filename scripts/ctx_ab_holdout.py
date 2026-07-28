@@ -61,6 +61,16 @@ def canonical_repo_url(repo: str) -> str:
     return f"https://github.com/{normalized}.git"
 
 
+def _is_canonical_repo_url(value: object) -> bool:
+    if not isinstance(value, str) or not value.startswith("https://github.com/"):
+        return False
+    repo = value.removeprefix("https://github.com/").removesuffix(".git")
+    try:
+        return canonical_repo_url(repo) == value
+    except ValueError:
+        return False
+
+
 def _parse_patch(patch: str) -> tuple[tuple[str, ...], int, str]:
     lines = patch.splitlines()
     paths: list[str] = []
@@ -278,14 +288,40 @@ def validate_reconstructed_test_module(source: str) -> None:
 def select_rows(ledger: list[dict[str, Any]], protocol: dict[str, Any]) -> dict[str, Any]:
     seed = str(protocol["selection_seed"])
     selection_rules = protocol["selection"]
+    strategy = selection_rules.get("strategy", "legacy")
+    legacy_strategy = strategy is None or strategy == "legacy"
+    private_canary = selection_rules.get("private_canary", legacy_strategy)
     required_repositories = int(selection_rules["eligible_repositories_required"])
     candidates_per_repository = int(selection_rules["eligible_candidates_per_repository_required"])
     analysis_repositories = int(selection_rules["analysis_repositories"])
-    if (
-        required_repositories != analysis_repositories + 1
-        or int(selection_rules["analysis_scenarios"]) != analysis_repositories + 1
-    ):
-        raise ValueError("holdout selection cardinalities are inconsistent")
+    analysis_scenarios = int(selection_rules["analysis_scenarios"])
+    if not isinstance(private_canary, bool):
+        raise ValueError("selection.private_canary must be a boolean")
+    if legacy_strategy:
+        if (
+            not private_canary
+            or required_repositories != analysis_repositories + 1
+            or analysis_scenarios != analysis_repositories + 1
+        ):
+            raise ValueError("holdout selection cardinalities are inconsistent")
+    elif strategy == "one-per-repository":
+        if "private_canary" not in selection_rules:
+            raise ValueError("one-per-repository selection requires explicit private_canary")
+        expected_repositories = analysis_repositories + (1 if private_canary else 0)
+        if (
+            analysis_repositories < 1
+            or analysis_scenarios != analysis_repositories
+            or required_repositories != expected_repositories
+            or candidates_per_repository < 1
+        ):
+            raise ValueError(
+                "one-per-repository selection requires analysis_scenarios equal to "
+                "analysis_repositories, eligible_repositories_required equal to "
+                "analysis_repositories plus one when private_canary is true, and "
+                "at least one eligible candidate per repository"
+            )
+    else:
+        raise ValueError(f"unsupported holdout selection strategy: {strategy!r}")
     instance_ids = [str(row.get("instance_id") or "") for row in ledger]
     if len(instance_ids) != len(set(instance_ids)):
         raise ValueError("candidate ledger contains duplicate instance IDs")
@@ -302,7 +338,33 @@ def select_rows(ledger: list[dict[str, Any]], protocol: dict[str, Any]) -> dict[
         key=lambda item: (item[0], item[1]),
     )
     if len(ranked_repositories) < required_repositories:
-        raise ValueError("holdout requires six repositories with at least two eligible rows")
+        count = (
+            "zero",
+            "one",
+            "two",
+            "three",
+            "four",
+            "five",
+            "six",
+            "seven",
+            "eight",
+            "nine",
+            "ten",
+        )
+        required_label = (
+            count[required_repositories]
+            if required_repositories < len(count)
+            else str(required_repositories)
+        )
+        candidate_label = (
+            count[candidates_per_repository]
+            if 0 <= candidates_per_repository < len(count)
+            else str(candidates_per_repository)
+        )
+        raise ValueError(
+            f"holdout requires {required_label} repositories with at least "
+            f"{candidate_label} eligible rows"
+        )
     selected_repositories = ranked_repositories[:required_repositories]
 
     def ranked(repo: str) -> list[dict[str, Any]]:
@@ -312,36 +374,47 @@ def select_rows(ledger: list[dict[str, Any]], protocol: dict[str, Any]) -> dict[
         )
 
     analysis = [ranked(repo)[0] for _, _, repo in selected_repositories[:analysis_repositories]]
-    first_repo_rows = ranked(selected_repositories[0][2])
-    occupied = {
-        *str(first_repo_rows[0]["production_paths"]).split("|"),
-        str(first_repo_rows[0]["test_path"]),
-    }
-    second = next(
-        (
-            row
-            for row in first_repo_rows[1:]
-            if occupied.isdisjoint(
-                {
-                    *str(row["production_paths"]).split("|"),
-                    str(row["test_path"]),
-                }
-            )
-        ),
-        None,
-    )
-    if second is None:
-        raise ValueError("first ranked repository has no disjoint second candidate")
-    analysis.append(second)
-    canary = ranked(selected_repositories[analysis_repositories][2])[0]
+    if legacy_strategy:
+        first_repo_rows = ranked(selected_repositories[0][2])
+        occupied = {
+            *str(first_repo_rows[0]["production_paths"]).split("|"),
+            str(first_repo_rows[0]["test_path"]),
+        }
+        second = next(
+            (
+                row
+                for row in first_repo_rows[1:]
+                if occupied.isdisjoint(
+                    {
+                        *str(row["production_paths"]).split("|"),
+                        str(row["test_path"]),
+                    }
+                )
+            ),
+            None,
+        )
+        if second is None:
+            raise ValueError("first ranked repository has no disjoint second candidate")
+        analysis.append(second)
+    canary_id: str | None = None
+    canary_url: str | None = None
+    if private_canary:
+        canary = ranked(selected_repositories[analysis_repositories][2])[0]
+        analysis_urls = {canonical_repo_url(str(row["repo"])) for row in analysis}
+        canary_url = canonical_repo_url(str(canary["repo"]))
+        canary_id = str(canary["instance_id"])
+        if canary_url in analysis_urls or canary_id in {
+            str(row["instance_id"]) for row in analysis
+        }:
+            raise ValueError("canary must be disjoint from analysis selections")
     return {
         "protocol_id": protocol["protocol_id"],
         "analysis_instance_ids": [row["instance_id"] for row in analysis],
         "analysis_repository_map": {
             str(row["instance_id"]): canonical_repo_url(str(row["repo"])) for row in analysis
         },
-        "canary_instance_id": canary["instance_id"],
-        "canary_repository": canonical_repo_url(str(canary["repo"])),
+        "canary_instance_id": canary_id,
+        "canary_repository": canary_url,
     }
 
 
@@ -353,27 +426,73 @@ def _validated_selection(
     selection: dict[str, Any],
     protocol: dict[str, Any],
 ) -> tuple[list[str], dict[str, str]]:
+    selection_rules = protocol["selection"]
+    strategy = selection_rules.get("strategy", "legacy")
+    legacy_strategy = strategy is None or strategy == "legacy"
+    private_canary = selection_rules.get("private_canary", legacy_strategy)
+    analysis_repositories = int(selection_rules["analysis_repositories"])
+    required_repositories = int(selection_rules["eligible_repositories_required"])
+    analysis_scenarios = int(selection_rules["analysis_scenarios"])
+    candidates_per_repository = int(selection_rules["eligible_candidates_per_repository_required"])
+    if not isinstance(private_canary, bool):
+        raise ValueError("selection.private_canary must be a boolean")
+    if legacy_strategy:
+        if (
+            not private_canary
+            or required_repositories != analysis_repositories + 1
+            or analysis_scenarios != analysis_repositories + 1
+        ):
+            raise ValueError("claim selection cardinalities are inconsistent")
+    elif strategy == "one-per-repository":
+        if "private_canary" not in selection_rules:
+            raise ValueError("claim selection requires explicit private_canary")
+        expected_repositories = analysis_repositories + (1 if private_canary else 0)
+        if (
+            analysis_repositories < 1
+            or analysis_scenarios != analysis_repositories
+            or required_repositories != expected_repositories
+            or candidates_per_repository < 1
+        ):
+            raise ValueError("claim selection cardinalities are inconsistent")
+    else:
+        raise ValueError(f"unsupported holdout selection strategy: {strategy!r}")
     analysis_ids = selection.get("analysis_instance_ids")
     repository_map = selection.get("analysis_repository_map")
     canary_id = selection.get("canary_instance_id")
+    canary_repository = selection.get("canary_repository")
     if (
         selection.get("protocol_id") != protocol["protocol_id"]
         or not isinstance(analysis_ids, list)
         or not all(isinstance(value, str) and value for value in analysis_ids)
-        or len(analysis_ids) != int(protocol["selection"]["analysis_scenarios"])
+        or len(analysis_ids) != analysis_scenarios
         or len(set(analysis_ids)) != len(analysis_ids)
         or not isinstance(repository_map, dict)
         or set(repository_map) != set(analysis_ids)
         or not all(
-            isinstance(key, str) and isinstance(value, str) and value
+            isinstance(key, str) and isinstance(value, str) and _is_canonical_repo_url(value)
             for key, value in repository_map.items()
         )
-        or not isinstance(canary_id, str)
-        or not canary_id
-        or canary_id in repository_map
+        or (
+            strategy == "one-per-repository"
+            and len(set(repository_map.values())) != analysis_repositories
+        )
     ):
         raise ValueError("claim selection is invalid")
-    return [*analysis_ids, canary_id], dict(repository_map)
+    analysis_repository_values = set(repository_map.values())
+    if private_canary:
+        if (
+            not isinstance(canary_id, str)
+            or not canary_id
+            or canary_id in repository_map
+            or not isinstance(canary_repository, str)
+            or not _is_canonical_repo_url(canary_repository)
+            or canary_repository in analysis_repository_values
+        ):
+            raise ValueError("claim selection is invalid")
+        return [*analysis_ids, canary_id], dict(repository_map)
+    if canary_id is not None or canary_repository is not None:
+        raise ValueError("claim selection is invalid")
+    return [*analysis_ids], dict(repository_map)
 
 
 def build_reconstructed_test_attestation(
@@ -511,7 +630,10 @@ def evaluate_repository_claim(
         or control_results.get("guard") != "holdout-control-results-v1"
         or control_results.get("selection_sha256") != selection_sha256
         or control_results.get("scenario_pack_sha256") != scenario_pack_sha256
-        or control_results.get("all_seven_passed") is not True
+        or (
+            control_results.get("all_scenarios_passed", control_results.get("all_seven_passed"))
+            is not True
+        )
         or not isinstance(scenario_results, dict)
         or set(scenario_results) != set(selected_ids)
     ):
