@@ -1,10 +1,9 @@
 # ctx development benchmark
 
-This benchmark runs the same small feature task against pinned Click and Requests
-commits. The model, task, timeout, evaluator, sandbox, and verification stay fixed.
-It is a controlled context-delivery benchmark: scenario-local fixtures isolate the
-effect of selecting and using context. It does not measure production-catalog
-recommendation relevance; that requires a separate real-catalog benchmark.
+The public Click and Requests scenarios are controlled context-delivery checks.
+They keep the model, task, timeout, evaluator, sandbox, and verification fixed.
+Production-catalog runs use the shipped graph with a separately frozen private
+scenario pack; controlled fixtures alone do not measure recommendation relevance.
 
 | Arm | Selected context | Required use |
 | --- | --- | --- |
@@ -51,6 +50,9 @@ filtering to one scenario does not reset it.
 exact terminal-turn tokens when Codex emits them, and separate `recommended_ids`,
 `selected_ids`, and `used_ids`. `performance.json` records paired baseline/light
 ratios and enforces the declared limits when at least six paired trials are run.
+Product-level evidence first collapses trials to scenario medians, then scenarios
+to repository medians. Repeated trials never count as independent repositories.
+The frozen scenario-to-repository map must match every attempt, including retries.
 `environment.json` records the run configuration, schedule, code and scenario
 hashes, dependency inventory, and whether the ctx worktree was clean.
 
@@ -95,3 +97,14 @@ is unchanged and its median paired time and reported-token ratios are at most 1.
 The six-trial command fails when this performance gate fails. Smaller runs remain
 diagnostic and still write paired ratios. Raw model logs can contain repository
 source and local artifact paths; review them before sharing.
+
+A product-pilot verdict estimates the intent-to-treat effect of assigning the
+ctx-light policy. An assignment may deliver context or produce a verified policy
+abstention, so the verdict does not attribute every repository's result to delivered
+context. Eligibility requires at least one verified context delivery overall, six
+scenarios across five independent repositories, six trials per scenario, preserved
+quality, and no repository above the 1.10 non-regression limit. A repository supports
+benefit only when time or uncached tokens improve by at least 15% while the other
+stays within 10%. The exact one-sided support test must pass at `p <= 0.05`;
+otherwise the product verdict is `not_beneficial` or
+`insufficient_cross_repo_evidence`.
