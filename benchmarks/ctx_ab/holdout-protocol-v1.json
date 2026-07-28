@@ -1,8 +1,9 @@
 {
   "schema_version": 1,
   "protocol_id": "production-graph-holdout-v1",
-  "stage": "acquisition-preregistered",
+  "stage": "acquisition-frozen",
   "frozen_at": "2026-07-28T08:12:19Z",
+  "acquisition_frozen_at": "2026-07-28T09:22:10Z",
   "product_inputs": {
     "revision": "44f049fd04e5898382a70c455cb1ed853d26ee26",
     "catalog_archive_sha256": "d4a39836aab5f558b546842580b2e20c523b9a9ab901ed681f84c09b5c4d6515",
@@ -40,9 +41,9 @@
       "difficulty"
     ],
     "canonical_jsonl": "DuckDB read_parquet(file_row_number=true), row_idx 0..499; required string columns in declared order; compact UTF-8 JSON with ensure_ascii=false and LF after every row",
-    "raw_parquet_sha256": null,
-    "selection_jsonl_sha256": null,
-    "duckdb_cli_sha256": null,
+    "raw_parquet_sha256": "a45b1fe4e2f0c8390b2b2938ac83e92ed5979000856808f3679c07812e9e6dcd",
+    "selection_jsonl_sha256": "392529c5e79ca273bf0b073be35169beb68c604a26d9aef5514912fc584fa6cb",
+    "duckdb_cli_sha256": "5f5fafb02b609cdb20d199c06835d095023616e7366033775ba99a6a0b6969f3",
     "acquisition_rule": "download exact revision Parquet and pinned DuckDB gzip; verify both before conversion; rerun conversion after hashes are frozen"
   },
   "execution_inputs": {

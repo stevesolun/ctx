@@ -61,15 +61,25 @@ def test_holdout_protocol_pins_current_product_inputs() -> None:
     product = protocol["product_inputs"]
 
     assert protocol["schema_version"] == 1
-    assert protocol["stage"] == "acquisition-preregistered"
+    assert protocol["stage"] == "acquisition-frozen"
     assert datetime.fromisoformat(protocol["frozen_at"]).tzinfo == UTC
+    assert datetime.fromisoformat(protocol["acquisition_frozen_at"]).tzinfo == UTC
     assert re.fullmatch(r"[0-9a-f]{40}", product["revision"])
     assert SHA256.fullmatch(protocol["selection_seed"])
     assert protocol["universe"]["revision"] == "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
     assert protocol["universe"]["expected_rows"] == 500
-    assert protocol["universe"]["raw_parquet_sha256"] is None
-    assert protocol["universe"]["selection_jsonl_sha256"] is None
-    assert protocol["universe"]["duckdb_cli_sha256"] is None
+    assert (
+        protocol["universe"]["raw_parquet_sha256"]
+        == "a45b1fe4e2f0c8390b2b2938ac83e92ed5979000856808f3679c07812e9e6dcd"
+    )
+    assert (
+        protocol["universe"]["selection_jsonl_sha256"]
+        == "392529c5e79ca273bf0b073be35169beb68c604a26d9aef5514912fc584fa6cb"
+    )
+    assert (
+        protocol["universe"]["duckdb_cli_sha256"]
+        == "5f5fafb02b609cdb20d199c06835d095023616e7366033775ba99a6a0b6969f3"
+    )
     assert set(protocol["execution_inputs"].values()) == {None}
     assert protocol["timeouts"]["control_verification_seconds"] == 900
     assert protocol["universe"]["duckdb_version"] == "v1.5.2"
@@ -507,6 +517,10 @@ def test_selector_cli_rejects_hard_link_output(tmp_path: Path) -> None:
 
 def test_selector_cli_rejects_unfrozen_or_mutated_source(tmp_path: Path) -> None:
     protocol = json.loads(PROTOCOL_PATH.read_text(encoding="utf-8"))
+    protocol["stage"] = "acquisition-preregistered"
+    protocol["universe"]["raw_parquet_sha256"] = None
+    protocol["universe"]["duckdb_cli_sha256"] = None
+    protocol["universe"]["selection_jsonl_sha256"] = None
     protocol_path = tmp_path / "protocol.json"
     source_path = tmp_path / "source.jsonl"
     private = tmp_path / "private"
@@ -645,6 +659,10 @@ def test_acquisition_canonicalizer_is_byte_stable() -> None:
 
 def test_acquisition_runs_pinned_cli_and_verifies_frozen_rerun(tmp_path: Path) -> None:
     protocol = json.loads(PROTOCOL_PATH.read_text(encoding="utf-8"))
+    protocol["stage"] = "acquisition-preregistered"
+    protocol["universe"]["raw_parquet_sha256"] = None
+    protocol["universe"]["duckdb_cli_sha256"] = None
+    protocol["universe"]["selection_jsonl_sha256"] = None
     columns = protocol["universe"]["required_columns"]
     protocol["universe"]["expected_rows"] = 5
     parquet = tmp_path / "source.parquet"
@@ -740,6 +758,9 @@ def test_acquisition_rejects_frozen_hash_mismatch(
 def test_acquisition_rejects_missing_frozen_hashes(tmp_path: Path) -> None:
     protocol = json.loads(PROTOCOL_PATH.read_text(encoding="utf-8"))
     protocol["stage"] = "acquisition-frozen"
+    protocol["universe"]["raw_parquet_sha256"] = None
+    protocol["universe"]["duckdb_cli_sha256"] = None
+    protocol["universe"]["selection_jsonl_sha256"] = None
     protocol["universe"]["expected_rows"] = 1
     parquet = tmp_path / "source.parquet"
     duckdb_gzip = tmp_path / "duckdb.gz"
