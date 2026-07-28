@@ -435,20 +435,21 @@ def evaluate_repository_claim(
         scenario_pack = json.loads(scenario_pack_bytes)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("claim scenario pack is invalid") from exc
+    scenario_rows = scenario_pack.get("scenarios") if isinstance(scenario_pack, dict) else None
     if (
-        not isinstance(scenario_pack, list)
+        not isinstance(scenario_rows, list)
         or not all(
             isinstance(row, dict)
             and isinstance(row.get("id"), str)
             and SHA256.fullmatch(str(row.get("reconstructed_test_sha256") or "")) is not None
-            for row in scenario_pack
+            for row in scenario_rows
         )
-        or {str(row["id"]) for row in scenario_pack} != set(selected_ids)
-        or len(scenario_pack) != len(selected_ids)
+        or {str(row["id"]) for row in scenario_rows} != set(selected_ids)
+        or len(scenario_rows) != len(selected_ids)
     ):
         raise ValueError("claim scenario pack does not match the frozen selection")
     scenario_test_sha256 = {
-        str(row["id"]): str(row["reconstructed_test_sha256"]) for row in scenario_pack
+        str(row["id"]): str(row["reconstructed_test_sha256"]) for row in scenario_rows
     }
 
     if (

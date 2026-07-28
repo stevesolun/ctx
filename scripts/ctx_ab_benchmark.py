@@ -3963,6 +3963,17 @@ def run_trial(
     trial_started = time.perf_counter()
     production_catalog = catalog_snapshot is not None
     engine_name = PRODUCTION_CATALOG_ENGINE if production_catalog else "codex-controlled"
+    ctx_enabled = treatment_level != "baseline"
+    full_treatment = treatment_level == "ctx-full"
+    if treatment_level not in TREATMENT_ARMS:
+        raise ValueError(f"unsupported treatment level: {treatment_level}")
+    if production_catalog and full_treatment:
+        raise ValueError(f"{PRODUCTION_CATALOG_ENGINE} does not support ctx-full")
+    controlled_context_types = {
+        str(item.get("type")) for item in scenario.context if isinstance(item, dict)
+    }
+    if not production_catalog and not {"skill", "agent"}.issubset(controlled_context_types):
+        raise ValueError("controlled scenarios require skill and agent context")
     evidence_classification = (
         classify_codex_production_catalog_evidence(dry_run=dry_run)
         if production_catalog
@@ -4007,12 +4018,6 @@ def run_trial(
         "unload_seconds": 0.0,
         "session_end_seconds": 0.0,
     }
-    ctx_enabled = treatment_level != "baseline"
-    full_treatment = treatment_level == "ctx-full"
-    if treatment_level not in TREATMENT_ARMS:
-        raise ValueError(f"unsupported treatment level: {treatment_level}")
-    if production_catalog and full_treatment:
-        raise ValueError(f"{PRODUCTION_CATALOG_ENGINE} does not support ctx-full")
     store = make_lifecycle_store(lifecycle_root) if ctx_enabled else None
     session_id = f"ctx-ab-{scenario.id}-{attempt}"
     usage_evidence: dict[str, str] = {}
@@ -4336,28 +4341,36 @@ def run_trial(
         (run_dir / "changes.patch").write_text(diff.stdout, encoding="utf-8")
         usage = extract_token_usage(agent.stdout)
         trace_efficiency = extract_trace_efficiency(agent.stdout)
-        scenario_skill = next(item for item in scenario.context if item["type"] == "skill")
+        scenario_skill = next(
+            (item for item in scenario.context if item["type"] == "skill"),
+            None,
+        )
         selected_skill = next(
             (item for item in selected_items if item.get("type") == "skill"),
             None,
         )
-        mcp_used = (
-            False
-            if production_catalog
-            else observed_mcp_tool_use(
+        reviewer = next(
+            (item for item in scenario.context if item["type"] == "agent"),
+            None,
+        )
+        if production_catalog:
+            mcp_used = False
+            agent_used = False
+        else:
+            if scenario_skill is None or reviewer is None:
+                raise ValueError("controlled scenarios require skill and agent context")
+            mcp_used = observed_mcp_tool_use(
                 agent.stdout,
                 slug=str(scenario_skill["slug"]),
                 entity_type=str(scenario_skill["type"]),
                 expected_body=str(scenario_skill["body"]),
             )
-        )
-        reviewer = next(item for item in scenario.context if item["type"] == "agent")
+            agent_used = observed_agent_review(
+                agent.stdout,
+                reviewer_slug=str(reviewer["slug"]),
+                expected_instructions=str(reviewer["body"]),
+            )
         agent_attempted = observed_agent_attempt(agent.stdout)
-        agent_used = observed_agent_review(
-            agent.stdout,
-            reviewer_slug=str(reviewer["slug"]),
-            expected_instructions=str(reviewer["body"]),
-        )
         model_turn_observed = observed_model_turn(agent.stdout)
         body_provenance = catalog.get("body_provenance") if catalog is not None else None
         context_delivery_verified = bool(
@@ -4404,6 +4417,7 @@ def run_trial(
         used_ids: list[str] = []
         if ctx_enabled:
             if full_treatment and skill_used:
+                assert scenario_skill is not None
                 usage_evidence["skill"] = "selected skill body returned by runtime ctx MCP call"
                 usage_evidence["mcp-server"] = (
                     "Codex JSONL recorded successful ctx-wiki ctx__wiki_get completion"

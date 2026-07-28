@@ -11,6 +11,7 @@ import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -910,10 +911,10 @@ def _claim_fixture(
     *,
     time_ratios: list[float] | None = None,
 ) -> tuple[
-    dict[str, object],
-    dict[str, object],
-    list[dict[str, object]],
-    dict[str, object],
+    dict[str, Any],
+    dict[str, Any],
+    list[dict[str, Any]],
+    dict[str, Any],
 ]:
     protocol = json.loads(PROTOCOL_PATH.read_text(encoding="utf-8"))
     repository_map = {
@@ -933,15 +934,17 @@ def _claim_fixture(
         for index, scenario_id in enumerate(selected_ids)
     }
     scenario_pack_bytes = json.dumps(
-        [
-            {
-                "id": scenario_id,
-                "reconstructed_test_sha256": hashlib.sha256(
-                    reconstructed_tests[scenario_id].encode()
-                ).hexdigest(),
-            }
-            for scenario_id in selected_ids
-        ],
+        {
+            "scenarios": [
+                {
+                    "id": scenario_id,
+                    "reconstructed_test_sha256": hashlib.sha256(
+                        reconstructed_tests[scenario_id].encode()
+                    ).hexdigest(),
+                }
+                for scenario_id in selected_ids
+            ]
+        },
         sort_keys=True,
         separators=(",", ":"),
     ).encode()
@@ -1123,6 +1126,19 @@ def test_claim_gate_requires_six_trials_for_each_scenario() -> None:
 def test_claim_gate_authenticates_execution_artifact_bytes() -> None:
     protocol, selection, rows, artifacts = _claim_fixture([0.80, 0.82, 0.84, 0.86, 0.88])
     artifacts["scenario_pack_bytes"] += b" "
+    with pytest.raises(ValueError, match="scenario pack"):
+        selector.evaluate_repository_claim(rows, protocol, selection, **artifacts)
+
+    protocol, selection, rows, artifacts = _claim_fixture([0.80, 0.82, 0.84, 0.86, 0.88])
+    legacy_rows = json.loads(artifacts["scenario_pack_bytes"])["scenarios"]
+    artifacts["scenario_pack_bytes"] = json.dumps(
+        legacy_rows,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    protocol["execution_inputs"]["scenario_pack_sha256"] = hashlib.sha256(
+        artifacts["scenario_pack_bytes"]
+    ).hexdigest()
     with pytest.raises(ValueError, match="scenario pack"):
         selector.evaluate_repository_claim(rows, protocol, selection, **artifacts)
 

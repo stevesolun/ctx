@@ -1671,7 +1671,10 @@ def test_production_catalog_delivery_precedes_terminal_digest(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    scenario = benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0]
+    scenario = replace(
+        benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0],
+        context=(),
+    )
     snapshot = _catalog_snapshot(tmp_path)
     production_body = "Use focused pytest and preserve the public import contract."
     selected_id = "skill:ctx-python-testing"
@@ -3128,6 +3131,72 @@ def test_codex_controlled_dry_run_result_is_explicitly_non_production(
     assert result["endpoint_class"] == "codex_controlled"
     assert result["evidence_level"] == "controlled_wiring_only"
     assert result["production_efficiency_eligible"] is False
+
+
+def test_codex_controlled_empty_context_fails_before_workspace_setup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scenario = replace(
+        benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0],
+        context=(),
+    )
+
+    def workspace_setup_forbidden(*_args: object, **_kwargs: object) -> str:
+        raise AssertionError("workspace setup must not run for invalid controlled context")
+
+    monkeypatch.setattr(benchmark, "prepare_workspace", workspace_setup_forbidden)
+
+    with pytest.raises(ValueError, match="require skill and agent context"):
+        benchmark.run_trial(
+            scenario,
+            arm="baseline",
+            treatment_level="baseline",
+            attempt=1,
+            trial=1,
+            retry=0,
+            cache=tmp_path / "cache",
+            output=tmp_path / "output",
+            codex="codex",
+            model="gpt-test",
+            timeout=10,
+            dry_run=True,
+            incidents=benchmark.IncidentLog(tmp_path / "incidents.csv"),
+        )
+
+    assert not (tmp_path / "output").exists()
+
+
+def test_invalid_treatment_fails_before_workspace_or_codex(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scenario = benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0]
+
+    def side_effect_forbidden(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("invalid treatment must fail before external work")
+
+    monkeypatch.setattr(benchmark, "prepare_workspace", side_effect_forbidden)
+    monkeypatch.setattr(benchmark, "run_process", side_effect_forbidden)
+
+    with pytest.raises(ValueError, match="unsupported treatment level"):
+        benchmark.run_trial(
+            scenario,
+            arm="baseline",
+            treatment_level="unknown",
+            attempt=1,
+            trial=1,
+            retry=0,
+            cache=tmp_path / "cache",
+            output=tmp_path / "output",
+            codex="codex",
+            model="gpt-test",
+            timeout=10,
+            dry_run=False,
+            incidents=benchmark.IncidentLog(tmp_path / "incidents.csv"),
+        )
+
+    assert not (tmp_path / "output").exists()
 
 
 def test_codex_controlled_dry_run_is_accepted_as_complete() -> None:
