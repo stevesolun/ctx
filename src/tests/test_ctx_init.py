@@ -785,6 +785,9 @@ def test_runtime_graph_install_seeds_actionable_local_availability_pack(
 
     expected_paths = {
         "converted/ctx-python-testing/SKILL.md",
+        "converted/ctx-python-state-protocols/SKILL.md",
+        "converted/ctx-python-input-boundaries/SKILL.md",
+        "converted/ctx-python-api-compatibility/SKILL.md",
         "converted/ctx-javascript-testing/SKILL.md",
         "converted/ctx-rust-patterns/SKILL.md",
         "converted/ctx-typescript/SKILL.md",
@@ -801,6 +804,9 @@ def test_runtime_graph_install_seeds_actionable_local_availability_pack(
     expected_ids = {entry["id"] for entry in pack["entries"]}
     assert expected_ids == {
         "skill:ctx-python-testing",
+        "skill:ctx-python-state-protocols",
+        "skill:ctx-python-input-boundaries",
+        "skill:ctx-python-api-compatibility",
         "skill:ctx-javascript-testing",
         "skill:ctx-rust-patterns",
         "skill:ctx-typescript",
@@ -822,14 +828,42 @@ def test_runtime_graph_install_seeds_actionable_local_availability_pack(
         graph_path=wiki / "graphify-out" / "graph.json",
     )
     recommendation_cases = (
-        ("python testing", "python", "skill:ctx-python-testing"),
-        ("javascript testing", "javascript", "skill:ctx-javascript-testing"),
-        ("rust implementation patterns", "rust", "skill:ctx-rust-patterns"),
-        ("typescript strict typing", "typescript", "skill:ctx-typescript"),
-        ("python reviewer security", "python", "agent:ctx-python-reviewer"),
-        ("ctx core mcp recommendations", None, "mcp-server:ctx-core"),
+        ("python testing", "python", "skill:ctx-python-testing", "testing"),
+        (
+            "debug Python nested state restoration in a context manager",
+            "python",
+            "skill:ctx-python-state-protocols",
+            "state",
+        ),
+        (
+            "fix malformed Python parser parameters",
+            "python",
+            "skill:ctx-python-input-boundaries",
+            "malformed",
+        ),
+        (
+            "preserve Python public API compatibility output",
+            "python",
+            "skill:ctx-python-api-compatibility",
+            "compatibility",
+        ),
+        (
+            "javascript testing",
+            "javascript",
+            "skill:ctx-javascript-testing",
+            "testing",
+        ),
+        ("rust implementation patterns", "rust", "skill:ctx-rust-patterns", "patterns"),
+        ("typescript strict typing", "typescript", "skill:ctx-typescript", "typing"),
+        (
+            "python reviewer security",
+            "python",
+            "agent:ctx-python-reviewer",
+            "reviewer",
+        ),
+        ("ctx core mcp recommendations", None, "mcp-server:ctx-core", "recommendations"),
     )
-    for query, language, expected_id in recommendation_cases:
+    for query, language, expected_id, expected_intent_tag in recommendation_cases:
         payload = json.loads(
             toolbox.dispatch(
                 ToolCall(
@@ -848,9 +882,31 @@ def test_runtime_graph_install_seeds_actionable_local_availability_pack(
         by_id = {row["id"]: row for row in payload["results"]}
         assert by_id[expected_id]["installable"] is True
         assert by_id[expected_id]["load_status"] == "local-wiki"
+        assert expected_intent_tag in by_id[expected_id]["matching_tags"]
+
+    language_only = json.loads(
+        toolbox.dispatch(
+            ToolCall(
+                id="clean-home-language-only",
+                name="ctx__recommend_bundle",
+                arguments={
+                    "query": "python maintenance",
+                    "top_k": 5,
+                    "local_code_task": True,
+                    "no_api_keys": True,
+                    "language": "python",
+                },
+            )
+        )
+    )
+    assert language_only["results"]
+    assert all(row["matching_tags"] == ["python"] for row in language_only["results"])
 
     for slug in (
         "ctx-python-testing",
+        "ctx-python-state-protocols",
+        "ctx-python-input-boundaries",
+        "ctx-python-api-compatibility",
         "ctx-javascript-testing",
         "ctx-rust-patterns",
         "ctx-typescript",
@@ -872,6 +928,9 @@ def test_runtime_graph_install_seeds_actionable_local_availability_pack(
 
     for slug in (
         "ctx-python-testing",
+        "ctx-python-state-protocols",
+        "ctx-python-input-boundaries",
+        "ctx-python-api-compatibility",
         "ctx-javascript-testing",
         "ctx-rust-patterns",
         "ctx-typescript",
