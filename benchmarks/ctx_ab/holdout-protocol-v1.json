@@ -2,17 +2,17 @@
   "schema_version": 1,
   "protocol_id": "production-graph-holdout-v1",
   "stage": "acquisition-frozen",
-  "frozen_at": "2026-07-28T08:12:19Z",
+  "frozen_at": "2026-07-28T09:39:28Z",
   "acquisition_frozen_at": "2026-07-28T09:22:10Z",
   "product_inputs": {
-    "revision": "44f049fd04e5898382a70c455cb1ed853d26ee26",
+    "revision": "ce1ddaa97d3a3e149ee93bb1a799c41b32e15449",
     "catalog_archive_sha256": "d4a39836aab5f558b546842580b2e20c523b9a9ab901ed681f84c09b5c4d6515",
     "runtime_availability_sha256": "10ea10a4096493fbed9059b221ae9da4945beb03405fe85b683b5b2de6a1cb0e",
-    "benchmark_script_sha256": "6caf19309b69ef059c7be2dbc7ab0774b10e522861a108b4cdaf97b4cf94cfb3",
+    "benchmark_script_sha256": "ac039da3be492dae5f994f3fee95fe166922d19908b16a6c3df27c3a3a046b64",
     "git_blob_sha1": {
       "graph/wiki-graph-runtime.tar.gz": "384fb05269d27e18c4905ce40eda6a58d1e80a94",
       "src/ctx/assets/runtime-availability.json": "1a5ed3b84bddba28b627a1c9cf743e732152b3e5",
-      "scripts/ctx_ab_benchmark.py": "a33c01ce6f98e5470b8ca6d4ce87502470112980"
+      "scripts/ctx_ab_benchmark.py": "99cb0a03c41011687f9009cdf51c1610c21e9bd8"
     }
   },
   "universe": {
