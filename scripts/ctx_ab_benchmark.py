@@ -56,6 +56,29 @@ PRODUCTION_CATALOG_CACHE_VERSION = 2
 PRODUCTION_CATALOG_BODY_MAX_BYTES = 16 * 1024
 PRODUCTION_TOOL_OUTPUT_LIMIT_BYTES = 32 * 1024
 PRODUCTION_CATALOG_MCP_TOOLS = ("ctx__recommend_bundle", "ctx__wiki_get")
+PRODUCTION_POLICY_ABSTENTION_LEVEL = "production_catalog_policy_abstention"
+_LANGUAGE_TAG_ALIASES = {
+    "c": frozenset({"c"}),
+    "cpp": frozenset({"cpp", "c++", "cplusplus"}),
+    "csharp": frozenset({"csharp", "c#", "dotnet"}),
+    "go": frozenset({"go", "golang"}),
+    "java": frozenset({"java"}),
+    "javascript": frozenset({"javascript", "js", "node"}),
+    "php": frozenset({"php"}),
+    "python": frozenset({"python", "py"}),
+    "rust": frozenset({"rust", "rs"}),
+    "typescript": frozenset({"typescript", "ts"}),
+}
+_NON_INTENT_MATCH_TAGS = frozenset(
+    {
+        "ctx",
+        "local",
+        "no-api",
+        "no-api-key",
+        "no-api-keys",
+        "offline",
+    }
+)
 SUCCESSFUL_CTX_RUN_STOP_REASONS = frozenset({"completed"})
 SUCCESSFUL_LIFECYCLE_STATUSES = frozenset({"completed", "successful"})
 ENTITY_TRANSITION_ACTIONS = frozenset(
@@ -119,6 +142,34 @@ class CommandResult:
     timed_out: bool = False
     reaped_descendants: int = 0
     residual_descendants: tuple[int, ...] = ()
+
+
+class _VerifiedProductionResult(dict[str, Any]):
+    """In-process result whose final attested fields have not changed."""
+
+    __slots__ = ("_sealed_sha256",)
+
+    def __init__(self, values: Mapping[str, Any]) -> None:
+        super().__init__(values)
+        self._sealed_sha256: str | None = None
+
+    def seal(self) -> None:
+        if (
+            self.get("repository_state_matches_start_at_end") is not True
+            or self.get("environment_manifest_matches_start_at_end") is not True
+        ):
+            raise RuntimeError("production result cannot be sealed before final attestation")
+        self._sealed_sha256 = self._current_sha256()
+
+    def is_sealed(self) -> bool:
+        return bool(
+            self._sealed_sha256
+            and secrets.compare_digest(self._sealed_sha256, self._current_sha256())
+        )
+
+    def _current_sha256(self) -> str:
+        payload = json.dumps(self, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -1064,14 +1115,114 @@ def _catalog_mcp_client(
 
 def _policy_initial_load_ids(policy: dict[str, Any]) -> tuple[list[str], str]:
     field = "initial_load" if "initial_load" in policy else "load"
-    raw = policy.get(field) or []
-    values = raw if isinstance(raw, list) else [raw]
-    ids: list[str] = []
-    for value in values:
-        entity_id = value.get("id") if isinstance(value, dict) else value
-        if isinstance(entity_id, str) and entity_id.strip():
-            ids.append(entity_id.strip())
+    raw = policy.get(field, [])
+    if not isinstance(raw, list):
+        raise RuntimeError(f"context_policy.{field} must be a list")
+    ids = [value.strip() for value in raw if isinstance(value, str) and value.strip()]
+    if len(ids) != len(raw) or len(ids) != len(set(ids)):
+        raise RuntimeError(f"context_policy.{field} must contain unique non-empty IDs")
     return ids, field
+
+
+def _selected_policy_skill_candidate(
+    candidates: list[dict[str, Any]],
+    policy: dict[str, Any],
+) -> tuple[dict[str, Any] | None, list[str], str]:
+    initial_load_ids, policy_field = _policy_initial_load_ids(policy)
+    candidate_ids = [str(row.get("id") or "").strip() for row in candidates]
+    if any(not entity_id for entity_id in candidate_ids) or len(candidate_ids) != len(
+        set(candidate_ids)
+    ):
+        raise RuntimeError("catalog candidates must contain unique non-empty IDs")
+    by_id = dict(zip(candidate_ids, candidates, strict=True))
+    selected = next(
+        (
+            by_id[entity_id]
+            for entity_id in initial_load_ids
+            if entity_id in by_id
+            and str(by_id[entity_id].get("type") or "").strip().lower() == "skill"
+            and by_id[entity_id].get("installable") is True
+        ),
+        None,
+    )
+    return selected, initial_load_ids, policy_field
+
+
+def classify_catalog_match_evidence(
+    candidate: Mapping[str, Any],
+    *,
+    language: str,
+) -> dict[str, Any]:
+    """Decide whether recommendation match evidence adds intent beyond language."""
+    raw_language = str(language or "").strip().lower()
+    canonical_language = next(
+        (
+            canonical
+            for canonical, aliases in _LANGUAGE_TAG_ALIASES.items()
+            if raw_language == canonical or raw_language in aliases
+        ),
+        raw_language,
+    )
+    raw_tags = candidate.get("matching_tags")
+    normalized: list[str] = []
+    valid = bool(canonical_language)
+    if not isinstance(raw_tags, list) or not raw_tags:
+        valid = False
+    else:
+        for value in raw_tags:
+            if not isinstance(value, str) or not value.strip():
+                valid = False
+                break
+            raw_tag = value.strip().lower()
+            normalized.append(
+                next(
+                    (
+                        canonical
+                        for canonical, aliases in _LANGUAGE_TAG_ALIASES.items()
+                        if raw_tag == canonical or raw_tag in aliases
+                    ),
+                    raw_tag,
+                )
+            )
+        if len(normalized) != len(set(normalized)):
+            valid = False
+    if not valid:
+        return {
+            "decision": "abstain",
+            "reason": "insufficient_match_evidence",
+            "language": canonical_language,
+            "matching_tags": sorted(set(normalized)),
+        }
+    matching_tags = sorted(set(normalized))
+    foreign_languages = (set(matching_tags) & set(_LANGUAGE_TAG_ALIASES)) - {canonical_language}
+    if foreign_languages:
+        return {
+            "decision": "abstain",
+            "reason": "conflicting_language_match",
+            "language": canonical_language,
+            "matching_tags": matching_tags,
+        }
+    if set(matching_tags) == {canonical_language}:
+        return {
+            "decision": "abstain",
+            "reason": "language_only_match",
+            "language": canonical_language,
+            "matching_tags": matching_tags,
+        }
+    intent_tags = set(matching_tags) - {canonical_language} - _NON_INTENT_MATCH_TAGS
+    if not intent_tags:
+        return {
+            "decision": "abstain",
+            "reason": "constraint_only_match",
+            "language": canonical_language,
+            "matching_tags": matching_tags,
+        }
+    return {
+        "decision": "load",
+        "reason": "intent_match",
+        "language": canonical_language,
+        "matching_tags": matching_tags,
+    }
 
 
 def decide_deferred_activation(
@@ -1328,73 +1479,76 @@ def recommend_production_catalog(
                 "no_api_keys": True,
             },
         )
-        initial_load_ids, policy_field = _policy_initial_load_ids(policy)
-        by_id = {str(row["id"]): row for row in candidates}
-        selected_row = next(
-            (
-                by_id[entity_id]
-                for entity_id in initial_load_ids
-                if entity_id in by_id
-                and str(by_id[entity_id].get("type") or "").strip().lower() == "skill"
-                and by_id[entity_id].get("installable") is True
-            ),
-            None,
+        selected_row, initial_load_ids, policy_field = _selected_policy_skill_candidate(
+            candidates,
+            policy,
         )
         selected_item: dict[str, Any] | None = None
         body_provenance: dict[str, Any] | None = None
+        policy_abstention: dict[str, Any] | None = None
         selection_skip_reason: str | None = None
         raw_wiki = ""
         if selected_row is not None:
             entity_id = str(selected_row["id"])
-            slug = str(selected_row.get("name") or entity_id.partition(":")[2]).strip()
-            body_started = time.perf_counter()
-            raw_wiki = client.call_tool(
-                "ctx__wiki_get",
-                {"slug": slug, "entity_type": "skill"},
+            match_evidence = classify_catalog_match_evidence(
+                selected_row,
+                language=scenario.language,
             )
-            body_fetch_seconds = time.perf_counter() - body_started
-            wiki_payload = json.loads(raw_wiki)
-            if (
-                not isinstance(wiki_payload, dict)
-                or wiki_payload.get("error")
-                or wiki_payload.get("slug") != slug
-                or wiki_payload.get("entity_type") != "skill"
-            ):
-                raise RuntimeError(f"production catalog wiki lookup failed for {entity_id}")
-            body = str(wiki_payload.get("body") or "").strip()
-            body_bytes = body.encode("utf-8")
-            if not body:
-                selection_skip_reason = "selected skill body was empty"
-            elif len(body_bytes) > PRODUCTION_CATALOG_BODY_MAX_BYTES:
-                selection_skip_reason = (
-                    f"selected skill body exceeded {PRODUCTION_CATALOG_BODY_MAX_BYTES} bytes"
-                )
+            if match_evidence["decision"] == "abstain":
+                policy_abstention = {"candidate_id": entity_id, **match_evidence}
+                selection_skip_reason = str(match_evidence["reason"])
             else:
-                wiki_path = _safe_relative_path(
-                    wiki_payload.get("path"),
-                    field=f"{entity_id}.wiki_path",
+                slug = str(selected_row.get("name") or entity_id.partition(":")[2]).strip()
+                body_started = time.perf_counter()
+                raw_wiki = client.call_tool(
+                    "ctx__wiki_get",
+                    {"slug": slug, "entity_type": "skill"},
                 )
-                frontmatter = wiki_payload.get("frontmatter")
-                frontmatter = dict(frontmatter) if isinstance(frontmatter, dict) else {}
-                selected_item = {
-                    "id": entity_id,
-                    "type": "skill",
-                    "slug": slug,
-                    "body": body,
-                }
-                body_provenance = {
-                    "surface": "ctx MCP ctx__wiki_get",
-                    "wiki_path": wiki_path,
-                    "wiki_response_sha256": hashlib.sha256(raw_wiki.encode("utf-8")).hexdigest(),
-                    "body_sha256": hashlib.sha256(body_bytes).hexdigest(),
-                    "body_bytes": len(body_bytes),
-                    "frontmatter_source": frontmatter.get("source"),
-                    "frontmatter_license": frontmatter.get("license"),
-                    "candidate_source": selected_row.get("source"),
-                    "candidate_source_path": selected_row.get("source_path"),
-                    "catalog_archive_sha256": snapshot.provenance["archive_sha256"],
-                    "catalog_graph_export_id": snapshot.provenance["graph_export_id"],
-                }
+                body_fetch_seconds = time.perf_counter() - body_started
+                wiki_payload = json.loads(raw_wiki)
+                if (
+                    not isinstance(wiki_payload, dict)
+                    or wiki_payload.get("error")
+                    or wiki_payload.get("slug") != slug
+                    or wiki_payload.get("entity_type") != "skill"
+                ):
+                    raise RuntimeError(f"production catalog wiki lookup failed for {entity_id}")
+                body = str(wiki_payload.get("body") or "").strip()
+                body_bytes = body.encode("utf-8")
+                if not body:
+                    selection_skip_reason = "selected skill body was empty"
+                elif len(body_bytes) > PRODUCTION_CATALOG_BODY_MAX_BYTES:
+                    selection_skip_reason = (
+                        f"selected skill body exceeded {PRODUCTION_CATALOG_BODY_MAX_BYTES} bytes"
+                    )
+                else:
+                    wiki_path = _safe_relative_path(
+                        wiki_payload.get("path"),
+                        field=f"{entity_id}.wiki_path",
+                    )
+                    frontmatter = wiki_payload.get("frontmatter")
+                    frontmatter = dict(frontmatter) if isinstance(frontmatter, dict) else {}
+                    selected_item = {
+                        "id": entity_id,
+                        "type": "skill",
+                        "slug": slug,
+                        "body": body,
+                    }
+                    body_provenance = {
+                        "surface": "ctx MCP ctx__wiki_get",
+                        "wiki_path": wiki_path,
+                        "wiki_response_sha256": hashlib.sha256(
+                            raw_wiki.encode("utf-8")
+                        ).hexdigest(),
+                        "body_sha256": hashlib.sha256(body_bytes).hexdigest(),
+                        "body_bytes": len(body_bytes),
+                        "frontmatter_source": frontmatter.get("source"),
+                        "frontmatter_license": frontmatter.get("license"),
+                        "candidate_source": selected_row.get("source"),
+                        "candidate_source_path": selected_row.get("source_path"),
+                        "catalog_archive_sha256": snapshot.provenance["archive_sha256"],
+                        "catalog_graph_export_id": snapshot.provenance["graph_export_id"],
+                    }
         elif initial_load_ids:
             selection_skip_reason = (
                 "context_policy initial load contained no loadable skill candidate"
@@ -1411,6 +1565,7 @@ def recommend_production_catalog(
         "selected_item": selected_item,
         "selected_ids": [selected_item["id"]] if selected_item is not None else [],
         "body_provenance": body_provenance,
+        "policy_abstention": policy_abstention,
         "selection_skip_reason": selection_skip_reason,
         "recommendation_response_sha256": hashlib.sha256(
             raw_recommendation.encode("utf-8")
@@ -1431,14 +1586,95 @@ def production_catalog_context_prompt(catalog: dict[str, Any]) -> str:
     return f"\n\nCTX SELECTED PRODUCTION CATALOG CONTEXT\n[SKILL {selected['slug']}]\n{body}\n"
 
 
+def verify_production_policy_abstention(
+    catalog: Mapping[str, Any],
+    *,
+    language: str,
+    task_prompt_sha256: str,
+    delivered_prompt_sha256: str,
+    model_turn_observed: bool,
+    evaluator_isolation_verified: bool,
+    mcp_used: bool,
+    agent_attempted: bool,
+    lifecycle_events: list[dict[str, Any]] | None = None,
+) -> bool:
+    evidence = catalog.get("policy_abstention")
+    candidate_id = evidence.get("candidate_id") if isinstance(evidence, dict) else None
+    candidates = catalog.get("candidates")
+    policy = catalog.get("context_policy")
+    if (
+        not isinstance(candidate_id, str)
+        or not isinstance(candidates, list)
+        or not all(isinstance(row, dict) for row in candidates)
+        or not isinstance(policy, dict)
+    ):
+        return False
+    typed_candidates = [dict(row) for row in candidates]
+    derived_candidate_ids = [str(row.get("id") or "").strip() for row in typed_candidates]
+    try:
+        selected, initial_load_ids, policy_field = _selected_policy_skill_candidate(
+            typed_candidates,
+            policy,
+        )
+    except RuntimeError:
+        return False
+    if selected is None or str(selected.get("id") or "") != candidate_id:
+        return False
+    expected = {
+        "candidate_id": candidate_id,
+        **classify_catalog_match_evidence(selected, language=language),
+    }
+    body_fetch_seconds = catalog.get("body_fetch_seconds")
+    checks = (
+        evidence == expected,
+        expected["decision"] == "abstain",
+        catalog.get("candidate_ids") == derived_candidate_ids,
+        catalog.get("policy_field") == policy_field,
+        catalog.get("policy_initial_load_ids") == initial_load_ids,
+        catalog.get("selected_ids") == [],
+        catalog.get("selected_item") is None,
+        catalog.get("body_provenance") is None,
+        isinstance(body_fetch_seconds, int | float),
+        not isinstance(body_fetch_seconds, bool),
+        body_fetch_seconds == 0.0,
+        re.fullmatch(r"[0-9a-f]{64}", task_prompt_sha256) is not None,
+        task_prompt_sha256 == delivered_prompt_sha256,
+        model_turn_observed,
+        evaluator_isolation_verified,
+        mcp_used is False,
+        agent_attempted is False,
+    )
+    if not all(checks):
+        return False
+    if lifecycle_events is None:
+        return True
+    if len(lifecycle_events) != 2:
+        return False
+    recommendation_event, terminal_event = lifecycle_events
+    payload = recommendation_event.get("payload")
+    return bool(
+        recommendation_event.get("action") == "dev_event"
+        and recommendation_event.get("event_type") == "catalog_recommendation"
+        and isinstance(payload, dict)
+        and payload.get("candidate_ids") == derived_candidate_ids
+        and payload.get("selected_ids") == []
+        and payload.get("context_policy") == policy
+        and terminal_event.get("action") == "session_end"
+        and terminal_event.get("status") == "passed"
+    )
+
+
 def production_skill_use_evidence_reason(
     *,
     production_catalog: bool,
     ctx_enabled: bool,
     context_delivery_verified: bool,
+    policy_abstention_verified: bool = False,
 ) -> str | None:
     if not production_catalog or not ctx_enabled:
         return None
+    if policy_abstention_verified:
+        return "policy_abstained_before_context_delivery"
     if not context_delivery_verified:
         return "no_skill_delivered"
     return "provider_does_not_expose_semantic_context_attribution"
@@ -1463,6 +1699,7 @@ def write_catalog_recommendation_evidence(
                 "policy_field": catalog["policy_field"],
                 "policy_initial_load_ids": catalog["policy_initial_load_ids"],
                 "deferred_activation": catalog.get("deferred_activation"),
+                "policy_abstention": catalog.get("policy_abstention"),
                 "selection_skip_reason": catalog["selection_skip_reason"],
                 "body_provenance": catalog["body_provenance"],
                 "recommendation_response_sha256": catalog["recommendation_response_sha256"],
@@ -1499,6 +1736,7 @@ def catalog_lifecycle_evidence(
     if loaded:
         raise RuntimeError("production catalog lifecycle ended with loaded context")
     return {
+        "events": events,
         "actions": [str(event.get("action") or "") for event in events],
         "sha256": hashlib.sha256(content).hexdigest(),
         "final_loaded": [],
@@ -3844,6 +4082,13 @@ def run_trial(
                 "adopted_ids": [],
                 "used_ids": [],
                 "context_delivery_verified": False,
+                "policy_abstention_applied": bool(
+                    catalog is not None and catalog.get("policy_abstention")
+                ),
+                "policy_abstention_verified": False,
+                "policy_abstention_reason": (
+                    catalog.get("selection_skip_reason") if catalog is not None else None
+                ),
                 "evaluator_isolation_verified": False,
                 "workspace_setup_seconds": round(workspace_setup_seconds, 6),
                 "ctx_setup_seconds": round(ctx_setup_seconds, 6),
@@ -3998,6 +4243,30 @@ def run_trial(
             and isolation_evidence
             and isolation_evidence.get("verified") is True
         )
+        preliminary_policy_abstention_applied = bool(
+            production_catalog
+            and ctx_enabled
+            and catalog is not None
+            and verify_production_policy_abstention(
+                catalog,
+                language=scenario.language,
+                task_prompt_sha256=prompt_hash,
+                delivered_prompt_sha256=treatment_hash,
+                model_turn_observed=model_turn_observed,
+                evaluator_isolation_verified=bool(
+                    isolation_evidence and isolation_evidence.get("verified") is True
+                ),
+                mcp_used=mcp_used,
+                agent_attempted=agent_attempted,
+            )
+        )
+        policy_abstention_reason = (
+            str(catalog.get("selection_skip_reason") or "") if catalog is not None else ""
+        )
+        preliminary_policy_abstention_verified = bool(
+            preliminary_policy_abstention_applied
+            and policy_abstention_reason == "language_only_match"
+        )
         delivered_ids = selected_ids if context_delivery_verified else []
         skill_used = bool(
             not production_catalog
@@ -4033,7 +4302,13 @@ def run_trial(
                     next(entity_id for entity_id in selected_ids if entity_id.startswith("agent:"))
                 )
         policy_valid = (
-            not mcp_used and not agent_attempted and (not ctx_enabled or context_delivery_verified)
+            not mcp_used
+            and not agent_attempted
+            and (
+                not ctx_enabled
+                or context_delivery_verified
+                or preliminary_policy_abstention_applied
+            )
             if production_catalog
             else treatment_policy_valid(
                 treatment_level,
@@ -4081,6 +4356,13 @@ def run_trial(
                     if production_catalog
                     else "selected skill use was not observed"
                 )
+            if (
+                production_catalog
+                and ctx_enabled
+                and not context_delivery_verified
+                and not preliminary_policy_abstention_applied
+            ):
+                reasons.append("context absent without verified policy abstention")
             incidents.add(
                 scenario=scenario.id,
                 arm=arm,
@@ -4117,6 +4399,30 @@ def run_trial(
             if production_catalog and ctx_enabled and store is not None
             else None
         )
+        evaluator_isolation_verified = bool(
+            isolation_evidence and isolation_evidence.get("verified") is True
+        )
+        policy_abstention_applied = bool(
+            preliminary_policy_abstention_applied
+            and catalog is not None
+            and lifecycle is not None
+            and verify_production_policy_abstention(
+                catalog,
+                language=scenario.language,
+                task_prompt_sha256=prompt_hash,
+                delivered_prompt_sha256=treatment_hash,
+                model_turn_observed=model_turn_observed,
+                evaluator_isolation_verified=evaluator_isolation_verified,
+                mcp_used=mcp_used,
+                agent_attempted=agent_attempted,
+                lifecycle_events=list(lifecycle["events"]),
+            )
+        )
+        if preliminary_policy_abstention_applied and not policy_abstention_applied:
+            raise RuntimeError("production catalog policy abstention lifecycle was not verified")
+        policy_abstention_verified = bool(
+            policy_abstention_applied and preliminary_policy_abstention_verified
+        )
         if production_catalog and catalog is not None:
             assert catalog_snapshot is not None
             write_catalog_recommendation_evidence(
@@ -4125,17 +4431,16 @@ def run_trial(
                 used_ids=used_ids,
                 snapshot=catalog_snapshot,
             )
-        evaluator_isolation_verified = bool(
-            isolation_evidence and isolation_evidence.get("verified") is True
-        )
         production_efficiency_eligible = bool(
             evidence_classification["production_efficiency_eligible"]
             and evaluator_isolation_verified
             and model_turn_observed
-            and (not ctx_enabled or context_delivery_verified)
+            and (not ctx_enabled or context_delivery_verified or policy_abstention_verified)
         )
         evidence_level = str(evidence_classification["evidence_level"])
-        if production_catalog and ctx_enabled and not context_delivery_verified:
+        if policy_abstention_verified:
+            evidence_level = PRODUCTION_POLICY_ABSTENTION_LEVEL
+        elif production_catalog and ctx_enabled and not context_delivery_verified:
             evidence_level = "production_catalog_ctx_noop"
         elif production_catalog and not production_efficiency_eligible:
             evidence_level = "production_catalog_unverified"
@@ -4172,6 +4477,12 @@ def run_trial(
             "adopted_ids": used_ids,
             "used_ids": used_ids,
             "context_delivery_verified": (context_delivery_verified if ctx_enabled else None),
+            "policy_abstention_applied": (policy_abstention_applied if ctx_enabled else None),
+            "policy_abstention_verified": (policy_abstention_verified if ctx_enabled else None),
+            "policy_abstention_reason": (policy_abstention_reason or None),
+            "catalog_recommendation_lifecycle_verified": (
+                policy_abstention_applied if ctx_enabled else None
+            ),
             "evaluator_isolation_verified": evaluator_isolation_verified,
             "pinned_head_verified": not head_check.returncode,
             "policy_valid": policy_valid,
@@ -4198,6 +4509,7 @@ def run_trial(
                 production_catalog=production_catalog,
                 ctx_enabled=ctx_enabled,
                 context_delivery_verified=context_delivery_verified,
+                policy_abstention_verified=policy_abstention_verified,
             ),
             "mcp_tool_use_observed": mcp_used if ctx_enabled else None,
             "review_agent_use_observed": agent_used if ctx_enabled else None,
@@ -4224,16 +4536,36 @@ def run_trial(
 
 
 def write_summary(output: Path, results: list[dict[str, Any]]) -> None:
-    (output / "summary.json").write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
-    fields = sorted({key for row in results for key in row})
+    published_results: list[dict[str, Any]] = []
+    for row in results:
+        published = dict(row)
+        if row.get("engine") == PRODUCTION_CATALOG_ENGINE and (
+            not isinstance(row, _VerifiedProductionResult) or not row.is_sealed()
+        ):
+            published["production_efficiency_eligible"] = False
+            if (
+                row.get("repository_state_matches_start_at_end") is not False
+                and row.get("environment_manifest_matches_start_at_end") is not False
+            ):
+                published["evidence_level"] = "attestation_pending"
+        published_results.append(published)
+    (output / "summary.json").write_text(
+        json.dumps(published_results, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    fields = sorted({key for row in published_results for key in row})
     with (output / "summary.csv").open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=fields)
         writer.writeheader()
-        for row in results:
+        for row in published_results:
             writer.writerow(row)
     grouped: dict[tuple[str, str, int], list[dict[str, Any]]] = {}
     for row in results:
         if row.get("production_efficiency_eligible") is not True:
+            continue
+        if row.get("engine") == PRODUCTION_CATALOG_ENGINE and (
+            not isinstance(row, _VerifiedProductionResult) or not row.is_sealed()
+        ):
             continue
         key = (str(row.get("scenario")), str(row.get("arm")), int(row.get("trial", 0)))
         grouped.setdefault(key, []).append(row)
@@ -4276,6 +4608,34 @@ def build_performance_report(
     trials: int,
     arms: tuple[str, ...],
 ) -> dict[str, Any]:
+    def verified_policy_abstention(row: Mapping[str, Any]) -> bool:
+        task_hash = row.get("task_prompt_sha256")
+        body_fetch_seconds = row.get("body_fetch_seconds")
+        return bool(
+            row.get("policy_abstention_applied") is True
+            and row.get("policy_abstention_verified") is True
+            and row.get("policy_abstention_reason") == "language_only_match"
+            and row.get("evidence_level") == PRODUCTION_POLICY_ABSTENTION_LEVEL
+            and row.get("policy_valid") is True
+            and row.get("context_delivery_verified") is False
+            and all(
+                row.get(field) == []
+                for field in ("selected_ids", "delivered_ids", "adopted_ids", "used_ids")
+            )
+            and isinstance(task_hash, str)
+            and re.fullmatch(r"[0-9a-f]{64}", task_hash) is not None
+            and row.get("delivered_prompt_sha256") == task_hash
+            and isinstance(body_fetch_seconds, int | float)
+            and not isinstance(body_fetch_seconds, bool)
+            and body_fetch_seconds == 0
+            and row.get("lifecycle_actions") == ["dev_event", "session_end"]
+            and row.get("lifecycle_session_status") == "passed"
+            and row.get("catalog_recommendation_lifecycle_verified") is True
+            and row.get("pinned_head_verified") is True
+            and row.get("repository_state_matches_start_at_end") is True
+            and row.get("environment_manifest_matches_start_at_end") is True
+        )
+
     def eligible(row: dict[str, Any]) -> bool:
         measured = row.get("measured_phase_seconds")
         if (
@@ -4287,9 +4647,20 @@ def build_performance_report(
             return False
         if row.get("engine") != PRODUCTION_CATALOG_ENGINE:
             return True
+        if not isinstance(row, _VerifiedProductionResult) or not row.is_sealed():
+            return False
+        if (
+            row.get("repository_state_matches_start_at_end") is not True
+            or row.get("environment_manifest_matches_start_at_end") is not True
+        ):
+            return False
         if row.get("evaluator_isolation_verified") is not True:
             return False
-        return row.get("arm") == "baseline" or row.get("context_delivery_verified") is True
+        return (
+            row.get("arm") == "baseline"
+            or row.get("context_delivery_verified") is True
+            or verified_policy_abstention(row)
+        )
 
     eligible_results = [row for row in results if eligible(row)]
     excluded_results = [row for row in results if not eligible(row)]
@@ -4298,6 +4669,33 @@ def build_performance_report(
     for row in results:
         key = (str(row.get("scenario")), str(row.get("arm")), int(row.get("trial", 0)))
         assigned.setdefault(key, []).append(row)
+    expected_result_keys = {
+        (scenario_id, arm, trial)
+        for scenario_id in scenario_ids
+        for arm in arms
+        for trial in range(1, trials + 1)
+    }
+    final_ctx_rows = [
+        assigned[(scenario_id, "ctx-light", trial)][-1]
+        for scenario_id in scenario_ids
+        for trial in range(1, trials + 1)
+        if assigned.get((scenario_id, "ctx-light", trial))
+    ]
+    trusted_final_ctx_rows = [row for row in final_ctx_rows if eligible(row)]
+    delivered_context_count = sum(
+        row.get("context_delivery_verified") is True for row in trusted_final_ctx_rows
+    )
+    verified_abstention_count = sum(
+        verified_policy_abstention(row) for row in trusted_final_ctx_rows
+    )
+    ctx_assignment_count = len(final_ctx_rows)
+    unverified_noop_count = (
+        len(trusted_final_ctx_rows) - delivered_context_count - verified_abstention_count
+    )
+    untrusted_assignment_count = ctx_assignment_count - len(trusted_final_ctx_rows)
+    abstention_only = bool(ctx_assignment_count) and (
+        verified_abstention_count == ctx_assignment_count
+    )
     attempts: dict[tuple[str, str, int], list[dict[str, Any]]] = {}
     for row in eligible_results:
         key = (str(row.get("scenario")), str(row.get("arm")), int(row.get("trial", 0)))
@@ -4418,14 +4816,20 @@ def build_performance_report(
             pairs.append(pair)
     complete_pairs = [pair for pair in pairs if pair.get("complete")]
     expected_pairs = len(scenario_ids) * trials
-    assignment_complete = len(pairs) == expected_pairs and all(
-        pair["baseline_status"] != "missing" and pair["ctx_light_status"] != "missing"
-        for pair in pairs
+    assignment_complete = (
+        set(assigned) == expected_result_keys
+        and len(pairs) == expected_pairs
+        and all(
+            pair["baseline_status"] != "missing" and pair["ctx_light_status"] != "missing"
+            for pair in pairs
+        )
     )
     evidence_required = (
         trials >= 6 and {"baseline", "ctx-light"}.issubset(set(arms)) and efficiency_claim_allowed
     )
-    evidence_complete = efficiency_claim_allowed and len(complete_pairs) == expected_pairs
+    evidence_complete = (
+        efficiency_claim_allowed and assignment_complete and len(complete_pairs) == expected_pairs
+    )
     quality_preserved = assignment_complete and all(
         pair["paired_quality_preserved"] for pair in pairs
     )
@@ -4469,7 +4873,10 @@ def build_performance_report(
         and expected_pairs >= 6
     )
     benefit_evidence_complete = bool(
-        benefit_evidence_required and assignment_complete and efficiency_claim_allowed
+        benefit_evidence_required
+        and assignment_complete
+        and efficiency_claim_allowed
+        and delivered_context_count > 0
     )
     beneficial = (
         bool(
@@ -4490,22 +4897,30 @@ def build_performance_report(
         if beneficial is True
         else "not_beneficial"
         if beneficial is False
+        else "policy_abstention_only"
+        if abstention_only
         else "insufficient_evidence"
         if production_catalog_scored
         else "not_applicable"
     )
+    expected_final_rows = [
+        assigned[key][-1] for key in sorted(expected_result_keys) if assigned.get(key)
+    ]
     repositories = sorted(
         {
             str(row["repo_url"])
-            for row in results
+            for row in expected_final_rows
             if isinstance(row.get("repo_url"), str) and row["repo_url"]
         }
     )
+    distinct_scenario_count = len(set(scenario_ids))
     product_claim_eligible = bool(
         efficiency_claim_allowed
-        and len(scenario_ids) >= 6
+        and assignment_complete
+        and evidence_complete
+        and distinct_scenario_count >= 6
         and len(repositories) >= 3
-        and trials >= 3
+        and trials >= 6
     )
     arm_outcomes = {}
     for arm in ("baseline", "ctx-light"):
@@ -4546,12 +4961,29 @@ def build_performance_report(
         "benefit_evidence_complete": benefit_evidence_complete,
         "beneficial": beneficial,
         "benefit_verdict": benefit_verdict,
+        "ctx_policy_outcomes": {
+            "assigned": ctx_assignment_count,
+            "context_delivered": delivered_context_count,
+            "verified_abstentions": verified_abstention_count,
+            "unverified_noops": unverified_noop_count,
+            "untrusted_assignments": untrusted_assignment_count,
+            "activation_rate": (
+                round(delivered_context_count / ctx_assignment_count, 6)
+                if ctx_assignment_count
+                else None
+            ),
+            "abstention_rate": (
+                round(verified_abstention_count / ctx_assignment_count, 6)
+                if ctx_assignment_count
+                else None
+            ),
+        },
         "claim_scope": "product_pilot" if product_claim_eligible else "scenario_set_only",
         "product_claim_eligible": product_claim_eligible,
         "product_benefit_verdict": (
             benefit_verdict if product_claim_eligible else "insufficient_cross_repo_evidence"
         ),
-        "distinct_scenario_count": len(set(scenario_ids)),
+        "distinct_scenario_count": distinct_scenario_count,
         "distinct_repository_count": len(repositories),
         "repositories": repositories,
         "intent_to_treat": arm_outcomes,
@@ -4961,6 +5393,11 @@ def main(argv: list[str] | None = None) -> int:
                             "provider_authentication_verified": False,
                             "provider_response_success": False,
                         }
+                    if (
+                        args.engine == PRODUCTION_CATALOG_ENGINE
+                        and result.get("status") != "harness_error"
+                    ):
+                        result = _VerifiedProductionResult(result)
                     results.append(result)
                     write_summary(output, results)
                     if args.dry_run or result.get("status") == "passed":
@@ -4997,31 +5434,38 @@ def main(argv: list[str] | None = None) -> int:
         repository_state,
         environment_manifest,
     )
-    if args.engine == PRODUCTION_CATALOG_ENGINE and (
-        not repository_state_matches or not environment_manifest_matches
-    ):
-        incidents.add(
-            scenario="control",
-            arm="control",
-            attempt=1,
-            stage="run-attestation",
-            message="RunAttestationChanged",
-            evidence=json.dumps(
-                {
-                    "repository_state_start": repository_state,
-                    "repository_state_end": repository_state_end,
-                    "repository_state_matches_start_at_end": repository_state_matches,
-                    "environment_manifest_matches_start_at_end": (environment_manifest_matches),
-                },
-                sort_keys=True,
-            ),
-        )
+    if args.engine == PRODUCTION_CATALOG_ENGINE:
         for result in results:
-            result["production_efficiency_eligible"] = False
-            result["evidence_level"] = "run_attestation_changed"
             result["repository_state_matches_start_at_end"] = repository_state_matches
             result["environment_manifest_matches_start_at_end"] = environment_manifest_matches
-        write_summary(output, results)
+        if not repository_state_matches or not environment_manifest_matches:
+            incidents.add(
+                scenario="control",
+                arm="control",
+                attempt=1,
+                stage="run-attestation",
+                message="RunAttestationChanged",
+                evidence=json.dumps(
+                    {
+                        "repository_state_start": repository_state,
+                        "repository_state_end": repository_state_end,
+                        "repository_state_matches_start_at_end": repository_state_matches,
+                        "environment_manifest_matches_start_at_end": (environment_manifest_matches),
+                    },
+                    sort_keys=True,
+                ),
+            )
+            for result in results:
+                result["production_efficiency_eligible"] = False
+                result["evidence_level"] = "run_attestation_changed"
+        for result in results:
+            if (
+                isinstance(result, _VerifiedProductionResult)
+                and repository_state_matches
+                and environment_manifest_matches
+            ):
+                result.seal()
+    write_summary(output, results)
     if args.dry_run:
         print(output)
         return (

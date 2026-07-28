@@ -556,6 +556,41 @@ def _catalog_snapshot(tmp_path: Path) -> Any:
     )
 
 
+@pytest.mark.parametrize(
+    ("matching_tags", "language", "decision", "reason"),
+    [
+        (["python"], "python", "abstain", "language_only_match"),
+        (["Py"], "PYTHON", "abstain", "language_only_match"),
+        (["python", "pytest"], "python", "load", "intent_match"),
+        (["javascript"], "python", "abstain", "conflicting_language_match"),
+        (
+            ["python", "javascript"],
+            "python",
+            "abstain",
+            "conflicting_language_match",
+        ),
+        (["python", "local"], "python", "abstain", "constraint_only_match"),
+        (None, "python", "abstain", "insufficient_match_evidence"),
+        ([], "python", "abstain", "insufficient_match_evidence"),
+        (["python", "python"], "python", "abstain", "insufficient_match_evidence"),
+        (["python", 1], "python", "abstain", "insufficient_match_evidence"),
+    ],
+)
+def test_catalog_match_evidence_requires_intent_beyond_language(
+    matching_tags: object,
+    language: str,
+    decision: str,
+    reason: str,
+) -> None:
+    result = benchmark.classify_catalog_match_evidence(
+        {"matching_tags": matching_tags},
+        language=language,
+    )
+
+    assert result["decision"] == decision
+    assert result["reason"] == reason
+
+
 def test_production_catalog_recommendation_records_candidates_selection_and_body_provenance(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -584,6 +619,7 @@ def test_production_catalog_recommendation_records_candidates_selection_and_body
                                 "type": "skill",
                                 "installable": True,
                                 "load_status": "local-wiki",
+                                "matching_tags": ["python", "pytest"],
                                 "source": "ctx-runtime-availability",
                                 "source_path": "converted/ctx-python-testing/SKILL.md",
                             },
@@ -703,6 +739,206 @@ def test_production_catalog_recommendation_records_candidates_selection_and_body
         "catalog_archive_sha256": "a" * 64,
         "catalog_graph_export_id": "export-1",
     }
+
+
+def test_production_catalog_language_only_match_abstains_before_body_fetch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scenario = benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0]
+    calls: list[str] = []
+
+    class Client:
+        def __enter__(self) -> "Client":
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+        def call_tool(self, name: str, _arguments: dict[str, object]) -> str:
+            calls.append(name)
+            if name != "ctx__recommend_bundle":
+                raise AssertionError("language-only match must not fetch a wiki body")
+            return json.dumps(
+                {
+                    "results": [
+                        {
+                            "id": "skill:ctx-python-testing",
+                            "name": "ctx-python-testing",
+                            "type": "skill",
+                            "installable": True,
+                            "load_status": "local-wiki",
+                            "matching_tags": ["python"],
+                            "source": "ctx-runtime-availability",
+                            "source_path": "converted/ctx-python-testing/SKILL.md",
+                        }
+                    ],
+                    "context_policy": {
+                        "initial_load": ["skill:ctx-python-testing"],
+                        "deferred": [],
+                    },
+                }
+            )
+
+    monkeypatch.setattr(benchmark, "_catalog_mcp_client", lambda **_kwargs: Client())
+    catalog = benchmark.recommend_production_catalog(
+        scenario,
+        home=tmp_path / "home",
+        lifecycle_root=tmp_path / "lifecycle",
+        session_id="language-only",
+        snapshot=_catalog_snapshot(tmp_path),
+    )
+
+    assert calls == ["ctx__recommend_bundle"]
+    assert catalog["selected_ids"] == []
+    assert catalog["selected_item"] is None
+    assert catalog["body_provenance"] is None
+    assert catalog["body_fetch_seconds"] == 0.0
+    assert catalog["selection_skip_reason"] == "language_only_match"
+    assert catalog["policy_abstention"] == {
+        "candidate_id": "skill:ctx-python-testing",
+        "decision": "abstain",
+        "reason": "language_only_match",
+        "language": "python",
+        "matching_tags": ["python"],
+    }
+    prompt_hash = hashlib.sha256(b"unchanged").hexdigest()
+    lifecycle_events = [
+        {
+            "action": "dev_event",
+            "event_type": "catalog_recommendation",
+            "payload": {
+                "candidate_ids": catalog["candidate_ids"],
+                "selected_ids": [],
+                "context_policy": catalog["context_policy"],
+            },
+        },
+        {"action": "session_end", "status": "passed"},
+    ]
+    assert benchmark.verify_production_policy_abstention(
+        catalog,
+        language="python",
+        task_prompt_sha256=prompt_hash,
+        delivered_prompt_sha256=prompt_hash,
+        model_turn_observed=True,
+        evaluator_isolation_verified=True,
+        mcp_used=False,
+        agent_attempted=False,
+        lifecycle_events=lifecycle_events,
+    )
+    spoofed = json.loads(json.dumps(catalog))
+    spoofed["selected_ids"] = ["skill:ctx-python-testing"]
+    assert not benchmark.verify_production_policy_abstention(
+        spoofed,
+        language="python",
+        task_prompt_sha256=prompt_hash,
+        delivered_prompt_sha256=prompt_hash,
+        model_turn_observed=True,
+        evaluator_isolation_verified=True,
+        mcp_used=False,
+        agent_attempted=False,
+        lifecycle_events=lifecycle_events,
+    )
+    wrong_policy = json.loads(json.dumps(catalog))
+    wrong_policy["candidates"].insert(
+        0,
+        {
+            "id": "skill:intent-specific",
+            "name": "intent-specific",
+            "type": "skill",
+            "installable": True,
+            "matching_tags": ["python", "pytest"],
+        },
+    )
+    wrong_policy["candidate_ids"].insert(0, "skill:intent-specific")
+    wrong_policy["context_policy"]["initial_load"].insert(0, "skill:intent-specific")
+    wrong_policy["policy_initial_load_ids"].insert(0, "skill:intent-specific")
+    assert not benchmark.verify_production_policy_abstention(
+        wrong_policy,
+        language="python",
+        task_prompt_sha256=prompt_hash,
+        delivered_prompt_sha256=prompt_hash,
+        model_turn_observed=True,
+        evaluator_isolation_verified=True,
+        mcp_used=False,
+        agent_attempted=False,
+    )
+    for field, value in (("type", "agent"), ("installable", False)):
+        invalid = json.loads(json.dumps(catalog))
+        invalid["candidates"][0][field] = value
+        assert not benchmark.verify_production_policy_abstention(
+            invalid,
+            language="python",
+            task_prompt_sha256=prompt_hash,
+            delivered_prompt_sha256=prompt_hash,
+            model_turn_observed=True,
+            evaluator_isolation_verified=True,
+            mcp_used=False,
+            agent_attempted=False,
+        )
+    malformed_policy = json.loads(json.dumps(catalog))
+    malformed_policy["policy_initial_load_ids"] = "skill:ctx-python-testing"
+    assert not benchmark.verify_production_policy_abstention(
+        malformed_policy,
+        language="python",
+        task_prompt_sha256=prompt_hash,
+        delivered_prompt_sha256=prompt_hash,
+        model_turn_observed=True,
+        evaluator_isolation_verified=True,
+        mcp_used=False,
+        agent_attempted=False,
+    )
+    boolean_timing = json.loads(json.dumps(catalog))
+    boolean_timing["body_fetch_seconds"] = False
+    assert not benchmark.verify_production_policy_abstention(
+        boolean_timing,
+        language="python",
+        task_prompt_sha256=prompt_hash,
+        delivered_prompt_sha256=prompt_hash,
+        model_turn_observed=True,
+        evaluator_isolation_verified=True,
+        mcp_used=False,
+        agent_attempted=False,
+    )
+    assert not benchmark.verify_production_policy_abstention(
+        catalog,
+        language="python",
+        task_prompt_sha256="a",
+        delivered_prompt_sha256="a",
+        model_turn_observed=True,
+        evaluator_isolation_verified=True,
+        mcp_used=False,
+        agent_attempted=False,
+    )
+    tampered_events = json.loads(json.dumps(lifecycle_events))
+    tampered_events[0]["payload"]["candidate_ids"] = []
+    assert not benchmark.verify_production_policy_abstention(
+        catalog,
+        language="python",
+        task_prompt_sha256=prompt_hash,
+        delivered_prompt_sha256=prompt_hash,
+        model_turn_observed=True,
+        evaluator_isolation_verified=True,
+        mcp_used=False,
+        agent_attempted=False,
+        lifecycle_events=tampered_events,
+    )
+    for candidate_ids in ([], ["skill:phantom"]):
+        coordinated_catalog = json.loads(json.dumps(catalog))
+        coordinated_catalog["candidate_ids"] = candidate_ids
+        coordinated_events = json.loads(json.dumps(lifecycle_events))
+        coordinated_events[0]["payload"]["candidate_ids"] = candidate_ids
+        assert not benchmark.verify_production_policy_abstention(
+            coordinated_catalog,
+            language="python",
+            task_prompt_sha256=prompt_hash,
+            delivered_prompt_sha256=prompt_hash,
+            model_turn_observed=True,
+            evaluator_isolation_verified=True,
+            mcp_used=False,
+            agent_attempted=False,
+            lifecycle_events=coordinated_events,
+        )
 
 
 def _deferred_candidate(
@@ -1065,6 +1301,15 @@ def test_production_skill_use_reason_distinguishes_no_delivery() -> None:
             production_catalog=True,
             ctx_enabled=True,
             context_delivery_verified=False,
+            policy_abstention_verified=True,
+        )
+        == "policy_abstained_before_context_delivery"
+    )
+    assert (
+        benchmark.production_skill_use_evidence_reason(
+            production_catalog=True,
+            ctx_enabled=True,
+            context_delivery_verified=False,
         )
         == "no_skill_delivered"
     )
@@ -1341,6 +1586,162 @@ def test_production_catalog_delivery_precedes_terminal_digest(
     assert all(event.get("action") != "used" for event in events)
 
 
+@pytest.mark.parametrize(
+    ("matching_tags", "reason", "efficiency_eligible", "evidence_level"),
+    [
+        (
+            ["python"],
+            "language_only_match",
+            True,
+            benchmark.PRODUCTION_POLICY_ABSTENTION_LEVEL,
+        ),
+        (
+            None,
+            "insufficient_match_evidence",
+            False,
+            "production_catalog_ctx_noop",
+        ),
+    ],
+)
+def test_production_catalog_live_abstention_is_policy_valid(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    matching_tags: object,
+    reason: str,
+    efficiency_eligible: bool,
+    evidence_level: str,
+) -> None:
+    scenario = benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0]
+    snapshot = _catalog_snapshot(tmp_path)
+    selected_id = "skill:ctx-python-testing"
+    candidate = {
+        "id": selected_id,
+        "name": "ctx-python-testing",
+        "type": "skill",
+        "installable": True,
+        "matching_tags": matching_tags,
+    }
+    policy_abstention = {
+        "candidate_id": selected_id,
+        **benchmark.classify_catalog_match_evidence(candidate, language="python"),
+    }
+    catalog = {
+        "query": scenario.query,
+        "candidates": [candidate],
+        "candidate_ids": [selected_id],
+        "context_policy": {"initial_load": [selected_id]},
+        "policy_field": "initial_load",
+        "policy_initial_load_ids": [selected_id],
+        "deferred_activation": {
+            "decision": "deny",
+            "selected_ids": [],
+            "reason": "no_deferred_candidates",
+            "deferred_candidates": [],
+        },
+        "selected_item": None,
+        "selected_ids": [],
+        "body_provenance": None,
+        "policy_abstention": policy_abstention,
+        "selection_skip_reason": reason,
+        "recommendation_response_sha256": "d" * 64,
+        "recommendation_seconds": 0.01,
+        "body_fetch_seconds": 0.0,
+        "surface_seconds": 0.01,
+    }
+
+    def fake_prepare(
+        _scenario: object,
+        _cache: Path,
+        destination: Path,
+        *,
+        include_evaluator_test: bool,
+    ) -> str:
+        assert include_evaluator_test is False
+        destination.mkdir(parents=True)
+        return hashlib.sha256(scenario.test_body.encode("utf-8")).hexdigest()
+
+    def fake_process(command: list[str], **_kwargs: object) -> Any:
+        if command[0] == "codex":
+            stdout = "\n".join(
+                [
+                    json.dumps({"type": "turn.started"}),
+                    json.dumps(
+                        {
+                            "type": "turn.completed",
+                            "usage": {
+                                "input_tokens": 12,
+                                "cached_input_tokens": 2,
+                                "output_tokens": 3,
+                            },
+                        }
+                    ),
+                ]
+            )
+            return benchmark.CommandResult(0, stdout, "", 0.25)
+        return benchmark.CommandResult(0, "", "", 0.01)
+
+    def fake_prepare_home(home: Path, **_kwargs: object) -> Path:
+        home.mkdir(parents=True)
+        return home
+
+    monkeypatch.setattr(benchmark, "prepare_workspace", fake_prepare)
+    monkeypatch.setattr(benchmark, "bind_catalog_snapshot", lambda *_args: None)
+    monkeypatch.setattr(
+        benchmark,
+        "recommend_production_catalog",
+        lambda *_args, **_kwargs: catalog,
+    )
+    monkeypatch.setattr(benchmark, "prepare_isolated_codex_home", fake_prepare_home)
+    monkeypatch.setattr(
+        benchmark,
+        "verify_agent_sandbox_isolation",
+        lambda **_kwargs: {"verified": True},
+    )
+    monkeypatch.setattr(benchmark, "run_process", fake_process)
+    monkeypatch.setattr(
+        benchmark,
+        "_verify_pinned_head",
+        lambda *_args: benchmark.CommandResult(0, "", "", 0.01),
+    )
+    monkeypatch.setattr(
+        benchmark,
+        "verify_workspace",
+        lambda *_args: benchmark.CommandResult(0, "passed", "", 0.01),
+    )
+
+    result = benchmark.run_trial(
+        scenario,
+        arm="ctx-light",
+        treatment_level="ctx-light",
+        attempt=1,
+        trial=1,
+        retry=0,
+        cache=tmp_path / "cache",
+        output=tmp_path / "output",
+        codex="codex",
+        model="gpt-test",
+        timeout=10,
+        dry_run=False,
+        incidents=benchmark.IncidentLog(tmp_path / "incidents.csv"),
+        catalog_snapshot=snapshot,
+    )
+
+    assert result["status"] == "passed"
+    assert result["policy_valid"] is True
+    assert result["production_efficiency_eligible"] is efficiency_eligible
+    assert result["evidence_level"] == evidence_level
+    assert result["policy_abstention_applied"] is True
+    assert result["policy_abstention_verified"] is efficiency_eligible
+    assert result["policy_abstention_reason"] == reason
+    assert result["catalog_recommendation_lifecycle_verified"] is True
+    assert result["context_delivery_verified"] is False
+    assert result["task_prompt_sha256"] == result["delivered_prompt_sha256"]
+    assert result["selected_ids"] == result["delivered_ids"] == result["used_ids"] == []
+    assert result["body_fetch_seconds"] == 0.0
+    assert result["lifecycle_actions"] == ["dev_event", "session_end"]
+    assert result["final_loaded"] == []
+
+
 def test_catalog_archive_validation_rejects_traversal(tmp_path: Path) -> None:
     archive = tmp_path / "wiki-graph.tar.gz"
     with tarfile.open(archive, "w:gz") as tf:
@@ -1579,6 +1980,90 @@ def test_incident_log_appends_machine_readable_rows(tmp_path: Path) -> None:
     assert "recovered by attempt 2" in resolved[0]["evidence"]
 
 
+def _sealed_production_rows(
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    sealed: list[dict[str, Any]] = []
+    for row in rows:
+        result = benchmark._VerifiedProductionResult(
+            {
+                **row,
+                "repository_state_matches_start_at_end": True,
+                "environment_manifest_matches_start_at_end": True,
+            }
+        )
+        result.seal()
+        sealed.append(result)
+    return sealed
+
+
+def test_production_summary_stays_pending_until_final_attestation(tmp_path: Path) -> None:
+    result = benchmark._VerifiedProductionResult(
+        {
+            "scenario": "scenario",
+            "arm": "baseline",
+            "trial": 1,
+            "engine": benchmark.PRODUCTION_CATALOG_ENGINE,
+            "status": "passed",
+            "production_efficiency_eligible": True,
+            "total_seconds": 1.0,
+            "token_attribution": "exact",
+            "total_tokens": 10,
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="before final attestation"):
+        result.seal()
+    benchmark.write_summary(tmp_path, [result])
+    pending = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
+    assert pending[0]["production_efficiency_eligible"] is False
+    assert pending[0]["evidence_level"] == "attestation_pending"
+    assert json.loads((tmp_path / "aggregate.json").read_text(encoding="utf-8")) == []
+
+    result["repository_state_matches_start_at_end"] = True
+    result["environment_manifest_matches_start_at_end"] = True
+    result.seal()
+    benchmark.write_summary(tmp_path, [result])
+    final = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
+    assert final[0]["production_efficiency_eligible"] is True
+    assert json.loads((tmp_path / "aggregate.json").read_text(encoding="utf-8")) == [
+        {
+            "scenario": "scenario",
+            "arm": "baseline",
+            "trial": 1,
+            "attempts": 1,
+            "first_attempt_passed": True,
+            "eventual_passed": True,
+            "retries_used": 0,
+            "cumulative_seconds": 1.0,
+            "cumulative_exact_tokens": 10,
+        }
+    ]
+
+
+def test_production_summary_preserves_failed_attestation_reason(tmp_path: Path) -> None:
+    result = benchmark._VerifiedProductionResult(
+        {
+            "scenario": "scenario",
+            "arm": "baseline",
+            "trial": 1,
+            "engine": benchmark.PRODUCTION_CATALOG_ENGINE,
+            "status": "passed",
+            "production_efficiency_eligible": False,
+            "evidence_level": "run_attestation_changed",
+            "repository_state_matches_start_at_end": False,
+            "environment_manifest_matches_start_at_end": True,
+        }
+    )
+
+    benchmark.write_summary(tmp_path, [result])
+
+    summary = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
+    assert summary[0]["production_efficiency_eligible"] is False
+    assert summary[0]["evidence_level"] == "run_attestation_changed"
+    assert json.loads((tmp_path / "aggregate.json").read_text(encoding="utf-8")) == []
+
+
 def test_performance_gate_rejects_slow_evidence_run() -> None:
     def rows(light_ratio: float) -> list[dict[str, object]]:
         values: list[dict[str, object]] = []
@@ -1631,8 +2116,8 @@ def test_performance_gate_rejects_slow_evidence_run() -> None:
 
 
 def test_production_catalog_benefit_verdict_is_stricter_than_non_regression() -> None:
-    def rows(time_ratio: float, token_ratio: float) -> list[dict[str, object]]:
-        values: list[dict[str, object]] = []
+    def rows(time_ratio: float, token_ratio: float) -> list[dict[str, Any]]:
+        values: list[dict[str, Any]] = []
         for trial in range(1, 7):
             for arm, seconds, tokens in (
                 ("baseline", 10.0, 1000),
@@ -1657,7 +2142,7 @@ def test_production_catalog_benefit_verdict_is_stricter_than_non_regression() ->
                         "context_delivery_verified": arm == "ctx-light",
                     }
                 )
-        return values
+        return _sealed_production_rows(values)
 
     beneficial = benchmark.build_performance_report(
         rows(0.85, 1.05),
@@ -1689,7 +2174,7 @@ def test_production_catalog_benefit_verdict_is_stricter_than_non_regression() ->
 
 
 def test_production_report_keeps_asymmetric_failure_in_intent_to_treat() -> None:
-    rows: list[dict[str, object]] = []
+    rows: list[dict[str, Any]] = []
     for trial in range(1, 7):
         for arm in ("baseline", "ctx-light"):
             rows.append(
@@ -1713,7 +2198,7 @@ def test_production_report_keeps_asymmetric_failure_in_intent_to_treat() -> None
             )
 
     report = benchmark.build_performance_report(
-        rows,
+        _sealed_production_rows(rows),
         scenario_ids=["scenario"],
         trials=6,
         arms=("baseline", "ctx-light"),
@@ -1725,6 +2210,255 @@ def test_production_report_keeps_asymmetric_failure_in_intent_to_treat() -> None
     assert report["quality_preserved"] is False
     assert report["benefit_verdict"] == "not_beneficial"
     assert report["beneficial"] is False
+
+
+def test_production_report_scores_verified_abstention_as_policy_overhead_only() -> None:
+    prompt_hash = "a" * 64
+    rows: list[dict[str, Any]] = []
+    for trial in range(1, 7):
+        rows.append(
+            {
+                "scenario": "scenario",
+                "repo_url": "https://example.test/repo.git",
+                "arm": "baseline",
+                "trial": trial,
+                "engine": benchmark.PRODUCTION_CATALOG_ENGINE,
+                "status": "passed",
+                "measured_phase_seconds": 10.0,
+                "harness_total_seconds": 10.5,
+                "token_attribution": "exact",
+                "total_tokens": 1000,
+                "uncached_input_tokens": 800,
+                "team_token_completeness": "not_applicable",
+                "production_efficiency_eligible": True,
+                "evaluator_isolation_verified": True,
+            }
+        )
+        rows.append(
+            {
+                "scenario": "scenario",
+                "repo_url": "https://example.test/repo.git",
+                "arm": "ctx-light",
+                "trial": trial,
+                "engine": benchmark.PRODUCTION_CATALOG_ENGINE,
+                "status": "passed",
+                "measured_phase_seconds": 10.1,
+                "harness_total_seconds": 10.6,
+                "token_attribution": "exact",
+                "total_tokens": 1005,
+                "uncached_input_tokens": 804,
+                "team_token_completeness": "not_applicable",
+                "production_efficiency_eligible": True,
+                "evaluator_isolation_verified": True,
+                "context_delivery_verified": False,
+                "policy_abstention_applied": True,
+                "policy_abstention_verified": True,
+                "policy_abstention_reason": "language_only_match",
+                "evidence_level": benchmark.PRODUCTION_POLICY_ABSTENTION_LEVEL,
+                "policy_valid": True,
+                "selected_ids": [],
+                "delivered_ids": [],
+                "adopted_ids": [],
+                "used_ids": [],
+                "task_prompt_sha256": prompt_hash,
+                "delivered_prompt_sha256": prompt_hash,
+                "body_fetch_seconds": 0.0,
+                "lifecycle_actions": ["dev_event", "session_end"],
+                "lifecycle_session_status": "passed",
+                "catalog_recommendation_lifecycle_verified": True,
+                "pinned_head_verified": True,
+                "repository_state_matches_start_at_end": True,
+                "environment_manifest_matches_start_at_end": True,
+            }
+        )
+
+    forged = benchmark.build_performance_report(
+        rows,
+        scenario_ids=["scenario"],
+        trials=6,
+        arms=("baseline", "ctx-light"),
+    )
+    sealed_rows = _sealed_production_rows(rows)
+    report = benchmark.build_performance_report(
+        sealed_rows,
+        scenario_ids=["scenario"],
+        trials=6,
+        arms=("baseline", "ctx-light"),
+    )
+    tampered_rows = _sealed_production_rows(rows)
+    tampered_rows[1]["total_tokens"] = 999999
+    tampered = benchmark.build_performance_report(
+        tampered_rows,
+        scenario_ids=["scenario"],
+        trials=6,
+        arms=("baseline", "ctx-light"),
+    )
+
+    assert forged["production_efficiency_claim_allowed"] is False
+    assert forged["ctx_policy_outcomes"]["verified_abstentions"] == 0
+    assert forged["ctx_policy_outcomes"]["untrusted_assignments"] == 6
+    assert tampered["production_efficiency_claim_allowed"] is False
+    assert tampered["ctx_policy_outcomes"]["verified_abstentions"] == 5
+    assert tampered["ctx_policy_outcomes"]["untrusted_assignments"] == 1
+    assert tampered["ctx_policy_outcomes"]["abstention_rate"] == pytest.approx(5 / 6)
+    assert report["production_efficiency_claim_allowed"] is True
+    assert report["evidence_complete"] is True
+    assert report["gate_passed"] is True
+    assert report["beneficial"] is None
+    assert report["benefit_verdict"] == "policy_abstention_only"
+    assert report["ctx_policy_outcomes"] == {
+        "assigned": 6,
+        "context_delivered": 0,
+        "verified_abstentions": 6,
+        "unverified_noops": 0,
+        "untrusted_assignments": 0,
+        "activation_rate": 0.0,
+        "abstention_rate": 1.0,
+    }
+
+
+def test_policy_activation_rate_rejects_post_seal_mutation() -> None:
+    rows = _sealed_production_rows(
+        [
+            {
+                "scenario": "scenario",
+                "arm": "baseline",
+                "trial": 1,
+                "engine": benchmark.PRODUCTION_CATALOG_ENGINE,
+                "status": "passed",
+                "measured_phase_seconds": 10.0,
+                "harness_total_seconds": 10.5,
+                "token_attribution": "exact",
+                "total_tokens": 1000,
+                "uncached_input_tokens": 800,
+                "team_token_completeness": "not_applicable",
+                "production_efficiency_eligible": True,
+                "evaluator_isolation_verified": True,
+            },
+            {
+                "scenario": "scenario",
+                "arm": "ctx-light",
+                "trial": 1,
+                "engine": benchmark.PRODUCTION_CATALOG_ENGINE,
+                "status": "passed",
+                "measured_phase_seconds": 9.0,
+                "harness_total_seconds": 9.5,
+                "token_attribution": "exact",
+                "total_tokens": 900,
+                "uncached_input_tokens": 700,
+                "team_token_completeness": "not_applicable",
+                "production_efficiency_eligible": True,
+                "evaluator_isolation_verified": True,
+                "context_delivery_verified": True,
+            },
+        ]
+    )
+    rows[1]["total_tokens"] = 899
+
+    report = benchmark.build_performance_report(
+        rows,
+        scenario_ids=["scenario"],
+        trials=1,
+        arms=("baseline", "ctx-light"),
+    )
+
+    assert report["ctx_policy_outcomes"] == {
+        "assigned": 1,
+        "context_delivered": 0,
+        "verified_abstentions": 0,
+        "unverified_noops": 0,
+        "untrusted_assignments": 1,
+        "activation_rate": 0.0,
+        "abstention_rate": 0.0,
+    }
+
+
+def test_product_claim_requires_exact_complete_expected_schedule() -> None:
+    scenario_ids = [f"scenario-{index}" for index in range(6)]
+    rows: list[dict[str, Any]] = [
+        {
+            "scenario": scenario,
+            "repo_url": f"https://example.test/repo-{index % 2}.git",
+            "arm": arm,
+            "trial": trial,
+            "engine": benchmark.PRODUCTION_CATALOG_ENGINE,
+            "status": "passed",
+            "measured_phase_seconds": 10.0,
+            "harness_total_seconds": 10.5,
+            "token_attribution": "exact",
+            "total_tokens": 1000,
+            "uncached_input_tokens": 800,
+            "team_token_completeness": "not_applicable",
+            "production_efficiency_eligible": True,
+            "evaluator_isolation_verified": True,
+            "context_delivery_verified": arm == "ctx-light",
+        }
+        for index, scenario in enumerate(scenario_ids)
+        for trial in range(1, 7)
+        for arm in ("baseline", "ctx-light")
+    ]
+    rows.append(
+        {
+            **rows[-1],
+            "scenario": "unexpected",
+            "repo_url": "https://example.test/repo-extra.git",
+            "trial": 6,
+        }
+    )
+
+    report = benchmark.build_performance_report(
+        _sealed_production_rows(rows),
+        scenario_ids=scenario_ids,
+        trials=6,
+        arms=("baseline", "ctx-light"),
+    )
+
+    assert report["assignment_complete"] is False
+    assert report["evidence_complete"] is False
+    assert report["gate_passed"] is False
+    assert report["product_claim_eligible"] is False
+    assert report["claim_scope"] == "scenario_set_only"
+    assert report["distinct_repository_count"] == 2
+    assert report["ctx_policy_outcomes"]["assigned"] == 36
+
+
+def test_product_claim_accepts_complete_multi_repository_schedule() -> None:
+    scenario_ids = [f"scenario-{index}" for index in range(6)]
+    rows: list[dict[str, Any]] = [
+        {
+            "scenario": scenario,
+            "repo_url": f"https://example.test/repo-{index % 3}.git",
+            "arm": arm,
+            "trial": trial,
+            "engine": benchmark.PRODUCTION_CATALOG_ENGINE,
+            "status": "passed",
+            "measured_phase_seconds": 10.0,
+            "harness_total_seconds": 10.5,
+            "token_attribution": "exact",
+            "total_tokens": 1000,
+            "uncached_input_tokens": 800,
+            "team_token_completeness": "not_applicable",
+            "production_efficiency_eligible": True,
+            "evaluator_isolation_verified": True,
+            "context_delivery_verified": arm == "ctx-light",
+        }
+        for index, scenario in enumerate(scenario_ids)
+        for trial in range(1, 7)
+        for arm in ("baseline", "ctx-light")
+    ]
+
+    report = benchmark.build_performance_report(
+        _sealed_production_rows(rows),
+        scenario_ids=scenario_ids,
+        trials=6,
+        arms=("baseline", "ctx-light"),
+    )
+
+    assert report["assignment_complete"] is True
+    assert report["evidence_complete"] is True
+    assert report["product_claim_eligible"] is True
+    assert report["claim_scope"] == "product_pilot"
+    assert report["distinct_repository_count"] == 3
 
 
 def test_production_report_excludes_ctx_noop_and_missing_measured_phase() -> None:
