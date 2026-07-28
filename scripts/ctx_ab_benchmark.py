@@ -197,6 +197,15 @@ def _safe_relative_path(value: object, *, field: str) -> str:
     return raw
 
 
+def _workspace_git_command(workspace: Path, *args: str) -> list[str]:
+    return [
+        "git",
+        f"--git-dir={workspace / '.git'}",
+        f"--work-tree={workspace}",
+        *args,
+    ]
+
+
 def _validated_command(value: object, *, field: str) -> tuple[str, ...]:
     if not isinstance(value, list) or not value or not all(isinstance(item, str) for item in value):
         raise ValueError(f"{field} must be a non-empty string list")
@@ -738,19 +747,242 @@ def prepare_workspace(
     return test_hash
 
 
+def _open_relative_parent(
+    workspace: Path,
+    relative: str,
+    *,
+    create: bool,
+) -> tuple[int, str]:
+    safe_relative = _safe_relative_path(relative, field="benchmark-owned test path")
+    parts = Path(safe_relative).parts
+    if not parts:
+        raise RuntimeError("benchmark-owned test path has no filename")
+    if os.name != "nt" and (not hasattr(os, "O_DIRECTORY") or not hasattr(os, "O_NOFOLLOW")):
+        raise RuntimeError("secure evaluator path operations are unavailable")
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | os.O_DIRECTORY | os.O_NOFOLLOW
+    descriptor = os.open(workspace, flags)
+    try:
+        for component in parts[:-1]:
+            if create:
+                try:
+                    os.mkdir(component, mode=0o755, dir_fd=descriptor)
+                except FileExistsError:
+                    pass
+            child = os.open(component, flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child
+        return descriptor, parts[-1]
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _relative_regular_bytes(workspace: Path, relative: str) -> bytes | None:
+    if os.name == "nt":
+        path = workspace / _safe_relative_path(relative, field="benchmark-owned test path")
+        workspace_root = workspace.resolve()
+        try:
+            resolved_parent = path.parent.resolve(strict=True)
+        except FileNotFoundError:
+            return None
+        if resolved_parent != workspace_root and workspace_root not in resolved_parent.parents:
+            raise RuntimeError("benchmark-owned test path escapes the workspace")
+        if path.is_symlink():
+            raise RuntimeError("benchmark-owned test path is a symlink")
+        try:
+            file_stat = path.stat()
+        except FileNotFoundError:
+            return None
+        if not stat.S_ISREG(file_stat.st_mode):
+            raise RuntimeError("benchmark-owned test path is not a regular file")
+        return path.read_bytes()
+
+    try:
+        parent_fd, leaf = _open_relative_parent(workspace, relative, create=False)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise RuntimeError("benchmark-owned test path contains an unsafe component") from exc
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | os.O_NOFOLLOW
+        try:
+            descriptor = os.open(leaf, flags, dir_fd=parent_fd)
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            raise RuntimeError("benchmark-owned test path is a symlink or unsafe file") from exc
+        with os.fdopen(descriptor, "rb") as fh:
+            if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
+                raise RuntimeError("benchmark-owned test path is not a regular file")
+            return fh.read()
+    finally:
+        os.close(parent_fd)
+
+
+def _write_evaluator_atomically(workspace: Path, relative: str, body: bytes) -> None:
+    if os.name == "nt":
+        path = workspace / _safe_relative_path(relative, field="benchmark-owned test path")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        workspace_root = workspace.resolve()
+        resolved_parent = path.parent.resolve()
+        if resolved_parent != workspace_root and workspace_root not in resolved_parent.parents:
+            raise RuntimeError("benchmark-owned test path escapes the workspace")
+        if path.is_symlink() or (path.exists() and not path.is_file()):
+            raise RuntimeError("benchmark-owned test path is a symlink or unsafe file")
+        temporary_path = path.with_name(f".{path.name}.ctx-{secrets.token_hex(8)}")
+        try:
+            with temporary_path.open("xb") as fh:
+                fh.write(body)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(temporary_path, path)
+        finally:
+            temporary_path.unlink(missing_ok=True)
+    else:
+        try:
+            parent_fd, leaf = _open_relative_parent(workspace, relative, create=True)
+        except OSError as exc:
+            raise RuntimeError("benchmark-owned test path contains an unsafe component") from exc
+        temporary_entry = f".{leaf}.ctx-{secrets.token_hex(8)}"
+        try:
+            try:
+                existing = os.stat(leaf, dir_fd=parent_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                existing = None
+            if existing is not None and not stat.S_ISREG(existing.st_mode):
+                raise RuntimeError("benchmark-owned test path is a symlink or unsafe file")
+            flags = (
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0) | os.O_NOFOLLOW
+            )
+            descriptor = os.open(temporary_entry, flags, 0o600, dir_fd=parent_fd)
+            with os.fdopen(descriptor, "wb") as fh:
+                fh.write(body)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(
+                temporary_entry,
+                leaf,
+                src_dir_fd=parent_fd,
+                dst_dir_fd=parent_fd,
+            )
+            temporary_entry = ""
+        finally:
+            if temporary_entry:
+                try:
+                    os.unlink(temporary_entry, dir_fd=parent_fd)
+                except FileNotFoundError:
+                    pass
+            os.close(parent_fd)
+
+    materialized = _relative_regular_bytes(workspace, relative)
+    if materialized != body:
+        raise RuntimeError("benchmark-owned test could not be materialized exactly")
+
+
+def _parse_single_git_entry(
+    output: str,
+    *,
+    path: str,
+    indexed: bool,
+) -> tuple[str, str] | None:
+    rows = [row for row in output.split("\0") if row]
+    if not rows:
+        return None
+    if len(rows) != 1 or "\t" not in rows[0]:
+        raise RuntimeError("benchmark-owned test git state is ambiguous")
+    metadata, observed_path = rows[0].split("\t", 1)
+    if observed_path != path:
+        raise RuntimeError("benchmark-owned test git path changed unexpectedly")
+    fields = metadata.split()
+    if indexed:
+        if len(fields) != 3 or fields[2] != "0":
+            raise RuntimeError("benchmark-owned test index state is ambiguous")
+        return fields[0], fields[1]
+    if len(fields) != 3 or fields[1] != "blob":
+        raise RuntimeError("benchmark-owned test tree state is ambiguous")
+    return fields[0], fields[2]
+
+
+def _evaluator_git_entries(
+    scenario: Scenario,
+    workspace: Path,
+) -> tuple[tuple[str, str] | None, tuple[str, str] | None]:
+    tree = run_process(
+        _workspace_git_command(
+            workspace,
+            "ls-tree",
+            "-r",
+            "-z",
+            scenario.commit,
+            "--",
+            scenario.test_path,
+        ),
+        cwd=workspace,
+        timeout=30,
+    )
+    if tree.returncode:
+        raise RuntimeError(f"could not inspect benchmark-owned test: {tree.stderr.strip()}")
+    index = run_process(
+        _workspace_git_command(
+            workspace,
+            "ls-files",
+            "--stage",
+            "-z",
+            "--",
+            scenario.test_path,
+        ),
+        cwd=workspace,
+        timeout=30,
+    )
+    if index.returncode:
+        raise RuntimeError(
+            f"could not inspect indexed benchmark-owned test: {index.stderr.strip()}"
+        )
+    return (
+        _parse_single_git_entry(tree.stdout, path=scenario.test_path, indexed=False),
+        _parse_single_git_entry(index.stdout, path=scenario.test_path, indexed=True),
+    )
+
+
+def _require_pristine_evaluator_index(scenario: Scenario, workspace: Path) -> None:
+    tree_entry, index_entry = _evaluator_git_entries(scenario, workspace)
+    if index_entry != tree_entry:
+        raise RuntimeError("agent changed the benchmark-owned test path in the git index")
+
+
+def _require_pristine_evaluator_path(scenario: Scenario, workspace: Path) -> None:
+    current = _relative_regular_bytes(workspace, scenario.test_path)
+    tree_entry, index_entry = _evaluator_git_entries(scenario, workspace)
+    if index_entry != tree_entry:
+        raise RuntimeError("agent changed the benchmark-owned test path in the git index")
+    if tree_entry is None:
+        if current is not None:
+            raise RuntimeError("agent created the benchmark-owned test path")
+        return
+    if current is None:
+        raise RuntimeError("agent changed the benchmark-owned test path")
+    header = f"blob {len(current)}\0".encode("ascii")
+    current_blob = hashlib.sha1(header + current, usedforsecurity=False).hexdigest()
+    if current_blob != tree_entry[1]:
+        raise RuntimeError("agent changed the benchmark-owned test path")
+
+
 def materialize_evaluator_test(
     scenario: Scenario,
     workspace: Path,
     *,
     expected_hash: str,
+    require_pristine: bool = False,
 ) -> None:
     if hashlib.sha256(scenario.test_body.encode("utf-8")).hexdigest() != expected_hash:
         raise RuntimeError("benchmark-owned test definition changed during the trial")
-    test_path = workspace / scenario.test_path
-    test_path.parent.mkdir(parents=True, exist_ok=True)
-    test_path.write_text(scenario.test_body, encoding="utf-8")
-    if hashlib.sha256(test_path.read_bytes()).hexdigest() != expected_hash:
-        raise RuntimeError("benchmark-owned test could not be materialized exactly")
+    if require_pristine:
+        _require_pristine_evaluator_path(scenario, workspace)
+    _write_evaluator_atomically(
+        workspace,
+        scenario.test_path,
+        scenario.test_body.encode("utf-8"),
+    )
 
 
 def _sha256_file(path: Path) -> str:
@@ -3327,6 +3559,7 @@ def _verification_env(workspace: Path, temp: Path) -> dict[str, str]:
         "PYTHONPATH": str(workspace / "src"),
         "PYTHONNOUSERSITE": "1",
         "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTEST_ADDOPTS": "-p no:cacheprovider",
         "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
     }
 
@@ -3363,8 +3596,11 @@ def _pytest_pass_count(output: str) -> int | None:
 
 
 def _focused_verification(scenario: Scenario, workspace: Path, test_hash: str) -> CommandResult:
-    test_path = workspace / scenario.test_path
-    if not test_path.is_file() or hashlib.sha256(test_path.read_bytes()).hexdigest() != test_hash:
+    try:
+        test_body = _relative_regular_bytes(workspace, scenario.test_path)
+    except RuntimeError as exc:
+        return CommandResult(1, "", str(exc), 0.0)
+    if test_body is None or hashlib.sha256(test_body).hexdigest() != test_hash:
         return CommandResult(1, "", "benchmark-owned test was changed", 0.0)
     argv = [part.replace("{python}", sys.executable) for part in scenario.verify]
     focused = _run_verified(argv, workspace=workspace)
@@ -3384,7 +3620,11 @@ def _focused_verification(scenario: Scenario, workspace: Path, test_hash: str) -
 
 def _verify_pinned_head(scenario: Scenario, workspace: Path) -> CommandResult:
     started = time.perf_counter()
-    current = run_process(["git", "rev-parse", "HEAD"], cwd=workspace, timeout=30)
+    current = run_process(
+        _workspace_git_command(workspace, "rev-parse", "HEAD"),
+        cwd=workspace,
+        timeout=30,
+    )
     observed = current.stdout.strip()
     if current.returncode or observed != scenario.commit:
         return CommandResult(
@@ -3397,20 +3637,123 @@ def _verify_pinned_head(scenario: Scenario, workspace: Path) -> CommandResult:
     return CommandResult(0, current.stdout, current.stderr, time.perf_counter() - started)
 
 
-def _materialize_untracked_changes(scenario: Scenario, workspace: Path) -> CommandResult:
-    started = time.perf_counter()
-    indexed_test = run_process(
-        ["git", "ls-files", "--error-unmatch", scenario.test_path], cwd=workspace, timeout=30
+def _porcelain_status_paths(output: str) -> set[str]:
+    records = output.split("\0")
+    paths: set[str] = set()
+    index = 0
+    while index < len(records):
+        record = records[index]
+        index += 1
+        if not record:
+            continue
+        if len(record) < 4 or record[2] != " ":
+            raise RuntimeError("git status returned malformed path metadata")
+        status = record[:2]
+        path = record[3:]
+        if not path:
+            raise RuntimeError("git status returned an empty path")
+        paths.add(path)
+        if "R" in status or "C" in status:
+            if index >= len(records) or not records[index]:
+                raise RuntimeError("git status returned an incomplete rename")
+            paths.add(records[index])
+            index += 1
+    return paths
+
+
+def _hidden_index_flag_paths(workspace: Path) -> tuple[CommandResult, set[str]]:
+    result = run_process(
+        _workspace_git_command(workspace, "ls-files", "-v", "-z"),
+        cwd=workspace,
+        timeout=30,
     )
-    if not indexed_test.returncode:
+    if result.returncode:
+        return result, set()
+    hidden: set[str] = set()
+    for record in result.stdout.split("\0"):
+        if not record:
+            continue
+        if len(record) < 3 or record[1] != " ":
+            return (
+                CommandResult(
+                    1, result.stdout, "git index returned malformed flags", result.elapsed
+                ),
+                set(),
+            )
+        if record[0] != "H":
+            hidden.add(record[2:])
+    return result, hidden
+
+
+def _materialize_untracked_changes(
+    scenario: Scenario,
+    workspace: Path,
+    test_hash: str,
+) -> CommandResult:
+    started = time.perf_counter()
+    try:
+        test_body = _relative_regular_bytes(workspace, scenario.test_path)
+    except RuntimeError as exc:
+        return CommandResult(1, "", str(exc), time.perf_counter() - started)
+    if test_body is None or hashlib.sha256(test_body).hexdigest() != test_hash:
         return CommandResult(
             1,
             "",
-            "benchmark-owned test entered the git index",
+            "benchmark-owned test was changed",
             time.perf_counter() - started,
         )
+    try:
+        _require_pristine_evaluator_index(scenario, workspace)
+    except RuntimeError as exc:
+        return CommandResult(
+            1,
+            "",
+            str(exc),
+            time.perf_counter() - started,
+        )
+    flags_result, hidden_paths = _hidden_index_flag_paths(workspace)
+    if flags_result.returncode:
+        return CommandResult(
+            flags_result.returncode,
+            flags_result.stdout,
+            flags_result.stderr,
+            time.perf_counter() - started,
+        )
+    if hidden_paths:
+        return CommandResult(
+            1,
+            flags_result.stdout,
+            f"unsupported git index flags: {sorted(hidden_paths)}",
+            time.perf_counter() - started,
+        )
+    status = run_process(
+        _workspace_git_command(
+            workspace,
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            "core.untrackedCache=false",
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=all",
+        ),
+        cwd=workspace,
+        timeout=30,
+    )
+    if status.returncode:
+        return CommandResult(
+            status.returncode,
+            status.stdout,
+            status.stderr,
+            time.perf_counter() - started,
+        )
+    try:
+        changed_paths = _porcelain_status_paths(status.stdout)
+    except RuntimeError as exc:
+        return CommandResult(1, status.stdout, str(exc), time.perf_counter() - started)
     untracked = run_process(
-        ["git", "ls-files", "--others", "--exclude-standard", "-z"],
+        _workspace_git_command(workspace, "ls-files", "--others", "-z"),
         cwd=workspace,
         timeout=30,
     )
@@ -3421,9 +3764,24 @@ def _materialize_untracked_changes(scenario: Scenario, workspace: Path) -> Comma
             untracked.stderr,
             time.perf_counter() - started,
         )
-    paths = [path for path in untracked.stdout.split("\0") if path and path != scenario.test_path]
+    paths = [path for path in untracked.stdout.split("\0") if path]
+    changed_paths.update(paths)
+    changed_paths.discard(scenario.test_path)
+    disallowed = changed_paths - set(scenario.allowed_changes)
+    if disallowed:
+        return CommandResult(
+            1,
+            status.stdout + untracked.stdout,
+            f"changes outside scenario allowlist: {sorted(disallowed)}",
+            time.perf_counter() - started,
+        )
+    paths = [path for path in paths if path != scenario.test_path]
     if paths:
-        added = run_process(["git", "add", "-N", "--", *paths], cwd=workspace, timeout=30)
+        added = run_process(
+            _workspace_git_command(workspace, "add", "-N", "-f", "--", *paths),
+            cwd=workspace,
+            timeout=30,
+        )
         if added.returncode:
             return CommandResult(
                 added.returncode,
@@ -3431,37 +3789,24 @@ def _materialize_untracked_changes(scenario: Scenario, workspace: Path) -> Comma
                 added.stderr,
                 time.perf_counter() - started,
             )
-    changed = run_process(
-        ["git", "diff", "--name-only", "-z", scenario.commit],
-        cwd=workspace,
-        timeout=30,
+    return CommandResult(
+        0,
+        status.stdout + untracked.stdout,
+        "",
+        time.perf_counter() - started,
     )
-    if changed.returncode:
-        return CommandResult(
-            changed.returncode,
-            changed.stdout,
-            changed.stderr,
-            time.perf_counter() - started,
-        )
-    changed_paths = {path for path in changed.stdout.split("\0") if path}
-    disallowed = changed_paths - set(scenario.allowed_changes)
-    if disallowed:
-        return CommandResult(
-            1,
-            changed.stdout,
-            f"changes outside scenario allowlist: {sorted(disallowed)}",
-            time.perf_counter() - started,
-        )
-    return CommandResult(0, changed.stdout, "", time.perf_counter() - started)
 
 
 def verify_workspace(scenario: Scenario, workspace: Path, test_hash: str) -> CommandResult:
+    preflight = _materialize_untracked_changes(scenario, workspace, test_hash)
+    if preflight.returncode:
+        return preflight
     focused = _focused_verification(scenario, workspace, test_hash)
     if focused.returncode:
         return focused
-    stdout = focused.stdout
+    stdout = preflight.stdout + focused.stdout
     stderr = focused.stderr
-    elapsed = focused.elapsed
+    elapsed = preflight.elapsed + focused.elapsed
     for command in scenario.regression_verify:
         argv = [part.replace("{python}", sys.executable) for part in command]
         regression = _run_verified(argv, workspace=workspace)
@@ -3470,7 +3815,7 @@ def verify_workspace(scenario: Scenario, workspace: Path, test_hash: str) -> Com
         elapsed += regression.elapsed
         if regression.returncode:
             return CommandResult(regression.returncode, stdout, stderr, elapsed)
-    materialized = _materialize_untracked_changes(scenario, workspace)
+    materialized = _materialize_untracked_changes(scenario, workspace, test_hash)
     if materialized.returncode:
         return CommandResult(
             1,
@@ -3479,17 +3824,17 @@ def verify_workspace(scenario: Scenario, workspace: Path, test_hash: str) -> Com
             elapsed + materialized.elapsed,
         )
     elapsed += materialized.elapsed
-    diff_check = run_process(
-        ["git", "diff", "--check", scenario.commit],
-        cwd=workspace,
-        timeout=30,
-    )
-    return CommandResult(
-        diff_check.returncode,
-        stdout + diff_check.stdout,
-        stderr + diff_check.stderr,
-        elapsed + diff_check.elapsed,
-    )
+    for diff_command in (
+        _workspace_git_command(workspace, "diff", "--check", scenario.commit),
+        _workspace_git_command(workspace, "diff", "--cached", "--check", scenario.commit),
+    ):
+        diff_check = run_process(diff_command, cwd=workspace, timeout=30)
+        stdout += diff_check.stdout
+        stderr += diff_check.stderr
+        elapsed += diff_check.elapsed
+        if diff_check.returncode:
+            return CommandResult(diff_check.returncode, stdout, stderr, elapsed)
+    return CommandResult(0, stdout, stderr, elapsed)
 
 
 def validate_evaluator_controls(
@@ -4300,7 +4645,16 @@ def run_trial(
         (run_dir / "codex.jsonl").write_text(agent.stdout, encoding="utf-8")
         (run_dir / "codex.stderr.log").write_text(agent.stderr, encoding="utf-8")
         pre_status = run_process(
-            ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+            _workspace_git_command(
+                workspace,
+                "-c",
+                "core.fsmonitor=false",
+                "-c",
+                "core.untrackedCache=false",
+                "status",
+                "--porcelain=v1",
+                "--untracked-files=all",
+            ),
             cwd=workspace,
             timeout=30,
         )
@@ -4315,6 +4669,7 @@ def run_trial(
                 scenario,
                 workspace,
                 expected_hash=test_hash,
+                require_pristine=True,
             )
         verification = verify_workspace(scenario, workspace, test_hash)
         if head_check.returncode:
@@ -4328,13 +4683,22 @@ def run_trial(
             verification.stdout + verification.stderr, encoding="utf-8"
         )
         status = run_process(
-            ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+            _workspace_git_command(
+                workspace,
+                "-c",
+                "core.fsmonitor=false",
+                "-c",
+                "core.untrackedCache=false",
+                "status",
+                "--porcelain=v1",
+                "--untracked-files=all",
+            ),
             cwd=workspace,
             timeout=30,
         )
         (run_dir / "git-status.txt").write_text(status.stdout, encoding="utf-8")
         diff = run_process(
-            ["git", "diff", "--binary", scenario.commit],
+            _workspace_git_command(workspace, "diff", "--binary", scenario.commit),
             cwd=workspace,
             timeout=30,
         )

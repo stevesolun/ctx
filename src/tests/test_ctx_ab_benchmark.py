@@ -3736,6 +3736,638 @@ def test_pinned_head_guard_rejects_agent_commit(tmp_path: Path) -> None:
     assert "agent changed pinned HEAD" in result.stderr
 
 
+def test_tracked_evaluator_test_is_reconstructed_only_from_pristine_base(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+    subprocess.run(["git", "config", "user.email", "ctx@example.test"], cwd=workspace, check=True)
+    subprocess.run(["git", "config", "user.name", "ctx benchmark"], cwd=workspace, check=True)
+    source = workspace / "source.py"
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    tests = workspace / "tests"
+    tests.mkdir()
+    evaluator_test = tests / "test_feature.py"
+    evaluator_test.write_text("def test_old():\n    assert True\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=workspace, check=True)
+    subprocess.run(["git", "commit", "-qm", "parent"], cwd=workspace, check=True)
+    pinned = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    scenario = replace(
+        benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0],
+        commit=pinned,
+        test_path="tests/test_feature.py",
+        test_body="def test_new():\n    assert True\n",
+        allowed_changes=("source.py",),
+    )
+    expected_hash = hashlib.sha256(scenario.test_body.encode()).hexdigest()
+
+    benchmark.materialize_evaluator_test(
+        scenario,
+        workspace,
+        expected_hash=expected_hash,
+        require_pristine=True,
+    )
+    source.write_text("VALUE = 2\n", encoding="utf-8")
+
+    assert (
+        benchmark._materialize_untracked_changes(scenario, workspace, expected_hash).returncode == 0
+    )
+
+    subprocess.run(
+        ["git", "checkout", "--detach", "--force", pinned],
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+    )
+    evaluator_test.write_text("def test_agent_change():\n    assert False\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="agent changed"):
+        benchmark.materialize_evaluator_test(
+            scenario,
+            workspace,
+            expected_hash=expected_hash,
+            require_pristine=True,
+        )
+
+
+def test_tracked_evaluator_rejects_cached_only_mutation(tmp_path: Path) -> None:
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+    subprocess.run(["git", "config", "user.email", "ctx@example.test"], cwd=workspace, check=True)
+    subprocess.run(["git", "config", "user.name", "ctx benchmark"], cwd=workspace, check=True)
+    evaluator_test = workspace / "test_feature.py"
+    base_body = "def test_old():\n    assert True\n"
+    evaluator_test.write_text(base_body, encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=workspace, check=True)
+    subprocess.run(["git", "commit", "-qm", "parent"], cwd=workspace, check=True)
+    pinned = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    scenario = replace(
+        benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0],
+        commit=pinned,
+        test_path="test_feature.py",
+        test_body="def test_hidden():\n    assert True\n",
+    )
+    expected_hash = hashlib.sha256(scenario.test_body.encode()).hexdigest()
+    evaluator_test.write_text("def test_staged():\n    assert False\n", encoding="utf-8")
+    subprocess.run(["git", "add", "test_feature.py"], cwd=workspace, check=True)
+    evaluator_test.write_text(base_body, encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="git index"):
+        benchmark.materialize_evaluator_test(
+            scenario,
+            workspace,
+            expected_hash=expected_hash,
+            require_pristine=True,
+        )
+
+
+@pytest.mark.parametrize(
+    "add_args",
+    [("add",), ("add", "-N")],
+    ids=("staged", "intent-to-add"),
+)
+def test_untracked_evaluator_rejects_agent_index_entry(
+    tmp_path: Path,
+    add_args: tuple[str, ...],
+) -> None:
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+    subprocess.run(["git", "config", "user.email", "ctx@example.test"], cwd=workspace, check=True)
+    subprocess.run(["git", "config", "user.name", "ctx benchmark"], cwd=workspace, check=True)
+    source = workspace / "source.py"
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "source.py"], cwd=workspace, check=True)
+    subprocess.run(["git", "commit", "-qm", "parent"], cwd=workspace, check=True)
+    pinned = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    scenario = replace(
+        benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0],
+        commit=pinned,
+        test_path="test_feature.py",
+        test_body="def test_hidden():\n    assert True\n",
+        allowed_changes=("source.py",),
+    )
+    expected_hash = hashlib.sha256(scenario.test_body.encode()).hexdigest()
+    benchmark.materialize_evaluator_test(
+        scenario,
+        workspace,
+        expected_hash=expected_hash,
+    )
+    subprocess.run(["git", *add_args, "test_feature.py"], cwd=workspace, check=True)
+
+    result = benchmark._materialize_untracked_changes(scenario, workspace, expected_hash)
+
+    assert result.returncode == 1
+    assert "benchmark-owned test" in result.stderr
+    assert "git index" in result.stderr
+
+
+def test_production_evaluator_rejects_deleted_intent_to_add_entry(tmp_path: Path) -> None:
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+    subprocess.run(["git", "config", "user.email", "ctx@example.test"], cwd=workspace, check=True)
+    subprocess.run(["git", "config", "user.name", "ctx benchmark"], cwd=workspace, check=True)
+    source = workspace / "source.py"
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "source.py"], cwd=workspace, check=True)
+    subprocess.run(["git", "commit", "-qm", "parent"], cwd=workspace, check=True)
+    pinned = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    scenario = replace(
+        benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0],
+        commit=pinned,
+        test_path="test_feature.py",
+        test_body="def test_hidden():\n    assert True\n",
+    )
+    evaluator = workspace / scenario.test_path
+    evaluator.write_text("agent placeholder\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-N", scenario.test_path], cwd=workspace, check=True)
+    evaluator.unlink()
+
+    with pytest.raises(RuntimeError, match="git index"):
+        benchmark.materialize_evaluator_test(
+            scenario,
+            workspace,
+            expected_hash=hashlib.sha256(scenario.test_body.encode()).hexdigest(),
+            require_pristine=True,
+        )
+
+
+@pytest.mark.parametrize("flag", ["--assume-unchanged", "--skip-worktree"])
+def test_tracked_evaluator_rejects_index_flag_hidden_mutation(
+    tmp_path: Path,
+    flag: str,
+) -> None:
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+    subprocess.run(["git", "config", "user.email", "ctx@example.test"], cwd=workspace, check=True)
+    subprocess.run(["git", "config", "user.name", "ctx benchmark"], cwd=workspace, check=True)
+    evaluator = workspace / "test_feature.py"
+    evaluator.write_text("def test_base():\n    assert True\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=workspace, check=True)
+    subprocess.run(["git", "commit", "-qm", "parent"], cwd=workspace, check=True)
+    pinned = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    scenario = replace(
+        benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0],
+        commit=pinned,
+        test_path="test_feature.py",
+        test_body="def test_hidden():\n    assert True\n",
+    )
+    subprocess.run(["git", "update-index", flag, scenario.test_path], cwd=workspace, check=True)
+    evaluator.write_text("def test_agent():\n    assert False\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="agent changed"):
+        benchmark.materialize_evaluator_test(
+            scenario,
+            workspace,
+            expected_hash=hashlib.sha256(scenario.test_body.encode()).hexdigest(),
+            require_pristine=True,
+        )
+
+
+def test_evaluator_pristine_check_fails_closed_on_git_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    scenario = replace(
+        benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0],
+        test_path="test_feature.py",
+        test_body="def test_hidden():\n    assert True\n",
+    )
+    monkeypatch.setattr(
+        benchmark,
+        "run_process",
+        lambda *_args, **_kwargs: benchmark.CommandResult(128, "", "fatal: broken git", 0.0),
+    )
+
+    with pytest.raises(RuntimeError, match="could not inspect"):
+        benchmark.materialize_evaluator_test(
+            scenario,
+            workspace,
+            expected_hash=hashlib.sha256(scenario.test_body.encode()).hexdigest(),
+            require_pristine=True,
+        )
+
+
+def test_evaluator_test_rejects_symlink_escape(tmp_path: Path) -> None:
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (workspace / "tests").symlink_to(outside, target_is_directory=True)
+    scenario = replace(
+        benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0],
+        test_path="tests/test_feature.py",
+        test_body="def test_new():\n    assert True\n",
+    )
+
+    with pytest.raises(RuntimeError, match="unsafe component"):
+        benchmark.materialize_evaluator_test(
+            scenario,
+            workspace,
+            expected_hash=hashlib.sha256(scenario.test_body.encode()).hexdigest(),
+        )
+
+
+def test_focused_verification_rejects_evaluator_symlink(tmp_path: Path) -> None:
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    outside = tmp_path / "outside.py"
+    body = "def test_hidden():\n    assert True\n"
+    outside.write_text(body, encoding="utf-8")
+    (workspace / "test_feature.py").symlink_to(outside)
+    scenario = replace(
+        benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0],
+        test_path="test_feature.py",
+        test_body=body,
+    )
+
+    result = benchmark._focused_verification(
+        scenario,
+        workspace,
+        hashlib.sha256(body.encode()).hexdigest(),
+    )
+
+    assert result.returncode == 1
+    assert "symlink or unsafe file" in result.stderr
+
+
+@pytest.mark.skipif(os.name == "nt", reason="dir-fd atomic replacement is POSIX-only")
+def test_evaluator_materialization_detects_parent_swap_without_external_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    tests = workspace / "tests"
+    tests.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    outside_test = outside / "test_feature.py"
+    outside_test.write_text("outside sentinel\n", encoding="utf-8")
+    scenario = replace(
+        benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0],
+        test_path="tests/test_feature.py",
+        test_body="def test_hidden():\n    assert True\n",
+    )
+    original_replace = os.replace
+    swapped = False
+
+    def swap_parent_before_replace(
+        source: str | bytes,
+        destination: str | bytes,
+        *,
+        src_dir_fd: int | None = None,
+        dst_dir_fd: int | None = None,
+    ) -> None:
+        nonlocal swapped
+        if not swapped and src_dir_fd is not None and dst_dir_fd is not None:
+            tests.rename(workspace / "original-tests")
+            tests.symlink_to(outside, target_is_directory=True)
+            swapped = True
+        original_replace(
+            source,
+            destination,
+            src_dir_fd=src_dir_fd,
+            dst_dir_fd=dst_dir_fd,
+        )
+
+    monkeypatch.setattr(os, "replace", swap_parent_before_replace)
+
+    with pytest.raises(RuntimeError, match="unsafe component"):
+        benchmark.materialize_evaluator_test(
+            scenario,
+            workspace,
+            expected_hash=hashlib.sha256(scenario.test_body.encode()).hexdigest(),
+        )
+
+    assert swapped
+    assert outside_test.read_text(encoding="utf-8") == "outside sentinel\n"
+
+
+def _untracked_allowlist_fixture(
+    tmp_path: Path,
+) -> tuple[Path, Any, str]:
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+    subprocess.run(["git", "config", "user.email", "ctx@example.test"], cwd=workspace, check=True)
+    subprocess.run(["git", "config", "user.name", "ctx benchmark"], cwd=workspace, check=True)
+    source = workspace / "source.py"
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "source.py"], cwd=workspace, check=True)
+    subprocess.run(["git", "commit", "-qm", "parent"], cwd=workspace, check=True)
+    pinned = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    scenario = replace(
+        benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0],
+        commit=pinned,
+        test_path="test_feature.py",
+        test_body="def test_hidden():\n    assert True\n",
+        allowed_changes=("source.py",),
+    )
+    expected_hash = hashlib.sha256(scenario.test_body.encode()).hexdigest()
+    benchmark.materialize_evaluator_test(scenario, workspace, expected_hash=expected_hash)
+    return workspace, scenario, expected_hash
+
+
+@pytest.mark.parametrize("ignore_source", ["info-exclude", "core-excludes-file"])
+def test_verification_rejects_ignored_untracked_disallowed_change(
+    tmp_path: Path,
+    ignore_source: str,
+) -> None:
+    workspace, scenario, expected_hash = _untracked_allowlist_fixture(tmp_path)
+    if ignore_source == "info-exclude":
+        (workspace / ".git/info/exclude").write_text("forbidden.py\n", encoding="utf-8")
+    else:
+        excludes = tmp_path / "global-ignore"
+        excludes.write_text("forbidden.py\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "config", "core.excludesFile", str(excludes)],
+            cwd=workspace,
+            check=True,
+        )
+    (workspace / "forbidden.py").write_text("VALUE = 2\n", encoding="utf-8")
+
+    result = benchmark._materialize_untracked_changes(scenario, workspace, expected_hash)
+
+    assert result.returncode == 1
+    assert "changes outside scenario allowlist" in result.stderr
+    assert "forbidden.py" in result.stderr
+
+
+def test_verification_accepts_ignored_untracked_allowed_change(tmp_path: Path) -> None:
+    workspace, scenario, expected_hash = _untracked_allowlist_fixture(tmp_path)
+    scenario = replace(
+        scenario,
+        allowed_changes=(*scenario.allowed_changes, "generated.py"),
+    )
+    (workspace / ".git/info/exclude").write_text("generated.py\n", encoding="utf-8")
+    (workspace / "generated.py").write_text("VALUE = 2\n", encoding="utf-8")
+
+    result = benchmark._materialize_untracked_changes(scenario, workspace, expected_hash)
+
+    assert result.returncode == 0
+    staged = subprocess.run(
+        ["git", "diff", "--name-only"],
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "generated.py" in staged.stdout.splitlines()
+
+
+def test_verification_rejects_ignored_untracked_change_before_project_tests(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace, scenario, expected_hash = _untracked_allowlist_fixture(tmp_path)
+    (workspace / ".git/info/exclude").write_text("forbidden.py\n", encoding="utf-8")
+    (workspace / "forbidden.py").write_text("VALUE = 2\n", encoding="utf-8")
+    project_test_called = False
+
+    def reject_project_test(*_args: object, **_kwargs: object) -> Any:
+        nonlocal project_test_called
+        project_test_called = True
+        raise AssertionError("project test ran before the allowlist preflight")
+
+    monkeypatch.setattr(benchmark, "_run_verified", reject_project_test)
+
+    result = benchmark.verify_workspace(scenario, workspace, expected_hash)
+
+    assert result.returncode == 1
+    assert "forbidden.py" in result.stderr
+    assert project_test_called is False
+
+
+def test_verification_ignores_mutable_core_worktree_config(tmp_path: Path) -> None:
+    workspace, scenario, expected_hash = _untracked_allowlist_fixture(tmp_path)
+    forbidden = workspace / "forbidden.py"
+    forbidden.write_text("VALUE = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "forbidden.py"], cwd=workspace, check=True)
+    subprocess.run(["git", "commit", "-qm", "tracked forbidden"], cwd=workspace, check=True)
+    pinned = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    scenario = replace(scenario, commit=pinned)
+    decoy = tmp_path / "decoy"
+    decoy.mkdir()
+    subprocess.run(
+        ["git", "config", "core.worktree", str(decoy)],
+        cwd=workspace,
+        check=True,
+    )
+    forbidden.write_text("VALUE = 2\n", encoding="utf-8")
+
+    result = benchmark._materialize_untracked_changes(scenario, workspace, expected_hash)
+
+    assert result.returncode == 1
+    assert "changes outside scenario allowlist" in result.stderr
+    assert "forbidden.py" in result.stderr
+
+
+def test_verification_rejects_cached_only_disallowed_change(tmp_path: Path) -> None:
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+    subprocess.run(["git", "config", "user.email", "ctx@example.test"], cwd=workspace, check=True)
+    subprocess.run(["git", "config", "user.name", "ctx benchmark"], cwd=workspace, check=True)
+    source = workspace / "source.py"
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    forbidden = workspace / "forbidden.py"
+    forbidden.write_text("VALUE = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=workspace, check=True)
+    subprocess.run(["git", "commit", "-qm", "parent"], cwd=workspace, check=True)
+    pinned = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    scenario = replace(
+        benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0],
+        commit=pinned,
+        test_path="test_feature.py",
+        test_body="def test_hidden():\n    assert True\n",
+        allowed_changes=("source.py",),
+    )
+    expected_hash = hashlib.sha256(scenario.test_body.encode()).hexdigest()
+    benchmark.materialize_evaluator_test(
+        scenario,
+        workspace,
+        expected_hash=expected_hash,
+    )
+    forbidden.write_text("VALUE = 2\n", encoding="utf-8")
+    subprocess.run(["git", "add", "forbidden.py"], cwd=workspace, check=True)
+    forbidden.write_text("VALUE = 1\n", encoding="utf-8")
+
+    result = benchmark._materialize_untracked_changes(scenario, workspace, expected_hash)
+
+    assert result.returncode == 1
+    assert "changes outside scenario allowlist" in result.stderr
+    assert "forbidden.py" in result.stderr
+
+
+@pytest.mark.parametrize("flag", ["--assume-unchanged", "--skip-worktree"])
+def test_verification_rejects_index_flag_hidden_disallowed_change(
+    tmp_path: Path,
+    flag: str,
+) -> None:
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+    subprocess.run(["git", "config", "user.email", "ctx@example.test"], cwd=workspace, check=True)
+    subprocess.run(["git", "config", "user.name", "ctx benchmark"], cwd=workspace, check=True)
+    source = workspace / "source.py"
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    forbidden = workspace / "forbidden.py"
+    forbidden.write_text("VALUE = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=workspace, check=True)
+    subprocess.run(["git", "commit", "-qm", "parent"], cwd=workspace, check=True)
+    pinned = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    scenario = replace(
+        benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0],
+        commit=pinned,
+        test_path="test_feature.py",
+        test_body="def test_hidden():\n    assert True\n",
+        allowed_changes=("source.py",),
+    )
+    expected_hash = hashlib.sha256(scenario.test_body.encode()).hexdigest()
+    benchmark.materialize_evaluator_test(scenario, workspace, expected_hash=expected_hash)
+    subprocess.run(["git", "update-index", flag, "forbidden.py"], cwd=workspace, check=True)
+    forbidden.write_text("VALUE = 2\n", encoding="utf-8")
+
+    result = benchmark._materialize_untracked_changes(scenario, workspace, expected_hash)
+
+    assert result.returncode == 1
+    assert "unsupported git index flags" in result.stderr
+    assert "forbidden.py" in result.stderr
+
+
+def test_verification_accepts_staged_allowed_change(tmp_path: Path) -> None:
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+    subprocess.run(["git", "config", "user.email", "ctx@example.test"], cwd=workspace, check=True)
+    subprocess.run(["git", "config", "user.name", "ctx benchmark"], cwd=workspace, check=True)
+    source = workspace / "source.py"
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "source.py"], cwd=workspace, check=True)
+    subprocess.run(["git", "commit", "-qm", "parent"], cwd=workspace, check=True)
+    pinned = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    scenario = replace(
+        benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0],
+        commit=pinned,
+        test_path="test_feature.py",
+        test_body="def test_hidden():\n    assert True\n",
+        allowed_changes=("source.py",),
+    )
+    expected_hash = hashlib.sha256(scenario.test_body.encode()).hexdigest()
+    benchmark.materialize_evaluator_test(scenario, workspace, expected_hash=expected_hash)
+    source.write_text("VALUE = 2\n", encoding="utf-8")
+    subprocess.run(["git", "add", "source.py"], cwd=workspace, check=True)
+
+    result = benchmark._materialize_untracked_changes(scenario, workspace, expected_hash)
+
+    assert result.returncode == 0
+
+
+def test_verification_unions_staged_and_unstaged_allowed_changes(tmp_path: Path) -> None:
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+    subprocess.run(["git", "config", "user.email", "ctx@example.test"], cwd=workspace, check=True)
+    subprocess.run(["git", "config", "user.name", "ctx benchmark"], cwd=workspace, check=True)
+    staged = workspace / "staged.py"
+    unstaged = workspace / "unstaged.py"
+    staged.write_text("VALUE = 1\n", encoding="utf-8")
+    unstaged.write_text("VALUE = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=workspace, check=True)
+    subprocess.run(["git", "commit", "-qm", "parent"], cwd=workspace, check=True)
+    pinned = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    scenario = replace(
+        benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0],
+        commit=pinned,
+        test_path="test_feature.py",
+        test_body="def test_hidden():\n    assert True\n",
+        allowed_changes=("staged.py", "unstaged.py"),
+    )
+    expected_hash = hashlib.sha256(scenario.test_body.encode()).hexdigest()
+    benchmark.materialize_evaluator_test(scenario, workspace, expected_hash=expected_hash)
+    staged.write_text("VALUE = 2\n", encoding="utf-8")
+    unstaged.write_text("VALUE = 2\n", encoding="utf-8")
+    subprocess.run(["git", "add", "staged.py"], cwd=workspace, check=True)
+
+    result = benchmark._materialize_untracked_changes(scenario, workspace, expected_hash)
+
+    assert result.returncode == 0
+    assert "staged.py" in result.stdout
+    assert "unstaged.py" in result.stdout
+
+
 def test_production_ctx_command_uses_shipped_cli_with_equal_controls(tmp_path: Path) -> None:
     common = {
         "model": "openai/model",
