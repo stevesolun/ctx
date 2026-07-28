@@ -361,10 +361,12 @@ def test_local_fast_main_pins_head_and_writes_provenance(
     assert payload["source_worktree_dirty_at_selection"] is False
     started_at = datetime.fromisoformat(payload["started_at"])
     finished_at = datetime.fromisoformat(payload["finished_at"])
-    assert started_at.utcoffset() is not None
-    assert started_at.utcoffset().total_seconds() == 0
-    assert finished_at.utcoffset() is not None
-    assert finished_at.utcoffset().total_seconds() == 0
+    started_offset = started_at.utcoffset()
+    finished_offset = finished_at.utcoffset()
+    assert started_offset is not None
+    assert started_offset.total_seconds() == 0
+    assert finished_offset is not None
+    assert finished_offset.total_seconds() == 0
     assert started_at <= finished_at
 
 
