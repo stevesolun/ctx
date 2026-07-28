@@ -89,6 +89,235 @@ def test_scenarios_are_pinned_and_have_all_ctx_entity_types() -> None:
     assert all(scenario.reference_patch and scenario.allowed_changes for scenario in scenarios)
 
 
+def test_runtime_pack_independence_accepts_generic_context(tmp_path: Path) -> None:
+    scenario = benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0]
+    availability = tmp_path / "runtime-availability.json"
+    availability.write_text(
+        json.dumps(
+            {
+                "entries": [
+                    {
+                        "id": "skill:generic-python-testing",
+                        "body": "Inspect the target code, add a focused regression, and run tests.",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    attestation = benchmark.validate_runtime_pack_scenario_independence(
+        [scenario],
+        availability_path=availability,
+    )
+
+    assert attestation["guard"] == "runtime-pack-distinctive-evidence-v1"
+    assert (
+        attestation["runtime_availability_sha256"]
+        == hashlib.sha256(availability.read_bytes()).hexdigest()
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("scenario_id", lambda scenario: scenario.id),
+        (
+            "repository",
+            lambda scenario: "/".join(scenario.repo_url.removesuffix(".git").rsplit("/", 2)[-2:]),
+        ),
+        ("commit", lambda scenario: scenario.commit),
+        ("query", lambda scenario: scenario.query),
+        ("task", lambda scenario: scenario.task),
+        ("test_path", lambda scenario: scenario.test_path),
+        ("test_body", lambda scenario: scenario.test_body),
+        ("reference_patch", lambda scenario: scenario.reference_patch),
+        ("allowed_change", lambda scenario: scenario.allowed_changes[0]),
+        ("context_body", lambda scenario: next(iter(scenario.context))["body"]),
+    ],
+)
+def test_runtime_pack_independence_rejects_frozen_scenario_evidence(
+    tmp_path: Path,
+    field: str,
+    value: Any,
+) -> None:
+    scenario = benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0]
+    availability = tmp_path / "runtime-availability.json"
+    availability.write_text(
+        json.dumps({"entries": [{"body": value(scenario)}]}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=rf":{field}") as exc_info:
+        benchmark.validate_runtime_pack_scenario_independence(
+            [scenario],
+            availability_path=availability,
+        )
+    assert scenario.id not in str(exc_info.value)
+
+
+def test_runtime_pack_independence_accepts_common_repository_words(tmp_path: Path) -> None:
+    scenarios = benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")
+    availability = tmp_path / "runtime-availability.json"
+    availability.write_text(
+        json.dumps(
+            {
+                "entries": [
+                    {
+                        "body": (
+                            "Click requests rich testing output from Python through "
+                            "the shared ctx-wiki."
+                        )
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    benchmark.validate_runtime_pack_scenario_independence(
+        scenarios,
+        availability_path=availability,
+    )
+
+
+@pytest.mark.parametrize(
+    "transform",
+    [
+        str.upper,
+        lambda value: value.replace("/", "\\"),
+        lambda value: value.replace("/", " /\r\n "),
+        lambda value: f"https://github.com/{value}.git",
+        lambda value: value.replace("pallets", "ｐａｌｌｅｔｓ"),
+    ],
+)
+def test_runtime_pack_independence_normalizes_repository_variants(
+    tmp_path: Path,
+    transform: Any,
+) -> None:
+    scenario = benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0]
+    repository = "/".join(scenario.repo_url.removesuffix(".git").rsplit("/", 2)[-2:])
+    availability = tmp_path / "runtime-availability.json"
+    availability.write_text(
+        json.dumps({"entries": [{"body": transform(repository)}]}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=":repository"):
+        benchmark.validate_runtime_pack_scenario_independence(
+            [scenario],
+            availability_path=availability,
+        )
+
+
+def test_runtime_pack_independence_rejects_distinctive_partial_test_body(
+    tmp_path: Path,
+) -> None:
+    scenario = benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0]
+    availability = tmp_path / "runtime-availability.json"
+    availability.write_text(
+        json.dumps(
+            {
+                "entries": [
+                    {
+                        "body": (
+                            "def test_echo_json_is_public_sorted_unicode_output(): "
+                            'output = StringIO() click.echo_json({"z": 1, "mark": "x"}, '
+                            "file=output)"
+                        )
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=":test_body"):
+        benchmark.validate_runtime_pack_scenario_independence(
+            [scenario],
+            availability_path=availability,
+        )
+
+
+def test_scenario_independence_attestation_rejects_mutation(tmp_path: Path) -> None:
+    scenario_source = tmp_path / "scenarios.yaml"
+    scenario_source.write_bytes((ROOT / "benchmarks/ctx_ab/scenarios.yaml").read_bytes())
+    availability = tmp_path / "runtime-availability.json"
+    availability.write_text('{"entries": []}\n', encoding="utf-8")
+    archive = tmp_path / "catalog.tar.gz"
+    archive.write_bytes(b"catalog")
+    scenarios = benchmark.load_scenarios(scenario_source)
+    attestation = benchmark.validate_runtime_pack_scenario_independence(
+        scenarios,
+        availability_path=availability,
+        scenarios_path=scenario_source,
+        archive_path=archive,
+    )
+    snapshot = benchmark.CatalogSnapshot(
+        wiki_dir=tmp_path,
+        provenance={
+            "runtime_availability_sha256": hashlib.sha256(availability.read_bytes()).hexdigest(),
+            "archive_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+        },
+    )
+
+    benchmark.verify_scenario_independence_attestation(
+        attestation,
+        scenarios_path=scenario_source,
+        snapshot=snapshot,
+    )
+    scenario_source.write_text(
+        scenario_source.read_text(encoding="utf-8") + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="scenarios_sha256"):
+        benchmark.verify_scenario_independence_attestation(
+            attestation,
+            scenarios_path=scenario_source,
+            snapshot=snapshot,
+        )
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["runtime_availability_sha256", "archive_sha256"],
+)
+def test_scenario_independence_attestation_rejects_catalog_input_mismatch(
+    tmp_path: Path,
+    field: str,
+) -> None:
+    scenario_source = tmp_path / "scenarios.yaml"
+    scenario_source.write_bytes((ROOT / "benchmarks/ctx_ab/scenarios.yaml").read_bytes())
+    availability = tmp_path / "runtime-availability.json"
+    availability.write_text('{"entries": []}\n', encoding="utf-8")
+    archive = tmp_path / "catalog.tar.gz"
+    archive.write_bytes(b"catalog")
+    scenarios = benchmark.load_scenarios(scenario_source)
+    attestation = benchmark.validate_runtime_pack_scenario_independence(
+        scenarios,
+        availability_path=availability,
+        scenarios_path=scenario_source,
+        archive_path=archive,
+    )
+    provenance = {
+        "runtime_availability_sha256": attestation["runtime_availability_sha256"],
+        "archive_sha256": attestation["catalog_archive_sha256"],
+    }
+    provenance[field] = "0" * 64
+    snapshot = benchmark.CatalogSnapshot(
+        wiki_dir=tmp_path,
+        provenance=provenance,
+    )
+
+    with pytest.raises(ValueError, match=field.replace("archive", "catalog_archive")):
+        benchmark.verify_scenario_independence_attestation(
+            attestation,
+            scenarios_path=scenario_source,
+            snapshot=snapshot,
+        )
+
+
 def test_click_regression_verification_covers_import_contract() -> None:
     scenario = benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0]
 

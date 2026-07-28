@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tarfile
 import time
+import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -364,6 +365,125 @@ def load_scenarios(path: Path) -> list[Scenario]:
             )
         )
     return scenarios
+
+
+def validate_runtime_pack_scenario_independence(
+    scenarios: list[Scenario],
+    *,
+    availability_path: Path = PRODUCTION_RUNTIME_AVAILABILITY,
+    scenarios_path: Path | None = None,
+    archive_path: Path | None = None,
+) -> dict[str, str]:
+    """Reject distinctive frozen evidence in the mutable runtime context pack."""
+    try:
+        availability_bytes = availability_path.read_bytes()
+        payload = json.loads(availability_bytes)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"runtime availability pack is unreadable: {availability_path}") from exc
+
+    def strings(value: object) -> list[str]:
+        if isinstance(value, str):
+            return [value]
+        if isinstance(value, dict):
+            return [text for item in value.values() for text in strings(item)]
+        if isinstance(value, list):
+            return [text for item in value for text in strings(item)]
+        return []
+
+    def normalize(value: object) -> str:
+        text = unicodedata.normalize("NFKC", str(value)).casefold().replace("\\", "/")
+        text = re.sub(r"\s*/\s*", "/", text)
+        return " ".join(re.findall(r"[a-z0-9_./:+-]+", text)).replace(".git", "")
+
+    def distinctive_fragments(value: object) -> set[str]:
+        normalized = normalize(value)
+        tokens = normalized.split()
+        fragments = {
+            token for token in tokens if len(token) >= 8 and "_" in token and len(set(token)) >= 6
+        }
+        for start in range(max(0, len(tokens) - 7)):
+            window = tokens[start : start + 8]
+            fragment = " ".join(window)
+            if len(fragment) >= 48 and len(set(window)) >= 5:
+                fragments.add(fragment)
+        if len(normalized) >= 48 and len(set(tokens)) >= 5:
+            fragments.add(normalized)
+        return fragments
+
+    catalog_text = "\n".join(normalize(value) for value in strings(payload))
+    collisions: list[str] = []
+    for scenario in scenarios:
+        repository = "/".join(scenario.repo_url.removesuffix(".git").rsplit("/", 2)[-2:])
+        exact_probes: list[tuple[str, str]] = [
+            ("scenario_id", scenario.id),
+            ("repository", repository),
+            ("commit", scenario.commit),
+            ("test_path", scenario.test_path),
+        ]
+        exact_probes.extend(
+            ("allowed_change", path)
+            for path in scenario.allowed_changes
+            if len(normalize(path)) >= 16
+        )
+        fragment_sources: list[tuple[str, str]] = [
+            ("query", scenario.query),
+            ("task", scenario.task),
+            ("test_body", scenario.test_body),
+            ("reference_patch", scenario.reference_patch),
+        ]
+        fragment_sources.extend(
+            ("context_body", str(item[key]))
+            for item in scenario.context
+            for key in ("body", "description", "instructions")
+            if isinstance(item.get(key), str)
+        )
+        scenario_fingerprint = hashlib.sha256(
+            f"{scenario.id}\0{scenario.commit}".encode()
+        ).hexdigest()[:12]
+        for field, value in exact_probes:
+            normalized = normalize(value)
+            if normalized and normalized in catalog_text:
+                collisions.append(f"scenario={scenario_fingerprint}:{field}")
+        for field, value in fragment_sources:
+            if any(fragment in catalog_text for fragment in distinctive_fragments(value)):
+                collisions.append(f"scenario={scenario_fingerprint}:{field}")
+
+    if collisions:
+        raise ValueError(
+            "runtime availability pack contains frozen scenario evidence: "
+            + ", ".join(sorted(set(collisions)))
+        )
+    attestation = {
+        "guard": "runtime-pack-distinctive-evidence-v1",
+        "runtime_availability_sha256": hashlib.sha256(availability_bytes).hexdigest(),
+    }
+    if scenarios_path is not None:
+        attestation["scenarios_sha256"] = _sha256_file(scenarios_path)
+    if archive_path is not None:
+        attestation["catalog_archive_sha256"] = _sha256_file(archive_path)
+    return attestation
+
+
+def verify_scenario_independence_attestation(
+    attestation: Mapping[str, str],
+    *,
+    scenarios_path: Path,
+    snapshot: CatalogSnapshot,
+) -> None:
+    """Bind the independence check to the scenario and catalog bytes in use."""
+    current = {
+        "scenarios_sha256": _sha256_file(scenarios_path),
+        "runtime_availability_sha256": str(snapshot.provenance["runtime_availability_sha256"]),
+        "catalog_archive_sha256": str(snapshot.provenance["archive_sha256"]),
+    }
+    mismatches = sorted(
+        field for field, value in current.items() if attestation.get(field) != value
+    )
+    if mismatches:
+        raise ValueError(
+            "benchmark integrity inputs changed after independence validation: "
+            + ", ".join(mismatches)
+        )
 
 
 def _descendant_pids(root_pid: int) -> list[int]:
@@ -5340,6 +5460,7 @@ def _validate_production_scenarios_path(path: Path, *, live: bool) -> Path:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    independence_attestation: dict[str, str] | None = None
     if args.engine == PRODUCTION_CATALOG_ENGINE:
         try:
             args.scenarios = _validate_production_scenarios_path(
@@ -5359,6 +5480,15 @@ def main(argv: list[str] | None = None) -> int:
         for scenario in scenarios:
             print(f"{scenario.id}\t{scenario.commit}\t{scenario.repo_url}")
         return 0
+    if args.engine == PRODUCTION_CATALOG_ENGINE:
+        try:
+            independence_attestation = validate_runtime_pack_scenario_independence(
+                scenarios,
+                scenarios_path=args.scenarios,
+                archive_path=PRODUCTION_CATALOG_ARCHIVE,
+            )
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
     if args.trials < 1 or args.retries < 0:
         raise SystemExit("--trials must be >= 1 and --retries must be >= 0")
     if (
@@ -5420,6 +5550,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.engine == PRODUCTION_CATALOG_ENGINE:
         try:
             catalog_snapshot = prepare_production_catalog(args.cache_root)
+            assert independence_attestation is not None
+            verify_scenario_independence_attestation(
+                independence_attestation,
+                scenarios_path=args.scenarios,
+                snapshot=catalog_snapshot,
+            )
         except Exception as exc:  # noqa: BLE001 - persist catalog install failures.
             incidents.add(
                 scenario="control",
@@ -5457,6 +5593,7 @@ def main(argv: list[str] | None = None) -> int:
             "catalog_provenance": (
                 catalog_snapshot.provenance if catalog_snapshot is not None else None
             ),
+            "runtime_pack_independence_attestation": independence_attestation,
             "catalog_cache_hit": (
                 catalog_snapshot.cache_hit if catalog_snapshot is not None else None
             ),
