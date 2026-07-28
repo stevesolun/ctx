@@ -23,6 +23,7 @@ import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from math import comb
 from pathlib import Path
 from statistics import median
 from typing import Any
@@ -33,6 +34,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SCENARIOS = ROOT / "benchmarks" / "ctx_ab" / "scenarios.yaml"
 ORIGINAL_CODEX_HOME = os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))
 SAFE_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+GITHUB_REPO_URL = re.compile(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\.git")
 INCIDENT_FIELDS = (
     "timestamp",
     "scenario",
@@ -57,6 +59,12 @@ PRODUCTION_CATALOG_BODY_MAX_BYTES = 16 * 1024
 PRODUCTION_TOOL_OUTPUT_LIMIT_BYTES = 32 * 1024
 PRODUCTION_CATALOG_MCP_TOOLS = ("ctx__recommend_bundle", "ctx__wiki_get")
 PRODUCTION_POLICY_ABSTENTION_LEVEL = "production_catalog_policy_abstention"
+PRODUCT_CLAIM_MIN_SCENARIOS = 6
+PRODUCT_CLAIM_MIN_REPOSITORIES = 5
+PRODUCT_CLAIM_MIN_TRIALS = 6
+PRODUCT_BENEFIT_RATIO_MAX = 0.85
+PRODUCT_OTHER_RATIO_MAX = 1.10
+PRODUCT_SUPPORT_ALPHA = 0.05
 _LANGUAGE_TAG_ALIASES = {
     "c": frozenset({"c"}),
     "cpp": frozenset({"cpp", "c++", "cplusplus"}),
@@ -304,7 +312,7 @@ def load_scenarios(path: Path) -> list[Scenario]:
         if not re.fullmatch(r"[0-9a-f]{40}", commit):
             raise ValueError(f"{scenario_id}: commit must be a full lowercase SHA-1")
         repo_url = str(row["repo_url"])
-        if not re.fullmatch(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\.git", repo_url):
+        if GITHUB_REPO_URL.fullmatch(repo_url) is None:
             raise ValueError(f"{scenario_id}: repo_url must be an HTTPS GitHub .git URL")
         benchmark_class = str(row.get("benchmark_class") or "").strip()
         if benchmark_class not in {"trivial", "historical", "escalation"}:
@@ -4607,6 +4615,7 @@ def build_performance_report(
     scenario_ids: list[str],
     trials: int,
     arms: tuple[str, ...],
+    expected_repositories: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     def verified_policy_abstention(row: Mapping[str, Any]) -> bool:
         task_hash = row.get("task_prompt_sha256")
@@ -4854,15 +4863,180 @@ def build_performance_report(
         if complete_pairs
         else None
     )
+    expected_final_rows = [
+        assigned[key][-1] for key in sorted(expected_result_keys) if assigned.get(key)
+    ]
+    expected_repository_map = dict(expected_repositories or {})
+    expected_repository_map_valid = bool(
+        expected_repositories is not None
+        and set(expected_repository_map) == set(scenario_ids)
+        and all(
+            isinstance(repository, str) and GITHUB_REPO_URL.fullmatch(repository) is not None
+            for repository in expected_repository_map.values()
+        )
+        and len(set(expected_repository_map.values()))
+        == len({repository.casefold() for repository in expected_repository_map.values()})
+    )
+    repositories_by_scenario: dict[str, set[str]] = {
+        scenario_id: set() for scenario_id in scenario_ids
+    }
+    repository_observations_by_scenario: dict[str, list[str | None]] = {
+        scenario_id: [] for scenario_id in scenario_ids
+    }
+    for row in results:
+        scenario_id = str(row.get("scenario"))
+        repository = row.get("repo_url")
+        if scenario_id not in repositories_by_scenario:
+            continue
+        repository_value = repository if isinstance(repository, str) and repository else None
+        repository_observations_by_scenario[scenario_id].append(repository_value)
+        if repository_value is not None:
+            repositories_by_scenario[scenario_id].add(repository_value)
+    repository_identity_verified = bool(
+        expected_repository_map_valid
+        and results
+        and all(
+            str(row.get("scenario")) in expected_repository_map
+            and row.get("repo_url") == expected_repository_map[str(row.get("scenario"))]
+            for row in results
+        )
+    )
+
+    scenario_effects: list[dict[str, Any]] = []
+    for scenario_id in scenario_ids:
+        scenario_pairs = [pair for pair in complete_pairs if pair.get("scenario") == scenario_id]
+        scenario_repositories = sorted(repositories_by_scenario[scenario_id])
+        repository_observations = repository_observations_by_scenario[scenario_id]
+        expected_repository = (
+            expected_repository_map.get(scenario_id) if expected_repository_map_valid else None
+        )
+        scenario_repository_identity_verified = bool(
+            expected_repository
+            and repository_observations
+            and all(repository == expected_repository for repository in repository_observations)
+        )
+        scenario_complete = len(scenario_pairs) == trials and scenario_repository_identity_verified
+        scenario_effect: dict[str, Any] = {
+            "scenario": scenario_id,
+            "repository": expected_repository,
+            "repository_values": scenario_repositories,
+            "repository_observation_count": len(repository_observations),
+            "repository_identity_verified": scenario_repository_identity_verified,
+            "trial_pair_count": len(scenario_pairs),
+            "complete": scenario_complete,
+            "quality_preserved": (
+                scenario_complete
+                and all(pair["paired_quality_preserved"] for pair in scenario_pairs)
+            ),
+            "median_time_ratio": None,
+            "median_uncached_token_ratio": None,
+        }
+        if scenario_complete:
+            scenario_effect["median_time_ratio"] = round(
+                median(float(pair["time_ratio"]) for pair in scenario_pairs),
+                6,
+            )
+            scenario_effect["median_uncached_token_ratio"] = round(
+                median(float(pair["uncached_token_ratio"]) for pair in scenario_pairs),
+                6,
+            )
+        scenario_effects.append(scenario_effect)
+
+    complete_scenario_effects = [effect for effect in scenario_effects if effect["complete"]]
+    repository_effects: list[dict[str, Any]] = []
+    for repository in sorted(
+        {str(effect["repository"]) for effect in complete_scenario_effects if effect["repository"]}
+    ):
+        effects = [
+            effect for effect in complete_scenario_effects if effect["repository"] == repository
+        ]
+        repository_time_ratio = round(
+            median(float(effect["median_time_ratio"]) for effect in effects),
+            6,
+        )
+        repository_token_ratio = round(
+            median(float(effect["median_uncached_token_ratio"]) for effect in effects),
+            6,
+        )
+        repository_effects.append(
+            {
+                "repository": repository,
+                "scenario_count": len(effects),
+                "scenarios": sorted(str(effect["scenario"]) for effect in effects),
+                "median_time_ratio": repository_time_ratio,
+                "median_uncached_token_ratio": repository_token_ratio,
+                "quality_preserved": all(effect["quality_preserved"] for effect in effects),
+                "non_regression_supported": (
+                    repository_time_ratio <= PRODUCT_OTHER_RATIO_MAX
+                    and repository_token_ratio <= PRODUCT_OTHER_RATIO_MAX
+                ),
+                "benefit_supported": (
+                    (
+                        repository_time_ratio <= PRODUCT_BENEFIT_RATIO_MAX
+                        and repository_token_ratio <= PRODUCT_OTHER_RATIO_MAX
+                    )
+                    or (
+                        repository_token_ratio <= PRODUCT_BENEFIT_RATIO_MAX
+                        and repository_time_ratio <= PRODUCT_OTHER_RATIO_MAX
+                    )
+                ),
+            }
+        )
+
+    observed_repositories = sorted(
+        {
+            str(row["repo_url"])
+            for row in expected_final_rows
+            if isinstance(row.get("repo_url"), str) and row["repo_url"]
+        }
+    )
+    canonical_expected_repositories: dict[str, str] = {}
+    if expected_repository_map_valid:
+        for repository in expected_repository_map.values():
+            canonical_expected_repositories.setdefault(repository.casefold(), repository)
+    repositories = (
+        sorted(canonical_expected_repositories.values())
+        if expected_repository_map_valid
+        else observed_repositories
+    )
+    distinct_scenario_count = len(set(scenario_ids))
+    repository_support_count = sum(effect["benefit_supported"] for effect in repository_effects)
+    repository_support_p_value = (
+        round(
+            sum(
+                comb(len(repository_effects), successes)
+                for successes in range(repository_support_count, len(repository_effects) + 1)
+            )
+            / (2 ** len(repository_effects)),
+            12,
+        )
+        if repository_effects
+        else None
+    )
+    clustered_evidence_complete = bool(
+        evidence_complete
+        and distinct_scenario_count >= PRODUCT_CLAIM_MIN_SCENARIOS
+        and len(repositories) >= PRODUCT_CLAIM_MIN_REPOSITORIES
+        and trials >= PRODUCT_CLAIM_MIN_TRIALS
+        and repository_identity_verified
+        and len(complete_scenario_effects) == distinct_scenario_count
+        and len(repository_effects) == len(repositories)
+    )
+    repository_quality_preserved = bool(repository_effects) and all(
+        effect["quality_preserved"] for effect in repository_effects
+    )
+    all_repositories_non_regressing = bool(repository_effects) and all(
+        effect["non_regression_supported"] for effect in repository_effects
+    )
     gate_passed = None
     if evidence_required:
         gate_passed = bool(
             evidence_complete
             and quality_preserved
             and median_time_ratio is not None
-            and median_time_ratio <= 1.10
+            and median_time_ratio <= PRODUCT_OTHER_RATIO_MAX
             and median_token_ratio is not None
-            and median_token_ratio <= 1.10
+            and median_token_ratio <= PRODUCT_OTHER_RATIO_MAX
         )
     production_catalog_scored = bool(eligible_results) and all(
         row.get("engine") == PRODUCTION_CATALOG_ENGINE for row in eligible_results
@@ -4885,8 +5059,14 @@ def build_performance_report(
             and median_time_ratio is not None
             and median_uncached_token_ratio is not None
             and (
-                (median_time_ratio <= 0.85 and median_uncached_token_ratio <= 1.10)
-                or (median_uncached_token_ratio <= 0.85 and median_time_ratio <= 1.10)
+                (
+                    median_time_ratio <= PRODUCT_BENEFIT_RATIO_MAX
+                    and median_uncached_token_ratio <= PRODUCT_OTHER_RATIO_MAX
+                )
+                or (
+                    median_uncached_token_ratio <= PRODUCT_BENEFIT_RATIO_MAX
+                    and median_time_ratio <= PRODUCT_OTHER_RATIO_MAX
+                )
             )
         )
         if benefit_evidence_complete
@@ -4903,24 +5083,16 @@ def build_performance_report(
         if production_catalog_scored
         else "not_applicable"
     )
-    expected_final_rows = [
-        assigned[key][-1] for key in sorted(expected_result_keys) if assigned.get(key)
-    ]
-    repositories = sorted(
-        {
-            str(row["repo_url"])
-            for row in expected_final_rows
-            if isinstance(row.get("repo_url"), str) and row["repo_url"]
-        }
-    )
-    distinct_scenario_count = len(set(scenario_ids))
-    product_claim_eligible = bool(
-        efficiency_claim_allowed
-        and assignment_complete
-        and evidence_complete
-        and distinct_scenario_count >= 6
-        and len(repositories) >= 3
-        and trials >= 6
+    product_claim_eligible = bool(clustered_evidence_complete and benefit_evidence_complete)
+    product_beneficial = (
+        bool(
+            repository_quality_preserved
+            and all_repositories_non_regressing
+            and repository_support_p_value is not None
+            and repository_support_p_value <= PRODUCT_SUPPORT_ALPHA
+        )
+        if product_claim_eligible
+        else None
     )
     arm_outcomes = {}
     for arm in ("baseline", "ctx-light"):
@@ -4981,22 +5153,55 @@ def build_performance_report(
         "claim_scope": "product_pilot" if product_claim_eligible else "scenario_set_only",
         "product_claim_eligible": product_claim_eligible,
         "product_benefit_verdict": (
-            benefit_verdict if product_claim_eligible else "insufficient_cross_repo_evidence"
+            "beneficial"
+            if product_beneficial is True
+            else "not_beneficial"
+            if product_beneficial is False
+            else "insufficient_cross_repo_evidence"
         ),
+        "product_beneficial": product_beneficial,
         "distinct_scenario_count": distinct_scenario_count,
         "distinct_repository_count": len(repositories),
         "repositories": repositories,
+        "repository_identity": {
+            "predeclared_mapping_provided": expected_repositories is not None,
+            "predeclared_mapping_valid": expected_repository_map_valid,
+            "verified_for_all_attempts": repository_identity_verified,
+            "comparison": "exact_frozen_scenario_url",
+            "canonical_count_key": "casefolded_https_github_url",
+            "observed_repositories": observed_repositories,
+        },
+        "repository_cluster_analysis": {
+            "method": ("scenario_median_then_repository_median_with_exact_one_sided_support"),
+            "independent_unit": "repository",
+            "repeated_trials_count_as_independent_units": False,
+            "complete": clustered_evidence_complete,
+            "minimum_scenarios": PRODUCT_CLAIM_MIN_SCENARIOS,
+            "minimum_independent_repositories": PRODUCT_CLAIM_MIN_REPOSITORIES,
+            "minimum_trials_per_scenario": PRODUCT_CLAIM_MIN_TRIALS,
+            "independent_repository_count": len(repository_effects),
+            "benefit_support_count": repository_support_count,
+            "benefit_support_p_value": repository_support_p_value,
+            "support_alpha": PRODUCT_SUPPORT_ALPHA,
+            "all_repositories_non_regressing": all_repositories_non_regressing,
+            "quality_preserved": repository_quality_preserved,
+            "scenario_effects": scenario_effects,
+            "repository_effects": repository_effects,
+        },
         "intent_to_treat": arm_outcomes,
         "thresholds": {
-            "median_time_ratio_max": 1.10,
-            "median_reported_token_ratio_max": 1.10,
+            "median_time_ratio_max": PRODUCT_OTHER_RATIO_MAX,
+            "median_reported_token_ratio_max": PRODUCT_OTHER_RATIO_MAX,
         },
         "benefit_thresholds": {
-            "minimum_complete_pairs": 6,
-            "improvement_ratio_max": 0.85,
-            "other_ratio_max": 1.10,
+            "minimum_complete_pairs": PRODUCT_CLAIM_MIN_TRIALS,
+            "minimum_scenarios": PRODUCT_CLAIM_MIN_SCENARIOS,
+            "minimum_independent_repositories": PRODUCT_CLAIM_MIN_REPOSITORIES,
+            "improvement_ratio_max": PRODUCT_BENEFIT_RATIO_MAX,
+            "other_ratio_max": PRODUCT_OTHER_RATIO_MAX,
             "primary_token_metric": "uncached_input_tokens",
             "quality_preserved_required": True,
+            "repository_support_alpha": PRODUCT_SUPPORT_ALPHA,
         },
         "median_time_ratio": median_time_ratio,
         "median_reported_token_ratio": median_token_ratio,
@@ -5016,12 +5221,14 @@ def write_performance_report(
     scenario_ids: list[str],
     trials: int,
     arms: tuple[str, ...],
+    expected_repositories: Mapping[str, str],
 ) -> dict[str, Any]:
     report = build_performance_report(
         results,
         scenario_ids=scenario_ids,
         trials=trials,
         arms=arms,
+        expected_repositories=expected_repositories,
     )
     (output / "performance.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     return report
@@ -5484,6 +5691,7 @@ def main(argv: list[str] | None = None) -> int:
         scenario_ids=[scenario.id for scenario in scenarios],
         trials=args.trials,
         arms=arms,
+        expected_repositories={scenario.id: scenario.repo_url for scenario in scenarios},
     )
     final: dict[tuple[str, str, int], dict[str, Any]] = {}
     for row in results:

@@ -2219,7 +2219,7 @@ def test_production_report_scores_verified_abstention_as_policy_overhead_only() 
         rows.append(
             {
                 "scenario": "scenario",
-                "repo_url": "https://example.test/repo.git",
+                "repo_url": "https://github.com/example/repo.git",
                 "arm": "baseline",
                 "trial": trial,
                 "engine": benchmark.PRODUCTION_CATALOG_ENGINE,
@@ -2237,7 +2237,7 @@ def test_production_report_scores_verified_abstention_as_policy_overhead_only() 
         rows.append(
             {
                 "scenario": "scenario",
-                "repo_url": "https://example.test/repo.git",
+                "repo_url": "https://github.com/example/repo.git",
                 "arm": "ctx-light",
                 "trial": trial,
                 "engine": benchmark.PRODUCTION_CATALOG_ENGINE,
@@ -2284,6 +2284,9 @@ def test_production_report_scores_verified_abstention_as_policy_overhead_only() 
         scenario_ids=["scenario"],
         trials=6,
         arms=("baseline", "ctx-light"),
+        expected_repositories={
+            "scenario": "https://github.com/example/repo.git",
+        },
     )
     tampered_rows = _sealed_production_rows(rows)
     tampered_rows[1]["total_tokens"] = 999999
@@ -2306,6 +2309,7 @@ def test_production_report_scores_verified_abstention_as_policy_overhead_only() 
     assert report["gate_passed"] is True
     assert report["beneficial"] is None
     assert report["benefit_verdict"] == "policy_abstention_only"
+    assert report["product_benefit_verdict"] == "insufficient_cross_repo_evidence"
     assert report["ctx_policy_outcomes"] == {
         "assigned": 6,
         "context_delivered": 0,
@@ -2375,10 +2379,14 @@ def test_policy_activation_rate_rejects_post_seal_mutation() -> None:
 
 def test_product_claim_requires_exact_complete_expected_schedule() -> None:
     scenario_ids = [f"scenario-{index}" for index in range(6)]
+    expected_repositories = {
+        scenario: f"https://github.com/example/repo-{index % 5}.git"
+        for index, scenario in enumerate(scenario_ids)
+    }
     rows: list[dict[str, Any]] = [
         {
             "scenario": scenario,
-            "repo_url": f"https://example.test/repo-{index % 2}.git",
+            "repo_url": expected_repositories[scenario],
             "arm": arm,
             "trial": trial,
             "engine": benchmark.PRODUCTION_CATALOG_ENGINE,
@@ -2397,11 +2405,18 @@ def test_product_claim_requires_exact_complete_expected_schedule() -> None:
         for trial in range(1, 7)
         for arm in ("baseline", "ctx-light")
     ]
+    control = benchmark.build_performance_report(
+        _sealed_production_rows(rows),
+        scenario_ids=scenario_ids,
+        trials=6,
+        arms=("baseline", "ctx-light"),
+        expected_repositories=expected_repositories,
+    )
     rows.append(
         {
             **rows[-1],
             "scenario": "unexpected",
-            "repo_url": "https://example.test/repo-extra.git",
+            "repo_url": "https://github.com/example/repo-extra.git",
             "trial": 6,
         }
     )
@@ -2411,23 +2426,29 @@ def test_product_claim_requires_exact_complete_expected_schedule() -> None:
         scenario_ids=scenario_ids,
         trials=6,
         arms=("baseline", "ctx-light"),
+        expected_repositories=expected_repositories,
     )
 
+    assert control["product_claim_eligible"] is True
     assert report["assignment_complete"] is False
     assert report["evidence_complete"] is False
     assert report["gate_passed"] is False
     assert report["product_claim_eligible"] is False
     assert report["claim_scope"] == "scenario_set_only"
-    assert report["distinct_repository_count"] == 2
+    assert report["distinct_repository_count"] == 5
     assert report["ctx_policy_outcomes"]["assigned"] == 36
 
 
-def test_product_claim_accepts_complete_multi_repository_schedule() -> None:
+def test_product_claim_accepts_complete_five_repository_schedule() -> None:
     scenario_ids = [f"scenario-{index}" for index in range(6)]
+    expected_repositories = {
+        scenario: f"https://github.com/example/repo-{index % 5}.git"
+        for index, scenario in enumerate(scenario_ids)
+    }
     rows: list[dict[str, Any]] = [
         {
             "scenario": scenario,
-            "repo_url": f"https://example.test/repo-{index % 3}.git",
+            "repo_url": f"https://github.com/example/repo-{index % 5}.git",
             "arm": arm,
             "trial": trial,
             "engine": benchmark.PRODUCTION_CATALOG_ENGINE,
@@ -2452,13 +2473,229 @@ def test_product_claim_accepts_complete_multi_repository_schedule() -> None:
         scenario_ids=scenario_ids,
         trials=6,
         arms=("baseline", "ctx-light"),
+        expected_repositories=expected_repositories,
+    )
+    missing_repository_rows = [dict(row) for row in rows]
+    missing_repository_rows[0]["repo_url"] = ""
+    missing_repository = benchmark.build_performance_report(
+        _sealed_production_rows(missing_repository_rows),
+        scenario_ids=scenario_ids,
+        trials=6,
+        arms=("baseline", "ctx-light"),
+        expected_repositories=expected_repositories,
+    )
+    retry_relabelled_rows = [
+        *rows,
+        {
+            **rows[0],
+            "repo_url": "https://github.com/example/relabelled.git",
+        },
+    ]
+    retry_relabelled = benchmark.build_performance_report(
+        _sealed_production_rows(retry_relabelled_rows),
+        scenario_ids=scenario_ids,
+        trials=6,
+        arms=("baseline", "ctx-light"),
+        expected_repositories=expected_repositories,
+    )
+    malformed_mapping = {
+        **expected_repositories,
+        scenario_ids[0]: "not-a-github-url",
+    }
+    malformed = benchmark.build_performance_report(
+        _sealed_production_rows(rows),
+        scenario_ids=scenario_ids,
+        trials=6,
+        arms=("baseline", "ctx-light"),
+        expected_repositories=malformed_mapping,
+    )
+    aliased_scenario = scenario_ids[4]
+    aliased_repository = "https://github.com/EXAMPLE/REPO-0.git"
+    aliased_mapping = {
+        **expected_repositories,
+        aliased_scenario: aliased_repository,
+    }
+    aliased_rows = [
+        {
+            **row,
+            "repo_url": (
+                aliased_repository if row["scenario"] == aliased_scenario else row["repo_url"]
+            ),
+        }
+        for row in rows
+    ]
+    aliased = benchmark.build_performance_report(
+        _sealed_production_rows(aliased_rows),
+        scenario_ids=scenario_ids,
+        trials=6,
+        arms=("baseline", "ctx-light"),
+        expected_repositories=aliased_mapping,
     )
 
     assert report["assignment_complete"] is True
     assert report["evidence_complete"] is True
     assert report["product_claim_eligible"] is True
     assert report["claim_scope"] == "product_pilot"
-    assert report["distinct_repository_count"] == 3
+    assert report["distinct_repository_count"] == 5
+    assert report["product_beneficial"] is False
+    assert report["product_benefit_verdict"] == "not_beneficial"
+    assert report["repository_cluster_analysis"]["benefit_support_p_value"] == 1.0
+    assert missing_repository["product_claim_eligible"] is False
+    assert missing_repository["repository_cluster_analysis"]["complete"] is False
+    assert retry_relabelled["product_claim_eligible"] is False
+    assert retry_relabelled["repository_identity"]["verified_for_all_attempts"] is False
+    assert malformed["product_claim_eligible"] is False
+    assert malformed["repository_identity"]["predeclared_mapping_valid"] is False
+    assert aliased["product_claim_eligible"] is False
+    assert aliased["repository_identity"]["predeclared_mapping_valid"] is False
+    assert aliased["repository_cluster_analysis"]["benefit_support_p_value"] is None
+
+
+def test_product_claim_rejects_three_repository_pseudoreplication() -> None:
+    scenario_ids = [f"scenario-{index}" for index in range(6)]
+    rows: list[dict[str, Any]] = []
+    for index, scenario in enumerate(scenario_ids):
+        for trial in range(1, 7):
+            for arm, ratio in (("baseline", 1.0), ("ctx-light", 0.8)):
+                rows.append(
+                    {
+                        "scenario": scenario,
+                        "repo_url": f"https://github.com/example/repo-{index % 3}.git",
+                        "arm": arm,
+                        "trial": trial,
+                        "engine": benchmark.PRODUCTION_CATALOG_ENGINE,
+                        "status": "passed",
+                        "measured_phase_seconds": 10.0 * ratio,
+                        "harness_total_seconds": 10.5 * ratio,
+                        "token_attribution": "exact",
+                        "total_tokens": int(1000 * ratio),
+                        "uncached_input_tokens": int(800 * ratio),
+                        "team_token_completeness": "not_applicable",
+                        "production_efficiency_eligible": True,
+                        "evaluator_isolation_verified": True,
+                        "context_delivery_verified": arm == "ctx-light",
+                    }
+                )
+
+    report = benchmark.build_performance_report(
+        _sealed_production_rows(rows),
+        scenario_ids=scenario_ids,
+        trials=6,
+        arms=("baseline", "ctx-light"),
+        expected_repositories={
+            scenario: f"https://github.com/example/repo-{index % 3}.git"
+            for index, scenario in enumerate(scenario_ids)
+        },
+    )
+
+    cluster = report["repository_cluster_analysis"]
+    assert report["benefit_verdict"] == "beneficial"
+    assert report["product_claim_eligible"] is False
+    assert report["product_benefit_verdict"] == "insufficient_cross_repo_evidence"
+    assert cluster["complete"] is False
+    assert cluster["independent_repository_count"] == 3
+    assert cluster["benefit_support_count"] == 3
+    assert cluster["benefit_support_p_value"] == 0.125
+    assert cluster["repeated_trials_count_as_independent_units"] is False
+
+
+def test_product_claim_requires_repository_cluster_support() -> None:
+    repositories = [
+        "https://github.com/example/repo-a.git",
+        "https://github.com/example/repo-b.git",
+        "https://github.com/example/repo-c.git",
+        "https://github.com/example/repo-d.git",
+        "https://github.com/example/repo-e.git",
+    ]
+    scenario_repositories = [repositories[0]] * 5 + repositories[1:]
+    scenario_ids = [f"scenario-{index}" for index in range(len(scenario_repositories))]
+    rows: list[dict[str, Any]] = []
+    for scenario, repository in zip(scenario_ids, scenario_repositories, strict=True):
+        ctx_ratio = 0.8 if repository == repositories[0] else 1.0
+        for trial in range(1, 7):
+            for arm, ratio in (("baseline", 1.0), ("ctx-light", ctx_ratio)):
+                rows.append(
+                    {
+                        "scenario": scenario,
+                        "repo_url": repository,
+                        "arm": arm,
+                        "trial": trial,
+                        "engine": benchmark.PRODUCTION_CATALOG_ENGINE,
+                        "status": "passed",
+                        "measured_phase_seconds": 10.0 * ratio,
+                        "harness_total_seconds": 10.5 * ratio,
+                        "token_attribution": "exact",
+                        "total_tokens": int(1000 * ratio),
+                        "uncached_input_tokens": int(800 * ratio),
+                        "team_token_completeness": "not_applicable",
+                        "production_efficiency_eligible": True,
+                        "evaluator_isolation_verified": True,
+                        "context_delivery_verified": arm == "ctx-light",
+                    }
+                )
+
+    report = benchmark.build_performance_report(
+        _sealed_production_rows(rows),
+        scenario_ids=scenario_ids,
+        trials=6,
+        arms=("baseline", "ctx-light"),
+        expected_repositories=dict(zip(scenario_ids, scenario_repositories, strict=True)),
+    )
+
+    cluster = report["repository_cluster_analysis"]
+    assert report["median_time_ratio"] == 0.8
+    assert report["benefit_verdict"] == "beneficial"
+    assert report["product_claim_eligible"] is True
+    assert report["product_beneficial"] is False
+    assert report["product_benefit_verdict"] == "not_beneficial"
+    assert cluster["complete"] is True
+    assert cluster["benefit_support_count"] == 1
+    assert cluster["benefit_support_p_value"] == 0.96875
+
+
+def test_product_claim_accepts_consistent_five_repository_benefit() -> None:
+    scenario_ids = [f"scenario-{index}" for index in range(6)]
+    rows: list[dict[str, Any]] = []
+    for index, scenario in enumerate(scenario_ids):
+        for trial in range(1, 7):
+            for arm, ratio in (("baseline", 1.0), ("ctx-light", 0.8)):
+                rows.append(
+                    {
+                        "scenario": scenario,
+                        "repo_url": f"https://github.com/example/repo-{index % 5}.git",
+                        "arm": arm,
+                        "trial": trial,
+                        "engine": benchmark.PRODUCTION_CATALOG_ENGINE,
+                        "status": "passed",
+                        "measured_phase_seconds": 10.0 * ratio,
+                        "harness_total_seconds": 10.5 * ratio,
+                        "token_attribution": "exact",
+                        "total_tokens": int(1000 * ratio),
+                        "uncached_input_tokens": int(800 * ratio),
+                        "team_token_completeness": "not_applicable",
+                        "production_efficiency_eligible": True,
+                        "evaluator_isolation_verified": True,
+                        "context_delivery_verified": arm == "ctx-light",
+                    }
+                )
+
+    report = benchmark.build_performance_report(
+        _sealed_production_rows(rows),
+        scenario_ids=scenario_ids,
+        trials=6,
+        arms=("baseline", "ctx-light"),
+        expected_repositories={
+            scenario: f"https://github.com/example/repo-{index % 5}.git"
+            for index, scenario in enumerate(scenario_ids)
+        },
+    )
+
+    cluster = report["repository_cluster_analysis"]
+    assert report["product_claim_eligible"] is True
+    assert report["product_beneficial"] is True
+    assert report["product_benefit_verdict"] == "beneficial"
+    assert cluster["benefit_support_count"] == 5
+    assert cluster["benefit_support_p_value"] == 0.03125
 
 
 def test_production_report_excludes_ctx_noop_and_missing_measured_phase() -> None:
