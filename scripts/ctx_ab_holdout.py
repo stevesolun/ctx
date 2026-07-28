@@ -1,0 +1,747 @@
+#!/usr/bin/env python3
+"""Deterministically filter and select a private CTX benchmark holdout."""
+
+from __future__ import annotations
+
+import argparse
+import ast
+import csv
+from collections import defaultdict
+import hashlib
+import json
+import math
+import os
+import re
+import stat
+import statistics
+from pathlib import Path, PurePosixPath
+from typing import Any, TextIO
+
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_PROTOCOL = ROOT / "benchmarks" / "ctx_ab" / "holdout-protocol-v1.json"
+PRIVATE_ROOT = ROOT / ".gate" / "ctx-ab-private"
+SHA1 = re.compile(r"^[0-9a-f]{40}$")
+SHA256 = re.compile(r"^[0-9a-f]{64}$")
+DIFF_PATH = re.compile(r"^diff --git a/(.+) b/(.+)$")
+HUNK_HEADER = re.compile(r"^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@(?: .*)?$")
+FORBIDDEN_TEST_IMPORT_ROOTS = {
+    "aiohttp",
+    "http",
+    "httpx",
+    "random",
+    "requests",
+    "socket",
+    "subprocess",
+    "urllib",
+    "urllib3",
+}
+LEDGER_FIELDS = (
+    "instance_id",
+    "repo",
+    "base_commit",
+    "production_paths",
+    "test_path",
+    "production_changed_lines",
+    "status",
+    "rejection_code",
+)
+
+
+def _digest(*values: str) -> str:
+    return hashlib.sha256("\0".join(values).encode()).hexdigest()
+
+
+def canonical_repo_url(repo: str) -> str:
+    normalized = repo.strip().lower()
+    if not re.fullmatch(r"[a-z0-9_.-]+/[a-z0-9_.-]+", normalized):
+        raise ValueError(f"invalid repository name: {repo!r}")
+    if any(part in {".", ".."} for part in normalized.split("/")):
+        raise ValueError(f"invalid repository name: {repo!r}")
+    return f"https://github.com/{normalized}.git"
+
+
+def _parse_patch(patch: str) -> tuple[tuple[str, ...], int, str]:
+    lines = patch.splitlines()
+    paths: list[str] = []
+    changed_lines = 0
+    added_lines: list[str] = []
+    index = 0
+    while index < len(lines):
+        match = DIFF_PATH.fullmatch(lines[index])
+        if match is None:
+            return (), -1, ""
+        before, after = match.groups()
+        if before != after:
+            return (), -1, ""
+        path = PurePosixPath(after)
+        if path.is_absolute() or ".." in path.parts or path.as_posix() in paths:
+            return (), -1, ""
+        paths.append(path.as_posix())
+        index += 1
+        while index < len(lines) and not lines[index].startswith("--- "):
+            if not lines[index].startswith(
+                ("index ", "new file mode ", "deleted file mode ", "old mode ", "new mode ")
+            ):
+                return (), -1, ""
+            index += 1
+        if index + 1 >= len(lines):
+            return (), -1, ""
+        old_header = lines[index][4:]
+        new_header = lines[index + 1][4:] if lines[index + 1].startswith("+++ ") else ""
+        if (
+            old_header not in {f"a/{after}", "/dev/null"}
+            or new_header not in {f"b/{after}", "/dev/null"}
+            or old_header == new_header == "/dev/null"
+        ):
+            return (), -1, ""
+        index += 2
+        saw_hunk = False
+        while index < len(lines) and not lines[index].startswith("diff --git "):
+            hunk = HUNK_HEADER.fullmatch(lines[index])
+            if hunk is None:
+                return (), -1, ""
+            saw_hunk = True
+            old_expected = int(hunk.group(1) or 1)
+            new_expected = int(hunk.group(2) or 1)
+            old_seen = 0
+            new_seen = 0
+            index += 1
+            while (
+                index < len(lines)
+                and not lines[index].startswith("diff --git ")
+                and not lines[index].startswith("@@ ")
+            ):
+                line = lines[index]
+                if line == r"\ No newline at end of file":
+                    index += 1
+                    continue
+                if not line or line[0] not in " +-":
+                    return (), -1, ""
+                if line[0] in " -":
+                    old_seen += 1
+                if line[0] in " +":
+                    new_seen += 1
+                if line[0] in "+-":
+                    changed_lines += 1
+                if line[0] == "+":
+                    added_lines.append(line[1:])
+                index += 1
+            if old_seen != old_expected or new_seen != new_expected:
+                return (), -1, ""
+        if not saw_hunk:
+            return (), -1, ""
+    return tuple(paths), changed_lines, "\n".join(added_lines)
+
+
+def _is_test_path(path: str) -> bool:
+    pure = PurePosixPath(path)
+    return path.endswith(".py") and (
+        pure.name.startswith("test_") or any(part in {"test", "tests"} for part in pure.parts)
+    )
+
+
+def _is_product_path(path: str, rules: dict[str, Any]) -> bool:
+    pure = PurePosixPath(path)
+    if not path.endswith(".py") or _is_test_path(path):
+        return False
+    if pure.name in rules["excluded_filenames"]:
+        return False
+    if any(re.search(pattern, pure.name) for pattern in rules["excluded_filename_regex"]):
+        return False
+    return not any(part in rules["excluded_path_components"] for part in pure.parts[:-1])
+
+
+def evaluate_row(row: dict[str, Any], protocol: dict[str, Any]) -> dict[str, Any]:
+    repo = str(row.get("repo") or "").strip().lower()
+    instance_id = str(row.get("instance_id") or "").strip()
+    base_commit = str(row.get("base_commit") or "").strip()
+    patch = str(row.get("patch") or "")
+    test_patch = str(row.get("test_patch") or "")
+    problem_statement = str(row.get("problem_statement") or "")
+    production_paths, changed_lines, _ = _parse_patch(patch)
+    test_paths, _, added_test = _parse_patch(test_patch)
+    rules = protocol["static_candidate_rules"]
+    rejection = ""
+    try:
+        canonical_repo_url(repo)
+    except ValueError:
+        rejection = "row-schema"
+    if not rejection and (not instance_id or not re.fullmatch(r"[A-Za-z0-9_.-]+", instance_id)):
+        rejection = "row-schema"
+    elif not rejection and repo in protocol["excluded_repositories"]:
+        rejection = "excluded-repository"
+    elif not rejection and not SHA1.fullmatch(base_commit):
+        rejection = "base-commit"
+    elif not rejection and (
+        not 1 <= len(production_paths) <= 3
+        or not all(_is_product_path(path, rules) for path in production_paths)
+    ):
+        rejection = "patch-paths"
+    elif not rejection and (len(test_paths) != 1 or not _is_test_path(test_paths[0])):
+        rejection = "test-paths"
+    elif not rejection and not (
+        rules["production_changed_lines"]["minimum"]
+        <= changed_lines
+        <= rules["production_changed_lines"]["maximum"]
+    ):
+        rejection = "patch-lines"
+    elif not rejection and not (
+        rules["problem_statement_words"]["minimum"]
+        <= len(problem_statement.split())
+        <= rules["problem_statement_words"]["maximum"]
+    ):
+        rejection = "problem-statement"
+    elif not rejection and any(
+        re.search(pattern, added_test) for pattern in rules["forbidden_test_regex"]
+    ):
+        rejection = "test-dependency"
+    return {
+        "instance_id": instance_id,
+        "repo": repo,
+        "base_commit": base_commit,
+        "production_paths": "|".join(production_paths),
+        "test_path": test_paths[0] if len(test_paths) == 1 else "",
+        "production_changed_lines": changed_lines,
+        "status": "eligible" if not rejection else "rejected",
+        "rejection_code": rejection,
+    }
+
+
+def validate_reconstructed_test_module(source: str) -> None:
+    """Reject external, nondeterministic, environment, and sleep dependencies."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as exc:
+        raise ValueError("reconstructed test module is not valid Python") from exc
+    aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for imported in node.names:
+                local = imported.asname or imported.name.split(".", 1)[0]
+                aliases[local] = (
+                    imported.name if imported.asname else imported.name.split(".", 1)[0]
+                )
+                if imported.name.split(".", 1)[0] in FORBIDDEN_TEST_IMPORT_ROOTS:
+                    raise ValueError("reconstructed test module has a forbidden import")
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            root = node.module.split(".", 1)[0]
+            if root in FORBIDDEN_TEST_IMPORT_ROOTS:
+                raise ValueError("reconstructed test module has a forbidden import")
+            for imported in node.names:
+                if imported.name == "*" and root in {"builtins", "importlib", "os", "time"}:
+                    raise ValueError("reconstructed test module has a forbidden wildcard import")
+                local = imported.asname or imported.name
+                aliases[local] = f"{node.module}.{imported.name}"
+                if (node.module, imported.name) in {
+                    ("os", "environ"),
+                    ("os", "getenv"),
+                    ("time", "sleep"),
+                }:
+                    raise ValueError("reconstructed test module has a forbidden dependency")
+
+    def qualified_name(node: ast.AST) -> str:
+        if isinstance(node, ast.Name):
+            return aliases.get(node.id, node.id)
+        if isinstance(node, ast.Attribute):
+            parent = qualified_name(node.value)
+            return f"{parent}.{node.attr}" if parent else node.attr
+        return ""
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and qualified_name(node) in {
+            "os.environ",
+            "os.getenv",
+            "time.sleep",
+        }:
+            raise ValueError("reconstructed test module has a forbidden dependency")
+        if not isinstance(node, ast.Call):
+            continue
+        name = qualified_name(node.func)
+        if name.rsplit(".", 1)[-1] == "sleep":
+            raise ValueError("reconstructed test module has a forbidden dependency")
+        if name in {
+            "__import__",
+            "builtins.__import__",
+            "importlib.import_module",
+        }:
+            if not node.args:
+                raise ValueError("reconstructed test module has a forbidden dynamic import")
+            argument = node.args[0]
+            if not isinstance(argument, ast.Constant) or not isinstance(argument.value, str):
+                raise ValueError("reconstructed test module has a forbidden dynamic import")
+            root = argument.value.split(".", 1)[0]
+            if root in FORBIDDEN_TEST_IMPORT_ROOTS | {"os", "time"}:
+                raise ValueError("reconstructed test module has a forbidden import")
+
+
+def select_rows(ledger: list[dict[str, Any]], protocol: dict[str, Any]) -> dict[str, Any]:
+    seed = str(protocol["selection_seed"])
+    selection_rules = protocol["selection"]
+    required_repositories = int(selection_rules["eligible_repositories_required"])
+    candidates_per_repository = int(selection_rules["eligible_candidates_per_repository_required"])
+    analysis_repositories = int(selection_rules["analysis_repositories"])
+    if (
+        required_repositories != analysis_repositories + 1
+        or int(selection_rules["analysis_scenarios"]) != analysis_repositories + 1
+    ):
+        raise ValueError("holdout selection cardinalities are inconsistent")
+    instance_ids = [str(row.get("instance_id") or "") for row in ledger]
+    if len(instance_ids) != len(set(instance_ids)):
+        raise ValueError("candidate ledger contains duplicate instance IDs")
+    eligible_by_repo: dict[str, list[dict[str, Any]]] = {}
+    for row in ledger:
+        if row.get("status") == "eligible":
+            eligible_by_repo.setdefault(str(row["repo"]), []).append(row)
+    ranked_repositories = sorted(
+        (
+            (_digest(seed, canonical_repo_url(repo)), canonical_repo_url(repo), repo)
+            for repo, rows in eligible_by_repo.items()
+            if len(rows) >= candidates_per_repository
+        ),
+        key=lambda item: (item[0], item[1]),
+    )
+    if len(ranked_repositories) < required_repositories:
+        raise ValueError("holdout requires six repositories with at least two eligible rows")
+    selected_repositories = ranked_repositories[:required_repositories]
+
+    def ranked(repo: str) -> list[dict[str, Any]]:
+        return sorted(
+            eligible_by_repo[repo],
+            key=lambda row: (_digest(seed, str(row["instance_id"])), str(row["instance_id"])),
+        )
+
+    analysis = [ranked(repo)[0] for _, _, repo in selected_repositories[:analysis_repositories]]
+    first_repo_rows = ranked(selected_repositories[0][2])
+    occupied = {
+        *str(first_repo_rows[0]["production_paths"]).split("|"),
+        str(first_repo_rows[0]["test_path"]),
+    }
+    second = next(
+        (
+            row
+            for row in first_repo_rows[1:]
+            if occupied.isdisjoint(
+                {
+                    *str(row["production_paths"]).split("|"),
+                    str(row["test_path"]),
+                }
+            )
+        ),
+        None,
+    )
+    if second is None:
+        raise ValueError("first ranked repository has no disjoint second candidate")
+    analysis.append(second)
+    canary = ranked(selected_repositories[analysis_repositories][2])[0]
+    return {
+        "protocol_id": protocol["protocol_id"],
+        "analysis_instance_ids": [row["instance_id"] for row in analysis],
+        "analysis_repository_map": {
+            str(row["instance_id"]): canonical_repo_url(str(row["repo"])) for row in analysis
+        },
+        "canary_instance_id": canary["instance_id"],
+        "canary_repository": canonical_repo_url(str(canary["repo"])),
+    }
+
+
+def _canonical_json_bytes(value: Any) -> bytes:
+    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+
+
+def _validated_selection(
+    selection: dict[str, Any],
+    protocol: dict[str, Any],
+) -> tuple[list[str], dict[str, str]]:
+    analysis_ids = selection.get("analysis_instance_ids")
+    repository_map = selection.get("analysis_repository_map")
+    canary_id = selection.get("canary_instance_id")
+    if (
+        selection.get("protocol_id") != protocol["protocol_id"]
+        or not isinstance(analysis_ids, list)
+        or not all(isinstance(value, str) and value for value in analysis_ids)
+        or len(analysis_ids) != int(protocol["selection"]["analysis_scenarios"])
+        or len(set(analysis_ids)) != len(analysis_ids)
+        or not isinstance(repository_map, dict)
+        or set(repository_map) != set(analysis_ids)
+        or not all(
+            isinstance(key, str) and isinstance(value, str) and value
+            for key, value in repository_map.items()
+        )
+        or not isinstance(canary_id, str)
+        or not canary_id
+        or canary_id in repository_map
+    ):
+        raise ValueError("claim selection is invalid")
+    return [*analysis_ids, canary_id], dict(repository_map)
+
+
+def build_reconstructed_test_attestation(
+    selection: dict[str, Any],
+    protocol: dict[str, Any],
+    reconstructed_tests: dict[str, str],
+) -> dict[str, Any]:
+    selected_ids, _ = _validated_selection(selection, protocol)
+    if set(reconstructed_tests) != set(selected_ids) or not all(
+        isinstance(source, str) for source in reconstructed_tests.values()
+    ):
+        raise ValueError("reconstructed tests do not match the frozen selection")
+    module_sha256: dict[str, str] = {}
+    for scenario_id in sorted(selected_ids):
+        source = reconstructed_tests[scenario_id]
+        validate_reconstructed_test_module(source)
+        module_sha256[scenario_id] = hashlib.sha256(source.encode()).hexdigest()
+    return {
+        "guard": "reconstructed-test-dependency-v1",
+        "selection_sha256": hashlib.sha256(_canonical_json_bytes(selection)).hexdigest(),
+        "module_sha256": module_sha256,
+    }
+
+
+def evaluate_repository_claim(
+    repository_rows: list[dict[str, Any]],
+    protocol: dict[str, Any],
+    selection: dict[str, Any],
+    *,
+    scenario_pack_bytes: bytes,
+    collision_attestation_bytes: bytes,
+    control_results_bytes: bytes,
+    reconstructed_tests: dict[str, str],
+) -> dict[str, Any]:
+    """Evaluate the preregistered repository-level efficacy gates."""
+    execution_inputs = protocol.get("execution_inputs")
+    if protocol.get("stage") != "execution-frozen" or not isinstance(execution_inputs, dict):
+        raise ValueError("claim evaluation requires an execution-frozen protocol")
+    if any(
+        SHA256.fullmatch(str(execution_inputs.get(field) or "")) is None
+        for field in (
+            "selection_output_sha256",
+            "scenario_pack_sha256",
+            "collision_attestation_sha256",
+            "reconstructed_test_attestation_sha256",
+            "control_results_sha256",
+        )
+    ):
+        raise ValueError("claim evaluation requires complete frozen execution hashes")
+    selected_ids, repository_map = _validated_selection(selection, protocol)
+    selection_sha256 = hashlib.sha256(_canonical_json_bytes(selection)).hexdigest()
+    if selection_sha256 != execution_inputs["selection_output_sha256"]:
+        raise ValueError("claim selection does not match the execution freeze")
+
+    scenario_pack_sha256 = hashlib.sha256(scenario_pack_bytes).hexdigest()
+    if scenario_pack_sha256 != execution_inputs["scenario_pack_sha256"]:
+        raise ValueError("claim scenario pack does not match the execution freeze")
+    try:
+        scenario_pack = json.loads(scenario_pack_bytes)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("claim scenario pack is invalid") from exc
+    if (
+        not isinstance(scenario_pack, list)
+        or not all(
+            isinstance(row, dict)
+            and isinstance(row.get("id"), str)
+            and SHA256.fullmatch(str(row.get("reconstructed_test_sha256") or "")) is not None
+            for row in scenario_pack
+        )
+        or {str(row["id"]) for row in scenario_pack} != set(selected_ids)
+        or len(scenario_pack) != len(selected_ids)
+    ):
+        raise ValueError("claim scenario pack does not match the frozen selection")
+    scenario_test_sha256 = {
+        str(row["id"]): str(row["reconstructed_test_sha256"]) for row in scenario_pack
+    }
+
+    if (
+        hashlib.sha256(collision_attestation_bytes).hexdigest()
+        != execution_inputs["collision_attestation_sha256"]
+    ):
+        raise ValueError("claim collision attestation does not match the execution freeze")
+    try:
+        collision_attestation = json.loads(collision_attestation_bytes)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("claim collision attestation is invalid") from exc
+    if (
+        not isinstance(collision_attestation, dict)
+        or collision_attestation.get("guard") != "runtime-pack-distinctive-evidence-v1"
+        or collision_attestation.get("runtime_availability_sha256")
+        != protocol["product_inputs"]["runtime_availability_sha256"]
+        or collision_attestation.get("catalog_archive_sha256")
+        != protocol["product_inputs"]["catalog_archive_sha256"]
+        or collision_attestation.get("scenarios_sha256") != scenario_pack_sha256
+        or collision_attestation.get("collision_free") is not True
+        or isinstance(collision_attestation.get("collision_count"), bool)
+        or not isinstance(collision_attestation.get("collision_count"), int)
+        or collision_attestation.get("collision_count") != 0
+        or collision_attestation.get("scenario_ids") != sorted(selected_ids)
+    ):
+        raise ValueError("claim collision attestation is invalid")
+
+    reconstructed_attestation = build_reconstructed_test_attestation(
+        selection,
+        protocol,
+        reconstructed_tests,
+    )
+    if (
+        hashlib.sha256(_canonical_json_bytes(reconstructed_attestation)).hexdigest()
+        != execution_inputs["reconstructed_test_attestation_sha256"]
+        or reconstructed_attestation["module_sha256"] != scenario_test_sha256
+    ):
+        raise ValueError("claim reconstructed tests do not match the execution freeze")
+
+    if (
+        hashlib.sha256(control_results_bytes).hexdigest()
+        != execution_inputs["control_results_sha256"]
+    ):
+        raise ValueError("claim control results do not match the execution freeze")
+    try:
+        control_results = json.loads(control_results_bytes)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("claim control results are invalid") from exc
+    scenario_results = (
+        control_results.get("scenario_results") if isinstance(control_results, dict) else None
+    )
+    control_timeout = protocol.get("timeouts", {}).get("control_verification_seconds")
+    if (
+        isinstance(control_timeout, bool)
+        or not isinstance(control_timeout, int | float)
+        or not math.isfinite(control_timeout)
+        or control_timeout <= 0
+        or not isinstance(control_results, dict)
+        or control_results.get("guard") != "holdout-control-results-v1"
+        or control_results.get("selection_sha256") != selection_sha256
+        or control_results.get("scenario_pack_sha256") != scenario_pack_sha256
+        or control_results.get("all_seven_passed") is not True
+        or not isinstance(scenario_results, dict)
+        or set(scenario_results) != set(selected_ids)
+    ):
+        raise ValueError("claim control results are invalid")
+    for scenario_id in selected_ids:
+        result = scenario_results[scenario_id]
+        if (
+            not isinstance(result, dict)
+            or result.get("parent_with_test_patch_red") is not True
+            or result.get("reference_patch_green") is not True
+            or result.get("changed_test_module_green") is not True
+            or result.get("timeout_compliant") is not True
+            or result.get("reconstructed_test_sha256") != scenario_test_sha256[scenario_id]
+            or any(
+                SHA256.fullmatch(str(result.get(field) or "")) is None
+                for field in (
+                    "red_evidence_sha256",
+                    "green_evidence_sha256",
+                    "module_evidence_sha256",
+                )
+            )
+            or isinstance(result.get("elapsed_seconds"), bool)
+            or not isinstance(result.get("elapsed_seconds"), int | float)
+            or not math.isfinite(result["elapsed_seconds"])
+            or result["elapsed_seconds"] < 0
+            or isinstance(result.get("timeout_seconds"), bool)
+            or not isinstance(result.get("timeout_seconds"), int | float)
+            or not math.isfinite(result["timeout_seconds"])
+            or result["timeout_seconds"] <= 0
+            or result["timeout_seconds"] != control_timeout
+            or result["elapsed_seconds"] > result["timeout_seconds"]
+        ):
+            raise ValueError("claim control results are invalid")
+
+    expected_scenarios: dict[str, list[str]] = defaultdict(list)
+    for scenario_id, repository in repository_map.items():
+        expected_scenarios[repository].append(scenario_id)
+    expected = int(protocol["selection"]["analysis_repositories"])
+    repositories = [str(row.get("repository") or "") for row in repository_rows]
+    if (
+        len(repository_rows) != expected
+        or len(set(repositories)) != expected
+        or set(repositories) != set(expected_scenarios)
+    ):
+        raise ValueError("claim evaluation repositories do not match the frozen selection")
+
+    def ratios(field: str) -> list[float]:
+        values: list[float] = []
+        for row in repository_rows:
+            value = row.get(field)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int | float)
+                or not math.isfinite(value)
+                or value < 0
+            ):
+                raise ValueError(f"claim evaluation requires finite non-negative {field}")
+            values.append(float(value))
+        return values
+
+    token_ratios = ratios("uncached_provider_tokens_ratio")
+    time_ratios = ratios("total_seconds_ratio")
+    benefiting = sum(value < 1.0 for value in token_ratios)
+    support_p = sum(
+        math.comb(expected, successes) for successes in range(benefiting, expected + 1)
+    ) / (2**expected)
+    gates = protocol["claim_gates"]
+    overall_token = float(statistics.median(token_ratios))
+    overall_time = float(statistics.median(time_ratios))
+    paired_trials = int(gates["paired_trials_per_scenario"])
+    evidence_complete = True
+    for row in repository_rows:
+        repository = str(row["repository"])
+        scenarios = sorted(expected_scenarios[repository])
+        trial_counts = row.get("paired_trials_by_scenario")
+        missing_pairs = row.get("missing_pairs")
+        unresolved = row.get("unresolved_incidents")
+        evidence_complete = evidence_complete and all(
+            (
+                row.get("scenario_ids") == scenarios,
+                isinstance(trial_counts, dict),
+                set(trial_counts) == set(scenarios) if isinstance(trial_counts, dict) else False,
+                (
+                    all(
+                        isinstance(count, int)
+                        and not isinstance(count, bool)
+                        and count == paired_trials
+                        for count in trial_counts.values()
+                    )
+                    if isinstance(trial_counts, dict)
+                    else False
+                ),
+                isinstance(missing_pairs, int) and not isinstance(missing_pairs, bool),
+                missing_pairs == 0,
+                row.get("token_usage_exact") is True,
+                row.get("trusted_policy_outcomes") is True,
+                isinstance(unresolved, int) and not isinstance(unresolved, bool),
+                unresolved == 0,
+            )
+        )
+    quality_preserved = all(row.get("quality_preserved") is True for row in repository_rows)
+    verified_deliveries = sum(row.get("verified_delivery") is True for row in repository_rows)
+    incident_free = all(
+        isinstance(row.get("unresolved_incidents"), int)
+        and not isinstance(row.get("unresolved_incidents"), bool)
+        and row.get("unresolved_incidents") == 0
+        for row in repository_rows
+    )
+    passed = all(
+        (
+            overall_token <= float(gates["primary_endpoint_maximum_ratio"]),
+            overall_time <= float(gates["total_seconds_maximum_ratio"]),
+            quality_preserved,
+            verified_deliveries >= int(gates["minimum_repositories_with_verified_delivery"]),
+            benefiting >= int(gates["required_benefiting_repositories"]),
+            support_p <= float(gates["exact_one_sided_repository_support_alpha"]),
+            incident_free,
+            evidence_complete,
+        )
+    )
+    return {
+        "overall_token_ratio": overall_token,
+        "overall_time_ratio": overall_time,
+        "benefiting_repositories": benefiting,
+        "verified_delivery_repositories": verified_deliveries,
+        "exact_one_sided_sign_p": support_p,
+        "quality_preserved": quality_preserved,
+        "incident_free": incident_free,
+        "evidence_complete": evidence_complete,
+        "passed": passed,
+    }
+
+
+def _load_jsonl(path: Path) -> list[dict[str, Any]]:
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+    if not all(isinstance(row, dict) for row in rows):
+        raise ValueError("selection JSONL must contain objects")
+    return rows
+
+
+def _private_text_handle(path: Path) -> TextIO:
+    resolved = path.resolve(strict=False)
+    private_root = PRIVATE_ROOT.resolve()
+    if ROOT.resolve() in resolved.parents and private_root not in resolved.parents:
+        raise ValueError("holdout evidence inside the repository must use .gate/ctx-ab-private")
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if stat.S_IMODE(path.parent.stat().st_mode) != 0o700:
+        raise ValueError("holdout evidence parent must be owner-only")
+    if path.is_symlink() or (path.exists() and not path.is_file()):
+        raise ValueError("holdout evidence path must be a regular file")
+    if path.exists() and path.stat().st_nlink != 1:
+        raise ValueError("holdout evidence path must not be a hard link")
+    if path.exists():
+        path.chmod(0o600)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags, 0o600)
+    os.fchmod(descriptor, 0o600)
+    return os.fdopen(descriptor, "w", encoding="utf-8", newline="")
+
+
+def _paths_are_distinct(paths: list[Path]) -> bool:
+    for index, left in enumerate(paths):
+        for right in paths[index + 1 :]:
+            if left.resolve(strict=False) == right.resolve(strict=False):
+                return False
+            if left.exists() and right.exists() and os.path.samefile(left, right):
+                return False
+    return True
+
+
+def _remove_stale_selection(path: Path) -> None:
+    if not path.exists() and not path.is_symlink():
+        return
+    resolved = path.resolve(strict=False)
+    private_root = PRIVATE_ROOT.resolve()
+    if ROOT.resolve() in resolved.parents and private_root not in resolved.parents:
+        raise ValueError("stale selection inside the repository must use .gate/ctx-ab-private")
+    if stat.S_IMODE(path.parent.stat().st_mode) != 0o700:
+        raise ValueError("stale selection parent must be owner-only")
+    if path.is_symlink() or not path.is_file() or path.stat().st_nlink != 1:
+        raise ValueError("stale selection must be a single-link regular file")
+    path.unlink()
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--protocol", type=Path, default=DEFAULT_PROTOCOL)
+    parser.add_argument("--selection-jsonl", type=Path, required=True)
+    parser.add_argument("--ledger", type=Path, required=True)
+    parser.add_argument("--selection", type=Path, required=True)
+    args = parser.parse_args(argv)
+    if not _paths_are_distinct([args.protocol, args.selection_jsonl, args.ledger, args.selection]):
+        raise SystemExit("protocol, source, ledger, and selection paths must be distinct")
+    _remove_stale_selection(args.selection)
+    protocol = json.loads(args.protocol.read_text(encoding="utf-8"))
+    universe = protocol["universe"]
+    if (
+        protocol.get("stage") not in {"acquisition-frozen", "execution-frozen"}
+        or SHA256.fullmatch(str(universe.get("raw_parquet_sha256") or "")) is None
+        or SHA256.fullmatch(str(universe.get("duckdb_cli_sha256") or "")) is None
+        or SHA256.fullmatch(str(universe.get("selection_jsonl_sha256") or "")) is None
+    ):
+        raise SystemExit("selection requires a frozen authenticated acquisition")
+    if (
+        hashlib.sha256(args.selection_jsonl.read_bytes()).hexdigest()
+        != universe["selection_jsonl_sha256"]
+    ):
+        raise SystemExit("selection JSONL does not match the frozen SHA-256")
+    source_rows = sorted(
+        _load_jsonl(args.selection_jsonl),
+        key=lambda row: str(row.get("instance_id") or ""),
+    )
+    if len(source_rows) != protocol["universe"]["expected_rows"]:
+        raise SystemExit("selection JSONL row count does not match the frozen universe")
+    ledger = [evaluate_row(row, protocol) for row in source_rows]
+    if {row["rejection_code"] for row in ledger if row["rejection_code"]} - set(
+        protocol["static_candidate_rules"]["rejection_codes"]
+    ):
+        raise SystemExit("selector emitted an undeclared rejection code")
+    with _private_text_handle(args.ledger) as handle:
+        writer = csv.DictWriter(handle, fieldnames=LEDGER_FIELDS)
+        writer.writeheader()
+        writer.writerows(ledger)
+    selection = select_rows(ledger, protocol)
+    with _private_text_handle(args.selection) as handle:
+        json.dump(selection, handle, indent=2)
+        handle.write("\n")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

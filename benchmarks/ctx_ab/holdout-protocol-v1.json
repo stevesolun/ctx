@@ -1,0 +1,196 @@
+{
+  "schema_version": 1,
+  "protocol_id": "production-graph-holdout-v1",
+  "stage": "acquisition-preregistered",
+  "frozen_at": "2026-07-28T08:12:19Z",
+  "product_inputs": {
+    "revision": "44f049fd04e5898382a70c455cb1ed853d26ee26",
+    "catalog_archive_sha256": "d4a39836aab5f558b546842580b2e20c523b9a9ab901ed681f84c09b5c4d6515",
+    "runtime_availability_sha256": "10ea10a4096493fbed9059b221ae9da4945beb03405fe85b683b5b2de6a1cb0e",
+    "benchmark_script_sha256": "6caf19309b69ef059c7be2dbc7ab0774b10e522861a108b4cdaf97b4cf94cfb3",
+    "git_blob_sha1": {
+      "graph/wiki-graph-runtime.tar.gz": "384fb05269d27e18c4905ce40eda6a58d1e80a94",
+      "src/ctx/assets/runtime-availability.json": "1a5ed3b84bddba28b627a1c9cf743e732152b3e5",
+      "scripts/ctx_ab_benchmark.py": "a33c01ce6f98e5470b8ca6d4ce87502470112980"
+    }
+  },
+  "universe": {
+    "source": "princeton-nlp/SWE-bench_Verified",
+    "revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a",
+    "file": "data/test-00000-of-00001.parquet",
+    "expected_rows": 500,
+    "hub_revision_url": "https://huggingface.co/api/datasets/princeton-nlp/SWE-bench_Verified/revision/c104f840cc67f8b6eec6f759ebc8b2693d585d4a",
+    "parquet_url": "https://huggingface.co/datasets/princeton-nlp/SWE-bench_Verified/resolve/c104f840cc67f8b6eec6f759ebc8b2693d585d4a/data/test-00000-of-00001.parquet",
+    "duckdb_version": "v1.5.2",
+    "duckdb_cli_gzip_url": "https://github.com/duckdb/duckdb/releases/download/v1.5.2/duckdb_cli-osx-arm64.gz",
+    "duckdb_cli_gzip_sha256": "c04495beb458c9f0451ee6a384d363cf14cf08276d6a6e8f1edcd2a3f7627075",
+    "required_columns": [
+      "repo",
+      "instance_id",
+      "base_commit",
+      "patch",
+      "test_patch",
+      "problem_statement",
+      "hints_text",
+      "created_at",
+      "version",
+      "FAIL_TO_PASS",
+      "PASS_TO_PASS",
+      "environment_setup_commit",
+      "difficulty"
+    ],
+    "canonical_jsonl": "DuckDB read_parquet(file_row_number=true), row_idx 0..499; required string columns in declared order; compact UTF-8 JSON with ensure_ascii=false and LF after every row",
+    "raw_parquet_sha256": null,
+    "selection_jsonl_sha256": null,
+    "duckdb_cli_sha256": null,
+    "acquisition_rule": "download exact revision Parquet and pinned DuckDB gzip; verify both before conversion; rerun conversion after hashes are frozen"
+  },
+  "execution_inputs": {
+    "selection_output_sha256": null,
+    "scenario_pack_sha256": null,
+    "collision_attestation_sha256": null,
+    "reconstructed_test_attestation_sha256": null,
+    "control_results_sha256": null
+  },
+  "timeouts": {
+    "control_verification_seconds": 900
+  },
+  "selection_seed": "e2638c075fb968839cbe1ff78e2dafd0d6776d6465753d786e0413cd84ec724b",
+  "selection_seed_input": "fixed literal ctx-holdout-selection-v1 NUL external dataset revision",
+  "excluded_repositories": [
+    "networkx/networkx",
+    "pallets/click",
+    "psf/requests",
+    "python-attrs/attrs",
+    "textualize/rich"
+  ],
+  "static_candidate_rules": {
+    "base_commit": "exactly 40 lowercase hexadecimal characters",
+    "production_patch": "1-3 Python files outside test, docs, examples, scripts, benchmarks, migrations, setup, and generated paths; no rename or copy metadata",
+    "test_patch": "exactly one Python test file and no other files; no rename or copy metadata",
+    "production_changed_lines": {
+      "minimum": 5,
+      "maximum": 120
+    },
+    "problem_statement_words": {
+      "minimum": 20,
+      "maximum": 1200
+    },
+    "excluded_path_components": [
+      ".github",
+      "benchmarks",
+      "docs",
+      "examples",
+      "generated",
+      "migrations",
+      "scripts",
+      "test",
+      "tests"
+    ],
+    "excluded_filenames": [
+      "conftest.py",
+      "setup.py"
+    ],
+    "excluded_filename_regex": [
+      "(?i)(^|[_.-])(?:auto)?generated([_.-]|$)"
+    ],
+    "forbidden_test_regex": [
+      "(?i)https?://|\\blocalhost\\b",
+      "(?i)\\b(?:requests|urllib(?:3|\\.request)?|http(?:\\.client)?|httpx|aiohttp|socket|subprocess|random)\\b",
+      "(?i)\\b(?:getenv|environ)\\b",
+      "(?i)\\bfrom\\s+time\\s+import\\b[^\\n]*\\bsleep\\b|\\bsleep\\s*\\(",
+      "(?i)import_module\\s*\\(\\s*[\"'](?:os|time|http|requests|urllib|socket|subprocess|random)[\"']"
+    ],
+    "rejection_codes": [
+      "base-commit",
+      "excluded-repository",
+      "patch-lines",
+      "patch-paths",
+      "problem-statement",
+      "row-schema",
+      "test-dependency",
+      "test-paths"
+    ]
+  },
+  "ranking": {
+    "repository_algorithm": "sha256(selection_seed NUL canonical_repo_url), ascending then canonical_repo_url",
+    "candidate_algorithm": "sha256(selection_seed NUL instance_id), ascending then instance_id",
+    "canonical_repo_url": "https://github.com/{lowercase repo}.git"
+  },
+  "selection": {
+    "eligible_repositories_required": 6,
+    "eligible_candidates_per_repository_required": 2,
+    "analysis_scenarios": 6,
+    "analysis_repositories": 5,
+    "first_scenario_rule": "first ranked candidate from each of the first five ranked eligible repositories",
+    "sixth_scenario_rule": "first disjoint candidate after the first candidate in the first ranked repository",
+    "disjoint_means": "production and test path sets do not intersect",
+    "canary_rule": "first ranked candidate from the sixth ranked eligible repository",
+    "canary_excluded_from_analysis": true,
+    "task": "exact problem_statement bytes from the frozen dataset row",
+    "query": "first 240 characters of whitespace-normalized problem_statement",
+    "ctx_context": [],
+    "replacement_after_control_failure": "forbidden"
+  },
+  "control_requirements": [
+    "parent plus reconstructed test patch is red",
+    "reference production patch makes the same test green",
+    "the complete changed test module passes with the reference patch",
+    "the complete reconstructed selected test module passes the AST dependency validator before execution freeze",
+    "verification finishes within the frozen timeout",
+    "all seven selected scenarios pass or the protocol is no-go"
+  ],
+  "freeze_manifest_requirements": [
+    "protocol file and protocol commit",
+    "raw parquet and canonical selection JSONL",
+    "complete 500-row candidate and rejection ledger",
+    "selection output and private seven-scenario pack",
+    "runtime-pack-distinctive-evidence-v1 collision attestation",
+    "reconstructed-test-dependency-v1 attestation for all seven selected test modules",
+    "holdout-control-results-v1 red, green, complete-module, and timeout evidence for all seven scenarios",
+    "product revision, catalog, runtime pack, benchmark runner, and evaluator",
+    "model, provider, Codex version, Python, dependency freeze, timeouts, token and iteration limits",
+    "counterbalanced schedule and repository map",
+    "execution-freeze commit created before any selected-task model or CTX query"
+  ],
+  "pre_execution_blinding": {
+    "allowed_before_freeze": "deterministic local selection, repository checkout, test reconstruction, red/green control validation, and runtime-pack-distinctive-evidence-v1 collision scanning only",
+    "forbidden_before_freeze": "submitting selected or canary identifiers, repositories, tasks, tests, patches, or reference patches to CTX, its recommendation surfaces, skills, MCPs, agents, telemetry, dashboards, or either model arm",
+    "collision_scan": "runtime-pack-distinctive-evidence-v1 checks exact scenario ID, repository, commit, test path, and distinctive task, test, reference-patch, and context fragments against the frozen runtime availability pack",
+    "collision_outcome": "protocol no-go with no candidate replacement",
+    "invalidation": "any forbidden exposure before the complete execution-freeze commit, or any exposure-informed change, requires a new seed, protocol, and holdout"
+  },
+  "canary_policy": {
+    "performance_is_ignored": true,
+    "required": "one baseline and ctx-light pair with retries disabled",
+    "pass": "both arms preserve quality, usage is exact, isolation and containment pass, lifecycle ends empty, and incidents are zero",
+    "invalidation": "any canary-informed change to product, ranking, prompt, model, provider, environment, evaluator, timeout, limits, harness, or dependencies requires a new seed, protocol, and holdout"
+  },
+  "analysis": {
+    "population": "eligible tasks selected by this protocol from the pinned SWE-bench Verified revision, using the frozen model, provider, product, catalog, and execution environment",
+    "treatment_policy": "intent-to-treat production CTX policy",
+    "pair_effect": "ctx-light divided by baseline within each complete paired trial",
+    "scenario_effect": "median pair effect with no outlier removal",
+    "repository_effect": "equal-weight median of scenario effects in that repository",
+    "overall_token_effect": "equal-weight median of the five repository uncached-provider-token effects",
+    "overall_time_effect": "equal-weight median of the five repository total-seconds effects",
+    "support_test": "exact one-sided sign test across five repository effects",
+    "failure_policy": "any missing pair, failed control, failed quality check, unresolved incident, unavailable token total, or unverified policy outcome makes the claim fail",
+    "quality": "every focused and regression verification passes in both arms with the expected test count",
+    "delivery": "at least one trusted verified CTX delivery in every repository",
+    "claim_scope": "results support only the declared eligible population and frozen execution conditions; broader software-development productivity claims are unsupported"
+  },
+  "claim_gates": {
+    "paired_trials_per_scenario": 6,
+    "primary_endpoint": "uncached_provider_tokens",
+    "primary_endpoint_aggregation": "overall_token_effect",
+    "primary_endpoint_maximum_ratio": 0.85,
+    "total_seconds_aggregation": "overall_time_effect",
+    "total_seconds_maximum_ratio": 1.1,
+    "quality_preserved": true,
+    "minimum_repositories_with_verified_delivery": 5,
+    "exact_one_sided_repository_support_alpha": 0.05,
+    "required_benefiting_repositories": 5,
+    "benefiting_repository_definition": "repository uncached-provider-token effect is strictly less than 1.0"
+  }
+}
