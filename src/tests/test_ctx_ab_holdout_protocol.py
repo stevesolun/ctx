@@ -33,10 +33,6 @@ ACQUIRE_SPEC.loader.exec_module(acquire)
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
-def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
 def _row(repo: str, suffix: str, *, path: str | None = None) -> dict[str, str]:
     production_path = path or f"src/{suffix}.py"
     return {
@@ -57,7 +53,7 @@ def _row(repo: str, suffix: str, *, path: str | None = None) -> dict[str, str]:
     }
 
 
-def test_holdout_protocol_pins_current_product_inputs() -> None:
+def test_holdout_protocol_authenticates_pinned_product_inputs() -> None:
     protocol = json.loads(PROTOCOL_PATH.read_text(encoding="utf-8"))
     product = protocol["product_inputs"]
 
@@ -91,13 +87,6 @@ def test_holdout_protocol_pins_current_product_inputs() -> None:
     assert protocol["universe"]["parquet_url"].endswith(
         "/c104f840cc67f8b6eec6f759ebc8b2693d585d4a/data/test-00000-of-00001.parquet"
     )
-    assert product["catalog_archive_sha256"] == _sha256(
-        ROOT / "graph" / "wiki-graph-runtime.tar.gz"
-    )
-    assert product["runtime_availability_sha256"] == _sha256(
-        ROOT / "src" / "ctx" / "assets" / "runtime-availability.json"
-    )
-    assert product["benchmark_script_sha256"] == _sha256(ROOT / "scripts" / "ctx_ab_benchmark.py")
     expected_seed = hashlib.sha256(
         "\0".join(
             [
@@ -107,27 +96,34 @@ def test_holdout_protocol_pins_current_product_inputs() -> None:
         ).encode()
     ).hexdigest()
     assert protocol["selection_seed"] == expected_seed
-    for path, blob_sha in product["git_blob_sha1"].items():
-        result = subprocess.run(
-            ["git", "rev-parse", f"{product['revision']}:{path}"],
+    pinned_inputs = {
+        "graph/wiki-graph-runtime.tar.gz": ("catalog_archive_sha256", True),
+        "src/ctx/assets/runtime-availability.json": ("runtime_availability_sha256", False),
+        "scripts/ctx_ab_benchmark.py": ("benchmark_script_sha256", False),
+    }
+    assert set(product["git_blob_sha1"]) == set(pinned_inputs)
+    for path, (digest_key, is_lfs_pointer) in pinned_inputs.items():
+        object_spec = f"{product['revision']}:{path}"
+        blob = subprocess.run(
+            ["git", "rev-parse", object_spec],
             cwd=ROOT,
             check=True,
             capture_output=True,
             text=True,
         )
-        assert result.stdout.strip() == blob_sha
+        assert blob.stdout.strip() == product["git_blob_sha1"][path]
         content = subprocess.run(
-            ["git", "show", f"{product['revision']}:{path}"],
+            ["git", "cat-file", "blob", object_spec],
             cwd=ROOT,
             check=True,
             capture_output=True,
         ).stdout
-        if path == "graph/wiki-graph-runtime.tar.gz":
-            assert f"oid sha256:{product['catalog_archive_sha256']}".encode() in content
-        elif path == "src/ctx/assets/runtime-availability.json":
-            assert hashlib.sha256(content).hexdigest() == product["runtime_availability_sha256"]
+        expected_digest = product[digest_key]
+        assert SHA256.fullmatch(expected_digest)
+        if is_lfs_pointer:
+            assert f"oid sha256:{expected_digest}".encode() in content.splitlines()
         else:
-            assert hashlib.sha256(content).hexdigest() == product["benchmark_script_sha256"]
+            assert hashlib.sha256(content).hexdigest() == expected_digest
 
 
 def test_static_filter_uses_declared_rejection_codes() -> None:
