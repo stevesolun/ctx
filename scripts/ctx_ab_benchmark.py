@@ -2215,10 +2215,14 @@ def _freeze_catalog_tree(root: Path) -> None:
 
 
 def _remove_catalog_staging(path: Path) -> None:
+    if path.is_symlink():
+        path.unlink()
+        return
     if not path.exists():
         return
-    for directory in [path, *(item for item in path.rglob("*") if item.is_dir())]:
-        directory.chmod(stat.S_IRWXU)
+    for item in [path, *path.rglob("*")]:
+        if not item.is_symlink():
+            item.chmod(item.stat().st_mode | stat.S_IWUSR)
     shutil.rmtree(path)
 
 

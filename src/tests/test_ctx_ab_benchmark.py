@@ -2014,6 +2014,28 @@ def _write_runtime_availability(
     )
 
 
+def test_remove_catalog_staging_makes_read_only_files_writable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    staging = tmp_path / "staging"
+    frozen = staging / "nested" / "catalog.json"
+    frozen.parent.mkdir(parents=True)
+    frozen.write_text("{}\n", encoding="utf-8")
+    frozen.chmod(0o400)
+    real_rmtree = benchmark.shutil.rmtree
+
+    def checked_rmtree(path: Path) -> None:
+        assert frozen.stat().st_mode & benchmark.stat.S_IWUSR
+        real_rmtree(path)
+
+    monkeypatch.setattr(benchmark.shutil, "rmtree", checked_rmtree)
+
+    benchmark._remove_catalog_staging(staging)
+
+    assert not staging.exists()
+
+
 def test_production_catalog_cache_uses_shipped_installer_once(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
