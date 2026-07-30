@@ -901,15 +901,15 @@ def materialize(
         with tempfile.TemporaryDirectory(prefix="ctx-holdout-materialize-") as raw_work:
             work_root = Path(raw_work)
             source_preflight_deadline = time.monotonic() + float(timeout)
-            for source in sources.values():
+            for source_bundle in sources.values():
                 _validate_source_bundle_heads(
-                    source,
+                    source_bundle,
                     cwd=work_root,
                     deadline=source_preflight_deadline,
                 )
             for slot, scenario_id in enumerate(selected_ids):
                 row = rows_by_id[scenario_id]
-                scenario_row, scenario, control, source = _scenario(
+                scenario_row, scenario, control, reconstructed_source = _scenario(
                     row,
                     dataset_path=rows_path.resolve(strict=True),
                     protocol=protocol,
@@ -924,7 +924,7 @@ def materialize(
                 scenario_rows.append(scenario_row)
                 scenarios.append(scenario)
                 controls[scenario_id] = control
-                reconstructed[scenario_id] = source
+                reconstructed[scenario_id] = reconstructed_source
 
         scenario_pack_bytes = _canonical_bytes({"scenarios": scenario_rows, "version": 1})
         scenario_pack_sha256 = _sha256(scenario_pack_bytes)

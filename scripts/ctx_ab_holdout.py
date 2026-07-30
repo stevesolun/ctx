@@ -21,7 +21,7 @@ from typing import Any, TextIO
 try:
     from scripts import ctx_ab_exposure_ledger as exposure_ledger
 except ImportError:  # pragma: no cover - direct script execution
-    import ctx_ab_exposure_ledger as exposure_ledger
+    import ctx_ab_exposure_ledger as exposure_ledger  # type: ignore[no-redef]
 
 
 ROOT = Path(__file__).resolve().parents[1]
