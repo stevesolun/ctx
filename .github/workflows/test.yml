@@ -249,8 +249,8 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install ".[dev]"
 
-      - name: Run focused Windows importer tests
-        run: python -m pytest -q --no-cov src/tests/test_import_designdotmd_skills.py src/tests/test_import_mattpocock_skills.py src/tests/test_import_strix_skills.py
+      - name: Run focused Windows tests
+        run: python -m pytest -q --no-cov src/tests/test_import_designdotmd_skills.py src/tests/test_import_mattpocock_skills.py src/tests/test_import_strix_skills.py src/tests/test_ctx_ab_swebench.py
 
   contract-compat:
     name: "Contract compatibility (${{ matrix.os }})"

@@ -244,7 +244,7 @@ def _run_process(
 
     def cleanup_marked_processes() -> None:
         nonlocal reaped, residual, cleanup_error
-        if process_token is None:
+        if process_token is None or os.name == "nt":
             return
         count, remaining, error = _cleanup_marked_processes(process_token)
         reaped += count

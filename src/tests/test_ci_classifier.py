@@ -1341,6 +1341,8 @@ def test_windows_high_risk_paths_are_classified_selectively() -> None:
         "src/tests/test_import_designdotmd_skills.py",
         "src/tests/test_import_mattpocock_skills.py",
         "src/tests/test_import_strix_skills.py",
+        "scripts/ctx_ab_swebench.py",
+        "src/tests/test_ctx_ab_swebench.py",
         "scripts/ci_classifier.py",
         "scripts/ci_required.py",
         ".github/workflows/test.yml",
@@ -1838,7 +1840,7 @@ def test_workflow_runs_full_pytest_matrix_for_ci_changed_prs() -> None:
     assert "needs.classify.outputs.ci_changed == 'true'" in pytest_job
 
 
-def test_workflow_runs_targeted_windows_high_risk_importer_gate() -> None:
+def test_workflow_runs_targeted_windows_high_risk_gate() -> None:
     workflow = Path(".github/workflows/test.yml").read_text(encoding="utf-8")
     windows_job = workflow.split("\n  windows-high-risk:\n", maxsplit=1)[1].split(
         "\n  contract-compat:", maxsplit=1
@@ -1851,4 +1853,5 @@ def test_workflow_runs_targeted_windows_high_risk_importer_gate() -> None:
     assert "src/tests/test_import_designdotmd_skills.py" in windows_job
     assert "src/tests/test_import_mattpocock_skills.py" in windows_job
     assert "src/tests/test_import_strix_skills.py" in windows_job
+    assert "src/tests/test_ctx_ab_swebench.py" in windows_job
     assert "matrix:" not in windows_job

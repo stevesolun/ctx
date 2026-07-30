@@ -108,7 +108,12 @@ def test_windows_process_launch_and_tree_signal_use_native_controls(
         lambda *_args: pytest.fail("Windows must not call os.killpg"),
     )
 
-    result = bridge._run_process(["worker"], cwd=tmp_path, timeout=7)
+    result = bridge._run_process(
+        ["worker"],
+        cwd=tmp_path,
+        timeout=7,
+        contain_descendants=True,
+    )
     bridge._signal_process_tree(
         cast(Any, FakeProcess()),
         signal.SIGTERM,
@@ -118,6 +123,22 @@ def test_windows_process_launch_and_tree_signal_use_native_controls(
     assert captured["popen"]["creationflags"] == 512
     assert "start_new_session" not in captured["popen"]
     assert captured["taskkill"][0] == ["taskkill", "/PID", "4321", "/T", "/F"]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows process contract")
+def test_windows_contained_process_completes_without_posix_marker_scan(
+    tmp_path: Path,
+) -> None:
+    result = bridge._run_process(
+        [sys.executable, "-c", "print('contained')"],
+        cwd=tmp_path,
+        timeout=10,
+        contain_descendants=True,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == "contained\n"
+    assert result.residual_descendants == ()
 
 
 def _report_entry(*, resolved: bool) -> dict[str, Any]:
