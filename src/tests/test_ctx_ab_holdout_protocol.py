@@ -672,6 +672,23 @@ with open(output, "w", encoding="utf-8") as handle:
             compressed.write(script.encode())
 
 
+@pytest.fixture
+def portable_fake_duckdb(monkeypatch: pytest.MonkeyPatch) -> None:
+    if os.name != "nt":
+        return
+    native_run = subprocess.run
+
+    def run_fake_cli(
+        command: list[str],
+        **kwargs: Any,
+    ) -> subprocess.CompletedProcess[str]:
+        if command and Path(command[0]).name == "duckdb":
+            command = [sys.executable, *command]
+        return native_run(command, **kwargs)
+
+    monkeypatch.setattr(acquire.subprocess, "run", run_fake_cli)
+
+
 def test_acquisition_canonicalizer_is_byte_stable() -> None:
     protocol = json.loads(PROTOCOL_PATH.read_text(encoding="utf-8"))
     columns = protocol["universe"]["required_columns"]
@@ -710,7 +727,10 @@ def test_v2_acquisition_authenticates_exact_protocol_bytes() -> None:
         acquire._authenticated_protocol(data + b"\n", expected_sha256=digest)
 
 
-def test_acquisition_runs_pinned_cli_and_verifies_frozen_rerun(tmp_path: Path) -> None:
+def test_acquisition_runs_pinned_cli_and_verifies_frozen_rerun(
+    tmp_path: Path,
+    portable_fake_duckdb: None,
+) -> None:
     protocol = json.loads(PROTOCOL_PATH.read_text(encoding="utf-8"))
     protocol["stage"] = "acquisition-preregistered"
     protocol["universe"]["raw_parquet_sha256"] = None
@@ -768,6 +788,7 @@ def test_acquisition_rejects_frozen_hash_mismatch(
     tmp_path: Path,
     field: str,
     message: str,
+    portable_fake_duckdb: None,
 ) -> None:
     protocol = json.loads(PROTOCOL_PATH.read_text(encoding="utf-8"))
     protocol["universe"]["expected_rows"] = 5
