@@ -46,6 +46,17 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def test_committed_v1_protocol_checkout_preserves_authenticated_bytes() -> None:
+    relative_path = freezer.V1_PROTOCOL_PATH.relative_to(freezer.ROOT).as_posix()
+    attributes = (freezer.ROOT / ".gitattributes").read_text(encoding="utf-8").splitlines()
+    data = freezer.V1_PROTOCOL_PATH.read_bytes()
+
+    assert f"{relative_path} text eol=lf" in attributes
+    assert b"\r" not in data
+    assert _sha256(data) == freezer.V1_PROTOCOL_SHA256
+    assert freezer._supported_v1_protocol()["protocol_id"] == "production-graph-holdout-v1"
+
+
 def _phase(
     *,
     phase: str,
