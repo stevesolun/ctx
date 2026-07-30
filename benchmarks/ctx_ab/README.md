@@ -83,6 +83,11 @@ DOCKER_CLI=/absolute/path/to/docker
 DOCKER_HOST=unix:///absolute/path/to/docker.sock
 MODEL=gpt-5.5
 
+# Private historical evidence must cover every task previously shown to CTX,
+# an LLM, or a benchmark arm. Repeat --selection/--evidence as needed.
+HISTORY_SELECTION=/absolute/private/path/to/prior-selection.json
+HISTORY_EVIDENCE=/absolute/private/path/to/prior-results.csv
+
 PRIVATE="$RUN/.gate/ctx-ab-private/production-graph-holdout-v2"
 MAT="$PRIVATE/materialized"
 CACHE="$PRIVATE/runner-cache"
@@ -93,8 +98,14 @@ chmod 700 "$RUN/.gate" "$RUN/.gate/ctx-ab-private" "$PRIVATE" \
 test ! -e "$MAT"
 test ! -e "$OUT"
 
+"$PY" -m scripts.ctx_ab_exposure_ledger \
+  --selection "$HISTORY_SELECTION" \
+  --evidence "$HISTORY_EVIDENCE" \
+  --output "$PRIVATE/exposure-ledger.json"
+
 "$PY" -m scripts.ctx_ab_holdout_prepare protocol \
   --output "$PRIVATE/acquisition-protocol.json" \
+  --exposure-ledger "$PRIVATE/exposure-ledger.json" \
   --codex "$CODEX" \
   --swebench-checkout "$SWEBENCH_CHECKOUT" \
   --swebench-python "$SWEBENCH_PYTHON" \
@@ -116,11 +127,13 @@ ACQ_SHA="$("$PY" -c \
   --expected-acquisition-protocol-sha256 "$ACQ_SHA" \
   --selection-jsonl "$PRIVATE/universe.jsonl" \
   --ledger "$PRIVATE/ledger.csv" \
+  --exposure-ledger "$PRIVATE/exposure-ledger.json" \
   --selection "$PRIVATE/selection.json"
 
 "$PY" -m scripts.ctx_ab_holdout_prepare sources \
   --protocol "$PRIVATE/acquisition-protocol.json" \
   --expected-acquisition-protocol-sha256 "$ACQ_SHA" \
+  --exposure-ledger "$PRIVATE/exposure-ledger.json" \
   --rows "$PRIVATE/universe.jsonl" \
   --selection "$PRIVATE/selection.json" \
   --cache-root "$PRIVATE/source-cache" \
@@ -131,6 +144,7 @@ ACQ_SHA="$("$PY" -c \
 "$PY" -m scripts.ctx_ab_holdout_materialize \
   --protocol "$PRIVATE/acquisition-protocol.json" \
   --expected-acquisition-protocol-sha256 "$ACQ_SHA" \
+  --exposure-ledger "$PRIVATE/exposure-ledger.json" \
   --rows "$PRIVATE/universe.jsonl" \
   --selection "$PRIVATE/selection.json" \
   --source-map "$PRIVATE/source-map.json" \
@@ -158,8 +172,10 @@ ACQ_SHA="$("$PY" -c \
 "$PY" -m scripts.ctx_ab_holdout_freeze \
   --protocol "$PRIVATE/acquisition-protocol.json" \
   --expected-acquisition-protocol-sha256 "$ACQ_SHA" \
+  --exposure-ledger "$PRIVATE/exposure-ledger.json" \
   --selection "$PRIVATE/selection.json" \
   --scenario-pack "$MAT/scenario-pack.json" \
+  --source-map "$PRIVATE/source-map.json" \
   --collision "$MAT/collision-attestation.json" \
   --reconstructed "$MAT/reconstructed-test-attestation.json" \
   --controls "$MAT/control-results.json" \
@@ -187,6 +203,7 @@ EXEC_SHA="$("$PY" -c \
   --holdout-controls "$MAT/control-results.json" \
   --holdout-environment "$PRIVATE/execution-environment.json" \
   --holdout-schedule "$PRIVATE/execution-schedule.json" \
+  --holdout-source-map "$PRIVATE/source-map.json" \
   --swebench-dataset "$PRIVATE/universe.jsonl" \
   --swebench-checkout "$SWEBENCH_CHECKOUT" \
   --swebench-python "$SWEBENCH_PYTHON" \
@@ -197,12 +214,16 @@ EXEC_SHA="$("$PY" -c \
   --timeout 900
 ```
 
-The acquisition protocol SHA-256 must be passed unchanged through acquisition,
-selection, source preparation, materialization, environment capture, and
-execution freeze. The execution protocol then authenticates that predecessor
-digest and every frozen execution input. Before accepting an execution protocol,
-the runner reconstructs the complete canonical acquisition protocol, validates
-the pinned V1-derived design, and compares its canonical digest with the
+The private exposure ledger must include every known historical task exposure.
+Its digest is authenticated by the acquisition protocol, checked before
+selection, source preparation, materialization, and freeze, and never publishes
+the underlying task IDs. The acquisition protocol SHA-256 must be passed
+unchanged through acquisition, selection, source preparation, materialization,
+environment capture, and execution freeze. The execution protocol then
+authenticates that predecessor digest, the source map and bundles, and every
+other frozen execution input. Before accepting an execution protocol, the
+runner reconstructs the complete canonical acquisition protocol, validates the
+pinned V1-derived design, and compares its canonical digest with the
 authenticated predecessor digest. Verdict generation uses the authenticated
 snapshots of every frozen input and fails closed if any on-disk input changes
 after attestation.
@@ -226,6 +247,10 @@ within each repository, so later generations must be task-ID-disjoint from
 earlier generations. If any of the ten repositories lacks a fresh eligible
 candidate, selection fails closed and a new pinned universe must be
 preregistered. Never reuse the observed V2 selection for a confirmatory claim.
+The runner also keeps a host-wide one-shot claim under
+`~/.ctx/benchmark-state/`, keyed by the canonical repository URL. A frozen
+protocol cannot run concurrently or be replayed from another clone or output
+directory.
 
 ## Evidence
 
