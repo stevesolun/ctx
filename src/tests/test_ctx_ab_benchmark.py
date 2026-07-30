@@ -3632,7 +3632,7 @@ def test_production_output_must_use_private_gate_root() -> None:
 
     assert benchmark._validate_production_output_path(private_output) == private_output.resolve()
     assert benchmark._is_system_temp_path(Path("/tmp/private-scenarios.yaml"))
-    assert not benchmark._is_system_temp_path(ROOT / "benchmarks/ctx_ab/scenarios.yaml")
+    assert not benchmark._is_system_temp_path(Path("/opt/ctx/private-scenarios.yaml"))
     with pytest.raises(ValueError, match="output must be beneath"):
         benchmark._validate_production_output_path(Path("/tmp/ctx-ab-run"))
 
