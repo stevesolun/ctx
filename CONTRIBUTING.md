@@ -62,15 +62,15 @@ new package path exists: shim removal requires an explicit migration phase plus
 clean-install and packaging evidence. Run the package-scaffold tests and the
 affected module tests before the repository gates.
 
-GitHub PRs skip the broad OS/Python `test` matrix for ordinary changes.
-Changes under `.github/workflows/**` set `ci_changed`, run the full
-Ubuntu/Windows/macOS pytest matrix on the PR, and make the stable required
-aggregate fail if that matrix is skipped.
+GitHub PRs skip the broad OS/Python `test` matrix. The full
+Ubuntu/Windows/macOS pytest matrix runs after merge on `main`; PRs use focused
+required jobs selected from the changed surface.
 
 PRs matching `WINDOWS_PATTERNS` in `scripts/ci_classifier.py` also run the
-required `windows-high-risk` job on native Windows 3.12, focused on the
-DesignDotMD, Matt Pocock, and Strix importer suites. Local-fast and preflight
-remain the first pass, but they do not replace that native Windows evidence.
+required `windows-high-risk` job on native Windows 3.12, focused on Windows
+sensitive importers and benchmark process/filesystem behavior. Local-fast and
+preflight remain the first pass, but they do not replace that native Windows
+evidence.
 
 ## Documentation changes
 

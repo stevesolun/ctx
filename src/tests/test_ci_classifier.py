@@ -1341,7 +1341,9 @@ def test_windows_high_risk_paths_are_classified_selectively() -> None:
         "src/tests/test_import_designdotmd_skills.py",
         "src/tests/test_import_mattpocock_skills.py",
         "src/tests/test_import_strix_skills.py",
+        "scripts/ctx_ab_benchmark.py",
         "scripts/ctx_ab_swebench.py",
+        "src/tests/test_ctx_ab_benchmark.py",
         "src/tests/test_ctx_ab_swebench.py",
         "scripts/ci_classifier.py",
         "scripts/ci_required.py",
@@ -1444,7 +1446,7 @@ def test_ci_required_allows_full_matrix_skip_on_pr_only() -> None:
     assert failed_required_jobs(needs, event_name="push") == {"test": "skipped"}
 
 
-def test_ci_required_rejects_full_matrix_skip_on_ci_changed_pr() -> None:
+def test_ci_required_allows_full_matrix_skip_on_ci_changed_pr() -> None:
     needs = _required_needs(
         classify={
             "result": "success",
@@ -1453,9 +1455,7 @@ def test_ci_required_rejects_full_matrix_skip_on_ci_changed_pr() -> None:
         test={"result": "skipped"},
     )
 
-    assert failed_required_jobs(needs, event_name="pull_request") == {
-        "test": "skipped",
-    }
+    assert failed_required_jobs(needs, event_name="pull_request") == {}
 
 
 def test_ci_required_allows_targeted_windows_skip_on_unrelated_pr() -> None:
@@ -1830,14 +1830,15 @@ def test_workflow_runs_focused_telemetry_enterprise_gate() -> None:
     assert '-k "telemetry or runtime_lifecycle"' in workflow
 
 
-def test_workflow_runs_full_pytest_matrix_for_ci_changed_prs() -> None:
+def test_workflow_runs_full_pytest_matrix_after_merge_not_on_prs() -> None:
     workflow = Path(".github/workflows/test.yml").read_text(encoding="utf-8")
     pytest_job = workflow.split("\n  test:\n", maxsplit=1)[1].split(
         "\n  contract-compat:", maxsplit=1
     )[0]
 
     assert "needs: classify" in pytest_job
-    assert "needs.classify.outputs.ci_changed == 'true'" in pytest_job
+    assert "if: ${{ github.event_name != 'pull_request' }}" in pytest_job
+    assert "needs.classify.outputs.ci_changed == 'true'" not in pytest_job
 
 
 def test_workflow_runs_targeted_windows_high_risk_gate() -> None:
@@ -1853,5 +1854,6 @@ def test_workflow_runs_targeted_windows_high_risk_gate() -> None:
     assert "src/tests/test_import_designdotmd_skills.py" in windows_job
     assert "src/tests/test_import_mattpocock_skills.py" in windows_job
     assert "src/tests/test_import_strix_skills.py" in windows_job
+    assert "src/tests/test_ctx_ab_benchmark.py" in windows_job
     assert "src/tests/test_ctx_ab_swebench.py" in windows_job
     assert "matrix:" not in windows_job

@@ -188,7 +188,7 @@ jobs:
   test:
     name: pytest (${{ matrix.os }} / py${{ matrix.python-version }})
     needs: classify
-    if: ${{ github.event_name != 'pull_request' || needs.classify.outputs.ci_changed == 'true' }}
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -227,7 +227,7 @@ jobs:
         run: pytest -q -m "not browser and not integration" --no-cov
 
   windows-high-risk:
-    name: "Windows high-risk importers"
+    name: "Windows high-risk"
     needs: classify
     if: ${{ github.event_name != 'pull_request' || needs.classify.outputs.windows_changed == 'true' }}
     runs-on: windows-latest
@@ -250,7 +250,13 @@ jobs:
           python -m pip install ".[dev]"
 
       - name: Run focused Windows tests
-        run: python -m pytest -q --no-cov src/tests/test_import_designdotmd_skills.py src/tests/test_import_mattpocock_skills.py src/tests/test_import_strix_skills.py src/tests/test_ctx_ab_swebench.py
+        run: >-
+          python -m pytest -q --no-cov
+          src/tests/test_import_designdotmd_skills.py
+          src/tests/test_import_mattpocock_skills.py
+          src/tests/test_import_strix_skills.py
+          src/tests/test_ctx_ab_benchmark.py
+          src/tests/test_ctx_ab_swebench.py
 
   contract-compat:
     name: "Contract compatibility (${{ matrix.os }})"
