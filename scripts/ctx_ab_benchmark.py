@@ -5361,6 +5361,10 @@ def require_clean_production_repository(repository_state: Mapping[str, Any], *, 
         )
 
 
+def _indented_json_bytes(value: Mapping[str, Any]) -> bytes:
+    return (json.dumps(dict(value), indent=2) + "\n").encode("utf-8")
+
+
 def write_final_repository_attestation(
     output: Path,
     initial_state: Mapping[str, Any],
@@ -5369,13 +5373,13 @@ def write_final_repository_attestation(
     final_state = collect_repository_state()
     state_matches = final_state == dict(initial_state)
     manifest_path = output / "environment.json"
-    initial_bytes = (json.dumps(dict(initial_manifest), indent=2) + "\n").encode("utf-8")
+    initial_bytes = _indented_json_bytes(initial_manifest)
     manifest_matches = manifest_path.read_bytes() == initial_bytes
     manifest = dict(initial_manifest)
     manifest["repository_state_end"] = final_state
     manifest["repository_state_matches_start_at_end"] = state_matches
     manifest["environment_manifest_matches_start_at_end"] = manifest_matches
-    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    manifest_path.write_bytes(_indented_json_bytes(manifest))
     return state_matches, manifest_matches, final_state
 
 
@@ -5435,9 +5439,7 @@ def write_environment_manifest(
         ),
         "cryptographic_independence": False if engine == "production-ctx-run" else None,
     }
-    (output / "environment.json").write_text(
-        json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
-    )
+    (output / "environment.json").write_bytes(_indented_json_bytes(manifest))
     return manifest
 
 

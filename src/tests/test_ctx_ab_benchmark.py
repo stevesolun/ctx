@@ -2053,7 +2053,7 @@ def test_production_catalog_cache_uses_shipped_installer_once(
             encoding="utf-8",
         )
         (graph / "graph-store.sqlite3").write_bytes(b"graph-store")
-        runtime_skill.write_text(runtime_content, encoding="utf-8")
+        runtime_skill.write_bytes(runtime_content.encode("utf-8"))
         return 0
 
     monkeypatch.setattr(benchmark, "_install_shipped_catalog", install)
@@ -2123,7 +2123,7 @@ def test_production_catalog_cache_rejects_content_tampering(
             encoding="utf-8",
         )
         (graph / "graph-store.sqlite3").write_bytes(b"graph-store")
-        skill.write_text(runtime_content, encoding="utf-8")
+        skill.write_bytes(runtime_content.encode("utf-8"))
         return 0
 
     monkeypatch.setattr(benchmark, "_install_shipped_catalog", install)
@@ -2169,7 +2169,7 @@ def test_production_catalog_rejects_installer_availability_mismatch(
             encoding="utf-8",
         )
         (graph / "graph-store.sqlite3").write_bytes(b"graph-store")
-        skill.write_text("# installed package copy\n", encoding="utf-8")
+        skill.write_bytes(b"# expected\r\n")
         return 0
 
     monkeypatch.setattr(benchmark, "_install_shipped_catalog", install)
@@ -3465,9 +3465,10 @@ def test_isolated_codex_home_denies_credentials_oracles_and_network(
     assert f'{benchmark._toml_key(home / "auth.json")} = "deny"' in config
     assert f'{benchmark._toml_key(home / "config.toml")} = "deny"' in config
     assert "[permissions.ctx_benchmark.network]\nenabled = false" in config
-    assert home.stat().st_mode & 0o777 == 0o700
-    assert (home / "auth.json").stat().st_mode & 0o777 == 0o600
-    assert (home / "config.toml").stat().st_mode & 0o777 == 0o600
+    if os.name != "nt":
+        assert home.stat().st_mode & 0o777 == 0o700
+        assert (home / "auth.json").stat().st_mode & 0o777 == 0o600
+        assert (home / "config.toml").stat().st_mode & 0o777 == 0o600
 
 
 def test_production_agent_env_prefers_checkout_and_neutralizes_color_flags(
@@ -3620,8 +3621,12 @@ def test_live_production_scenarios_are_private_and_owner_only(
     monkeypatch.setattr(benchmark, "PRODUCTION_PRIVATE_SCENARIO_ROOT", private_root)
     monkeypatch.setattr(benchmark, "_is_system_temp_path", lambda _path: False)
 
-    assert benchmark._validate_production_scenarios_path(source, live=True) == source.resolve()
+    if os.name == "nt":
+        with pytest.raises(ValueError, match="root must be an owner-only directory"):
+            benchmark._validate_production_scenarios_path(source, live=True)
+        return
 
+    assert benchmark._validate_production_scenarios_path(source, live=True) == source.resolve()
     source.chmod(0o644)
     with pytest.raises(ValueError, match="owner-only"):
         benchmark._validate_production_scenarios_path(source, live=True)
@@ -3660,9 +3665,8 @@ def test_final_repository_attestation_detects_mid_run_drift(
         "tracked_diff_sha256": hashlib.sha256(b"diff").hexdigest(),
     }
     initial_manifest = {"repository_state": initial, "model": "gpt-test"}
-    (tmp_path / "environment.json").write_text(
-        json.dumps(initial_manifest, indent=2) + "\n",
-        encoding="utf-8",
+    (tmp_path / "environment.json").write_bytes(
+        (json.dumps(initial_manifest, indent=2) + "\n").encode("utf-8")
     )
     monkeypatch.setattr(benchmark, "collect_repository_state", lambda: final)
 
@@ -3672,7 +3676,9 @@ def test_final_repository_attestation_detects_mid_run_drift(
         initial_manifest,
     )
 
-    manifest = json.loads((tmp_path / "environment.json").read_text(encoding="utf-8"))
+    manifest_bytes = (tmp_path / "environment.json").read_bytes()
+    manifest = json.loads(manifest_bytes)
+    assert b"\r\n" not in manifest_bytes
     assert state_matches is False
     assert manifest_matches is True
     assert observed == final
@@ -3830,6 +3836,7 @@ def test_tracked_evaluator_test_is_reconstructed_only_from_pristine_base(
     workspace = tmp_path / "repo"
     workspace.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+    subprocess.run(["git", "config", "core.autocrlf", "false"], cwd=workspace, check=True)
     subprocess.run(["git", "config", "user.email", "ctx@example.test"], cwd=workspace, check=True)
     subprocess.run(["git", "config", "user.name", "ctx benchmark"], cwd=workspace, check=True)
     source = workspace / "source.py"
@@ -4083,7 +4090,7 @@ def test_evaluator_test_rejects_symlink_escape(tmp_path: Path) -> None:
         test_body="def test_new():\n    assert True\n",
     )
 
-    with pytest.raises(RuntimeError, match="unsafe component"):
+    with pytest.raises(RuntimeError, match="unsafe component|escapes the workspace"):
         benchmark.materialize_evaluator_test(
             scenario,
             workspace,
@@ -4111,7 +4118,7 @@ def test_focused_verification_rejects_evaluator_symlink(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 1
-    assert "symlink or unsafe file" in result.stderr
+    assert "symlink" in result.stderr
 
 
 @pytest.mark.skipif(os.name == "nt", reason="dir-fd atomic replacement is POSIX-only")

@@ -83,7 +83,7 @@ def atomic_write_text(path: Path, text: str, encoding: str = "utf-8") -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix=path.name + ".", dir=str(path.parent))
     try:
-        with os.fdopen(fd, "w", encoding=encoding) as fh:
+        with os.fdopen(fd, "w", encoding=encoding, newline="") as fh:
             fh.write(text)
             fh.flush()
             os.fsync(fh.fileno())
