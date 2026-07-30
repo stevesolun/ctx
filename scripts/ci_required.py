@@ -86,7 +86,7 @@ def failed_required_jobs(
             continue
         if (
             event_name != "pull_request"
-            and name in {"docs-check", "graph-check", "no-test-no-merge"}
+            and name in {"docs-check", "graph-check", "no-test-no-merge", "windows-high-risk"}
             and result == "skipped"
         ):
             continue

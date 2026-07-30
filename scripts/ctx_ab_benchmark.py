@@ -20,6 +20,7 @@ import stat
 import subprocess
 import sys
 import tarfile
+import tempfile
 import time
 import unicodedata
 from collections.abc import Mapping, Sequence
@@ -8454,7 +8455,10 @@ def dry_run_results_complete(
 
 def _is_system_temp_path(path: Path) -> bool:
     resolved = path.resolve()
-    roots = {Path(value).resolve() for value in ("/tmp", "/private/tmp", "/var/tmp")}
+    roots = {
+        Path(value).resolve()
+        for value in (tempfile.gettempdir(), "/tmp", "/private/tmp", "/var/tmp")
+    }
     return any(resolved == root or root in resolved.parents for root in roots)
 
 

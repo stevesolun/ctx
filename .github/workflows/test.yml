@@ -229,7 +229,7 @@ jobs:
   windows-high-risk:
     name: "Windows high-risk"
     needs: classify
-    if: ${{ github.event_name != 'pull_request' || needs.classify.outputs.windows_changed == 'true' }}
+    if: ${{ github.event_name == 'pull_request' && needs.classify.outputs.windows_changed == 'true' }}
     runs-on: windows-latest
     steps:
       - name: Checkout

@@ -70,7 +70,7 @@ PRs matching `WINDOWS_PATTERNS` in `scripts/ci_classifier.py` also run the
 required `windows-high-risk` job on native Windows 3.12, focused on Windows
 sensitive importers and benchmark process/filesystem behavior. Local-fast and
 preflight remain the first pass, but they do not replace that native Windows
-evidence.
+evidence. After merge, the full Windows matrix supersedes the focused job.
 
 ## Documentation changes
 

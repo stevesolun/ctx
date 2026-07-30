@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import tarfile
+import tempfile
 import threading
 import time
 import tomllib
@@ -3629,10 +3630,13 @@ def test_agent_sandbox_preflight_rejects_unrelated_command_failure(
 
 def test_production_output_must_use_private_gate_root() -> None:
     private_output = benchmark.PRODUCTION_PRIVATE_RUN_ROOT / "unit-run"
+    platform_temp = Path(tempfile.gettempdir()) / "private-scenarios.yaml"
 
     assert benchmark._validate_production_output_path(private_output) == private_output.resolve()
-    assert benchmark._is_system_temp_path(Path("/tmp/private-scenarios.yaml"))
+    assert benchmark._is_system_temp_path(platform_temp)
     assert not benchmark._is_system_temp_path(Path("/opt/ctx/private-scenarios.yaml"))
+    with pytest.raises(ValueError, match="system temporary"):
+        benchmark._validate_production_scenarios_path(platform_temp, live=False)
     with pytest.raises(ValueError, match="output must be beneath"):
         benchmark._validate_production_output_path(Path("/tmp/ctx-ab-run"))
 

@@ -1458,7 +1458,7 @@ def test_ci_required_allows_full_matrix_skip_on_ci_changed_pr() -> None:
     assert failed_required_jobs(needs, event_name="pull_request") == {}
 
 
-def test_ci_required_allows_targeted_windows_skip_on_unrelated_pr() -> None:
+def test_ci_required_allows_targeted_windows_skip_when_not_selected() -> None:
     needs = _required_needs(
         classify={
             "result": "success",
@@ -1468,9 +1468,7 @@ def test_ci_required_allows_targeted_windows_skip_on_unrelated_pr() -> None:
     )
 
     assert failed_required_jobs(needs, event_name="pull_request") == {}
-    assert failed_required_jobs(needs, event_name="push") == {
-        "windows-high-risk": "skipped",
-    }
+    assert failed_required_jobs(needs, event_name="push") == {}
 
 
 def test_ci_required_rejects_targeted_windows_skip_on_high_risk_pr() -> None:
@@ -1848,6 +1846,7 @@ def test_workflow_runs_targeted_windows_high_risk_gate() -> None:
     )[0]
 
     assert "windows_changed: ${{ steps.classify.outputs.windows_changed }}" in workflow
+    assert "github.event_name == 'pull_request'" in windows_job
     assert "needs.classify.outputs.windows_changed == 'true'" in windows_job
     assert "runs-on: windows-latest" in windows_job
     assert 'python-version: "3.12"' in windows_job
