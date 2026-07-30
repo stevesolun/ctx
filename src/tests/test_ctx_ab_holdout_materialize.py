@@ -172,7 +172,8 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Fixture:
         rows.extend(repo_rows)
         canonical_url = holdout.canonical_repo_url(f"owner/repo-{index}")
         bundle = bundles / f"repo-{index}.bundle"
-        _git(repo, "bundle", "create", str(bundle), "HEAD")
+        _git(repo, "branch", "base", "HEAD")
+        _git(repo, "bundle", "create", str(bundle), "refs/heads/base")
         bundle.chmod(0o600)
         commit = _git(repo, "rev-parse", "HEAD").strip()
         tree = _git(repo, "rev-parse", "HEAD^{tree}").strip()
