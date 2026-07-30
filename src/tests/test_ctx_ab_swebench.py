@@ -1216,6 +1216,20 @@ def test_authenticated_harness_is_clean_commit_only(tmp_path: Path) -> None:
     assert benchmark.run_process(["git", "add", "."], cwd=source, timeout=10).returncode == 0
     assert (
         benchmark.run_process(
+            [
+                "git",
+                "update-index",
+                "--chmod=+x",
+                "--",
+                "swebench/harness/run-evaluation",
+            ],
+            cwd=source,
+            timeout=10,
+        ).returncode
+        == 0
+    )
+    assert (
+        benchmark.run_process(
             ["git", "commit", "-qm", "fixture"], cwd=source, timeout=10
         ).returncode
         == 0
@@ -1243,7 +1257,21 @@ def test_authenticated_harness_is_clean_commit_only(tmp_path: Path) -> None:
 
     assert (destination / "swebench/harness/run_evaluation.py").read_text() == "# committed\n"
     assert not (destination / "swebench/harness/grading.pyc").exists()
-    assert destination.joinpath("swebench/harness/run-evaluation").stat().st_mode & 0o111
+    tracked_mode = benchmark.run_process(
+        [
+            "git",
+            "ls-files",
+            "--stage",
+            "--",
+            "swebench/harness/run-evaluation",
+        ],
+        cwd=destination,
+        timeout=10,
+    )
+    assert tracked_mode.returncode == 0
+    assert tracked_mode.stdout.split(maxsplit=1)[0] == "100755"
+    if os.name != "nt":
+        assert destination.joinpath("swebench/harness/run-evaluation").stat().st_mode & 0o111
     assert (
         benchmark.run_process(
             ["git", "status", "--porcelain=v1"],
