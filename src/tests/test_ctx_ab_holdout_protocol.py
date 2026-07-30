@@ -102,6 +102,23 @@ def test_holdout_protocol_authenticates_pinned_product_inputs() -> None:
         "scripts/ctx_ab_benchmark.py": ("benchmark_script_sha256", False),
     }
     assert set(product["git_blob_sha1"]) == set(pinned_inputs)
+    revision_available = subprocess.run(
+        ["git", "cat-file", "-e", f"{product['revision']}^{{commit}}"],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+    )
+    if revision_available.returncode != 0:
+        shallow = subprocess.run(
+            ["git", "rev-parse", "--is-shallow-repository"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        if os.environ.get("GITHUB_JOB") == "unit-linux" or shallow != "true":
+            pytest.fail("pinned product revision is unavailable to the authoritative history check")
+        pytest.skip("pinned product revision is unavailable in this shallow matrix checkout")
     for path, (digest_key, is_lfs_pointer) in pinned_inputs.items():
         object_spec = f"{product['revision']}:{path}"
         blob = subprocess.run(

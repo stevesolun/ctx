@@ -6623,6 +6623,7 @@ def test_authenticated_freeze_drives_all_thirty_pairs_and_sixty_arms(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(benchmark.sys, "platform", "darwin")
     holdout, paths = _official_holdout_fixture(tmp_path)
     result_by_key = {
         (row["scenario"], row["trial"], row["arm"]): dict(row)
