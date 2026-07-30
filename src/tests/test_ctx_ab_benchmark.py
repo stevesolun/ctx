@@ -11,6 +11,7 @@ import sys
 import tarfile
 import threading
 import time
+import tomllib
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -3477,13 +3478,19 @@ def test_isolated_codex_home_denies_credentials_oracles_and_network(
     benchmark.prepare_isolated_codex_home(
         home,
         workspace=workspace,
-        forbidden_reads={"scenario_source": forbidden},
+        forbidden_reads={
+            "scenario_source": forbidden,
+            "same_scenario_from_frozen_inputs": forbidden,
+        },
     )
 
     config = (home / "config.toml").read_text(encoding="utf-8")
+    parsed = tomllib.loads(config)
     assert 'default_permissions = "ctx_benchmark"' in config
     assert f'{json.dumps(str(workspace))} = "write"' in config
     assert f'{benchmark._toml_key(forbidden)} = "deny"' in config
+    assert config.count(f'{benchmark._toml_key(forbidden)} = "deny"') == 1
+    assert parsed["permissions"]["ctx_benchmark"]["filesystem"][str(forbidden.resolve())] == "deny"
     assert f'{benchmark._toml_key(home / "auth.json")} = "deny"' in config
     assert f'{benchmark._toml_key(home / "config.toml")} = "deny"' in config
     assert "[permissions.ctx_benchmark.network]\nenabled = false" in config
@@ -6142,6 +6149,7 @@ def _official_holdout_fixture(
         acquisition_frozen_at="2026-07-01T00:00:00Z",
         product_inputs=product_inputs,
         verifier_pins=verifier,
+        exposure_ledger_sha256="e" * 64,
     )
     acquisition_protocol["execution_inputs"]["source_map_sha256"] = None
     acquisition_protocol_bytes = freezer._canonical_bytes(
@@ -6188,6 +6196,7 @@ def _official_holdout_fixture(
 
 def test_official_workspace_cannot_access_future_gold_commit(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     source_repo = tmp_path / "source"
     source_repo.mkdir()
@@ -6216,6 +6225,28 @@ def test_official_workspace_cannot_access_future_gold_commit(
     feature.write_text("VALUE = 2  # gold\n", encoding="utf-8")
     git("commit", "-am", "future gold")
     future_commit = git("rev-parse", "HEAD").stdout.strip()
+    if os.name != "nt":
+        hooks = tmp_path / "malicious-hooks"
+        hooks.mkdir()
+        post_checkout = hooks / "post-checkout"
+        post_checkout.write_text(
+            "#!/bin/sh\nprintf 'leaked\\n' > \"$PWD/GOLD_LEAK.txt\"\n",
+            encoding="utf-8",
+        )
+        post_checkout.chmod(0o700)
+        global_config = tmp_path / "malicious-gitconfig"
+        subprocess.run(
+            [
+                "git",
+                "config",
+                "--file",
+                str(global_config),
+                "core.hooksPath",
+                str(hooks),
+            ],
+            check=True,
+        )
+        monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_config))
     template = benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0]
     scenario = replace(
         template,
@@ -6267,6 +6298,17 @@ def test_official_workspace_cannot_access_future_gold_commit(
         ).stdout.strip()
         == ""
     )
+    assert not (workspace / "GOLD_LEAK.txt").exists()
+    assert (
+        subprocess.run(
+            ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+            cwd=workspace,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        == ""
+    )
 
 
 def test_official_protocol_claim_is_one_shot(tmp_path: Path) -> None:
@@ -6308,6 +6350,32 @@ def test_official_campaign_lock_rejects_concurrency_and_releases(
     assert not second.path.exists()
 
 
+def test_official_campaign_state_is_shared_by_independent_clones(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(benchmark, "OFFICIAL_CAMPAIGN_STATE_BASE", tmp_path / "host-state")
+    repository_url = "https://github.com/stevesolun/ctx.git"
+    first_root = benchmark._official_campaign_state_root(repository_url=repository_url)
+    second_root = benchmark._official_campaign_state_root(repository_url=repository_url)
+
+    benchmark.claim_official_protocol(
+        state_root=first_root,
+        protocol_sha256="1" * 64,
+        selection_sha256="2" * 64,
+        output=tmp_path / "first-clone-output",
+    )
+
+    assert first_root == second_root
+    with pytest.raises(RuntimeError, match="already consumed"):
+        benchmark.claim_official_protocol(
+            state_root=second_root,
+            protocol_sha256="1" * 64,
+            selection_sha256="2" * 64,
+            output=tmp_path / "second-clone-output",
+        )
+
+
 def test_origin_main_drift_fails_pre_arm_identity_check(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -6323,8 +6391,48 @@ def test_origin_main_drift_fails_pre_arm_identity_check(
             "origin_push_url": holdout.origin_url,
         },
     )
+    monkeypatch.setattr(
+        benchmark,
+        "collect_repository_state",
+        lambda: {
+            "clean": True,
+            "head": holdout.origin_main_revision,
+            "status": [],
+            "tracked_diff_sha256": hashlib.sha256(b"").hexdigest(),
+        },
+    )
 
     with pytest.raises(ValueError, match="origin/main"):
+        benchmark.validate_official_repository_identity(holdout)
+
+
+def test_dirty_worktree_fails_pre_arm_identity_check(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    holdout, _ = _official_holdout_fixture(tmp_path)
+    monkeypatch.setattr(
+        benchmark,
+        "collect_official_repository_identity",
+        lambda: {
+            "head": holdout.origin_main_revision,
+            "origin_fetch_url": holdout.origin_url,
+            "origin_main_revision": holdout.origin_main_revision,
+            "origin_push_url": holdout.origin_url,
+        },
+    )
+    monkeypatch.setattr(
+        benchmark,
+        "collect_repository_state",
+        lambda: {
+            "clean": False,
+            "head": holdout.origin_main_revision,
+            "status": [" M README.md"],
+            "tracked_diff_sha256": "f" * 64,
+        },
+    )
+
+    with pytest.raises(ValueError, match="clean"):
         benchmark.validate_official_repository_identity(holdout)
 
 

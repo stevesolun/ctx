@@ -69,6 +69,7 @@ PRODUCTION_CATALOG_ARCHIVE = ROOT / "graph" / "wiki-graph-runtime.tar.gz"
 PRODUCTION_RUNTIME_AVAILABILITY = ROOT / "src" / "ctx" / "assets" / "runtime-availability.json"
 PRODUCTION_PRIVATE_RUN_ROOT = ROOT / ".gate" / "ctx-ab-runs"
 PRODUCTION_PRIVATE_SCENARIO_ROOT = ROOT / ".gate" / "ctx-ab-private"
+OFFICIAL_CAMPAIGN_STATE_BASE = Path.home() / ".ctx" / "benchmark-state"
 PRODUCTION_CATALOG_CACHE_VERSION = 2
 PRODUCTION_CATALOG_BODY_MAX_BYTES = 16 * 1024
 PRODUCTION_TOOL_OUTPUT_LIMIT_BYTES = 32 * 1024
@@ -955,41 +956,9 @@ def _validate_acquisition_design(
     freezer: Any,
     acquisition_protocol: Mapping[str, Any],
 ) -> None:
-    """Validate the base freeze while preserving newer authenticated extensions."""
-    try:
-        freezer.validate_acquisition_protocol(
-            dict(acquisition_protocol),
-            benchmark_script_path=Path(__file__),
-            catalog_archive_path=PRODUCTION_CATALOG_ARCHIVE,
-            runtime_availability_path=PRODUCTION_RUNTIME_AVAILABILITY,
-        )
-        return
-    except freezer.FreezeError:
-        integrated_contract = {
-            "origin_url",
-            "origin_main_revision",
-        }.issubset(freezer.PRODUCT_INPUT_KEYS) and "source_map_sha256" in (
-            freezer.ACQUISITION_EXECUTION_INPUT_KEYS
-        )
-        if integrated_contract:
-            raise
-
-    # Temporary compatibility for focused runtime tests before the freezer lane lands.
-    validation_protocol = json.loads(json.dumps(acquisition_protocol))
-    validation_protocol.pop("exposure_ledger_sha256", None)
-    product_inputs = validation_protocol.get("product_inputs")
-    if isinstance(product_inputs, dict):
-        for field in ("origin_url", "origin_main_revision"):
-            if field not in freezer.PRODUCT_INPUT_KEYS:
-                product_inputs.pop(field, None)
-    execution_inputs = validation_protocol.get("execution_inputs")
-    if (
-        isinstance(execution_inputs, dict)
-        and "source_map_sha256" not in freezer.ACQUISITION_EXECUTION_INPUT_KEYS
-    ):
-        execution_inputs.pop("source_map_sha256", None)
+    """Validate the exact acquisition design reconstructed from the execution freeze."""
     freezer.validate_acquisition_protocol(
-        validation_protocol,
+        dict(acquisition_protocol),
         benchmark_script_path=Path(__file__),
         catalog_archive_path=PRODUCTION_CATALOG_ARCHIVE,
         runtime_availability_path=PRODUCTION_RUNTIME_AVAILABILITY,
@@ -1116,8 +1085,7 @@ def load_execution_frozen_holdout(
             raise
         freezer = importlib.import_module("ctx_ab_holdout_freeze")
 
-    acquisition_input_fields = set(freezer.ACQUISITION_EXECUTION_INPUT_KEYS)
-    expected_input_fields = acquisition_input_fields | {"source_map_sha256"}
+    expected_input_fields = set(freezer.ACQUISITION_EXECUTION_INPUT_KEYS)
     if set(execution_inputs) != expected_input_fields:
         raise ValueError("holdout protocol execution inputs have an unsupported shape")
     acquisition_protocol_sha256 = _require_sha256(
@@ -1993,6 +1961,21 @@ def prepare_workspace(
     return test_hash
 
 
+def _official_git_environment() -> dict[str, str]:
+    environment = {
+        key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")
+    }
+    environment.update(
+        {
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_OPTIONAL_LOCKS": "0",
+            "GIT_TERMINAL_PROMPT": "0",
+        }
+    )
+    return environment
+
+
 def _checked_git(
     argv: list[str],
     *,
@@ -2000,7 +1983,12 @@ def _checked_git(
     label: str,
     timeout: float = 60,
 ) -> str:
-    result = run_process(["git", *argv], cwd=cwd, timeout=timeout)
+    result = run_process(
+        ["git", *argv],
+        cwd=cwd,
+        env=_official_git_environment(),
+        timeout=timeout,
+    )
     if result.returncode or result.timed_out or result.residual_descendants:
         detail = result.stderr.strip() or result.stdout.strip() or f"exit {result.returncode}"
         raise RuntimeError(f"{label} failed: {detail}")
@@ -2035,20 +2023,24 @@ def prepare_official_workspace(
         [
             "git",
             "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
             "protocol.file.allow=always",
             "clone",
             "--no-local",
+            "--no-checkout",
             "--no-tags",
             str(source.bundle_path),
             str(destination),
         ],
         cwd=destination.parent,
+        env=_official_git_environment(),
         timeout=300,
     )
     if cloned.returncode or cloned.timed_out or cloned.residual_descendants:
         raise RuntimeError(f"official bundle clone failed: {cloned.stderr.strip()}")
     _checked_git(
-        ["checkout", "--detach", source.base_commit],
+        ["-c", "core.hooksPath=/dev/null", "checkout", "--detach", source.base_commit],
         cwd=destination,
         label="official base checkout",
     )
@@ -2069,6 +2061,12 @@ def prepare_official_workspace(
     )
     if head != source.base_commit or tree != source.tree_sha1:
         raise RuntimeError("official workspace commit or tree does not match the source map")
+    if _checked_git(
+        ["status", "--porcelain=v1", "--untracked-files=all"],
+        cwd=destination,
+        label="official clean worktree audit",
+    ):
+        raise RuntimeError("official workspace checkout is not an exact clean tree")
     commits_outside_base = _checked_git(
         ["rev-list", "--all", "--not", source.base_commit],
         cwd=destination,
@@ -3973,12 +3971,13 @@ def prepare_isolated_codex_home(
     config = home / "config.toml"
     shutil.copyfile(source, destination)
     destination.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    forbidden_paths = sorted({path.resolve() for path in forbidden_reads.values()})
     filesystem = [
         '":minimal" = "read"',
         f'{_toml_key(workspace)} = "write"',
         f'{_toml_key(temp)} = "write"',
         *(f'{_toml_key(path)} = "read"' for path in _agent_runtime_roots()),
-        *(f'{_toml_key(path)} = "deny"' for path in forbidden_reads.values()),
+        *(f'{_toml_key(path)} = "deny"' for path in forbidden_paths),
         f'{_toml_key(destination)} = "deny"',
         f'{_toml_key(config)} = "deny"',
     ]
@@ -5626,24 +5625,20 @@ def _ensure_owner_only_directory(path: Path, *, label: str) -> Path:
     return path.resolve(strict=True)
 
 
-def _official_campaign_state_root() -> Path:
-    result = run_process(
-        ["git", "rev-parse", "--git-common-dir"],
-        cwd=ROOT,
-        timeout=30,
-    )
-    if result.returncode or result.timed_out or result.residual_descendants:
-        raise RuntimeError("official campaign Git common directory is unavailable")
-    common_dir = Path(result.stdout.strip())
-    if not common_dir.is_absolute():
-        common_dir = ROOT / common_dir
-    try:
-        resolved = common_dir.resolve(strict=True)
-    except OSError as exc:
-        raise RuntimeError("official campaign Git common directory is unavailable") from exc
-    if not resolved.is_dir() or resolved.name != ".git":
-        raise RuntimeError("official campaign requires a non-bare shared Git repository")
-    return resolved.parent / ".gate" / "ctx-ab-private"
+def _official_campaign_state_root(*, repository_url: str | None = None) -> Path:
+    if repository_url is None:
+        urls = _checked_git(
+            ["remote", "get-url", "--all", "origin"],
+            cwd=ROOT,
+            label="official campaign repository URL",
+        ).splitlines()
+        if len(urls) != 1:
+            raise RuntimeError("official campaign requires one canonical repository URL")
+        repository_url = urls[0]
+    if GITHUB_REPO_URL.fullmatch(repository_url) is None:
+        raise RuntimeError("official campaign repository URL is not canonical")
+    repository_key = hashlib.sha256(repository_url.encode("utf-8")).hexdigest()
+    return OFFICIAL_CAMPAIGN_STATE_BASE / repository_key
 
 
 def _write_exclusive_owner_file(path: Path, payload: Mapping[str, Any]) -> None:
@@ -5805,6 +5800,7 @@ def validate_official_repository_identity(
     holdout: ExecutionFrozenHoldout,
 ) -> dict[str, str]:
     identity = collect_official_repository_identity()
+    repository_state = collect_repository_state()
     if (
         identity["head"] != holdout.origin_main_revision
         or identity["origin_main_revision"] != holdout.origin_main_revision
@@ -5814,6 +5810,14 @@ def validate_official_repository_identity(
         raise ValueError(
             "current HEAD, origin/main, or origin URL does not match the execution freeze"
         )
+    if (
+        repository_state.get("clean") is not True
+        or repository_state.get("head") != holdout.origin_main_revision
+    ):
+        raise ValueError("official repository must remain clean at the frozen origin/main commit")
+    identity["repository_state_sha256"] = _sha256_bytes(
+        _canonical_json_bytes(dict(repository_state))
+    )
     return identity
 
 
