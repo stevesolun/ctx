@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 from pathlib import Path
 from typing import Any
@@ -72,6 +73,27 @@ def _ledger(repositories: int, *, candidates_per_repository: int = 1) -> list[di
                 }
             )
     return rows
+
+
+def _exposure_ledger(*instance_ids: str) -> dict[str, object]:
+    salt = "a" * 64
+    hashes = sorted(
+        hmac.new(
+            bytes.fromhex(salt),
+            instance_id.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        for instance_id in instance_ids
+    )
+    return {
+        "schema_version": 1,
+        "salt": salt,
+        "instance_id_hmac_sha256": hashes,
+    }
+
+
+def _canonical_bytes(value: object) -> bytes:
+    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
 
 
 def test_legacy_strategy_preserves_exact_v1_selection() -> None:
@@ -180,6 +202,30 @@ def test_v2_generations_select_disjoint_candidate_slots() -> None:
     )
 
 
+def test_v2_excludes_previously_exposed_candidate_before_ranking() -> None:
+    protocol = _v2_protocol(generation=1)
+    ledger = _ledger(10, candidates_per_repository=2)
+    baseline = selector.select_rows(ledger, protocol)
+    exposed_id = str(baseline["analysis_instance_ids"][0])
+
+    filtered = selector.reject_historical_exposures(
+        ledger,
+        _exposure_ledger(exposed_id),
+    )
+    selection = selector.select_rows(filtered, protocol)
+
+    assert exposed_id not in selection["analysis_instance_ids"]
+    assert next(row for row in filtered if row["instance_id"] == exposed_id) == {
+        **next(row for row in ledger if row["instance_id"] == exposed_id),
+        "status": "rejected",
+        "rejection_code": "historical-exposure",
+    }
+    selector.require_exposure_disjoint_selection(
+        selection,
+        _exposure_ledger(exposed_id),
+    )
+
+
 def test_v2_generation_fails_closed_without_fresh_candidate_slot() -> None:
     protocol = _v2_protocol(generation=2)
 
@@ -274,6 +320,7 @@ def _v2_cli_arguments(
     *,
     protocol_bytes: bytes,
     expected_protocol_sha256: str | None,
+    exposure_ledger_bytes: bytes | None = None,
 ) -> tuple[list[str], Path, Path, Path]:
     protocol_path = tmp_path / "protocol.json"
     source_path = tmp_path / "source.jsonl"
@@ -281,8 +328,13 @@ def _v2_cli_arguments(
     private.mkdir(mode=0o700)
     ledger_path = private / "ledger.csv"
     selection_path = private / "selection.json"
+    exposure_path = private / "exposure-ledger.json"
     protocol_path.write_bytes(protocol_bytes)
     source_path.write_text("{}\n", encoding="utf-8")
+    if exposure_ledger_bytes is None:
+        exposure_ledger_bytes = _canonical_bytes(_exposure_ledger())
+    exposure_path.write_bytes(exposure_ledger_bytes)
+    exposure_path.chmod(0o600)
     arguments = [
         "--protocol",
         str(protocol_path),
@@ -292,6 +344,8 @@ def _v2_cli_arguments(
         str(ledger_path),
         "--selection",
         str(selection_path),
+        "--exposure-ledger",
+        str(exposure_path),
     ]
     if expected_protocol_sha256 is not None:
         arguments.extend(
@@ -303,7 +357,7 @@ def _v2_cli_arguments(
     return arguments, source_path, ledger_path, selection_path
 
 
-def _v2_cli_protocol(source_path: Path) -> dict[str, Any]:
+def _v2_cli_protocol(source_path: Path, exposure_ledger_bytes: bytes) -> dict[str, Any]:
     protocol = _protocol(strategy="one-per-repository", private_canary=False)
     protocol["schema_version"] = 2
     protocol["protocol_id"] = "production-graph-holdout-v2"
@@ -320,6 +374,7 @@ def _v2_cli_protocol(source_path: Path) -> dict[str, Any]:
     protocol["universe"]["selection_jsonl_sha256"] = hashlib.sha256(
         source_path.read_bytes()
     ).hexdigest()
+    protocol["exposure_ledger_sha256"] = hashlib.sha256(exposure_ledger_bytes).hexdigest()
     return protocol
 
 
@@ -333,8 +388,9 @@ def test_v2_selector_cli_accepts_matching_acquisition_protocol_digest(
         protocol_bytes=placeholder_protocol,
         expected_protocol_sha256=hashlib.sha256(placeholder_protocol).hexdigest(),
     )
+    exposure_bytes = (tmp_path / "private" / "exposure-ledger.json").read_bytes()
     protocol_bytes = json.dumps(
-        _v2_cli_protocol(source_path),
+        _v2_cli_protocol(source_path, exposure_bytes),
         sort_keys=True,
         separators=(",", ":"),
     ).encode()
@@ -359,6 +415,80 @@ def test_v2_selector_cli_accepts_matching_acquisition_protocol_digest(
     assert selection_path.is_file()
 
 
+def test_v2_selector_cli_output_is_deterministic_with_authenticated_exposure_ledger(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    placeholder_protocol = b"{}"
+    arguments, source_path, ledger_path, selection_path = _v2_cli_arguments(
+        tmp_path,
+        protocol_bytes=placeholder_protocol,
+        expected_protocol_sha256=hashlib.sha256(placeholder_protocol).hexdigest(),
+    )
+    exposure_bytes = (tmp_path / "private" / "exposure-ledger.json").read_bytes()
+    protocol_bytes = _canonical_bytes(_v2_cli_protocol(source_path, exposure_bytes))
+    (tmp_path / "protocol.json").write_bytes(protocol_bytes)
+    arguments[arguments.index("--expected-acquisition-protocol-sha256") + 1] = hashlib.sha256(
+        protocol_bytes
+    ).hexdigest()
+    rows = [
+        {
+            **row,
+            "base_commit": "",
+            "production_changed_lines": 0,
+            "rejection_code": "",
+        }
+        for row in _ledger(10)
+    ]
+    monkeypatch.setattr(selector, "_load_jsonl", lambda _: rows)
+    monkeypatch.setattr(selector, "evaluate_row", lambda row, _: row)
+
+    assert selector.main(arguments) == 0
+    first = (ledger_path.read_bytes(), selection_path.read_bytes())
+    assert selector.main(arguments) == 0
+
+    assert (ledger_path.read_bytes(), selection_path.read_bytes()) == first
+
+
+@pytest.mark.parametrize("failure", ["missing-path", "missing-digest", "tampered", "wrong"])
+def test_v2_selector_cli_requires_exact_authenticated_exposure_ledger(
+    tmp_path: Path,
+    failure: str,
+) -> None:
+    exposure = _canonical_bytes(_exposure_ledger())
+    placeholder_protocol = b"{}"
+    arguments, source_path, ledger_path, selection_path = _v2_cli_arguments(
+        tmp_path,
+        protocol_bytes=placeholder_protocol,
+        expected_protocol_sha256=hashlib.sha256(placeholder_protocol).hexdigest(),
+        exposure_ledger_bytes=exposure,
+    )
+    protocol = _v2_cli_protocol(source_path, exposure)
+    if failure == "missing-digest":
+        protocol.pop("exposure_ledger_sha256")
+    protocol_bytes = _canonical_bytes(protocol)
+    (tmp_path / "protocol.json").write_bytes(protocol_bytes)
+    arguments[arguments.index("--expected-acquisition-protocol-sha256") + 1] = hashlib.sha256(
+        protocol_bytes
+    ).hexdigest()
+    exposure_path = tmp_path / "private" / "exposure-ledger.json"
+    if failure == "missing-path":
+        index = arguments.index("--exposure-ledger")
+        del arguments[index : index + 2]
+    elif failure == "tampered":
+        exposure_path.write_bytes(exposure + b"\n")
+    elif failure == "wrong":
+        exposure_path.write_bytes(_canonical_bytes(_exposure_ledger("synthetic-prior-task")))
+    ledger_path.write_text("preserve-ledger", encoding="utf-8")
+    selection_path.write_text("preserve-selection", encoding="utf-8")
+
+    with pytest.raises(SystemExit, match="exposure ledger"):
+        selector.main(arguments)
+
+    assert ledger_path.read_text(encoding="utf-8") == "preserve-ledger"
+    assert selection_path.read_text(encoding="utf-8") == "preserve-selection"
+
+
 @pytest.mark.parametrize("failure", ["missing", "drift"])
 def test_v2_selector_cli_authenticates_protocol_before_private_io(
     tmp_path: Path,
@@ -371,8 +501,9 @@ def test_v2_selector_cli_authenticates_protocol_before_private_io(
         protocol_bytes=placeholder_protocol,
         expected_protocol_sha256=None,
     )
+    exposure_bytes = (tmp_path / "private" / "exposure-ledger.json").read_bytes()
     protocol_bytes = json.dumps(
-        _v2_cli_protocol(source_path),
+        _v2_cli_protocol(source_path, exposure_bytes),
         sort_keys=True,
         separators=(",", ":"),
     ).encode()

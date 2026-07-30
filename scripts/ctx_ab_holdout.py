@@ -18,12 +18,18 @@ import statistics
 from pathlib import Path, PurePosixPath
 from typing import Any, TextIO
 
+try:
+    from scripts import ctx_ab_exposure_ledger as exposure_ledger
+except ImportError:  # pragma: no cover - direct script execution
+    import ctx_ab_exposure_ledger as exposure_ledger
+
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PROTOCOL = ROOT / "benchmarks" / "ctx_ab" / "holdout-protocol-v1.json"
 PRIVATE_ROOT = ROOT / ".gate" / "ctx-ab-private"
 _IS_WINDOWS = os.name == "nt"
 V2_CANDIDATE_PARTITION_PREFIX = b"ctx-holdout-candidate-partition-v2\0"
+HISTORICAL_EXPOSURE_REJECTION_CODE = "historical-exposure"
 SHA1 = re.compile(r"^[0-9a-f]{40}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 DIFF_PATH = re.compile(r"^diff --git a/(.+) b/(.+)$")
@@ -219,6 +225,48 @@ def evaluate_row(row: dict[str, Any], protocol: dict[str, Any]) -> dict[str, Any
         "status": "eligible" if not rejection else "rejected",
         "rejection_code": rejection,
     }
+
+
+def reject_historical_exposures(
+    ledger: list[dict[str, Any]],
+    exposure_document: dict[str, Any],
+) -> list[dict[str, Any]]:
+    validated = exposure_ledger.validate_ledger_document(exposure_document)
+    exposed = set(validated["instance_id_hmac_sha256"])
+    salt = str(validated["salt"])
+    filtered: list[dict[str, Any]] = []
+    for original in ledger:
+        row = dict(original)
+        if row.get("status") == "eligible":
+            digest = exposure_ledger.instance_id_hmac_sha256(
+                salt,
+                str(row.get("instance_id") or ""),
+            )
+            if digest in exposed:
+                row["status"] = "rejected"
+                row["rejection_code"] = HISTORICAL_EXPOSURE_REJECTION_CODE
+        filtered.append(row)
+    return filtered
+
+
+def require_exposure_disjoint_selection(
+    selection: dict[str, Any],
+    exposure_document: dict[str, Any],
+) -> None:
+    validated = exposure_ledger.validate_ledger_document(exposure_document)
+    identities = selection.get("analysis_instance_ids")
+    canary = selection.get("canary_instance_id")
+    if not isinstance(identities, list):
+        raise ValueError("selection is invalid")
+    selected = list(identities)
+    if canary is not None:
+        selected.append(canary)
+    if any(
+        not isinstance(instance_id, str)
+        or exposure_ledger.contains_instance_id(validated, instance_id)
+        for instance_id in selected
+    ):
+        raise ValueError("selection intersects the authenticated exposure ledger")
 
 
 def validate_reconstructed_test_module(source: str) -> None:
@@ -870,10 +918,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--protocol", type=Path, default=DEFAULT_PROTOCOL)
     parser.add_argument("--expected-acquisition-protocol-sha256")
     parser.add_argument("--selection-jsonl", type=Path, required=True)
+    parser.add_argument("--exposure-ledger", type=Path)
     parser.add_argument("--ledger", type=Path, required=True)
     parser.add_argument("--selection", type=Path, required=True)
     args = parser.parse_args(argv)
-    if not _paths_are_distinct([args.protocol, args.selection_jsonl, args.ledger, args.selection]):
+    paths = [args.protocol, args.selection_jsonl, args.ledger, args.selection]
+    if args.exposure_ledger is not None:
+        paths.append(args.exposure_ledger)
+    if not _paths_are_distinct(paths):
         raise SystemExit("protocol, source, ledger, and selection paths must be distinct")
     expected_protocol_sha256 = args.expected_acquisition_protocol_sha256
     if expected_protocol_sha256 is not None and SHA256.fullmatch(expected_protocol_sha256) is None:
@@ -885,8 +937,30 @@ def main(argv: list[str] | None = None) -> int:
     ):
         raise SystemExit("acquisition protocol does not match the expected SHA-256")
     protocol = json.loads(protocol_bytes)
-    if _requires_acquisition_protocol_digest(protocol) and expected_protocol_sha256 is None:
+    requires_v2_authentication = _requires_acquisition_protocol_digest(protocol)
+    if requires_v2_authentication and expected_protocol_sha256 is None:
         raise SystemExit("V2 selection requires --expected-acquisition-protocol-sha256")
+    exposure_document: dict[str, Any] | None = None
+    if requires_v2_authentication:
+        expected_exposure_sha256 = protocol.get("exposure_ledger_sha256")
+        if (
+            not isinstance(expected_exposure_sha256, str)
+            or SHA256.fullmatch(expected_exposure_sha256) is None
+        ):
+            raise SystemExit("V2 acquisition protocol lacks an authenticated exposure ledger")
+        if args.exposure_ledger is None:
+            raise SystemExit(
+                "V2 selection requires an authenticated exposure ledger via --exposure-ledger"
+            )
+        try:
+            exposure_document = exposure_ledger.load_authenticated_ledger(
+                args.exposure_ledger,
+                expected_exposure_sha256,
+            )
+        except (OSError, ValueError) as exc:
+            raise SystemExit(f"authenticated exposure ledger is invalid: {exc}") from None
+    elif args.exposure_ledger is not None:
+        raise SystemExit("--exposure-ledger is only valid for V2 selection")
     _remove_stale_selection(args.selection)
     universe = protocol["universe"]
     if (
@@ -908,8 +982,13 @@ def main(argv: list[str] | None = None) -> int:
     if len(source_rows) != protocol["universe"]["expected_rows"]:
         raise SystemExit("selection JSONL row count does not match the frozen universe")
     ledger = [evaluate_row(row, protocol) for row in source_rows]
+    if exposure_document is not None:
+        ledger = reject_historical_exposures(ledger, exposure_document)
+    allowed_rejection_codes = set(protocol["static_candidate_rules"]["rejection_codes"])
+    if exposure_document is not None:
+        allowed_rejection_codes.add(HISTORICAL_EXPOSURE_REJECTION_CODE)
     if {row["rejection_code"] for row in ledger if row["rejection_code"]} - set(
-        protocol["static_candidate_rules"]["rejection_codes"]
+        allowed_rejection_codes
     ):
         raise SystemExit("selector emitted an undeclared rejection code")
     with _private_text_handle(args.ledger) as handle:
@@ -917,6 +996,8 @@ def main(argv: list[str] | None = None) -> int:
         writer.writeheader()
         writer.writerows(ledger)
     selection = select_rows(ledger, protocol)
+    if exposure_document is not None:
+        require_exposure_disjoint_selection(selection, exposure_document)
     with _private_text_handle(args.selection) as handle:
         handle.write(_canonical_json_bytes(selection).decode())
     return 0
