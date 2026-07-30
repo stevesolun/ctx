@@ -861,8 +861,7 @@ def main(argv: list[str] | None = None) -> int:
         writer.writerows(ledger)
     selection = select_rows(ledger, protocol)
     with _private_text_handle(args.selection) as handle:
-        json.dump(selection, handle, indent=2)
-        handle.write("\n")
+        handle.write(_canonical_json_bytes(selection).decode())
     return 0
 
 

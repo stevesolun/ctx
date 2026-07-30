@@ -437,6 +437,8 @@ def test_selector_cli_writes_owner_only_evidence(tmp_path: Path) -> None:
     assert stat.S_IMODE(selection_path.stat().st_mode) == 0o600
     assert stat.S_IMODE(ledger_path.parent.stat().st_mode) == 0o700
     assert len(ledger_path.read_text(encoding="utf-8").splitlines()) == len(source) + 1
+    selection = json.loads(selection_path.read_bytes())
+    assert selection_path.read_bytes() == selector._canonical_json_bytes(selection)
     selection_path.chmod(0o644)
 
     assert (
