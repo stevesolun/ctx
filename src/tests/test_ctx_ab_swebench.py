@@ -10,7 +10,7 @@ import socket
 import stat
 import sys
 import time
-from typing import Any
+from typing import Any, cast
 import weakref
 
 import pytest
@@ -109,7 +109,10 @@ def test_windows_process_launch_and_tree_signal_use_native_controls(
     )
 
     result = bridge._run_process(["worker"], cwd=tmp_path, timeout=7)
-    bridge._signal_process_tree(FakeProcess(), signal.SIGTERM)
+    bridge._signal_process_tree(
+        cast(Any, FakeProcess()),
+        signal.SIGTERM,
+    )
 
     assert result.returncode == 0
     assert captured["popen"]["creationflags"] == 512
