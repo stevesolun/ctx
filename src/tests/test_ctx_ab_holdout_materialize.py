@@ -149,7 +149,7 @@ def _executable(path: Path) -> Path:
     return path
 
 
-def _fixture(tmp_path: Path) -> Fixture:
+def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Fixture:
     repos = tmp_path / "repos"
     repos.mkdir()
     rows: list[dict[str, object]] = []
@@ -171,42 +171,19 @@ def _fixture(tmp_path: Path) -> Fixture:
     swebench_python = _executable(tmp_path / "swebench-python")
     docker_cli = _executable(tmp_path / "docker")
 
-    protocol = json.loads(PROTOCOL_PATH.read_text(encoding="utf-8"))
-    protocol["schema_version"] = 2
-    protocol["protocol_id"] = materializer.PROTOCOL_ID
-    protocol["stage"] = "acquisition-frozen"
-    protocol["universe"]["expected_rows"] = len(rows)
-    protocol["universe"]["selection_jsonl_sha256"] = hashlib.sha256(rows_bytes).hexdigest()
-    protocol["product_inputs"]["runtime_availability_sha256"] = hashlib.sha256(
-        runtime_path.read_bytes()
-    ).hexdigest()
-    protocol["product_inputs"]["catalog_archive_sha256"] = hashlib.sha256(
-        archive_path.read_bytes()
-    ).hexdigest()
+    v1 = json.loads(PROTOCOL_PATH.read_text(encoding="utf-8"))
+    v1["universe"]["expected_rows"] = len(rows)
+    v1["universe"]["selection_jsonl_sha256"] = hashlib.sha256(rows_bytes).hexdigest()
     benchmark_path = Path(str(materializer.benchmark.__file__))
-    protocol["product_inputs"]["benchmark_script_sha256"] = hashlib.sha256(
-        benchmark_path.read_bytes()
-    ).hexdigest()
-    protocol["product_inputs"]["codex_binary_sha256"] = "a" * 64
-    protocol["product_inputs"]["provider_config_sha256"] = (
-        materializer.benchmark.codex_provider_config_sha256("openai")
-    )
-    protocol["product_inputs"] = {
-        key: protocol["product_inputs"][key] for key in freezer.PRODUCT_INPUT_KEYS
+    product_inputs = {
+        "benchmark_script_sha256": hashlib.sha256(benchmark_path.read_bytes()).hexdigest(),
+        "catalog_archive_sha256": hashlib.sha256(archive_path.read_bytes()).hexdigest(),
+        "codex_binary_sha256": "a" * 64,
+        "provider_config_sha256": materializer.benchmark.codex_provider_config_sha256("openai"),
+        "revision": str(v1["product_inputs"]["revision"]),
+        "runtime_availability_sha256": hashlib.sha256(runtime_path.read_bytes()).hexdigest(),
     }
-    protocol["execution_inputs"] = {key: None for key in freezer.ACQUISITION_EXECUTION_INPUT_KEYS}
-    protocol["selection"].update(
-        {
-            "strategy": "one-per-repository",
-            "private_canary": False,
-            "analysis_repositories": 10,
-            "analysis_scenarios": 10,
-            "eligible_repositories_required": 10,
-            "eligible_candidates_per_repository_required": 1,
-        }
-    )
-    protocol["claim_gates"]["paired_trials_per_scenario"] = 3
-    protocol[materializer.VERIFIER_PROTOCOL_KEY] = {
+    verifier_pins = {
         "bridge_sha256": BRIDGE_SHA256,
         "docker_cli_sha256": DOCKER_CLI_SHA256,
         "docker_daemon_id": DOCKER_DAEMON_ID,
@@ -219,6 +196,18 @@ def _fixture(tmp_path: Path) -> Fixture:
         "run_evaluation_sha256": RUN_EVALUATION_SHA256,
         "schema_version": 1,
     }
+    protocol = freezer.build_acquisition_protocol(
+        v1=v1,
+        frozen_at=str(v1["frozen_at"]),
+        acquisition_frozen_at=str(v1["acquisition_frozen_at"]),
+        product_inputs=product_inputs,
+        verifier_pins=verifier_pins,
+    )
+    monkeypatch.setattr(
+        freezer,
+        "_supported_v1_protocol",
+        lambda: json.loads(json.dumps(v1)),
+    )
     selection = holdout.select_rows(
         [holdout.evaluate_row(row, protocol) for row in rows],
         protocol,
@@ -250,6 +239,9 @@ def _fixture(tmp_path: Path) -> Fixture:
 def _run(fixture: Fixture) -> dict[str, str]:
     return materializer.materialize(
         protocol_path=fixture.protocol_path,
+        expected_acquisition_protocol_sha256=hashlib.sha256(
+            fixture.protocol_path.read_bytes()
+        ).hexdigest(),
         rows_path=fixture.rows_path,
         selection_path=fixture.selection_path,
         source_map_path=fixture.source_map,
@@ -414,7 +406,7 @@ def test_materializes_ten_official_controls_and_evaluator_bound_attestations(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fixture = _fixture(tmp_path)
+    fixture = _fixture(tmp_path, monkeypatch)
     double = _install_verifier(fixture, monkeypatch)
 
     hashes = _run(fixture)
@@ -505,6 +497,7 @@ def test_materializes_ten_official_controls_and_evaluator_bound_attestations(
                 "protocol_id": materializer.PROTOCOL_ID,
                 "provider": "openai",
                 "python": {
+                    "dependencies_sha256": PYTHON_ENVIRONMENT_SHA256,
                     "executable_sha256": PYTHON_SHA256,
                     "version": "3.12.0",
                 },
@@ -526,6 +519,9 @@ def test_materializes_ten_official_controls_and_evaluator_bound_attestations(
     )
     freezer.freeze_protocol(
         protocol_path=fixture.protocol_path,
+        expected_acquisition_protocol_sha256=hashlib.sha256(
+            fixture.protocol_path.read_bytes()
+        ).hexdigest(),
         selection_path=fixture.selection_path,
         scenario_pack_path=output / "scenario-pack.json",
         collision_path=collision_path,
@@ -560,7 +556,7 @@ def test_red_green_invocations_are_symmetric_and_host_pytest_is_never_run(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fixture = _fixture(tmp_path)
+    fixture = _fixture(tmp_path, monkeypatch)
     double = _install_verifier(fixture, monkeypatch)
     commands: list[list[str]] = []
     original_run = materializer._run
@@ -618,7 +614,7 @@ def test_authenticated_v2_semantic_evidence_is_deterministic_across_identical_ru
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fixture = _fixture(tmp_path)
+    fixture = _fixture(tmp_path, monkeypatch)
     _install_verifier(fixture, monkeypatch)
 
     first_hashes = _run(fixture)
@@ -650,7 +646,7 @@ def test_failed_official_control_is_no_go_without_fallback(
     monkeypatch: pytest.MonkeyPatch,
     phase: str,
 ) -> None:
-    fixture = _fixture(tmp_path)
+    fixture = _fixture(tmp_path, monkeypatch)
     double = _install_verifier(fixture, monkeypatch, fail_phase=phase)
 
     with pytest.raises(materializer.MaterializationError, match=f"official {phase} control"):
@@ -665,7 +661,7 @@ def test_inexact_selector_evidence_fails_closed(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fixture = _fixture(tmp_path)
+    fixture = _fixture(tmp_path, monkeypatch)
     double = _install_verifier(fixture, monkeypatch, invalid_phase="red")
 
     with pytest.raises(materializer.MaterializationError, match="official red control"):
@@ -679,7 +675,7 @@ def test_cross_phase_runtime_identity_drift_fails_closed(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fixture = _fixture(tmp_path)
+    fixture = _fixture(tmp_path, monkeypatch)
     double = _install_verifier(
         fixture,
         monkeypatch,
@@ -697,7 +693,7 @@ def test_frozen_dataset_tamper_is_rejected_before_verifier_execution(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fixture = _fixture(tmp_path)
+    fixture = _fixture(tmp_path, monkeypatch)
     double = _install_verifier(fixture, monkeypatch)
     fixture.rows_path.write_bytes(fixture.rows_path.read_bytes() + b"\n")
 
@@ -712,7 +708,7 @@ def test_requires_exactly_ten_repositories_before_verifier_execution(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fixture = _fixture(tmp_path)
+    fixture = _fixture(tmp_path, monkeypatch)
     double = _install_verifier(fixture, monkeypatch)
     fixture.protocol["selection"].update(
         {
@@ -728,7 +724,10 @@ def test_requires_exactly_ten_repositories_before_verifier_execution(
     )
     fixture.selection_path.write_bytes(_canonical(fixture.selection))
 
-    with pytest.raises(materializer.MaterializationError, match="exactly ten tasks"):
+    with pytest.raises(
+        materializer.MaterializationError,
+        match="fixed V2 acquisition design drifted",
+    ):
         _run(fixture)
 
     assert not double.calls
@@ -739,7 +738,7 @@ def test_broken_symlink_output_destination_is_rejected_before_private_work(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fixture = _fixture(tmp_path)
+    fixture = _fixture(tmp_path, monkeypatch)
     double = _install_verifier(fixture, monkeypatch)
     fixture.output.symlink_to(tmp_path / "missing-private-output", target_is_directory=True)
 
@@ -754,7 +753,7 @@ def test_materialization_never_mutates_future_agent_repository_inputs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fixture = _fixture(tmp_path)
+    fixture = _fixture(tmp_path, monkeypatch)
     _install_verifier(fixture, monkeypatch)
 
     _run(fixture)
@@ -776,7 +775,7 @@ def test_hidden_raw_artifacts_are_private_and_summaries_are_redacted(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fixture = _fixture(tmp_path)
+    fixture = _fixture(tmp_path, monkeypatch)
     _install_verifier(fixture, monkeypatch)
     hashes = _run(fixture)
 
@@ -809,13 +808,96 @@ def test_requires_exact_frozen_timeout_before_private_work(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fixture = _fixture(tmp_path)
+    fixture = _fixture(tmp_path, monkeypatch)
     double = _install_verifier(fixture, monkeypatch)
     fixture.protocol["timeouts"]["control_verification_seconds"] = 899
     fixture.protocol_path.write_bytes(_canonical(fixture.protocol))
 
-    with pytest.raises(materializer.MaterializationError, match="fresh supported V2"):
+    with pytest.raises(
+        materializer.MaterializationError,
+        match="fixed V2 acquisition design drifted",
+    ):
         _run(fixture)
+
+    assert not double.calls
+    assert not fixture.output.exists()
+
+
+@pytest.mark.parametrize(
+    "expected_sha256",
+    [
+        "0" * 64,
+        "not-a-sha256",
+    ],
+)
+def test_acquisition_protocol_authentication_fails_before_private_work(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    expected_sha256: str,
+) -> None:
+    fixture = _fixture(tmp_path, monkeypatch)
+    double = _install_verifier(fixture, monkeypatch)
+    private_calls: list[str] = []
+
+    def fail_if_called(*args: Any, **kwargs: Any) -> Any:
+        private_calls.append("called")
+        raise AssertionError("private work must not run before protocol authentication")
+
+    monkeypatch.setattr(materializer, "_load_jsonl", fail_if_called)
+    monkeypatch.setattr(materializer, "_repo_source", fail_if_called)
+    monkeypatch.setattr(materializer, "_validate_output_destination", fail_if_called)
+
+    with pytest.raises(
+        materializer.MaterializationError,
+        match=r"^acquisition protocol authentication failed$",
+    ):
+        materializer.materialize(
+            protocol_path=fixture.protocol_path,
+            expected_acquisition_protocol_sha256=expected_sha256,
+            rows_path=tmp_path / "must-not-read-rows.jsonl",
+            selection_path=tmp_path / "must-not-read-selection.json",
+            source_map_path=tmp_path / "must-not-read-sources.json",
+            runtime_availability_path=tmp_path / "must-not-read-runtime.json",
+            catalog_archive_path=tmp_path / "must-not-read-catalog.tar.gz",
+            output=fixture.output,
+            swebench_checkout=tmp_path / "must-not-use-swebench",
+            swebench_python=tmp_path / "must-not-use-python",
+            docker_cli=tmp_path / "must-not-use-docker",
+            docker_host=fixture.docker_host,
+        )
+
+    assert not private_calls
+    assert not double.calls
+    assert not fixture.output.exists()
+
+
+def test_acquisition_protocol_byte_drift_is_rejected_before_private_work(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _fixture(tmp_path, monkeypatch)
+    expected_sha256 = hashlib.sha256(fixture.protocol_path.read_bytes()).hexdigest()
+    double = _install_verifier(fixture, monkeypatch)
+    fixture.protocol_path.write_bytes(fixture.protocol_path.read_bytes() + b"\n")
+
+    with pytest.raises(
+        materializer.MaterializationError,
+        match=r"^acquisition protocol authentication failed$",
+    ):
+        materializer.materialize(
+            protocol_path=fixture.protocol_path,
+            expected_acquisition_protocol_sha256=expected_sha256,
+            rows_path=fixture.rows_path,
+            selection_path=fixture.selection_path,
+            source_map_path=fixture.source_map,
+            runtime_availability_path=fixture.runtime,
+            catalog_archive_path=fixture.archive,
+            output=fixture.output,
+            swebench_checkout=fixture.swebench_checkout,
+            swebench_python=fixture.swebench_python,
+            docker_cli=fixture.docker_cli,
+            docker_host=fixture.docker_host,
+        )
 
     assert not double.calls
     assert not fixture.output.exists()
@@ -825,7 +907,7 @@ def test_requires_complete_pinned_verifier_identity_before_private_work(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fixture = _fixture(tmp_path)
+    fixture = _fixture(tmp_path, monkeypatch)
     double = _install_verifier(fixture, monkeypatch)
     del fixture.protocol[materializer.VERIFIER_PROTOCOL_KEY]["bridge_sha256"]
     fixture.protocol_path.write_bytes(_canonical(fixture.protocol))
@@ -849,7 +931,7 @@ def test_rejects_protocol_shapes_the_freezer_would_reject_before_private_work(
     monkeypatch: pytest.MonkeyPatch,
     mutate: Any,
 ) -> None:
-    fixture = _fixture(tmp_path)
+    fixture = _fixture(tmp_path, monkeypatch)
     double = _install_verifier(fixture, monkeypatch)
     mutate(fixture.protocol)
     fixture.protocol_path.write_bytes(_canonical(fixture.protocol))
@@ -863,9 +945,10 @@ def test_rejects_protocol_shapes_the_freezer_would_reject_before_private_work(
 
 def test_cli_failure_suppresses_private_identifiers_and_tasks(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    fixture = _fixture(tmp_path)
+    fixture = _fixture(tmp_path, monkeypatch)
     fixture.protocol["timeouts"]["control_verification_seconds"] = 899
     fixture.protocol_path.write_bytes(_canonical(fixture.protocol))
     with pytest.raises(SystemExit) as raised:
@@ -873,6 +956,8 @@ def test_cli_failure_suppresses_private_identifiers_and_tasks(
             [
                 "--protocol",
                 str(fixture.protocol_path),
+                "--expected-acquisition-protocol-sha256",
+                hashlib.sha256(fixture.protocol_path.read_bytes()).hexdigest(),
                 "--rows",
                 str(fixture.rows_path),
                 "--selection",

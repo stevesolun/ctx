@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import secrets
 import shutil
 import signal
 import stat
@@ -76,6 +77,18 @@ def _load_json(path: Path) -> dict[str, Any]:
     value = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(value, dict):
         raise MaterializationError("JSON input must contain an object")
+    return value
+
+
+def _load_authenticated_protocol(path: Path, *, expected_sha256: str) -> dict[str, Any]:
+    if not isinstance(expected_sha256, str) or freezer.SHA256.fullmatch(expected_sha256) is None:
+        raise MaterializationError("acquisition protocol authentication failed")
+    protocol_bytes = path.read_bytes()
+    if not secrets.compare_digest(_sha256(protocol_bytes), expected_sha256):
+        raise MaterializationError("acquisition protocol authentication failed")
+    value = json.loads(protocol_bytes)
+    if not isinstance(value, dict):
+        raise MaterializationError("acquisition protocol must contain an object")
     return value
 
 
@@ -738,6 +751,7 @@ def _write_artifacts(
 def materialize(
     *,
     protocol_path: Path,
+    expected_acquisition_protocol_sha256: str,
     rows_path: Path,
     selection_path: Path,
     source_map_path: Path,
@@ -749,7 +763,10 @@ def materialize(
     docker_cli: Path,
     docker_host: str,
 ) -> dict[str, str]:
-    protocol = _load_json(protocol_path)
+    protocol = _load_authenticated_protocol(
+        protocol_path,
+        expected_sha256=expected_acquisition_protocol_sha256,
+    )
     try:
         pins = freezer.validate_acquisition_protocol(
             protocol,
@@ -882,6 +899,7 @@ def materialize(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--protocol", type=Path, required=True)
+    parser.add_argument("--expected-acquisition-protocol-sha256", required=True)
     parser.add_argument("--rows", type=Path, required=True)
     parser.add_argument("--selection", type=Path, required=True)
     parser.add_argument("--source-map", type=Path, required=True)
@@ -896,6 +914,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         hashes = materialize(
             protocol_path=args.protocol,
+            expected_acquisition_protocol_sha256=args.expected_acquisition_protocol_sha256,
             rows_path=args.rows,
             selection_path=args.selection,
             source_map_path=args.source_map,
