@@ -13,6 +13,7 @@ import math
 import os
 from pathlib import Path
 import re
+import secrets
 import stat
 import tempfile
 from typing import Any
@@ -23,13 +24,20 @@ from scripts import ctx_ab_holdout as holdout
 
 ROOT = Path(__file__).resolve().parents[1]
 PRIVATE_ROOT = ROOT / ".gate" / "ctx-ab-private"
+V1_PROTOCOL_PATH = ROOT / "benchmarks" / "ctx_ab" / "holdout-protocol-v1.json"
+V1_PROTOCOL_SHA256 = "14c3e623b6a3dced3b41769a9e8b60faed5c921aa4f1456d4bde907f1f8a60fa"
 PROTOCOL_ID = "production-graph-holdout-v2"
+SEED_PREFIX = b"ctx-holdout-selection-v2\0"
+PROTOCOL_GENERATION = 1
+REPOSITORY_COUNT = 10
+TRIALS_PER_SCENARIO = 3
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 REVISION = re.compile(r"^[0-9a-f]{40}$")
 IMAGE_ID = re.compile(r"^sha256:[0-9a-f]{64}$")
 ARMS = ("baseline", "ctx-light")
 ACQUISITION_EXECUTION_INPUT_KEYS = frozenset(
     {
+        "acquisition_protocol_sha256",
         "collision_attestation_sha256",
         "control_results_sha256",
         "execution_environment_sha256",
@@ -271,6 +279,154 @@ def _require_text(value: object, *, label: str, maximum: int = 500) -> str:
     return value
 
 
+def _canonical_timestamp(value: object, *, label: str) -> str:
+    if not isinstance(value, str):
+        raise FreezeError(f"{label} is invalid")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise FreezeError(f"{label} is invalid") from exc
+    if parsed.tzinfo is None:
+        raise FreezeError(f"{label} must include a timezone")
+    normalized = parsed.astimezone(UTC).isoformat().replace("+00:00", "Z")
+    if value != normalized:
+        raise FreezeError(f"{label} must use canonical UTC form")
+    return value
+
+
+def _supported_v1_protocol() -> dict[str, Any]:
+    try:
+        data = V1_PROTOCOL_PATH.read_bytes()
+    except OSError as exc:
+        raise FreezeError("committed V1 protocol is unavailable") from exc
+    if not secrets.compare_digest(_sha256(data), V1_PROTOCOL_SHA256):
+        raise FreezeError("committed V1 protocol identity changed")
+    protocol = _json_object(data, label="committed V1 protocol")
+    if (
+        protocol.get("schema_version") != 1
+        or protocol.get("protocol_id") != "production-graph-holdout-v1"
+        or not isinstance(protocol.get("universe"), dict)
+        or not isinstance(protocol.get("static_candidate_rules"), dict)
+        or not isinstance(protocol.get("ranking"), dict)
+        or not isinstance(protocol.get("claim_gates"), dict)
+        or not isinstance(protocol.get("analysis"), dict)
+        or not isinstance(protocol.get("pre_execution_blinding"), dict)
+    ):
+        raise FreezeError("committed V1 protocol is unsupported")
+    return protocol
+
+
+def build_acquisition_protocol(
+    *,
+    v1: Mapping[str, Any],
+    frozen_at: str,
+    acquisition_frozen_at: str,
+    product_inputs: Mapping[str, Any],
+    verifier_pins: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Derive the complete fixed V2 acquisition design from the V1 contract."""
+    protocol = deepcopy(dict(v1))
+    universe = protocol.get("universe")
+    claim_gates = protocol.get("claim_gates")
+    analysis = protocol.get("analysis")
+    blinding = protocol.get("pre_execution_blinding")
+    if (
+        protocol.get("schema_version") != 1
+        or protocol.get("protocol_id") != "production-graph-holdout-v1"
+        or not isinstance(universe, dict)
+        or not isinstance(claim_gates, dict)
+        or not isinstance(analysis, dict)
+        or not isinstance(blinding, dict)
+    ):
+        raise FreezeError("committed V1 protocol is unsupported")
+    dataset_revision = str(universe.get("revision") or "")
+    if REVISION.fullmatch(dataset_revision) is None:
+        raise FreezeError("committed V1 dataset revision is invalid")
+
+    protocol["schema_version"] = 2
+    protocol["protocol_id"] = PROTOCOL_ID
+    protocol["protocol_generation"] = PROTOCOL_GENERATION
+    protocol["stage"] = "acquisition-frozen"
+    protocol["frozen_at"] = frozen_at
+    protocol["acquisition_frozen_at"] = acquisition_frozen_at
+    protocol.pop("execution_frozen_at", None)
+    protocol.pop("canary_policy", None)
+    protocol["product_inputs"] = dict(product_inputs)
+    protocol["selection_seed"] = _sha256(
+        SEED_PREFIX
+        + str(PROTOCOL_GENERATION).encode("ascii")
+        + b"\0"
+        + dataset_revision.encode("ascii")
+    )
+    protocol["selection_seed_input"] = (
+        "fixed literal ctx-holdout-selection-v2 NUL decimal protocol generation "
+        "NUL external dataset revision"
+    )
+    protocol["selection"] = {
+        "analysis_repositories": REPOSITORY_COUNT,
+        "analysis_scenarios": REPOSITORY_COUNT,
+        "ctx_context": [],
+        "eligible_candidates_per_repository_required": 1,
+        "eligible_repositories_required": REPOSITORY_COUNT,
+        "first_scenario_rule": (
+            "first ranked candidate from each of the first ten ranked eligible repositories"
+        ),
+        "private_canary": False,
+        "query": "first 240 characters of whitespace-normalized problem_statement",
+        "replacement_after_control_failure": "forbidden",
+        "strategy": "one-per-repository",
+        "task": "exact problem_statement bytes from the frozen dataset row",
+    }
+
+    fixed_claim_gates = deepcopy(claim_gates)
+    fixed_claim_gates.update(
+        {
+            "paired_trials_per_scenario": TRIALS_PER_SCENARIO,
+            "minimum_repositories_with_verified_delivery": REPOSITORY_COUNT,
+            "required_benefiting_repositories": 9,
+        }
+    )
+    protocol["claim_gates"] = fixed_claim_gates
+    fixed_analysis = deepcopy(analysis)
+    fixed_analysis.update(
+        {
+            "overall_token_effect": (
+                "equal-weight median of the ten repository uncached-provider-token effects"
+            ),
+            "overall_time_effect": (
+                "equal-weight median of the ten repository development-seconds effects"
+            ),
+            "support_test": "exact one-sided sign test across ten repository effects",
+            "delivery": "at least one trusted verified CTX delivery in every repository",
+        }
+    )
+    protocol["analysis"] = fixed_analysis
+    protocol["control_requirements"] = [
+        item.replace("all seven selected scenarios", "all ten selected scenarios")
+        for item in protocol.get("control_requirements", [])
+        if isinstance(item, str)
+    ]
+    protocol["freeze_manifest_requirements"] = [
+        item.replace("private seven-scenario pack", "private ten-scenario pack")
+        .replace("all seven selected test modules", "all ten selected test modules")
+        .replace("all seven scenarios", "all ten scenarios")
+        for item in protocol.get("freeze_manifest_requirements", [])
+        if isinstance(item, str)
+    ]
+    fixed_blinding = deepcopy(blinding)
+    for field in ("allowed_before_freeze", "forbidden_before_freeze"):
+        value = fixed_blinding.get(field)
+        if isinstance(value, str):
+            fixed_blinding[field] = value.replace(" or canary", "").replace(
+                "selected or canary",
+                "selected",
+            )
+    protocol["pre_execution_blinding"] = fixed_blinding
+    protocol["official_swebench_verifier"] = dict(verifier_pins)
+    protocol["execution_inputs"] = {key: None for key in sorted(ACQUISITION_EXECUTION_INPUT_KEYS)}
+    return protocol
+
+
 def _read_regular_bytes(path: Path, *, label: str, private: bool) -> bytes:
     try:
         resolved = path.resolve(strict=False)
@@ -324,8 +480,6 @@ def validate_acquisition_protocol(
 ) -> dict[str, Any]:
     """Validate the protocol contract shared by materialization and freezing."""
     execution_inputs = protocol.get("execution_inputs")
-    claim_gates = protocol.get("claim_gates")
-    timeouts = protocol.get("timeouts")
     product_inputs = protocol.get("product_inputs")
     universe = protocol.get("universe")
     pins = protocol.get("official_swebench_verifier")
@@ -336,16 +490,17 @@ def validate_acquisition_protocol(
         or not isinstance(execution_inputs, dict)
         or set(execution_inputs) != ACQUISITION_EXECUTION_INPUT_KEYS
         or any(value is not None for value in execution_inputs.values())
-        or not isinstance(claim_gates, dict)
-        or claim_gates.get("paired_trials_per_scenario") != 3
-        or not isinstance(timeouts, dict)
-        or timeouts.get("control_verification_seconds") != 900
         or not isinstance(product_inputs, dict)
         or set(product_inputs) != PRODUCT_INPUT_KEYS
         or not isinstance(universe, dict)
         or not isinstance(pins, dict)
     ):
         raise FreezeError("protocol is not a fresh supported V2 acquisition freeze")
+    frozen_at = _canonical_timestamp(protocol.get("frozen_at"), label="protocol frozen_at")
+    acquisition_frozen_at = _canonical_timestamp(
+        protocol.get("acquisition_frozen_at"),
+        label="protocol acquisition_frozen_at",
+    )
     _exact_keys(pins, VERIFIER_PIN_KEYS, label="official verifier pins")
     if (
         pins.get("schema_version") != 1
@@ -387,6 +542,15 @@ def validate_acquisition_protocol(
         universe.get("selection_jsonl_sha256"),
         label="frozen dataset identity",
     )
+    expected_protocol = build_acquisition_protocol(
+        v1=_supported_v1_protocol(),
+        frozen_at=frozen_at,
+        acquisition_frozen_at=acquisition_frozen_at,
+        product_inputs=product_inputs,
+        verifier_pins=pins,
+    )
+    if _canonical_bytes(protocol) != _canonical_bytes(expected_protocol):
+        raise FreezeError("protocol fixed V2 acquisition design drifted")
     return dict(pins)
 
 
@@ -740,7 +904,7 @@ def _validate_environment(
     _exact_keys(codex, frozenset({"version"}), label="Codex identity")
     _exact_keys(
         python,
-        frozenset({"executable_sha256", "version"}),
+        frozenset({"dependencies_sha256", "executable_sha256", "version"}),
         label="Python identity",
     )
     timeout = limits.get("agent_timeout_seconds")
@@ -769,6 +933,7 @@ def _validate_environment(
         raise FreezeError("provider configuration does not match the product freeze")
     _require_text(codex.get("version"), label="Codex version")
     _require_text(python.get("version"), label="Python version")
+    _require_sha256(python.get("dependencies_sha256"), label="Python dependency identity")
     _require_sha256(python.get("executable_sha256"), label="Python executable identity")
 
 
@@ -879,6 +1044,7 @@ def freeze_protocol(
     schedule_path: Path,
     output_path: Path,
     frozen_at: str,
+    expected_acquisition_protocol_sha256: str,
 ) -> dict[str, str]:
     """Authenticate materialization evidence and emit an execution freeze."""
     all_paths = {
@@ -899,6 +1065,17 @@ def freeze_protocol(
     ):
         if path.exists() or path.is_symlink():
             raise FreezeError(f"{label} already exists")
+    protocol_bytes = _read_regular_bytes(protocol_path, label="protocol", private=False)
+    expected_acquisition_sha256 = _require_sha256(
+        expected_acquisition_protocol_sha256,
+        label="expected acquisition protocol identity",
+    )
+    observed_acquisition_sha256 = _sha256(protocol_bytes)
+    if not secrets.compare_digest(
+        observed_acquisition_sha256,
+        expected_acquisition_sha256,
+    ):
+        raise FreezeError("acquisition protocol identity changed")
     try:
         parsed_time = datetime.fromisoformat(frozen_at)
     except ValueError as exc:
@@ -906,10 +1083,7 @@ def freeze_protocol(
     if parsed_time.tzinfo is None:
         raise FreezeError("execution freeze timestamp must include a timezone")
 
-    protocol = _json_object(
-        _read_regular_bytes(protocol_path, label="protocol", private=False),
-        label="protocol",
-    )
+    protocol = _json_object(protocol_bytes, label="protocol")
     pins = _validated_protocol(protocol)
     input_paths = {
         "selection": selection_path,
@@ -969,6 +1143,7 @@ def freeze_protocol(
         scenario_rows={str(row["id"]): row for row in scenario_rows},
     )
     execution_inputs: dict[str, str] = {
+        "acquisition_protocol_sha256": observed_acquisition_sha256,
         "collision_attestation_sha256": _sha256(blobs["collision"]),
         "control_results_sha256": _sha256(blobs["controls"]),
         "execution_environment_sha256": _sha256(blobs["environment"]),
@@ -1008,6 +1183,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--schedule", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
+        "--expected-acquisition-protocol-sha256",
+        required=True,
+    )
+    parser.add_argument(
         "--frozen-at",
         default=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
     )
@@ -1024,6 +1203,7 @@ def main(argv: list[str] | None = None) -> int:
             schedule_path=args.schedule,
             output_path=args.output,
             frozen_at=args.frozen_at,
+            expected_acquisition_protocol_sha256=args.expected_acquisition_protocol_sha256,
         )
     except (FreezeError, ValueError, OSError, KeyError, TypeError) as exc:
         parser.exit(2, f"execution freeze failed ({type(exc).__name__})\n")

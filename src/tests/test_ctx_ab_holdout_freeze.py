@@ -15,6 +15,7 @@ from scripts import ctx_ab_holdout_freeze as freezer
 
 PROTOCOL_ID = "production-graph-holdout-v2"
 FROZEN_AT = "2026-07-30T12:34:56+03:00"
+ACQUISITION_FROZEN_AT = "2026-07-30T08:00:00Z"
 PINS = {
     "bridge_sha256": "1" * 64,
     "docker_cli_sha256": "2" * 64,
@@ -72,34 +73,24 @@ def _fixture_documents() -> dict[str, dict[str, Any]]:
         scenario_id: f"https://github.com/owner/repo-{index}.git"
         for index, scenario_id in enumerate(scenario_ids)
     }
-    protocol: dict[str, Any] = {
-        "schema_version": 2,
-        "protocol_id": PROTOCOL_ID,
-        "stage": "acquisition-frozen",
-        "product_inputs": {
-            "benchmark_script_sha256": _sha256(Path(benchmark.__file__).read_bytes()),
-            "catalog_archive_sha256": _sha256(benchmark.PRODUCTION_CATALOG_ARCHIVE.read_bytes()),
-            "codex_binary_sha256": "d" * 64,
-            "provider_config_sha256": benchmark.codex_provider_config_sha256("openai"),
-            "revision": "e" * 40,
-            "runtime_availability_sha256": _sha256(
-                benchmark.PRODUCTION_RUNTIME_AVAILABILITY.read_bytes()
-            ),
-        },
-        "universe": {"selection_jsonl_sha256": "0" * 64},
-        "selection": {
-            "analysis_repositories": 10,
-            "analysis_scenarios": 10,
-            "eligible_candidates_per_repository_required": 1,
-            "eligible_repositories_required": 10,
-            "private_canary": False,
-            "strategy": "one-per-repository",
-        },
-        "claim_gates": {"paired_trials_per_scenario": 3},
-        "timeouts": {"control_verification_seconds": 900},
-        "official_swebench_verifier": deepcopy(PINS),
-        "execution_inputs": {key: None for key in freezer.ACQUISITION_EXECUTION_INPUT_KEYS},
+    v1 = json.loads(freezer.V1_PROTOCOL_PATH.read_bytes())
+    product_inputs = {
+        "benchmark_script_sha256": _sha256(Path(benchmark.__file__).read_bytes()),
+        "catalog_archive_sha256": _sha256(benchmark.PRODUCTION_CATALOG_ARCHIVE.read_bytes()),
+        "codex_binary_sha256": "d" * 64,
+        "provider_config_sha256": benchmark.codex_provider_config_sha256("openai"),
+        "revision": "e" * 40,
+        "runtime_availability_sha256": _sha256(
+            benchmark.PRODUCTION_RUNTIME_AVAILABILITY.read_bytes()
+        ),
     }
+    protocol = freezer.build_acquisition_protocol(
+        v1=v1,
+        frozen_at=ACQUISITION_FROZEN_AT,
+        acquisition_frozen_at=ACQUISITION_FROZEN_AT,
+        product_inputs=product_inputs,
+        verifier_pins=PINS,
+    )
     selection = {
         "protocol_id": PROTOCOL_ID,
         "analysis_instance_ids": scenario_ids,
@@ -232,7 +223,11 @@ def _fixture_documents() -> dict[str, dict[str, Any]]:
         "product_revision": protocol["product_inputs"]["revision"],
         "protocol_id": PROTOCOL_ID,
         "provider": "openai",
-        "python": {"executable_sha256": "1" * 64, "version": "3.12.11"},
+        "python": {
+            "dependencies_sha256": "2" * 64,
+            "executable_sha256": "1" * 64,
+            "version": "3.12.11",
+        },
         "schema_version": 1,
     }
     return {
@@ -300,12 +295,23 @@ def _fixture_paths(
     return documents, paths
 
 
-def _freeze(paths: dict[str, Path]) -> dict[str, Any]:
-    return freezer.freeze_protocol(**paths, frozen_at=FROZEN_AT)
+def _freeze(
+    paths: dict[str, Path],
+    *,
+    expected_acquisition_protocol_sha256: str | None = None,
+) -> dict[str, Any]:
+    expected = expected_acquisition_protocol_sha256 or _sha256(paths["protocol_path"].read_bytes())
+    return freezer.freeze_protocol(
+        **paths,
+        frozen_at=FROZEN_AT,
+        expected_acquisition_protocol_sha256=expected,
+    )
 
 
 def test_schedule_is_deterministic_complete_balanced_and_runner_compatible() -> None:
     documents = _fixture_documents()
+    assert documents["protocol"]["execution_inputs"]["acquisition_protocol_sha256"] is None
+    assert freezer.validate_acquisition_protocol(documents["protocol"]) == PINS
 
     first = freezer.build_execution_schedule(
         documents["selection"],
@@ -354,6 +360,7 @@ def test_freeze_binds_all_inputs_and_emits_runner_ready_private_outputs(
     assert frozen["stage"] == "execution-frozen"
     assert frozen["execution_frozen_at"] == "2026-07-30T09:34:56Z"
     assert frozen["execution_inputs"] == hashes
+    assert hashes["acquisition_protocol_sha256"] == _sha256(paths["protocol_path"].read_bytes())
     assert hashes["selection_output_sha256"] == _sha256(paths["selection_path"].read_bytes())
     assert hashes["scenario_pack_sha256"] == _sha256(paths["scenario_pack_path"].read_bytes())
     assert hashes["control_results_sha256"] == _sha256(paths["controls_path"].read_bytes())
@@ -392,7 +399,46 @@ def _set(document: str, *path: str, value: object) -> Mutation:
     [
         ("protocol-schema", _set("protocol", "schema_version", value=1)),
         ("protocol-id", _set("protocol", "protocol_id", value="other")),
+        ("protocol-generation", _set("protocol", "protocol_generation", value=2)),
+        (
+            "protocol-generation-and-seed",
+            lambda docs: docs["protocol"].update(
+                protocol_generation=2,
+                selection_seed=_sha256(
+                    freezer.SEED_PREFIX
+                    + b"2\0"
+                    + str(docs["protocol"]["universe"]["revision"]).encode("ascii")
+                ),
+            ),
+        ),
         ("protocol-stage", _set("protocol", "stage", value="execution-frozen")),
+        ("protocol-seed", _set("protocol", "selection_seed", value="0" * 64)),
+        (
+            "protocol-ranking-order",
+            lambda docs: docs["protocol"]["ranking"].update(repository_order="reverse"),
+        ),
+        (
+            "protocol-selection-design",
+            lambda docs: docs["protocol"]["selection"].update(strategy="best-overall"),
+        ),
+        (
+            "protocol-claim-threshold",
+            lambda docs: docs["protocol"]["claim_gates"].update(required_benefiting_repositories=8),
+        ),
+        (
+            "protocol-claim-numeric-type",
+            lambda docs: docs["protocol"]["claim_gates"].update(paired_trials_per_scenario=3.0),
+        ),
+        (
+            "protocol-frozen-list",
+            lambda docs: docs["protocol"]["excluded_repositories"].pop(),
+        ),
+        (
+            "protocol-frozen-policy",
+            lambda docs: docs["protocol"]["analysis"].update(
+                claim_scope="all software-development tasks"
+            ),
+        ),
         (
             "protocol-extra-input",
             lambda docs: docs["protocol"]["execution_inputs"].update(extra=None),
@@ -402,9 +448,19 @@ def _set(document: str, *path: str, value: object) -> Mutation:
             lambda docs: docs["protocol"]["execution_inputs"].pop("execution_environment_sha256"),
         ),
         (
+            "protocol-missing-acquisition-input",
+            lambda docs: docs["protocol"]["execution_inputs"].pop("acquisition_protocol_sha256"),
+        ),
+        (
             "protocol-stale-input",
             lambda docs: docs["protocol"]["execution_inputs"].update(
                 execution_schedule_sha256="1" * 64
+            ),
+        ),
+        (
+            "protocol-stale-acquisition-input",
+            lambda docs: docs["protocol"]["execution_inputs"].update(
+                acquisition_protocol_sha256="1" * 64
             ),
         ),
         (
@@ -587,6 +643,72 @@ def test_freeze_rejects_stale_outputs(tmp_path: Path, output_name: str) -> None:
     assert paths[output_name].read_text(encoding="utf-8") == "stale"
 
 
+def test_freeze_authenticates_acquisition_bytes_before_downstream_inputs(
+    tmp_path: Path,
+) -> None:
+    _, paths = _fixture_paths(tmp_path)
+    expected = _sha256(paths["protocol_path"].read_bytes())
+    paths["protocol_path"].write_bytes(paths["protocol_path"].read_bytes() + b" ")
+    paths["selection_path"].unlink()
+
+    with pytest.raises(freezer.FreezeError, match="acquisition protocol identity changed"):
+        _freeze(
+            paths,
+            expected_acquisition_protocol_sha256=expected,
+        )
+
+    assert not paths["schedule_path"].exists()
+    assert not paths["output_path"].exists()
+
+
+def test_freeze_rejects_invalid_acquisition_protocol_digest_shape(
+    tmp_path: Path,
+) -> None:
+    _, paths = _fixture_paths(tmp_path)
+
+    with pytest.raises(freezer.FreezeError, match="SHA-256"):
+        _freeze(
+            paths,
+            expected_acquisition_protocol_sha256="not-a-digest",
+        )
+
+    assert not paths["schedule_path"].exists()
+    assert not paths["output_path"].exists()
+
+
+def test_cli_requires_expected_acquisition_protocol_digest(
+    tmp_path: Path,
+) -> None:
+    _, paths = _fixture_paths(tmp_path)
+    arguments = [
+        "--protocol",
+        str(paths["protocol_path"]),
+        "--selection",
+        str(paths["selection_path"]),
+        "--scenario-pack",
+        str(paths["scenario_pack_path"]),
+        "--collision",
+        str(paths["collision_path"]),
+        "--reconstructed",
+        str(paths["reconstructed_path"]),
+        "--controls",
+        str(paths["controls_path"]),
+        "--environment",
+        str(paths["environment_path"]),
+        "--schedule",
+        str(paths["schedule_path"]),
+        "--output",
+        str(paths["output_path"]),
+    ]
+
+    with pytest.raises(SystemExit) as error:
+        freezer.main(arguments)
+
+    assert error.value.code == 2
+    assert not paths["schedule_path"].exists()
+    assert not paths["output_path"].exists()
+
+
 def test_freeze_rejects_non_private_symlink_hardlink_and_missing_inputs(
     tmp_path: Path,
 ) -> None:
@@ -616,7 +738,11 @@ def test_freeze_rejects_non_private_symlink_hardlink_and_missing_inputs(
 def test_freeze_rejects_invalid_timestamp_and_aliasing_paths(tmp_path: Path) -> None:
     _, paths = _fixture_paths(tmp_path)
     with pytest.raises(freezer.FreezeError, match="timestamp"):
-        freezer.freeze_protocol(**paths, frozen_at="2026-07-30T12:00:00")
+        freezer.freeze_protocol(
+            **paths,
+            frozen_at="2026-07-30T12:00:00",
+            expected_acquisition_protocol_sha256=_sha256(paths["protocol_path"].read_bytes()),
+        )
 
     paths["output_path"] = paths["schedule_path"]
     with pytest.raises(freezer.FreezeError, match="distinct"):
