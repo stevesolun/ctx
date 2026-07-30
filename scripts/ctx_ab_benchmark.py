@@ -246,19 +246,27 @@ class ExecutionFrozenHoldout:
     codex_binary_sha256: str
     provider_config_sha256: str
     protocol_path: Path
+    protocol_bytes: bytes
     scenario_pack_path: Path
+    scenario_pack_bytes: bytes
     scenario_pack_sha256: str
     selection_path: Path
+    selection_bytes: bytes
     selection_sha256: str
     collision_path: Path
+    collision_bytes: bytes
     collision_sha256: str
     reconstructed_path: Path
+    reconstructed_bytes: bytes
     reconstructed_sha256: str
     control_results_path: Path
+    control_results_bytes: bytes
     control_results_sha256: str
     environment_path: Path
+    environment_bytes: bytes
     environment_sha256: str
     schedule_path: Path
+    schedule_bytes: bytes
     schedule: FrozenSchedule
     scenarios: tuple[Scenario, ...]
     scenario_sha256: Mapping[str, str]
@@ -955,6 +963,47 @@ def load_execution_frozen_holdout(
         or not isinstance(product_inputs, dict)
     ):
         raise ValueError("holdout protocol is not execution-frozen")
+    try:
+        from scripts import ctx_ab_holdout_freeze as freezer
+    except ModuleNotFoundError as exc:
+        if exc.name != "scripts":
+            raise
+        import ctx_ab_holdout_freeze as freezer
+
+    expected_input_fields = freezer.ACQUISITION_EXECUTION_INPUT_KEYS
+    if set(execution_inputs) != expected_input_fields:
+        raise ValueError("holdout protocol execution inputs have an unsupported shape")
+    acquisition_protocol_sha256 = _require_sha256(
+        execution_inputs.get("acquisition_protocol_sha256"),
+        field="acquisition protocol SHA-256",
+    )
+    acquisition_protocol = dict(protocol)
+    execution_frozen_at = acquisition_protocol.pop("execution_frozen_at", None)
+    acquisition_protocol["stage"] = "acquisition-frozen"
+    acquisition_protocol["execution_inputs"] = {key: None for key in sorted(expected_input_fields)}
+    try:
+        freezer._canonical_timestamp(
+            execution_frozen_at,
+            label="protocol execution_frozen_at",
+        )
+        freezer.validate_acquisition_protocol(
+            acquisition_protocol,
+            benchmark_script_path=Path(__file__),
+            catalog_archive_path=PRODUCTION_CATALOG_ARCHIVE,
+            runtime_availability_path=PRODUCTION_RUNTIME_AVAILABILITY,
+        )
+    except freezer.FreezeError as exc:
+        raise ValueError(str(exc)) from exc
+    reconstructed_acquisition_sha256 = _sha256_bytes(
+        freezer._canonical_bytes(acquisition_protocol, newline=True)
+    )
+    if not secrets.compare_digest(
+        reconstructed_acquisition_sha256,
+        acquisition_protocol_sha256,
+    ):
+        raise ValueError(
+            "acquisition protocol identity does not match the reconstructed acquisition protocol"
+        )
     product_revision = str(product_inputs.get("revision") or "")
     if re.fullmatch(r"[0-9a-f]{40}", product_revision) is None:
         raise ValueError("holdout product revision is invalid")
@@ -978,22 +1027,6 @@ def load_execution_frozen_holdout(
     provider_config_sha256 = _require_sha256(
         product_inputs.get("provider_config_sha256"),
         field="product provider_config_sha256",
-    )
-    expected_input_fields = {
-        "acquisition_protocol_sha256",
-        "selection_output_sha256",
-        "scenario_pack_sha256",
-        "collision_attestation_sha256",
-        "reconstructed_test_attestation_sha256",
-        "control_results_sha256",
-        "execution_schedule_sha256",
-        "execution_environment_sha256",
-    }
-    if set(execution_inputs) != expected_input_fields:
-        raise ValueError("holdout protocol execution inputs have an unsupported shape")
-    acquisition_protocol_sha256 = _require_sha256(
-        execution_inputs.get("acquisition_protocol_sha256"),
-        field="acquisition protocol SHA-256",
     )
     selection_path, selection_bytes, selection_sha256 = _authenticated_artifact(
         selection_path,
@@ -1167,19 +1200,27 @@ def load_execution_frozen_holdout(
         codex_binary_sha256=codex_binary_sha256,
         provider_config_sha256=provider_config_sha256,
         protocol_path=protocol_path,
+        protocol_bytes=protocol_bytes,
         selection_path=selection_path,
+        selection_bytes=selection_bytes,
         selection_sha256=selection_sha256,
         scenario_pack_path=scenario_pack_path,
+        scenario_pack_bytes=scenario_bytes,
         scenario_pack_sha256=scenario_pack_sha256,
         collision_path=collision_path,
+        collision_bytes=collision_bytes,
         collision_sha256=collision_sha256,
         reconstructed_path=reconstructed_path,
+        reconstructed_bytes=reconstructed_bytes,
         reconstructed_sha256=reconstructed_sha256,
         control_results_path=control_results_path,
+        control_results_bytes=control_bytes,
         control_results_sha256=control_results_sha256,
         environment_path=environment_path,
+        environment_bytes=environment_bytes,
         environment_sha256=environment_sha256,
         schedule_path=schedule_path,
+        schedule_bytes=schedule_bytes,
         schedule=schedule,
         scenarios=tuple(scenarios),
         scenario_sha256=scenario_sha256,
@@ -1297,6 +1338,25 @@ def holdout_inputs_match_execution_freeze(holdout: ExecutionFrozenHoldout) -> bo
         if not secrets.compare_digest(observed, digest):
             return False
     return True
+
+
+def _require_authenticated_holdout_snapshot(holdout: ExecutionFrozenHoldout) -> None:
+    snapshots = (
+        (holdout.protocol_bytes, holdout.protocol_sha256),
+        (holdout.selection_bytes, holdout.selection_sha256),
+        (holdout.scenario_pack_bytes, holdout.scenario_pack_sha256),
+        (holdout.collision_bytes, holdout.collision_sha256),
+        (holdout.reconstructed_bytes, holdout.reconstructed_sha256),
+        (holdout.control_results_bytes, holdout.control_results_sha256),
+        (holdout.environment_bytes, holdout.environment_sha256),
+        (holdout.schedule_bytes, holdout.schedule.sha256),
+    )
+    if any(
+        not secrets.compare_digest(_sha256_bytes(data), expected) for data, expected in snapshots
+    ):
+        raise ValueError("official holdout authenticated snapshot is invalid")
+    if not holdout_inputs_match_execution_freeze(holdout):
+        raise ValueError("official holdout inputs changed after authentication")
 
 
 def load_scenarios(path: Path) -> list[Scenario]:
@@ -6732,6 +6792,8 @@ def build_performance_report(
     official_requested = bool(results) and any(
         row.get("verification_backend") == OFFICIAL_HOLDOUT_BACKEND for row in results
     )
+    if official_requested and official_holdout is not None:
+        _require_authenticated_holdout_snapshot(official_holdout)
 
     def verified_policy_abstention(row: Mapping[str, Any]) -> bool:
         task_hash = row.get("task_prompt_sha256")
@@ -7383,9 +7445,9 @@ def build_performance_report(
             or unresolved_incidents < 0
         ):
             raise ValueError("unresolved incident count cannot be negative")
-        protocol_bytes = official_holdout.protocol_path.read_bytes()
-        selection_bytes = official_holdout.selection_path.read_bytes()
-        scenario_pack_bytes = official_holdout.scenario_pack_path.read_bytes()
+        protocol_bytes = official_holdout.protocol_bytes
+        selection_bytes = official_holdout.selection_bytes
+        scenario_pack_bytes = official_holdout.scenario_pack_bytes
         protocol = _strict_json_object(protocol_bytes, label="execution-frozen protocol")
         selection = _strict_json_object(selection_bytes, label="private selection")
         scenario_pack = _strict_json_object(scenario_pack_bytes, label="private scenario pack")
@@ -7482,8 +7544,8 @@ def build_performance_report(
             protocol,
             selection,
             scenario_pack_bytes=scenario_pack_bytes,
-            collision_attestation_bytes=official_holdout.collision_path.read_bytes(),
-            control_results_bytes=official_holdout.control_results_path.read_bytes(),
+            collision_attestation_bytes=official_holdout.collision_bytes,
+            control_results_bytes=official_holdout.control_results_bytes,
             reconstructed_tests=reconstructed_tests,
         )
 
@@ -7685,6 +7747,7 @@ def build_public_holdout_summary(
     holdout: ExecutionFrozenHoldout,
 ) -> dict[str, Any]:
     """Build an aggregate summary with no task, repository, identifier, patch, or path data."""
+    _require_authenticated_holdout_snapshot(holdout)
 
     def numeric_values(arm: str, field: str) -> list[float]:
         return [

@@ -6073,67 +6073,43 @@ def _official_holdout_fixture(
             "environment": encoded(environment),
         }
     )
-    protocol = {
-        "claim_gates": {
-            "benefiting_repository_definition": (
-                "repository uncached-provider-token effect is strictly less than 1.0"
-            ),
-            "exact_one_sided_repository_support_alpha": 0.05,
-            "minimum_repositories_with_verified_delivery": 10,
-            "paired_trials_per_scenario": 3,
-            "primary_endpoint": "uncached_provider_tokens",
-            "primary_endpoint_aggregation": "overall_token_effect",
-            "primary_endpoint_maximum_ratio": 0.85,
-            "quality_preserved": True,
-            "required_benefiting_repositories": 9,
-            "total_seconds_aggregation": "overall_time_effect",
-            "total_seconds_maximum_ratio": 1.1,
-        },
-        "execution_inputs": {
-            "acquisition_protocol_sha256": "9" * 64,
-            "collision_attestation_sha256": hashlib.sha256(blobs["collision"]).hexdigest(),
-            "control_results_sha256": hashlib.sha256(blobs["controls"]).hexdigest(),
-            "execution_environment_sha256": hashlib.sha256(blobs["environment"]).hexdigest(),
-            "execution_schedule_sha256": hashlib.sha256(blobs["schedule"]).hexdigest(),
-            "reconstructed_test_attestation_sha256": hashlib.sha256(
-                blobs["reconstructed"]
-            ).hexdigest(),
-            "scenario_pack_sha256": scenario_pack_sha256,
-            "selection_output_sha256": selection_sha256,
-        },
-        "official_swebench_verifier": verifier,
-        "product_inputs": {
-            "benchmark_script_sha256": hashlib.sha256(SCRIPT.read_bytes()).hexdigest(),
-            "catalog_archive_sha256": hashlib.sha256(
-                benchmark.PRODUCTION_CATALOG_ARCHIVE.read_bytes()
-            ).hexdigest(),
-            "codex_binary_sha256": hashlib.sha256(codex_path.read_bytes()).hexdigest(),
-            "provider_config_sha256": benchmark.codex_provider_config_sha256("openai"),
-            "revision": "a" * 40,
-            "runtime_availability_sha256": hashlib.sha256(
-                benchmark.PRODUCTION_RUNTIME_AVAILABILITY.read_bytes()
-            ).hexdigest(),
-        },
-        "protocol_id": "production-graph-holdout-v2",
-        "schema_version": 2,
-        "selection": {
-            "analysis_repositories": 10,
-            "analysis_scenarios": 10,
-            "ctx_context": [],
-            "eligible_candidates_per_repository_required": 1,
-            "eligible_repositories_required": 10,
-            "first_scenario_rule": (
-                "first ranked candidate from each of the first ten ranked eligible repositories"
-            ),
-            "private_canary": False,
-            "query": "first 240 characters of whitespace-normalized problem_statement",
-            "replacement_after_control_failure": "forbidden",
-            "strategy": "one-per-repository",
-            "task": "exact problem_statement bytes from the frozen dataset row",
-        },
-        "stage": "execution-frozen",
-        "timeouts": {"control_verification_seconds": 900},
-        "universe": {"selection_jsonl_sha256": "a" * 64},
+    from scripts import ctx_ab_holdout_freeze as freezer
+
+    product_inputs = {
+        "benchmark_script_sha256": hashlib.sha256(SCRIPT.read_bytes()).hexdigest(),
+        "catalog_archive_sha256": hashlib.sha256(
+            benchmark.PRODUCTION_CATALOG_ARCHIVE.read_bytes()
+        ).hexdigest(),
+        "codex_binary_sha256": hashlib.sha256(codex_path.read_bytes()).hexdigest(),
+        "provider_config_sha256": benchmark.codex_provider_config_sha256("openai"),
+        "revision": "a" * 40,
+        "runtime_availability_sha256": hashlib.sha256(
+            benchmark.PRODUCTION_RUNTIME_AVAILABILITY.read_bytes()
+        ).hexdigest(),
+    }
+    acquisition_protocol = freezer.build_acquisition_protocol(
+        v1=freezer._supported_v1_protocol(),
+        frozen_at="2026-07-01T00:00:00Z",
+        acquisition_frozen_at="2026-07-01T00:00:00Z",
+        product_inputs=product_inputs,
+        verifier_pins=verifier,
+    )
+    acquisition_protocol_bytes = freezer._canonical_bytes(
+        acquisition_protocol,
+        newline=True,
+    )
+    protocol = json.loads(acquisition_protocol_bytes)
+    protocol["stage"] = "execution-frozen"
+    protocol["execution_frozen_at"] = "2026-07-02T00:00:00Z"
+    protocol["execution_inputs"] = {
+        "acquisition_protocol_sha256": hashlib.sha256(acquisition_protocol_bytes).hexdigest(),
+        "collision_attestation_sha256": hashlib.sha256(blobs["collision"]).hexdigest(),
+        "control_results_sha256": hashlib.sha256(blobs["controls"]).hexdigest(),
+        "execution_environment_sha256": hashlib.sha256(blobs["environment"]).hexdigest(),
+        "execution_schedule_sha256": hashlib.sha256(blobs["schedule"]).hexdigest(),
+        "reconstructed_test_attestation_sha256": hashlib.sha256(blobs["reconstructed"]).hexdigest(),
+        "scenario_pack_sha256": scenario_pack_sha256,
+        "selection_output_sha256": selection_sha256,
     }
     paths: dict[str, Path] = {}
     for name, data in blobs.items():
@@ -6182,7 +6158,12 @@ def test_execution_frozen_holdout_authenticates_all_inputs_and_balanced_schedule
     assert (
         holdout.codex_binary_sha256 == hashlib.sha256(Path(sys.executable).read_bytes()).hexdigest()
     )
-    assert holdout.acquisition_protocol_sha256 == "9" * 64
+    assert (
+        holdout.acquisition_protocol_sha256
+        == json.loads(paths["protocol"].read_text())["execution_inputs"][
+            "acquisition_protocol_sha256"
+        ]
+    )
     assert holdout.provider_config_sha256 == benchmark.codex_provider_config_sha256("openai")
     assert set(holdout.sensitive_paths) == {
         paths[name]
@@ -6197,6 +6178,18 @@ def test_execution_frozen_holdout_authenticates_all_inputs_and_balanced_schedule
             "schedule",
         )
     }
+
+
+def test_execution_frozen_holdout_loads_from_documented_module_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(benchmark, "__name__", "__main__")
+
+    holdout, _ = _official_holdout_fixture(tmp_path)
+
+    assert holdout.protocol_id == "production-graph-holdout-v2"
+    assert len(holdout.scenarios) == 10
 
 
 def test_execution_frozen_holdout_rejects_codex_or_provider_identity_drift(
@@ -6347,6 +6340,7 @@ def test_python_dependency_identity_is_canonical_and_fail_closed(
     [
         ("missing", "unsupported shape"),
         ("invalid", "acquisition protocol SHA-256"),
+        ("arbitrary", "acquisition protocol identity"),
     ],
 )
 def test_execution_frozen_holdout_rejects_invalid_acquisition_provenance(
@@ -6358,8 +6352,10 @@ def test_execution_frozen_holdout_rejects_invalid_acquisition_provenance(
     protocol = json.loads(paths["protocol"].read_text())
     if mutation == "missing":
         del protocol["execution_inputs"]["acquisition_protocol_sha256"]
-    else:
+    elif mutation == "invalid":
         protocol["execution_inputs"]["acquisition_protocol_sha256"] = "not-a-digest"
+    else:
+        protocol["execution_inputs"]["acquisition_protocol_sha256"] = "9" * 64
     paths["protocol"].write_text(
         json.dumps(protocol, sort_keys=True, separators=(",", ":")),
         encoding="utf-8",
@@ -6377,7 +6373,73 @@ def test_execution_frozen_holdout_rejects_invalid_acquisition_provenance(
             environment_path=paths["environment"],
             schedule_path=paths["schedule"],
         )
-    assert holdout.acquisition_protocol_sha256 == "9" * 64
+    assert holdout.acquisition_protocol_sha256 != "9" * 64
+
+
+def test_execution_frozen_holdout_rejects_rehashed_claim_gate_drift(
+    tmp_path: Path,
+) -> None:
+    from scripts import ctx_ab_holdout_freeze as freezer
+
+    _, paths = _official_holdout_fixture(tmp_path)
+    protocol = json.loads(paths["protocol"].read_text())
+    protocol["claim_gates"]["required_benefiting_repositories"] = 1
+    acquisition_protocol = dict(protocol)
+    acquisition_protocol.pop("execution_frozen_at")
+    acquisition_protocol["stage"] = "acquisition-frozen"
+    acquisition_protocol["execution_inputs"] = {key: None for key in protocol["execution_inputs"]}
+    protocol["execution_inputs"]["acquisition_protocol_sha256"] = hashlib.sha256(
+        freezer._canonical_bytes(acquisition_protocol, newline=True)
+    ).hexdigest()
+    paths["protocol"].write_text(
+        json.dumps(protocol, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="fixed V2 acquisition design drifted"):
+        benchmark.load_execution_frozen_holdout(
+            protocol_path=paths["protocol"],
+            expected_protocol_sha256=hashlib.sha256(paths["protocol"].read_bytes()).hexdigest(),
+            selection_path=paths["selection"],
+            scenario_pack_path=paths["scenario_pack"],
+            collision_path=paths["collision"],
+            reconstructed_path=paths["reconstructed"],
+            control_results_path=paths["controls"],
+            environment_path=paths["environment"],
+            schedule_path=paths["schedule"],
+        )
+
+
+def test_execution_frozen_holdout_rejects_noncanonical_acquisition_digest(
+    tmp_path: Path,
+) -> None:
+    _, paths = _official_holdout_fixture(tmp_path)
+    protocol = json.loads(paths["protocol"].read_text())
+    acquisition_protocol = dict(protocol)
+    acquisition_protocol.pop("execution_frozen_at")
+    acquisition_protocol["stage"] = "acquisition-frozen"
+    acquisition_protocol["execution_inputs"] = {key: None for key in protocol["execution_inputs"]}
+    noncanonical_bytes = (json.dumps(acquisition_protocol, indent=2) + "\n").encode()
+    protocol["execution_inputs"]["acquisition_protocol_sha256"] = hashlib.sha256(
+        noncanonical_bytes
+    ).hexdigest()
+    paths["protocol"].write_text(
+        json.dumps(protocol, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="acquisition protocol identity"):
+        benchmark.load_execution_frozen_holdout(
+            protocol_path=paths["protocol"],
+            expected_protocol_sha256=hashlib.sha256(paths["protocol"].read_bytes()).hexdigest(),
+            selection_path=paths["selection"],
+            scenario_pack_path=paths["scenario_pack"],
+            collision_path=paths["collision"],
+            reconstructed_path=paths["reconstructed"],
+            control_results_path=paths["controls"],
+            environment_path=paths["environment"],
+            schedule_path=paths["schedule"],
+        )
 
 
 def test_execution_frozen_holdout_rejects_mutated_materialization_input(
@@ -6521,6 +6583,40 @@ def _official_result_rows(
                 row.seal()
                 rows.append(row)
     return rows
+
+
+@pytest.mark.parametrize(
+    "artifact",
+    ["protocol", "selection", "scenario_pack", "collision", "controls"],
+)
+def test_official_verdict_rejects_post_attestation_artifact_drift(
+    tmp_path: Path,
+    artifact: str,
+) -> None:
+    holdout, paths = _official_holdout_fixture(tmp_path)
+    rows = _official_result_rows(holdout, status="passed", failure_class=None)
+    report_kwargs = {
+        "scenario_ids": [scenario.id for scenario in holdout.scenarios],
+        "trials": 3,
+        "arms": ("baseline", "ctx-light"),
+        "expected_repositories": {scenario.id: scenario.repo_url for scenario in holdout.scenarios},
+        "frozen_schedule": holdout.schedule,
+        "official_holdout": holdout,
+    }
+    performance = benchmark.build_performance_report(rows, **report_kwargs)
+    assert benchmark.holdout_inputs_match_execution_freeze(holdout) is True
+
+    paths[artifact].write_bytes(paths[artifact].read_bytes() + b"\n")
+    output = tmp_path / "output"
+    output.mkdir()
+
+    with pytest.raises(ValueError, match="changed after authentication"):
+        benchmark.write_performance_report(output, rows, **report_kwargs)
+    assert not (output / "performance.json").exists()
+
+    with pytest.raises(ValueError, match="changed after authentication"):
+        benchmark.write_public_holdout_summary(output, rows, performance, holdout)
+    assert not (output / "public-summary.json").exists()
 
 
 def test_authenticated_freeze_drives_all_thirty_pairs_and_sixty_arms(
