@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import importlib
 import json
 import os
 import platform
@@ -963,12 +964,13 @@ def load_execution_frozen_holdout(
         or not isinstance(product_inputs, dict)
     ):
         raise ValueError("holdout protocol is not execution-frozen")
+    freezer: Any
     try:
-        from scripts import ctx_ab_holdout_freeze as freezer
+        freezer = importlib.import_module("scripts.ctx_ab_holdout_freeze")
     except ModuleNotFoundError as exc:
         if exc.name != "scripts":
             raise
-        import ctx_ab_holdout_freeze as freezer
+        freezer = importlib.import_module("ctx_ab_holdout_freeze")
 
     expected_input_fields = freezer.ACQUISITION_EXECUTION_INPUT_KEYS
     if set(execution_inputs) != expected_input_fields:
