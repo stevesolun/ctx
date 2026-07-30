@@ -196,7 +196,12 @@ EXEC_SHA="$("$PY" -c \
 The acquisition protocol SHA-256 must be passed unchanged through acquisition,
 selection, source preparation, materialization, environment capture, and
 execution freeze. The execution protocol then authenticates that predecessor
-digest and every frozen execution input.
+digest and every frozen execution input. Before accepting an execution protocol,
+the runner reconstructs the complete canonical acquisition protocol, validates
+the pinned V1-derived design, and compares its canonical digest with the
+authenticated predecessor digest. Verdict generation uses the authenticated
+snapshots of every frozen input and fails closed if any on-disk input changes
+after attestation.
 
 A completed campaign has exactly 60 arms and 30 complete pairs,
 `experiment_valid=true`, no unresolved incidents, and an honest
@@ -212,7 +217,11 @@ containment, or interruption failures require a new output campaign. After any
 outcome-informed code or harness fix, increment the committed
 `PROTOCOL_GENERATION`, merge that change, and create a fresh protocol, seed,
 selection, controls, environment, schedule, and run from the new merged
-revision. Never reuse the observed V2 selection for a confirmatory claim.
+revision. Generation `N` selects stable candidate slot `N - 1` independently
+within each repository, so later generations must be task-ID-disjoint from
+earlier generations. If any of the ten repositories lacks a fresh eligible
+candidate, selection fails closed and a new pinned universe must be
+preregistered. Never reuse the observed V2 selection for a confirmatory claim.
 
 ## Evidence
 
