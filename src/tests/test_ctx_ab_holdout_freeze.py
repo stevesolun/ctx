@@ -11,12 +11,15 @@ from typing import Any, Callable
 import pytest
 
 from scripts import ctx_ab_benchmark as benchmark
+from scripts import ctx_ab_exposure_ledger as exposure_ledger
 from scripts import ctx_ab_holdout_freeze as freezer
 
 
 PROTOCOL_ID = "production-graph-holdout-v2"
 FROZEN_AT = "2026-07-30T12:34:56+03:00"
 ACQUISITION_FROZEN_AT = "2026-07-30T08:00:00Z"
+EXPOSURE_SALT = "0" * 64
+ORIGIN_URL = "https://github.com/stevesolun/ctx.git"
 PINS = {
     "bridge_sha256": "1" * 64,
     "docker_cli_sha256": "2" * 64,
@@ -86,10 +89,23 @@ def _fixture_documents() -> dict[str, dict[str, Any]]:
         for index, scenario_id in enumerate(scenario_ids)
     }
     v1 = json.loads(freezer.V1_PROTOCOL_PATH.read_bytes())
+    exposure_document = {
+        "instance_id_hmac_sha256": [
+            exposure_ledger.instance_id_hmac_sha256(
+                EXPOSURE_SALT,
+                "historical-control-task",
+            )
+        ],
+        "salt": EXPOSURE_SALT,
+        "schema_version": 1,
+    }
+    exposure_sha256 = _sha256(exposure_ledger.canonical_ledger_bytes(exposure_document))
     product_inputs = {
         "benchmark_script_sha256": _sha256(Path(benchmark.__file__).read_bytes()),
         "catalog_archive_sha256": _sha256(benchmark.PRODUCTION_CATALOG_ARCHIVE.read_bytes()),
         "codex_binary_sha256": "d" * 64,
+        "origin_main_revision": "e" * 40,
+        "origin_url": ORIGIN_URL,
         "provider_config_sha256": benchmark.codex_provider_config_sha256("openai"),
         "revision": "e" * 40,
         "runtime_availability_sha256": _sha256(
@@ -102,6 +118,7 @@ def _fixture_documents() -> dict[str, dict[str, Any]]:
         acquisition_frozen_at=ACQUISITION_FROZEN_AT,
         product_inputs=product_inputs,
         verifier_pins=PINS,
+        exposure_ledger_sha256=exposure_sha256,
     )
     selection = {
         "protocol_id": PROTOCOL_ID,
@@ -169,6 +186,18 @@ def _fixture_documents() -> dict[str, dict[str, Any]]:
             }
         )
     scenario_pack = {"scenarios": scenarios, "version": 1}
+    source_map = {
+        "repositories": {
+            row["repo_url"]: {
+                "base_commit": row["commit"],
+                "bundle_path": f"bundles/repo-{index}.bundle",
+                "bundle_sha256": _sha256(f"bundle-{index}\n".encode()),
+                "tree_sha1": row["official_verifier_binding"]["repository_tree_sha1"],
+            }
+            for index, row in enumerate(scenarios)
+        },
+        "schema_version": 1,
+    }
     selection_sha256 = _sha256(_canonical(selection))
     scenario_pack_sha256 = _sha256(_canonical(scenario_pack))
     collision = {
@@ -244,8 +273,10 @@ def _fixture_documents() -> dict[str, dict[str, Any]]:
     }
     return {
         "protocol": protocol,
+        "exposure_ledger": exposure_document,
         "selection": selection,
         "scenario_pack": scenario_pack,
+        "source_map": source_map,
         "collision": collision,
         "reconstructed": reconstructed,
         "controls": controls,
@@ -279,11 +310,21 @@ def _fixture_paths(
         mutate(documents)
     private = tmp_path / "private"
     private.mkdir(mode=0o700)
+    bundles = private / "bundles"
+    bundles.mkdir(mode=0o700)
+    for index in range(10):
+        bundle = bundles / f"repo-{index}.bundle"
+        bundle.write_bytes(f"bundle-{index}\n".encode())
+        bundle.chmod(0o600)
     paths = {
         "protocol_path": _write_json(
             tmp_path / "protocol.json",
             documents["protocol"],
             newline=True,
+        ),
+        "exposure_ledger_path": _write_json(
+            private / "exposure-ledger.json",
+            documents["exposure_ledger"],
         ),
         "selection_path": _write_json(
             private / "selection.json",
@@ -292,6 +333,10 @@ def _fixture_paths(
         "scenario_pack_path": _write_json(
             private / "scenario-pack.json",
             documents["scenario_pack"],
+        ),
+        "source_map_path": _write_json(
+            private / "source-map.json",
+            documents["source_map"],
         ),
         "collision_path": _write_json(
             private / "collision-attestation.json",
@@ -331,7 +376,28 @@ def _freeze(
 def test_schedule_is_deterministic_complete_balanced_and_runner_compatible() -> None:
     documents = _fixture_documents()
     assert documents["protocol"]["execution_inputs"]["acquisition_protocol_sha256"] is None
+    assert documents["protocol"]["execution_inputs"]["source_map_sha256"] is None
+    assert documents["protocol"]["exposure_ledger_sha256"] == _sha256(
+        exposure_ledger.canonical_ledger_bytes(documents["exposure_ledger"])
+    )
+    assert documents["protocol"]["product_inputs"]["origin_url"] == ORIGIN_URL
+    assert (
+        documents["protocol"]["product_inputs"]["origin_main_revision"]
+        == documents["protocol"]["product_inputs"]["revision"]
+    )
     assert freezer.validate_acquisition_protocol(documents["protocol"]) == PINS
+    rebuilt = freezer.build_acquisition_protocol(
+        v1=freezer._supported_v1_protocol(),
+        frozen_at=ACQUISITION_FROZEN_AT,
+        acquisition_frozen_at=ACQUISITION_FROZEN_AT,
+        product_inputs=documents["protocol"]["product_inputs"],
+        verifier_pins=PINS,
+        exposure_ledger_sha256=documents["protocol"]["exposure_ledger_sha256"],
+    )
+    assert _canonical(rebuilt, newline=True) == _canonical(
+        documents["protocol"],
+        newline=True,
+    )
 
     first = freezer.build_execution_schedule(
         documents["selection"],
@@ -380,10 +446,12 @@ def test_freeze_binds_all_inputs_and_emits_runner_ready_private_outputs(
         assert stat.S_IMODE(paths["output_path"].stat().st_mode) == 0o644
     assert frozen["stage"] == "execution-frozen"
     assert frozen["execution_frozen_at"] == "2026-07-30T09:34:56Z"
+    assert frozen["exposure_ledger_sha256"] == documents["protocol"]["exposure_ledger_sha256"]
     assert frozen["execution_inputs"] == hashes
     assert hashes["acquisition_protocol_sha256"] == _sha256(paths["protocol_path"].read_bytes())
     assert hashes["selection_output_sha256"] == _sha256(paths["selection_path"].read_bytes())
     assert hashes["scenario_pack_sha256"] == _sha256(paths["scenario_pack_path"].read_bytes())
+    assert hashes["source_map_sha256"] == _sha256(paths["source_map_path"].read_bytes())
     assert hashes["control_results_sha256"] == _sha256(paths["controls_path"].read_bytes())
     assert hashes["execution_schedule_sha256"] == _sha256(schedule_bytes)
     assert hashes["execution_environment_sha256"] == _sha256(paths["environment_path"].read_bytes())
@@ -397,6 +465,7 @@ def test_freeze_binds_all_inputs_and_emits_runner_ready_private_outputs(
         control_results_path=paths["controls_path"],
         environment_path=paths["environment_path"],
         schedule_path=paths["schedule_path"],
+        source_map_path=paths["source_map_path"],
     )
     assert loaded.execution_conditions == documents["environment"]
     assert len(loaded.schedule.assignments) == 30
@@ -433,6 +502,14 @@ def _set(document: str, *path: str, value: object) -> Mutation:
             ),
         ),
         ("protocol-stage", _set("protocol", "stage", value="execution-frozen")),
+        (
+            "protocol-exposure-ledger",
+            _set("protocol", "exposure_ledger_sha256", value="not-a-sha256"),
+        ),
+        (
+            "protocol-missing-exposure-ledger",
+            lambda docs: docs["protocol"].pop("exposure_ledger_sha256"),
+        ),
         ("protocol-seed", _set("protocol", "selection_seed", value="0" * 64)),
         (
             "protocol-candidate-partition-seed",
@@ -481,6 +558,10 @@ def _set(document: str, *path: str, value: object) -> Mutation:
             lambda docs: docs["protocol"]["execution_inputs"].pop("execution_environment_sha256"),
         ),
         (
+            "protocol-missing-source-map-input",
+            lambda docs: docs["protocol"]["execution_inputs"].pop("source_map_sha256"),
+        ),
+        (
             "protocol-missing-acquisition-input",
             lambda docs: docs["protocol"]["execution_inputs"].pop("acquisition_protocol_sha256"),
         ),
@@ -503,6 +584,14 @@ def _set(document: str, *path: str, value: object) -> Mutation:
         (
             "protocol-missing-codex",
             lambda docs: docs["protocol"]["product_inputs"].pop("codex_binary_sha256"),
+        ),
+        (
+            "protocol-missing-origin",
+            lambda docs: docs["protocol"]["product_inputs"].pop("origin_url"),
+        ),
+        (
+            "protocol-origin-main-drift",
+            lambda docs: docs["protocol"]["product_inputs"].update(origin_main_revision="0" * 40),
         ),
         (
             "protocol-provider-config",
@@ -727,6 +816,146 @@ def test_freeze_rejects_invalid_acquisition_protocol_digest_shape(
     assert not paths["output_path"].exists()
 
 
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "missing",
+        "tampered-bundle",
+        "reordered",
+        "path-traversal",
+        "extra-key",
+        "hash-mismatch",
+        "base-commit-mismatch",
+        "tree-mismatch",
+    ],
+)
+def test_freeze_rejects_untrusted_source_map_or_bundle(
+    tmp_path: Path,
+    kind: str,
+) -> None:
+    documents, paths = _fixture_paths(tmp_path)
+    source_map = documents["source_map"]
+    first = next(iter(source_map["repositories"].values()))
+    bundle = paths["source_map_path"].parent / first["bundle_path"]
+    if kind == "missing":
+        paths["source_map_path"].unlink()
+    elif kind == "tampered-bundle":
+        bundle.write_bytes(bundle.read_bytes() + b"tampered")
+    elif kind == "reordered":
+        paths["source_map_path"].write_bytes(
+            json.dumps(
+                {
+                    "schema_version": source_map["schema_version"],
+                    "repositories": source_map["repositories"],
+                },
+                separators=(",", ":"),
+            ).encode()
+        )
+    elif kind == "path-traversal":
+        first["bundle_path"] = "../escaped.bundle"
+        _write_json(paths["source_map_path"], source_map)
+    elif kind == "extra-key":
+        first["extra"] = True
+        _write_json(paths["source_map_path"], source_map)
+    elif kind == "hash-mismatch":
+        first["bundle_sha256"] = "0" * 64
+        _write_json(paths["source_map_path"], source_map)
+    elif kind == "base-commit-mismatch":
+        first["base_commit"] = "a" * 40
+        _write_json(paths["source_map_path"], source_map)
+    else:
+        first["tree_sha1"] = "b" * 40
+        _write_json(paths["source_map_path"], source_map)
+    if paths["source_map_path"].exists():
+        paths["source_map_path"].chmod(0o600)
+
+    with pytest.raises(freezer.FreezeError):
+        _freeze(paths)
+
+    assert not paths["schedule_path"].exists()
+    assert not paths["output_path"].exists()
+
+
+@pytest.mark.parametrize("kind", ["symlink", "hardlink", "duplicate-path"])
+def test_freeze_rejects_source_bundle_aliases(
+    tmp_path: Path,
+    kind: str,
+) -> None:
+    documents, paths = _fixture_paths(tmp_path)
+    entries = list(documents["source_map"]["repositories"].values())
+    bundle = paths["source_map_path"].parent / entries[0]["bundle_path"]
+    alias = bundle.with_suffix(".alias")
+    if kind == "symlink":
+        bundle.rename(alias)
+        bundle.symlink_to(alias)
+    elif kind == "hardlink":
+        alias.hardlink_to(bundle)
+    else:
+        entries[1]["bundle_path"] = entries[0]["bundle_path"]
+        entries[1]["bundle_sha256"] = entries[0]["bundle_sha256"]
+        _write_json(paths["source_map_path"], documents["source_map"])
+
+    with pytest.raises(freezer.FreezeError):
+        _freeze(paths)
+
+    assert not paths["schedule_path"].exists()
+    assert not paths["output_path"].exists()
+
+
+def test_freeze_rejects_selection_intersecting_authenticated_exposure(
+    tmp_path: Path,
+) -> None:
+    documents, paths = _fixture_paths(tmp_path)
+    selected_id = str(documents["selection"]["analysis_instance_ids"][0])
+    exposure_document = {
+        "instance_id_hmac_sha256": [
+            exposure_ledger.instance_id_hmac_sha256(EXPOSURE_SALT, selected_id)
+        ],
+        "salt": EXPOSURE_SALT,
+        "schema_version": 1,
+    }
+    exposure_bytes = exposure_ledger.canonical_ledger_bytes(exposure_document)
+    paths["exposure_ledger_path"].write_bytes(exposure_bytes)
+    paths["exposure_ledger_path"].chmod(0o600)
+    documents["protocol"]["exposure_ledger_sha256"] = _sha256(exposure_bytes)
+    _write_json(
+        paths["protocol_path"],
+        documents["protocol"],
+        newline=True,
+    )
+
+    with pytest.raises(freezer.FreezeError, match="historical exposure"):
+        _freeze(paths)
+
+    assert not paths["schedule_path"].exists()
+    assert not paths["output_path"].exists()
+
+
+@pytest.mark.parametrize("kind", ["missing", "tampered", "symlink", "hardlink"])
+def test_freeze_rejects_missing_tampered_or_aliased_exposure_ledger(
+    tmp_path: Path,
+    kind: str,
+) -> None:
+    _, paths = _fixture_paths(tmp_path)
+    ledger = paths["exposure_ledger_path"]
+    alias = ledger.with_suffix(".alias")
+    if kind == "missing":
+        ledger.unlink()
+    elif kind == "tampered":
+        ledger.write_bytes(ledger.read_bytes() + b"tampered")
+    elif kind == "symlink":
+        ledger.rename(alias)
+        ledger.symlink_to(alias)
+    else:
+        alias.hardlink_to(ledger)
+
+    with pytest.raises(freezer.FreezeError):
+        _freeze(paths)
+
+    assert not paths["schedule_path"].exists()
+    assert not paths["output_path"].exists()
+
+
 def test_cli_requires_expected_acquisition_protocol_digest(
     tmp_path: Path,
 ) -> None:
@@ -734,10 +963,14 @@ def test_cli_requires_expected_acquisition_protocol_digest(
     arguments = [
         "--protocol",
         str(paths["protocol_path"]),
+        "--exposure-ledger",
+        str(paths["exposure_ledger_path"]),
         "--selection",
         str(paths["selection_path"]),
         "--scenario-pack",
         str(paths["scenario_pack_path"]),
+        "--source-map",
+        str(paths["source_map_path"]),
         "--collision",
         str(paths["collision_path"]),
         "--reconstructed",

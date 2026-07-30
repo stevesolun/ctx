@@ -26,6 +26,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts import ctx_ab_benchmark as benchmark  # noqa: E402
+from scripts import ctx_ab_exposure_ledger as exposure_ledger  # noqa: E402
 from scripts import ctx_ab_holdout as holdout  # noqa: E402
 from scripts import ctx_ab_holdout_freeze as freezer  # noqa: E402
 from scripts import ctx_ab_swebench as swebench  # noqa: E402
@@ -434,22 +435,33 @@ def _retain_phase_artifacts(
 
 def _repo_source(
     row: dict[str, Any],
-    sources: dict[str, Any],
-    *,
-    source_map_path: Path,
-) -> Path:
+    sources: Mapping[str, freezer.SourceBundle],
+) -> freezer.SourceBundle:
     repo = str(row["repo"]).strip().lower()
     url = holdout.canonical_repo_url(repo)
-    raw = sources.get(url, sources.get(repo))
-    if not isinstance(raw, str) or not raw:
+    source = sources.get(url)
+    if source is None:
         raise MaterializationError("selected repository is absent from the source map")
-    path = Path(raw)
-    if not path.is_absolute():
-        path = source_map_path.parent / path
-    path = path.resolve()
-    if not path.is_dir():
-        raise MaterializationError("selected repository source is unavailable")
-    return path
+    if source.base_commit != str(row.get("base_commit") or ""):
+        raise MaterializationError("selected repository source commit is stale")
+    return source
+
+
+def _validate_source_bundle_heads(
+    source: freezer.SourceBundle,
+    *,
+    cwd: Path,
+    deadline: float,
+) -> None:
+    listed_heads = _checked(
+        ["git", "bundle", "list-heads", str(source.bundle_path)],
+        cwd=cwd,
+        deadline=deadline,
+    ).stdout.splitlines()
+    if not listed_heads or any(
+        not line.startswith(f"{source.base_commit} ") for line in listed_heads
+    ):
+        raise MaterializationError("repository source bundle exposes an unpinned ref")
 
 
 def _scenario(
@@ -460,7 +472,7 @@ def _scenario(
     pins: dict[str, Any],
     retained_root: Path,
     runtime: VerifierRuntime,
-    source: Path,
+    source: freezer.SourceBundle,
     slot: int,
     work_root: Path,
     timeout: float,
@@ -468,6 +480,7 @@ def _scenario(
     started = time.monotonic()
     deadline = started + timeout
     workspace = work_root / f"scenario-{slot}"
+    _validate_source_bundle_heads(source, cwd=work_root, deadline=deadline)
     _checked(
         [
             "git",
@@ -477,7 +490,7 @@ def _scenario(
             "--quiet",
             "--no-checkout",
             "--no-hardlinks",
-            str(source),
+            str(source.bundle_path),
             str(workspace),
         ],
         cwd=work_root,
@@ -492,6 +505,22 @@ def _scenario(
     observed = _checked(["git", "rev-parse", "HEAD"], cwd=workspace, deadline=deadline)
     if observed.stdout.strip() != commit:
         raise MaterializationError("repository checkout did not reach the pinned commit")
+    future_history = _checked(
+        ["git", "rev-list", "--all", "--not", commit],
+        cwd=workspace,
+        deadline=deadline,
+    )
+    unreachable = _checked(
+        ["git", "fsck", "--full", "--unreachable", "--no-reflogs"],
+        cwd=workspace,
+        deadline=deadline,
+    )
+    if future_history.stdout.strip() or unreachable.stdout.strip():
+        raise MaterializationError("repository source bundle is not a base-commit closure")
+    _checked(["git", "remote", "remove", "origin"], cwd=workspace, deadline=deadline)
+    remotes = _checked(["git", "remote"], cwd=workspace, deadline=deadline)
+    if remotes.stdout.strip():
+        raise MaterializationError("repository source bundle retained an external remote")
     tree = _checked(
         ["git", "rev-parse", "HEAD^{tree}"],
         cwd=workspace,
@@ -502,7 +531,11 @@ def _scenario(
         cwd=workspace,
         deadline=deadline,
     )
-    if not swebench.REVISION_PATTERN.fullmatch(tree) or status_result.stdout:
+    if (
+        not swebench.REVISION_PATTERN.fullmatch(tree)
+        or tree != source.tree_sha1
+        or status_result.stdout
+    ):
         raise MaterializationError("repository checkout is not an exact clean tree")
 
     evaluated = holdout.evaluate_row(row, protocol)
@@ -752,6 +785,7 @@ def materialize(
     *,
     protocol_path: Path,
     expected_acquisition_protocol_sha256: str,
+    exposure_ledger_path: Path,
     rows_path: Path,
     selection_path: Path,
     source_map_path: Path,
@@ -768,6 +802,21 @@ def materialize(
         expected_sha256=expected_acquisition_protocol_sha256,
     )
     try:
+        freezer._paths_are_distinct(
+            {
+                "protocol": protocol_path,
+                "exposure ledger": exposure_ledger_path,
+                "rows": rows_path,
+                "selection": selection_path,
+                "source map": source_map_path,
+                "runtime availability": runtime_availability_path,
+                "catalog archive": catalog_archive_path,
+                "output": output,
+            }
+        )
+    except freezer.FreezeError as exc:
+        raise MaterializationError("materialization inputs must not alias") from exc
+    try:
         pins = freezer.validate_acquisition_protocol(
             protocol,
             benchmark_script_path=Path(benchmark.__file__),
@@ -778,6 +827,13 @@ def materialize(
         raise MaterializationError(
             f"materializer requires a valid acquisition-frozen V2 protocol: {exc}"
         ) from exc
+    try:
+        exposure_document = exposure_ledger.load_authenticated_ledger(
+            exposure_ledger_path,
+            str(protocol["exposure_ledger_sha256"]),
+        )
+    except (OSError, ValueError) as exc:
+        raise MaterializationError("authenticated exposure ledger is invalid") from exc
     timeout = protocol["timeouts"]["control_verification_seconds"]
     rows_bytes = rows_path.read_bytes()
     rows_sha256 = _sha256(rows_bytes)
@@ -790,9 +846,16 @@ def materialize(
     selection = _load_json(selection_path)
     if selection_bytes != _canonical_bytes(selection):
         raise MaterializationError("private selection must use canonical JSON bytes")
-    ledger = [holdout.evaluate_row(row, protocol) for row in rows]
+    ledger = holdout.reject_historical_exposures(
+        [holdout.evaluate_row(row, protocol) for row in rows],
+        exposure_document,
+    )
     if selection != holdout.select_rows(ledger, protocol):
         raise MaterializationError("private selection does not match deterministic selection")
+    try:
+        holdout.require_exposure_disjoint_selection(selection, exposure_document)
+    except ValueError as exc:
+        raise MaterializationError("private selection intersects historical exposure") from exc
     selected_ids, repository_map = holdout._validated_selection(selection, protocol)
     if len(selected_ids) != SCENARIO_COUNT or len(set(repository_map.values())) != SCENARIO_COUNT:
         raise MaterializationError(
@@ -801,7 +864,16 @@ def materialize(
     rows_by_id = {str(row.get("instance_id") or ""): row for row in rows}
     if len(rows_by_id) != len(rows) or any(item not in rows_by_id for item in selected_ids):
         raise MaterializationError("selected rows are missing or duplicated")
-    sources = _load_json(source_map_path)
+    try:
+        sources, _source_map_sha256 = freezer.validate_source_map(source_map_path)
+    except freezer.FreezeError as exc:
+        raise MaterializationError(f"private source map is invalid: {exc}") from exc
+    expected_source_urls = {
+        holdout.canonical_repo_url(str(rows_by_id[scenario_id]["repo"]))
+        for scenario_id in selected_ids
+    }
+    if set(sources) != expected_source_urls:
+        raise MaterializationError("private source map does not match selected repositories")
     if _sha256(runtime_availability_path.read_bytes()) != protocol["product_inputs"].get(
         "runtime_availability_sha256"
     ):
@@ -828,6 +900,13 @@ def materialize(
     try:
         with tempfile.TemporaryDirectory(prefix="ctx-holdout-materialize-") as raw_work:
             work_root = Path(raw_work)
+            source_preflight_deadline = time.monotonic() + float(timeout)
+            for source in sources.values():
+                _validate_source_bundle_heads(
+                    source,
+                    cwd=work_root,
+                    deadline=source_preflight_deadline,
+                )
             for slot, scenario_id in enumerate(selected_ids):
                 row = rows_by_id[scenario_id]
                 scenario_row, scenario, control, source = _scenario(
@@ -837,7 +916,7 @@ def materialize(
                     pins=pins,
                     retained_root=retained_evidence,
                     runtime=runtime,
-                    source=_repo_source(row, sources, source_map_path=source_map_path),
+                    source=_repo_source(row, sources),
                     slot=slot,
                     work_root=work_root,
                     timeout=float(timeout),
@@ -900,6 +979,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--protocol", type=Path, required=True)
     parser.add_argument("--expected-acquisition-protocol-sha256", required=True)
+    parser.add_argument("--exposure-ledger", type=Path, required=True)
     parser.add_argument("--rows", type=Path, required=True)
     parser.add_argument("--selection", type=Path, required=True)
     parser.add_argument("--source-map", type=Path, required=True)
@@ -915,6 +995,7 @@ def main(argv: list[str] | None = None) -> int:
         hashes = materialize(
             protocol_path=args.protocol,
             expected_acquisition_protocol_sha256=args.expected_acquisition_protocol_sha256,
+            exposure_ledger_path=args.exposure_ledger,
             rows_path=args.rows,
             selection_path=args.selection,
             source_map_path=args.source_map,

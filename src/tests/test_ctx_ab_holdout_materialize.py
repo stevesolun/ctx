@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 
+from scripts import ctx_ab_exposure_ledger as exposure_ledger
 from scripts import ctx_ab_holdout as holdout
 from scripts import ctx_ab_holdout_freeze as freezer
 from scripts import ctx_ab_holdout_materialize as materializer
@@ -28,6 +29,8 @@ DOCKER_CLI_SHA256 = "7" * 64
 DOCKER_DAEMON_ID = "ctx-test-daemon"
 DOCKER_SERVER_VERSION = "29.5.2"
 HIDDEN_ARTIFACT = "PRIVATE-HIDDEN-EVALUATOR-CONTENT"
+EXPOSURE_SALT = "b" * 64
+ORIGIN_URL = "https://github.com/stevesolun/ctx.git"
 
 
 @dataclass
@@ -35,9 +38,11 @@ class Fixture:
     archive: Path
     docker_cli: Path
     docker_host: str
+    exposure_ledger: Path
     output: Path
     protocol: dict[str, Any]
     protocol_path: Path
+    repositories: dict[str, Path]
     rows: list[dict[str, Any]]
     rows_path: Path
     runtime: Path
@@ -157,12 +162,27 @@ def _executable(path: Path) -> Path:
 def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Fixture:
     repos = tmp_path / "repos"
     repos.mkdir()
+    bundles = tmp_path / "source-bundles"
+    bundles.mkdir(mode=0o700)
     rows: list[dict[str, object]] = []
-    sources: dict[str, str] = {}
+    repositories: dict[str, Path] = {}
+    sources: dict[str, Any] = {"repositories": {}, "schema_version": 1}
     for index in range(10):
         repo, repo_rows = _make_repo(repos, index)
         rows.extend(repo_rows)
-        sources[f"owner/repo-{index}"] = str(repo)
+        canonical_url = holdout.canonical_repo_url(f"owner/repo-{index}")
+        bundle = bundles / f"repo-{index}.bundle"
+        _git(repo, "bundle", "create", str(bundle), "HEAD")
+        bundle.chmod(0o600)
+        commit = _git(repo, "rev-parse", "HEAD").strip()
+        tree = _git(repo, "rev-parse", "HEAD^{tree}").strip()
+        repositories[canonical_url] = repo
+        sources["repositories"][canonical_url] = {
+            "base_commit": commit,
+            "bundle_path": bundle.relative_to(tmp_path).as_posix(),
+            "bundle_sha256": hashlib.sha256(bundle.read_bytes()).hexdigest(),
+            "tree_sha1": tree,
+        }
 
     rows_bytes = b"".join(_canonical(row) + b"\n" for row in rows)
     rows_path = tmp_path / "rows.jsonl"
@@ -175,6 +195,20 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Fixture:
     swebench_checkout.mkdir()
     swebench_python = _executable(tmp_path / "swebench-python")
     docker_cli = _executable(tmp_path / "docker")
+    exposure_document = {
+        "instance_id_hmac_sha256": [
+            exposure_ledger.instance_id_hmac_sha256(
+                EXPOSURE_SALT,
+                "historical-control-task",
+            )
+        ],
+        "salt": EXPOSURE_SALT,
+        "schema_version": 1,
+    }
+    exposure_path = tmp_path / "exposure-ledger.json"
+    exposure_bytes = exposure_ledger.canonical_ledger_bytes(exposure_document)
+    exposure_path.write_bytes(exposure_bytes)
+    exposure_path.chmod(0o600)
 
     v1 = json.loads(PROTOCOL_PATH.read_text(encoding="utf-8"))
     v1["universe"]["expected_rows"] = len(rows)
@@ -184,6 +218,8 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Fixture:
         "benchmark_script_sha256": hashlib.sha256(benchmark_path.read_bytes()).hexdigest(),
         "catalog_archive_sha256": hashlib.sha256(archive_path.read_bytes()).hexdigest(),
         "codex_binary_sha256": "a" * 64,
+        "origin_main_revision": str(v1["product_inputs"]["revision"]),
+        "origin_url": ORIGIN_URL,
         "provider_config_sha256": materializer.benchmark.codex_provider_config_sha256("openai"),
         "revision": str(v1["product_inputs"]["revision"]),
         "runtime_availability_sha256": hashlib.sha256(runtime_path.read_bytes()).hexdigest(),
@@ -207,6 +243,7 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Fixture:
         acquisition_frozen_at=str(v1["acquisition_frozen_at"]),
         product_inputs=product_inputs,
         verifier_pins=verifier_pins,
+        exposure_ledger_sha256=hashlib.sha256(exposure_bytes).hexdigest(),
     )
     monkeypatch.setattr(
         freezer,
@@ -223,13 +260,16 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Fixture:
     selection_path.write_bytes(_canonical(selection))
     source_map_path = tmp_path / "sources.json"
     source_map_path.write_bytes(_canonical(sources))
+    source_map_path.chmod(0o600)
     return Fixture(
         archive=archive_path,
         docker_cli=docker_cli,
         docker_host="unix:///tmp/ctx-materializer-test.sock",
+        exposure_ledger=exposure_path,
         output=tmp_path / "private-output",
         protocol=protocol,
         protocol_path=protocol_path,
+        repositories=repositories,
         rows=rows,
         rows_path=rows_path,
         runtime=runtime_path,
@@ -247,6 +287,7 @@ def _run(fixture: Fixture) -> dict[str, str]:
         expected_acquisition_protocol_sha256=hashlib.sha256(
             fixture.protocol_path.read_bytes()
         ).hexdigest(),
+        exposure_ledger_path=fixture.exposure_ledger,
         rows_path=fixture.rows_path,
         selection_path=fixture.selection_path,
         source_map_path=fixture.source_map,
@@ -525,11 +566,13 @@ def test_materializes_ten_official_controls_and_evaluator_bound_attestations(
     )
     freezer.freeze_protocol(
         protocol_path=fixture.protocol_path,
+        exposure_ledger_path=fixture.exposure_ledger,
         expected_acquisition_protocol_sha256=hashlib.sha256(
             fixture.protocol_path.read_bytes()
         ).hexdigest(),
         selection_path=fixture.selection_path,
         scenario_pack_path=output / "scenario-pack.json",
+        source_map_path=fixture.source_map,
         collision_path=collision_path,
         reconstructed_path=reconstructed_path,
         controls_path=output / "control-results.json",
@@ -549,6 +592,7 @@ def test_materializes_ten_official_controls_and_evaluator_bound_attestations(
         control_results_path=output / "control-results.json",
         environment_path=environment_path,
         schedule_path=schedule_path,
+        source_map_path=fixture.source_map,
     )
     assert len(loaded.scenarios) == 10
     assert len(loaded.schedule.assignments) == 30
@@ -710,6 +754,178 @@ def test_frozen_dataset_tamper_is_rejected_before_verifier_execution(
     assert not fixture.output.exists()
 
 
+def test_historically_exposed_top_candidate_is_replaced_and_materialized(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _fixture(tmp_path, monkeypatch)
+    exposed_id = str(fixture.selection["analysis_instance_ids"][0])
+    exposure_document = {
+        "instance_id_hmac_sha256": [
+            exposure_ledger.instance_id_hmac_sha256(EXPOSURE_SALT, exposed_id)
+        ],
+        "salt": EXPOSURE_SALT,
+        "schema_version": 1,
+    }
+    exposure_bytes = exposure_ledger.canonical_ledger_bytes(exposure_document)
+    fixture.exposure_ledger.write_bytes(exposure_bytes)
+    fixture.exposure_ledger.chmod(0o600)
+    fixture.protocol["exposure_ledger_sha256"] = hashlib.sha256(exposure_bytes).hexdigest()
+    fixture.protocol_path.write_bytes(_canonical_acquisition(fixture.protocol))
+    filtered = holdout.reject_historical_exposures(
+        [holdout.evaluate_row(row, fixture.protocol) for row in fixture.rows],
+        exposure_document,
+    )
+    fixture.selection = holdout.select_rows(filtered, fixture.protocol)
+    fixture.selection_path.write_bytes(_canonical(fixture.selection))
+    double = _install_verifier(fixture, monkeypatch)
+
+    _run(fixture)
+
+    assert exposed_id not in fixture.selection["analysis_instance_ids"]
+    assert len(fixture.selection["analysis_instance_ids"]) == 10
+    assert len(set(fixture.selection["analysis_repository_map"].values())) == 10
+    assert len(double.calls) == 20
+
+
+@pytest.mark.parametrize("kind", ["missing", "tampered", "symlink", "hardlink"])
+def test_exposure_ledger_fails_closed_before_selection_or_verifier(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+) -> None:
+    fixture = _fixture(tmp_path, monkeypatch)
+    double = _install_verifier(fixture, monkeypatch)
+    alias = fixture.exposure_ledger.with_suffix(".alias")
+    if kind == "missing":
+        fixture.exposure_ledger.unlink()
+    elif kind == "tampered":
+        fixture.exposure_ledger.write_bytes(fixture.exposure_ledger.read_bytes() + b"tampered")
+    elif kind == "symlink":
+        fixture.exposure_ledger.rename(alias)
+        fixture.exposure_ledger.symlink_to(alias)
+    else:
+        alias.hardlink_to(fixture.exposure_ledger)
+
+    with pytest.raises(
+        materializer.MaterializationError,
+        match="authenticated exposure ledger",
+    ):
+        _run(fixture)
+
+    assert not double.calls
+    assert not fixture.output.exists()
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "missing",
+        "tampered-bundle",
+        "reordered",
+        "path-traversal",
+        "extra-key",
+        "hash-mismatch",
+    ],
+)
+def test_source_map_and_bundles_fail_closed_before_verifier_execution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+) -> None:
+    fixture = _fixture(tmp_path, monkeypatch)
+    double = _install_verifier(fixture, monkeypatch)
+    document = json.loads(fixture.source_map.read_bytes())
+    first = next(iter(document["repositories"].values()))
+    bundle = fixture.source_map.parent / first["bundle_path"]
+    if kind == "missing":
+        fixture.source_map.unlink()
+    elif kind == "tampered-bundle":
+        bundle.write_bytes(bundle.read_bytes() + b"tampered")
+    elif kind == "reordered":
+        fixture.source_map.write_bytes(
+            json.dumps(
+                {
+                    "schema_version": document["schema_version"],
+                    "repositories": document["repositories"],
+                },
+                separators=(",", ":"),
+            ).encode()
+        )
+    elif kind == "path-traversal":
+        first["bundle_path"] = "../escaped.bundle"
+        fixture.source_map.write_bytes(_canonical(document))
+    elif kind == "extra-key":
+        first["extra"] = True
+        fixture.source_map.write_bytes(_canonical(document))
+    else:
+        first["bundle_sha256"] = "0" * 64
+        fixture.source_map.write_bytes(_canonical(document))
+    if fixture.source_map.exists():
+        fixture.source_map.chmod(0o600)
+
+    with pytest.raises(materializer.MaterializationError, match="private source map"):
+        _run(fixture)
+
+    assert not double.calls
+    assert not fixture.output.exists()
+
+
+@pytest.mark.parametrize("kind", ["symlink", "hardlink"])
+def test_source_bundle_aliases_fail_closed_before_verifier_execution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+) -> None:
+    fixture = _fixture(tmp_path, monkeypatch)
+    double = _install_verifier(fixture, monkeypatch)
+    document = json.loads(fixture.source_map.read_bytes())
+    first = next(iter(document["repositories"].values()))
+    bundle = fixture.source_map.parent / first["bundle_path"]
+    alias = bundle.with_suffix(".alias")
+    if kind == "symlink":
+        bundle.rename(alias)
+        bundle.symlink_to(alias)
+    else:
+        alias.hardlink_to(bundle)
+
+    with pytest.raises(materializer.MaterializationError, match="private source map"):
+        _run(fixture)
+
+    assert not double.calls
+    assert not fixture.output.exists()
+
+
+def test_source_bundle_with_future_history_is_rejected_before_private_work(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _fixture(tmp_path, monkeypatch)
+    double = _install_verifier(fixture, monkeypatch)
+    document = json.loads(fixture.source_map.read_bytes())
+    canonical_url, first = next(iter(document["repositories"].items()))
+    repo = fixture.repositories[canonical_url]
+    (repo / "future-gold.txt").write_text("future solution\n", encoding="utf-8")
+    _git(repo, "add", "future-gold.txt")
+    _git(repo, "commit", "-qm", "future gold")
+    bundle = fixture.source_map.parent / first["bundle_path"]
+    bundle.unlink()
+    _git(repo, "bundle", "create", str(bundle), "--all")
+    bundle.chmod(0o600)
+    first["bundle_sha256"] = hashlib.sha256(bundle.read_bytes()).hexdigest()
+    fixture.source_map.write_bytes(_canonical(document))
+    fixture.source_map.chmod(0o600)
+
+    with pytest.raises(
+        materializer.MaterializationError,
+        match="unpinned ref|base-commit closure",
+    ):
+        _run(fixture)
+
+    assert not double.calls
+    assert not fixture.output.exists()
+
+
 def test_requires_exactly_ten_repositories_before_verifier_execution(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -764,12 +980,11 @@ def test_materialization_never_mutates_future_agent_repository_inputs(
 
     _run(fixture)
 
-    sources = json.loads(fixture.source_map.read_text(encoding="utf-8"))
     selected_ids = set(fixture.selection["analysis_instance_ids"])
     for row in fixture.rows:
         if row["instance_id"] not in selected_ids:
             continue
-        repo = Path(sources[str(row["repo"])])
+        repo = fixture.repositories[holdout.canonical_repo_url(str(row["repo"]))]
         assert _git(repo, "status", "--porcelain=v1", "--untracked-files=all") == ""
         product_path = holdout._parse_patch(str(row["patch"]))[0][0]
         test_path = holdout._parse_patch(str(row["test_patch"]))[0][0]
@@ -860,6 +1075,7 @@ def test_acquisition_protocol_authentication_fails_before_private_work(
         materializer.materialize(
             protocol_path=fixture.protocol_path,
             expected_acquisition_protocol_sha256=expected_sha256,
+            exposure_ledger_path=tmp_path / "must-not-read-exposure-ledger.json",
             rows_path=tmp_path / "must-not-read-rows.jsonl",
             selection_path=tmp_path / "must-not-read-selection.json",
             source_map_path=tmp_path / "must-not-read-sources.json",
@@ -893,6 +1109,7 @@ def test_acquisition_protocol_byte_drift_is_rejected_before_private_work(
         materializer.materialize(
             protocol_path=fixture.protocol_path,
             expected_acquisition_protocol_sha256=expected_sha256,
+            exposure_ledger_path=fixture.exposure_ledger,
             rows_path=fixture.rows_path,
             selection_path=fixture.selection_path,
             source_map_path=fixture.source_map,
@@ -964,6 +1181,8 @@ def test_cli_failure_suppresses_private_identifiers_and_tasks(
                 str(fixture.protocol_path),
                 "--expected-acquisition-protocol-sha256",
                 hashlib.sha256(fixture.protocol_path.read_bytes()).hexdigest(),
+                "--exposure-ledger",
+                str(fixture.exposure_ledger),
                 "--rows",
                 str(fixture.rows_path),
                 "--selection",

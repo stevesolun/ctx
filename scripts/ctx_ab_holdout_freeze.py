@@ -6,12 +6,13 @@ from __future__ import annotations
 import argparse
 from collections.abc import Mapping
 from copy import deepcopy
+from dataclasses import dataclass
 from datetime import UTC, datetime
 import hashlib
 import json
 import math
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import secrets
 import stat
@@ -19,6 +20,7 @@ import tempfile
 from typing import Any
 
 from scripts import ctx_ab_benchmark as benchmark
+from scripts import ctx_ab_exposure_ledger as exposure_ledger
 from scripts import ctx_ab_holdout as holdout
 
 
@@ -47,6 +49,16 @@ ACQUISITION_EXECUTION_INPUT_KEYS = frozenset(
         "reconstructed_test_attestation_sha256",
         "scenario_pack_sha256",
         "selection_output_sha256",
+        "source_map_sha256",
+    }
+)
+SOURCE_MAP_KEYS = frozenset({"repositories", "schema_version"})
+SOURCE_MAP_REPOSITORY_KEYS = frozenset(
+    {
+        "base_commit",
+        "bundle_path",
+        "bundle_sha256",
+        "tree_sha1",
     }
 )
 SELECTION_KEYS = frozenset(
@@ -186,6 +198,8 @@ PRODUCT_INPUT_KEYS = frozenset(
         "benchmark_script_sha256",
         "catalog_archive_sha256",
         "codex_binary_sha256",
+        "origin_main_revision",
+        "origin_url",
         "provider_config_sha256",
         "revision",
         "runtime_availability_sha256",
@@ -220,6 +234,16 @@ LIMIT_KEYS = frozenset(
 
 class FreezeError(RuntimeError):
     """The holdout cannot be execution-frozen."""
+
+
+@dataclass(frozen=True)
+class SourceBundle:
+    """Authenticated source bundle pinned by the private source map."""
+
+    base_commit: str
+    bundle_path: Path
+    bundle_sha256: str
+    tree_sha1: str
 
 
 def _canonical_bytes(value: Any, *, newline: bool = False) -> bytes:
@@ -325,6 +349,7 @@ def build_acquisition_protocol(
     acquisition_frozen_at: str,
     product_inputs: Mapping[str, Any],
     verifier_pins: Mapping[str, Any],
+    exposure_ledger_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Derive the complete fixed V2 acquisition design from the V1 contract."""
     protocol = deepcopy(dict(v1))
@@ -351,6 +376,11 @@ def build_acquisition_protocol(
     protocol["stage"] = "acquisition-frozen"
     protocol["frozen_at"] = frozen_at
     protocol["acquisition_frozen_at"] = acquisition_frozen_at
+    if exposure_ledger_sha256 is not None:
+        protocol["exposure_ledger_sha256"] = _require_sha256(
+            exposure_ledger_sha256,
+            label="exposure ledger identity",
+        )
     protocol.pop("execution_frozen_at", None)
     protocol.pop("canary_policy", None)
     protocol["product_inputs"] = dict(product_inputs)
@@ -481,6 +511,127 @@ def _paths_are_distinct(paths: Mapping[str, Path]) -> None:
                 raise FreezeError(f"{left_label} and {right_label} must be distinct")
 
 
+def _regular_file_sha256(path: Path, *, label: str, private: bool) -> str:
+    try:
+        resolved = path.resolve(strict=False)
+        if path.is_symlink():
+            raise FreezeError(f"{label} must be an owner-only single-link regular file")
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except (OSError, RuntimeError) as exc:
+        if isinstance(exc, FreezeError):
+            raise
+        raise FreezeError(f"{label} must be an owner-only single-link regular file") from exc
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_nlink != 1
+            or (
+                private
+                and os.name != "nt"
+                and stat.S_IMODE(metadata.st_mode) & (stat.S_IRWXG | stat.S_IRWXO)
+            )
+        ):
+            raise FreezeError(f"{label} must be an owner-only single-link regular file")
+        if private:
+            private_root = PRIVATE_ROOT.resolve()
+            if ROOT.resolve() in resolved.parents and private_root not in resolved.parents:
+                raise FreezeError(f"{label} inside the repository must use the private root")
+        digest = hashlib.sha256()
+        with os.fdopen(descriptor, "rb") as handle:
+            descriptor = -1
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def validate_source_map(source_map_path: Path) -> tuple[dict[str, SourceBundle], str]:
+    """Authenticate the canonical private map and each base-closure bundle."""
+    source_map_bytes = _read_regular_bytes(
+        source_map_path,
+        label="private source map",
+        private=True,
+    )
+    document = _json_object(source_map_bytes, label="private source map")
+    if source_map_bytes != _canonical_bytes(document):
+        raise FreezeError("private source map must use canonical JSON bytes")
+    _exact_keys(document, SOURCE_MAP_KEYS, label="private source map")
+    repositories = document.get("repositories")
+    if document.get("schema_version") != 1 or not isinstance(repositories, dict):
+        raise FreezeError("private source map has an unsupported shape")
+
+    try:
+        lexical_root = source_map_path.parent
+        source_root = lexical_root.resolve(strict=True)
+    except OSError as exc:
+        raise FreezeError("private source map root is unavailable") from exc
+    bundles: dict[str, SourceBundle] = {}
+    resolved_paths: set[Path] = set()
+    for canonical_url, raw_entry in repositories.items():
+        if (
+            not isinstance(canonical_url, str)
+            or benchmark.GITHUB_REPO_URL.fullmatch(canonical_url) is None
+            or not isinstance(raw_entry, dict)
+        ):
+            raise FreezeError("private source map repository entry is invalid")
+        _exact_keys(
+            raw_entry,
+            SOURCE_MAP_REPOSITORY_KEYS,
+            label="private source map repository entry",
+        )
+        base_commit = str(raw_entry.get("base_commit") or "")
+        tree_sha1 = str(raw_entry.get("tree_sha1") or "")
+        bundle_sha256 = _require_sha256(
+            raw_entry.get("bundle_sha256"),
+            label="private source bundle identity",
+        )
+        if REVISION.fullmatch(base_commit) is None or REVISION.fullmatch(tree_sha1) is None:
+            raise FreezeError("private source map repository identity is invalid")
+
+        raw_bundle_path = raw_entry.get("bundle_path")
+        if not isinstance(raw_bundle_path, str) or "\\" in raw_bundle_path:
+            raise FreezeError("source bundle path must be a normalized relative POSIX path")
+        relative = PurePosixPath(raw_bundle_path)
+        if (
+            relative.is_absolute()
+            or not relative.parts
+            or any(part in {"", ".", ".."} for part in relative.parts)
+            or relative.as_posix() != raw_bundle_path
+        ):
+            raise FreezeError("source bundle path must be a normalized relative POSIX path")
+        candidate = lexical_root.joinpath(*relative.parts)
+        cursor = lexical_root
+        for part in relative.parts:
+            cursor = cursor / part
+            if cursor.is_symlink():
+                raise FreezeError("private source bundle path must not traverse a symlink")
+        try:
+            resolved = candidate.resolve(strict=True)
+            resolved.relative_to(source_root)
+        except (OSError, ValueError) as exc:
+            raise FreezeError("private source bundle escaped its source-map root") from exc
+        if resolved == source_map_path.resolve(strict=True) or resolved in resolved_paths:
+            raise FreezeError("private source bundle paths must be distinct")
+        observed_sha256 = _regular_file_sha256(
+            resolved,
+            label="private source bundle",
+            private=True,
+        )
+        if not secrets.compare_digest(observed_sha256, bundle_sha256):
+            raise FreezeError("private source bundle identity changed")
+        resolved_paths.add(resolved)
+        bundles[canonical_url] = SourceBundle(
+            base_commit=base_commit,
+            bundle_path=resolved,
+            bundle_sha256=bundle_sha256,
+            tree_sha1=tree_sha1,
+        )
+    return bundles, _sha256(source_map_bytes)
+
+
 def validate_acquisition_protocol(
     protocol: dict[str, Any],
     *,
@@ -493,10 +644,12 @@ def validate_acquisition_protocol(
     product_inputs = protocol.get("product_inputs")
     universe = protocol.get("universe")
     pins = protocol.get("official_swebench_verifier")
+    exposure_ledger_sha256 = protocol.get("exposure_ledger_sha256")
     if (
         protocol.get("schema_version") != 2
         or protocol.get("protocol_id") != PROTOCOL_ID
         or protocol.get("stage") != "acquisition-frozen"
+        or SHA256.fullmatch(str(exposure_ledger_sha256 or "")) is None
         or not isinstance(execution_inputs, dict)
         or set(execution_inputs) != ACQUISITION_EXECUTION_INPUT_KEYS
         or any(value is not None for value in execution_inputs.values())
@@ -540,6 +693,14 @@ def validate_acquisition_protocol(
             raise FreezeError(f"frozen product input changed: {field}")
     if REVISION.fullmatch(str(product_inputs.get("revision") or "")) is None:
         raise FreezeError("product revision is invalid")
+    origin_url = str(product_inputs.get("origin_url") or "")
+    origin_main_revision = str(product_inputs.get("origin_main_revision") or "")
+    if (
+        benchmark.GITHUB_REPO_URL.fullmatch(origin_url) is None
+        or REVISION.fullmatch(origin_main_revision) is None
+        or origin_main_revision != product_inputs.get("revision")
+    ):
+        raise FreezeError("product origin/main identity is invalid")
     _require_sha256(
         product_inputs.get("codex_binary_sha256"),
         label="product Codex binary identity",
@@ -558,6 +719,7 @@ def validate_acquisition_protocol(
         acquisition_frozen_at=acquisition_frozen_at,
         product_inputs=product_inputs,
         verifier_pins=pins,
+        exposure_ledger_sha256=str(exposure_ledger_sha256),
     )
     if _canonical_bytes(protocol) != _canonical_bytes(expected_protocol):
         raise FreezeError("protocol fixed V2 acquisition design drifted")
@@ -1046,8 +1208,10 @@ def _install_outputs(outputs: list[tuple[Path, bytes, int]]) -> None:
 def freeze_protocol(
     *,
     protocol_path: Path,
+    exposure_ledger_path: Path,
     selection_path: Path,
     scenario_pack_path: Path,
+    source_map_path: Path,
     collision_path: Path,
     reconstructed_path: Path,
     controls_path: Path,
@@ -1060,8 +1224,10 @@ def freeze_protocol(
     """Authenticate materialization evidence and emit an execution freeze."""
     all_paths = {
         "protocol": protocol_path,
+        "exposure ledger": exposure_ledger_path,
         "selection": selection_path,
         "scenario pack": scenario_pack_path,
+        "source map": source_map_path,
         "collision": collision_path,
         "reconstructed tests": reconstructed_path,
         "materialization controls": controls_path,
@@ -1099,8 +1265,10 @@ def freeze_protocol(
     if protocol_bytes != _canonical_bytes(protocol, newline=True):
         raise FreezeError("acquisition protocol must use canonical JSON bytes")
     input_paths = {
+        "exposure_ledger": exposure_ledger_path,
         "selection": selection_path,
         "scenario_pack": scenario_pack_path,
+        "source_map": source_map_path,
         "collision": collision_path,
         "reconstructed": reconstructed_path,
         "controls": controls_path,
@@ -1111,7 +1279,25 @@ def freeze_protocol(
         for name, path in input_paths.items()
     }
     values = {name: _json_object(data, label=name) for name, data in blobs.items()}
+    try:
+        validated_exposure = exposure_ledger.validate_ledger_document(values["exposure_ledger"])
+    except ValueError as exc:
+        raise FreezeError("authenticated exposure ledger is invalid") from exc
+    if blobs["exposure_ledger"] != exposure_ledger.canonical_ledger_bytes(
+        validated_exposure
+    ) or not secrets.compare_digest(
+        _sha256(blobs["exposure_ledger"]),
+        str(protocol["exposure_ledger_sha256"]),
+    ):
+        raise FreezeError("authenticated exposure ledger identity changed")
     selected_ids, repository_map = _validated_selection(values["selection"], protocol)
+    try:
+        holdout.require_exposure_disjoint_selection(
+            values["selection"],
+            validated_exposure,
+        )
+    except ValueError as exc:
+        raise FreezeError("selection intersects authenticated historical exposure") from exc
     selection_canonical = _canonical_bytes(values["selection"])
     if blobs["selection"] != selection_canonical:
         raise FreezeError("selection must use canonical materializer JSON bytes")
@@ -1122,6 +1308,22 @@ def freeze_protocol(
         selected_ids=selected_ids,
         repository_map=repository_map,
     )
+    source_bundles, source_map_sha256 = validate_source_map(source_map_path)
+    if not secrets.compare_digest(source_map_sha256, _sha256(blobs["source_map"])):
+        raise FreezeError("private source map changed during execution freeze")
+    expected_sources = {
+        str(row["repo_url"]): (
+            str(row["commit"]),
+            str(row["official_verifier_binding"]["repository_tree_sha1"]),
+        )
+        for row in scenario_rows
+    }
+    if set(source_bundles) != set(expected_sources):
+        raise FreezeError("private source map does not match the selected repositories")
+    for repository_url, (base_commit, tree_sha1) in expected_sources.items():
+        source = source_bundles[repository_url]
+        if source.base_commit != base_commit or source.tree_sha1 != tree_sha1:
+            raise FreezeError("private source map repository identity is stale")
     scenario_test_sha256 = {
         str(row["id"]): str(row["reconstructed_test_sha256"]) for row in scenario_rows
     }
@@ -1164,6 +1366,7 @@ def freeze_protocol(
         "reconstructed_test_attestation_sha256": _sha256(blobs["reconstructed"]),
         "scenario_pack_sha256": scenario_pack_sha256,
         "selection_output_sha256": selection_sha256,
+        "source_map_sha256": source_map_sha256,
     }
     frozen = deepcopy(protocol)
     frozen["stage"] = "execution-frozen"
@@ -1187,8 +1390,10 @@ def freeze_protocol(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--protocol", type=Path, required=True)
+    parser.add_argument("--exposure-ledger", type=Path, required=True)
     parser.add_argument("--selection", type=Path, required=True)
     parser.add_argument("--scenario-pack", type=Path, required=True)
+    parser.add_argument("--source-map", type=Path, required=True)
     parser.add_argument("--collision", type=Path, required=True)
     parser.add_argument("--reconstructed", type=Path, required=True)
     parser.add_argument("--controls", type=Path, required=True)
@@ -1207,8 +1412,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         hashes = freeze_protocol(
             protocol_path=args.protocol,
+            exposure_ledger_path=args.exposure_ledger,
             selection_path=args.selection,
             scenario_pack_path=args.scenario_pack,
+            source_map_path=args.source_map,
             collision_path=args.collision,
             reconstructed_path=args.reconstructed,
             controls_path=args.controls,
