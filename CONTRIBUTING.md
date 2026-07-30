@@ -48,6 +48,20 @@ scripts, and `.no-mistakes.yaml` as contract files; include focused
 `src/tests/...` coverage unless the diff is a proven version or stats-only
 release metadata update.
 
+## Package-layout migration
+
+The legacy flat modules and the `ctx` package intentionally coexist during the
+staged migration. `pyproject.toml` is the authoritative inventory of packaged
+modules, packages, and console-script targets; `src/tests/test_package_scaffold.py`
+pins the import and distribution surface.
+
+When moving a module, preserve its documented CLI and import behavior, update
+the relevant `pyproject.toml` entries, and add focused tests for the canonical
+path and any compatibility shim. Do not remove a flat shim merely because the
+new package path exists: shim removal requires an explicit migration phase plus
+clean-install and packaging evidence. Run the package-scaffold tests and the
+affected module tests before the repository gates.
+
 GitHub PRs skip the broad OS/Python `test` matrix for ordinary changes.
 Changes under `.github/workflows/**` set `ci_changed`, run the full
 Ubuntu/Windows/macOS pytest matrix on the PR, and make the stable required
