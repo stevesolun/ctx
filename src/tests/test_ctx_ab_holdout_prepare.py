@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 import hashlib
+import inspect
 import json
 import os
 from pathlib import Path
 import stat
+import subprocess
 import threading
 import time
 from typing import Any
@@ -19,6 +21,7 @@ from scripts import ctx_ab_holdout_prepare as prepare
 
 
 REVISION = "a" * 40
+ORIGIN_URL = "https://github.com/stevesolun/ctx.git"
 PINS = {
     "bridge_sha256": "1" * 64,
     "docker_cli_sha256": "2" * 64,
@@ -64,8 +67,8 @@ def _v1() -> dict[str, Any]:
     )
 
 
-def _product_inputs() -> dict[str, str]:
-    return {
+def _product_inputs(*, source_trust: bool = True) -> dict[str, str]:
+    inputs = {
         "benchmark_script_sha256": "8" * 64,
         "catalog_archive_sha256": "9" * 64,
         "codex_binary_sha256": "a" * 64,
@@ -73,15 +76,37 @@ def _product_inputs() -> dict[str, str]:
         "revision": REVISION,
         "runtime_availability_sha256": "b" * 64,
     }
+    if source_trust:
+        inputs.update(
+            {
+                "origin_main_revision": REVISION,
+                "origin_url": ORIGIN_URL,
+            }
+        )
+    return inputs
 
 
-def _protocol(*, rows_sha256: str = "c" * 64, expected_rows: int = 10) -> dict[str, Any]:
+def _exposure_ledger() -> dict[str, Any]:
+    return {
+        "instance_id_hmac_sha256": ["1" * 64, "2" * 64],
+        "salt": "3" * 64,
+        "schema_version": 1,
+    }
+
+
+def _protocol(
+    *,
+    rows_sha256: str = "c" * 64,
+    expected_rows: int = 10,
+    exposure_ledger_sha256: str = "d" * 64,
+) -> dict[str, Any]:
     protocol = prepare._build_v2_protocol(
         v1=_v1(),
         revision=REVISION,
         frozen_at="2026-07-30T10:00:00Z",
         product_inputs=_product_inputs(),
         verifier_pins=PINS,
+        exposure_ledger_sha256=exposure_ledger_sha256,
     )
     protocol["universe"]["selection_jsonl_sha256"] = rows_sha256
     protocol["universe"]["expected_rows"] = expected_rows
@@ -110,13 +135,20 @@ def _row(index: int, required_columns: list[str]) -> dict[str, str]:
 def _source_fixture(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-) -> tuple[Path, Path, Path, dict[str, Any], dict[str, Any]]:
+) -> tuple[Path, Path, Path, Path, dict[str, Any], dict[str, Any]]:
     required_columns = list(_v1()["universe"]["required_columns"])
     rows = [_row(index, required_columns) for index in range(10)]
     rows_bytes = b"".join(
         json.dumps(row, ensure_ascii=False, separators=(",", ":")).encode() + b"\n" for row in rows
     )
-    protocol = _protocol(rows_sha256=_sha256(rows_bytes))
+    exposure_path = _private_file(
+        tmp_path / "inputs" / "exposure.json",
+        _canonical(_exposure_ledger()),
+    )
+    protocol = _protocol(
+        rows_sha256=_sha256(rows_bytes),
+        exposure_ledger_sha256=_sha256(exposure_path.read_bytes()),
+    )
     ids = [str(row["instance_id"]) for row in rows]
     repository_map = {
         item: holdout.canonical_repo_url(str(rows[index]["repo"])) for index, item in enumerate(ids)
@@ -142,7 +174,12 @@ def _source_fixture(
     monkeypatch.setattr(
         prepare,
         "_repository_state",
-        lambda _root: prepare.RepositoryState(repository, REVISION),
+        lambda _root: prepare.RepositoryState(
+            repository,
+            REVISION,
+            ORIGIN_URL,
+            REVISION,
+        ),
     )
     monkeypatch.setattr(prepare, "_assert_repository_unchanged", lambda _state: None)
     monkeypatch.setattr(prepare.holdout, "evaluate_row", lambda row, _protocol: row)
@@ -152,7 +189,7 @@ def _source_fixture(
         "_validated_selection",
         lambda _selection, _protocol: (ids, repository_map),
     )
-    return protocol_path, rows_path, selection_path, protocol, selection
+    return exposure_path, protocol_path, rows_path, selection_path, protocol, selection
 
 
 def test_build_v2_protocol_preserves_universe_and_sets_exact_design() -> None:
@@ -163,6 +200,7 @@ def test_build_v2_protocol_preserves_universe_and_sets_exact_design() -> None:
         frozen_at="2026-07-30T10:00:00Z",
         product_inputs=_product_inputs(),
         verifier_pins=PINS,
+        exposure_ledger_sha256="d" * 64,
     )
 
     assert protocol["schema_version"] == 2
@@ -204,6 +242,9 @@ def test_build_v2_protocol_preserves_universe_and_sets_exact_design() -> None:
     )
     assert "canary_policy" not in protocol
     assert protocol["official_swebench_verifier"] == PINS
+    assert protocol["exposure_ledger_sha256"] == "d" * 64
+    assert protocol["product_inputs"]["origin_url"] == ORIGIN_URL
+    assert protocol["product_inputs"]["origin_main_revision"] == REVISION
     assert protocol["execution_inputs"] == {
         key: None for key in sorted(freezer.ACQUISITION_EXECUTION_INPUT_KEYS)
     }
@@ -235,6 +276,7 @@ def test_protocol_generation_changes_seed_and_selects_disjoint_candidate_slots(
         frozen_at="2026-07-30T10:00:00Z",
         product_inputs=_product_inputs(),
         verifier_pins=PINS,
+        exposure_ledger_sha256="d" * 64,
     )
     monkeypatch.setattr(freezer, "PROTOCOL_GENERATION", 2)
     generation_two = prepare._build_v2_protocol(
@@ -243,6 +285,7 @@ def test_protocol_generation_changes_seed_and_selects_disjoint_candidate_slots(
         frozen_at="2026-07-30T10:00:00Z",
         product_inputs=_product_inputs(),
         verifier_pins=PINS,
+        exposure_ledger_sha256="d" * 64,
     )
     repositories = [f"https://github.com/owner/repo-{index}.git" for index in range(10)]
 
@@ -296,12 +339,23 @@ def test_built_protocol_satisfies_real_freezer_acquisition_contract() -> None:
             benchmark.PRODUCTION_RUNTIME_AVAILABILITY.read_bytes()
         ),
     }
+    if "origin_url" in freezer.PRODUCT_INPUT_KEYS:
+        product_inputs.update(
+            {
+                "origin_main_revision": REVISION,
+                "origin_url": ORIGIN_URL,
+            }
+        )
+    supports_exposure = (
+        "exposure_ledger_sha256" in inspect.signature(freezer.build_acquisition_protocol).parameters
+    )
     protocol = prepare._build_v2_protocol(
         v1=_v1(),
         revision=REVISION,
         frozen_at="2026-07-30T10:00:00Z",
         product_inputs=product_inputs,
         verifier_pins=PINS,
+        exposure_ledger_sha256="d" * 64 if supports_exposure else None,
     )
 
     assert freezer.validate_acquisition_protocol(protocol) == PINS
@@ -322,6 +376,93 @@ def test_repository_state_rejects_dirty_worktree(
         prepare._repository_state(tmp_path)
 
 
+def _mock_repository_commands(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    head: str = REVISION,
+    tracking: str = REVISION,
+    remote_main: str = REVISION,
+    fetch_url: str = ORIGIN_URL,
+    push_url: str = ORIGIN_URL,
+) -> None:
+    def command(argv: list[str], **_kwargs: Any) -> bytes:
+        if argv[1:4] == ["rev-parse", "--verify", "HEAD^{commit}"]:
+            return f"{head}\n".encode()
+        if argv[1] == "status":
+            return b""
+        if argv[1:4] == ["remote", "get-url", "origin"]:
+            return f"{fetch_url}\n".encode()
+        if argv[1:5] == ["remote", "get-url", "--push", "origin"]:
+            return f"{push_url}\n".encode()
+        if argv[1] == "rev-parse":
+            return f"{tracking}\n".encode()
+        if argv[1] == "ls-remote":
+            return f"{remote_main}\trefs/heads/main\n".encode()
+        raise AssertionError(argv)
+
+    monkeypatch.setattr(prepare, "_command_bytes", command)
+
+
+def test_repository_state_authenticates_exact_origin_main(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _mock_repository_commands(monkeypatch)
+
+    state = prepare._repository_state(tmp_path)
+
+    assert state == prepare.RepositoryState(tmp_path.resolve(), REVISION, ORIGIN_URL, REVISION)
+
+
+@pytest.mark.parametrize(
+    ("head", "tracking", "remote_main"),
+    [
+        ("b" * 40, REVISION, REVISION),
+        (REVISION, REVISION, "b" * 40),
+        (REVISION, "b" * 40, "b" * 40),
+    ],
+)
+def test_repository_state_rejects_unmerged_or_stale_origin_main(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    head: str,
+    tracking: str,
+    remote_main: str,
+) -> None:
+    _mock_repository_commands(
+        monkeypatch,
+        head=head,
+        tracking=tracking,
+        remote_main=remote_main,
+    )
+
+    with pytest.raises(prepare.PrepareError, match="exact current origin/main"):
+        prepare._repository_state(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("fetch_url", "push_url"),
+    [
+        ("https://token@github.com/stevesolun/ctx.git", ORIGIN_URL),
+        (ORIGIN_URL, "git@github.com:stevesolun/ctx.git"),
+    ],
+)
+def test_repository_state_rejects_credentialed_or_mismatched_origin(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fetch_url: str,
+    push_url: str,
+) -> None:
+    _mock_repository_commands(
+        monkeypatch,
+        fetch_url=fetch_url,
+        push_url=push_url,
+    )
+
+    with pytest.raises(prepare.PrepareError, match="credential-free"):
+        prepare._repository_state(tmp_path)
+
+
 def test_committed_v1_must_match_worktree(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -332,7 +473,9 @@ def test_committed_v1_must_match_worktree(
     monkeypatch.setattr(prepare, "_command_bytes", lambda *_a, **_k: b'{"changed":true}\n')
 
     with pytest.raises(prepare.PrepareError, match="does not match"):
-        prepare._committed_v1_protocol(prepare.RepositoryState(tmp_path, REVISION))
+        prepare._committed_v1_protocol(
+            prepare.RepositoryState(tmp_path, REVISION, ORIGIN_URL, REVISION)
+        )
 
 
 def test_atomic_private_write_is_canonical_owner_only_and_no_overwrite(
@@ -399,6 +542,32 @@ def test_load_private_json_rejects_noncanonical_bytes(tmp_path: Path) -> None:
         prepare._load_private_canonical_json(path, label="fixture", newline=False)
 
 
+@pytest.mark.parametrize(
+    "ledger",
+    [
+        {"schema_version": 1, "salt": "3" * 64, "instance_id_hmac_sha256": ["2" * 64, "1" * 64]},
+        {"schema_version": 1, "salt": "3" * 64, "instance_id_hmac_sha256": ["1" * 64] * 2},
+        {"schema_version": 1, "salt": "3" * 64, "instance_id_hmac_sha256": []},
+        {"schema_version": 1, "salt": "not-a-digest", "instance_id_hmac_sha256": []},
+        {"schema_version": True, "salt": "3" * 64, "instance_id_hmac_sha256": []},
+        {
+            "schema_version": 1,
+            "salt": "3" * 64,
+            "instance_id_hmac_sha256": [],
+            "unexpected": True,
+        },
+    ],
+)
+def test_exposure_ledger_requires_exact_canonical_shape(
+    tmp_path: Path,
+    ledger: dict[str, Any],
+) -> None:
+    path = _private_file(tmp_path / "ledger.json", _canonical(ledger))
+
+    with pytest.raises(prepare.PrepareError, match="unsupported shape"):
+        prepare._validated_exposure_ledger(path)
+
+
 def test_load_rows_rejects_noncanonical_field_order(tmp_path: Path) -> None:
     path = _private_file(tmp_path / "rows.jsonl", b'{"b":"2","a":"1"}\n')
 
@@ -421,7 +590,7 @@ def test_create_protocol_writes_authenticated_canonical_output(
     ]
     for index, path in enumerate(product_paths):
         path.write_bytes(f"product-{index}".encode())
-    state = prepare.RepositoryState(root, REVISION)
+    state = prepare.RepositoryState(root, REVISION, ORIGIN_URL, REVISION)
     codex = prepare.CodexIdentity(
         path=tmp_path / "codex",
         sha256="d" * 64,
@@ -434,8 +603,12 @@ def test_create_protocol_writes_authenticated_canonical_output(
     monkeypatch.setattr(prepare, "_probe_codex", lambda *_a, **_k: codex)
     monkeypatch.setattr(prepare, "_probe_verifier", lambda **_kwargs: deepcopy(PINS))
     monkeypatch.setattr(prepare.freezer, "validate_acquisition_protocol", lambda *_a, **_k: PINS)
+    exposure_path = _private_file(
+        tmp_path / "private" / "exposure.json",
+        _canonical(_exposure_ledger()),
+    )
     output = tmp_path / "private" / "protocol.json"
-    output.parent.mkdir(mode=0o700)
+    output.parent.mkdir(mode=0o700, exist_ok=True)
 
     digest = prepare.create_protocol(
         output_path=output,
@@ -445,6 +618,7 @@ def test_create_protocol_writes_authenticated_canonical_output(
         swebench_python=tmp_path / "swebench-python",
         docker_cli=tmp_path / "docker",
         docker_host="unix:///tmp/docker.sock",
+        exposure_ledger_path=exposure_path,
         frozen_at="2026-07-30T13:00:00+03:00",
         root=root,
     )
@@ -454,7 +628,10 @@ def test_create_protocol_writes_authenticated_canonical_output(
     assert digest == _sha256(output.read_bytes())
     assert document["frozen_at"] == "2026-07-30T10:00:00Z"
     assert document["product_inputs"]["revision"] == REVISION
+    assert document["product_inputs"]["origin_url"] == ORIGIN_URL
+    assert document["product_inputs"]["origin_main_revision"] == REVISION
     assert document["product_inputs"]["codex_binary_sha256"] == codex.sha256
+    assert document["exposure_ledger_sha256"] == _sha256(exposure_path.read_bytes())
     if os.name != "nt":
         assert stat.S_IMODE(output.stat().st_mode) == 0o600
 
@@ -490,49 +667,130 @@ def test_command_runner_requires_descendant_containment(
     assert observed["timeout"] == 5
 
 
-def test_clone_authenticated_mirror_uses_clone_fetch_and_fsck(
+def _git(cwd: Path, *argv: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *argv],
+        cwd=cwd,
+        check=check,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_authenticated_bundle_excludes_future_gold_refs_objects_and_remotes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    destination = tmp_path / "mirror.git"
-    url = "https://github.com/owner/repo.git"
-    commit = "d" * 40
-    commands: list[list[str]] = []
+    source = tmp_path / "source"
+    source.mkdir()
+    _git(source, "init", "--quiet", "--initial-branch=main")
+    _git(source, "config", "user.name", "Fixture")
+    _git(source, "config", "user.email", "fixture@example.com")
+    feature = source / "feature.py"
+    feature.write_text("def answer():\n    return 0\n", encoding="utf-8")
+    _git(source, "add", "feature.py")
+    _git(source, "commit", "--quiet", "-m", "base")
+    base = _git(source, "rev-parse", "HEAD").stdout.strip()
+    tree = _git(source, "rev-parse", "HEAD^{tree}").stdout.strip()
+    feature.write_text("def answer():\n    return 42\n", encoding="utf-8")
+    _git(source, "commit", "--quiet", "-am", "future gold fix")
+    future = _git(source, "rev-parse", "HEAD").stdout.strip()
 
-    def command(argv: list[str], **_kwargs: Any) -> bytes:
-        commands.append(argv)
-        if "clone" in argv:
-            destination.mkdir()
-        if "get-url" in argv:
-            return (url + "\n").encode()
-        if "rev-parse" in argv:
-            return (commit + "\n").encode()
-        return b""
+    destination = tmp_path / "bundles" / "base.bundle"
+    destination.parent.mkdir()
+    url = "https://github.com/owner/repo.git"
+    original_command = prepare._command_bytes
+
+    def command(argv: list[str], **kwargs: Any) -> bytes:
+        if "fetch" in argv and "origin" in argv:
+            repository = argv[argv.index("-C") + 1]
+            argv = [
+                "git",
+                "-C",
+                repository,
+                "-c",
+                "protocol.file.allow=always",
+                "fetch",
+                "--quiet",
+                "--force",
+                "--no-tags",
+                source.as_uri(),
+                f"{base}:refs/heads/base",
+            ]
+        return original_command(argv, **kwargs)
 
     monkeypatch.setattr(prepare, "_command_bytes", command)
 
-    prepare._clone_authenticated_mirror(url=url, commit=commit, destination=destination)
+    observed_tree, bundle_sha256 = prepare._create_authenticated_bundle(
+        url=url,
+        commit=base,
+        destination=destination,
+    )
 
-    assert any("clone" in command for command in commands)
-    assert any("fetch" in command for command in commands)
-    assert any("fsck" in command for command in commands)
-    assert any("cat-file" in command for command in commands)
+    assert observed_tree == tree
+    assert bundle_sha256 == _sha256(destination.read_bytes())
+    assert _git(tmp_path, "bundle", "list-heads", str(destination)).stdout.strip() == (
+        f"{base} refs/heads/base"
+    )
+    materialized = tmp_path / "materialized.git"
+    _git(tmp_path, "init", "--bare", "--quiet", str(materialized))
+    _git(
+        tmp_path,
+        "-C",
+        str(materialized),
+        "-c",
+        "protocol.file.allow=always",
+        "fetch",
+        "--quiet",
+        str(destination),
+        "refs/heads/base:refs/heads/base",
+    )
+    assert _git(tmp_path, "-C", str(materialized), "remote").stdout == ""
+    assert future not in _git(tmp_path, "-C", str(materialized), "rev-list", "--all").stdout
+    assert (
+        _git(
+            tmp_path,
+            "-C",
+            str(materialized),
+            "cat-file",
+            "-e",
+            f"{future}^{{commit}}",
+            check=False,
+        ).returncode
+        != 0
+    )
+    assert (
+        _git(
+            tmp_path,
+            "-C",
+            str(materialized),
+            "fsck",
+            "--full",
+            "--unreachable",
+            "--no-reflogs",
+        ).stdout
+        == ""
+    )
 
 
-def test_prepare_sources_clones_in_bounded_parallel_and_writes_deterministic_map(
+def test_prepare_sources_bundles_in_bounded_parallel_and_writes_deterministic_map(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    protocol_path, rows_path, selection_path, _protocol_value, _selection = _source_fixture(
-        tmp_path,
-        monkeypatch,
-    )
+    (
+        exposure_path,
+        protocol_path,
+        rows_path,
+        selection_path,
+        _protocol_value,
+        _selection,
+    ) = _source_fixture(tmp_path, monkeypatch)
     lock = threading.Lock()
     active = 0
     maximum_active = 0
     destinations: set[Path] = set()
 
-    def clone(*, url: str, commit: str, destination: Path) -> None:
+    def bundle(*, url: str, commit: str, destination: Path) -> tuple[str, str]:
         nonlocal active, maximum_active
         assert url.startswith("https://github.com/")
         assert prepare.REVISION.fullmatch(commit)
@@ -541,21 +799,22 @@ def test_prepare_sources_clones_in_bounded_parallel_and_writes_deterministic_map
             maximum_active = max(maximum_active, active)
             assert destination not in destinations
             destinations.add(destination)
-        destination.mkdir()
-        (destination / "HEAD").write_text(commit, encoding="utf-8")
+        destination.write_bytes(commit.encode())
         time.sleep(0.02)
         with lock:
             active -= 1
+        return "f" * 40, _sha256(destination.read_bytes())
 
-    monkeypatch.setattr(prepare, "_clone_authenticated_mirror", clone)
-    cache = tmp_path / "private-cache" / "mirrors"
-    cache.parent.mkdir(mode=0o700)
-    output = tmp_path / "private-map" / "source-map.json"
-    output.parent.mkdir(mode=0o700)
+    monkeypatch.setattr(prepare, "_create_authenticated_bundle", bundle)
+    private = tmp_path / "private-map"
+    private.mkdir(mode=0o700)
+    cache = private / "bundles"
+    output = private / "source-map.json"
 
     digest = prepare.prepare_sources(
         protocol_path=protocol_path,
         expected_acquisition_protocol_sha256=_sha256(protocol_path.read_bytes()),
+        exposure_ledger_path=exposure_path,
         rows_path=rows_path,
         selection_path=selection_path,
         cache_root=cache,
@@ -566,14 +825,134 @@ def test_prepare_sources_clones_in_bounded_parallel_and_writes_deterministic_map
 
     source_map = json.loads(output.read_bytes())
     assert output.read_bytes() == _canonical(source_map)
-    assert list(source_map) == sorted(source_map)
-    assert len(source_map) == 10
+    assert source_map["schema_version"] == 1
+    repositories = source_map["repositories"]
+    assert list(repositories) == sorted(repositories)
+    assert len(repositories) == 10
     assert len(destinations) == 10
     assert 2 <= maximum_active <= 4
-    assert all("private-task-" not in value for value in source_map.values())
+    assert all(
+        set(value) == {"base_commit", "bundle_path", "bundle_sha256", "tree_sha1"}
+        and value["bundle_path"].startswith("bundles/")
+        and not Path(value["bundle_path"]).is_absolute()
+        and "private-task-" not in value["bundle_path"]
+        for value in repositories.values()
+    )
     assert digest == _sha256(output.read_bytes())
     if os.name != "nt":
         assert stat.S_IMODE(output.stat().st_mode) == 0o600
+
+
+def test_prepare_sources_reconstructs_exposure_filtered_replacement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    required_columns = list(_v1()["universe"]["required_columns"])
+    rows: list[dict[str, str]] = []
+    for repository_index in range(10):
+        for candidate_index in range(2):
+            instance_id = f"repo-{repository_index}-candidate-{candidate_index}"
+            row = _row(repository_index + 1, required_columns)
+            row.update(
+                {
+                    "base_commit": hashlib.sha1(instance_id.encode()).hexdigest(),
+                    "instance_id": instance_id,
+                    "repo": f"owner/repo-{repository_index}",
+                }
+            )
+            rows.append(row)
+    rows_bytes = b"".join(
+        json.dumps(row, ensure_ascii=False, separators=(",", ":")).encode() + b"\n" for row in rows
+    )
+    provisional_protocol = _protocol(
+        rows_sha256=_sha256(rows_bytes),
+        expected_rows=len(rows),
+    )
+
+    def evaluate(row: dict[str, str], _protocol_value: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "base_commit": row["base_commit"],
+            "instance_id": row["instance_id"],
+            "production_paths": "src/feature.py",
+            "rejection_code": "",
+            "repo": row["repo"],
+            "status": "eligible",
+            "test_path": "tests/test_feature.py",
+        }
+
+    evaluated = [evaluate(row, provisional_protocol) for row in rows]
+    baseline = holdout.select_rows(evaluated, provisional_protocol)
+    exposed_id = str(baseline["analysis_instance_ids"][0])
+    salt = "4" * 64
+    exposure_document = {
+        "instance_id_hmac_sha256": [
+            holdout.exposure_ledger.instance_id_hmac_sha256(salt, exposed_id)
+        ],
+        "salt": salt,
+        "schema_version": 1,
+    }
+    private = tmp_path / "private"
+    exposure_path = _private_file(
+        private / "exposure.json",
+        _canonical(exposure_document),
+    )
+    protocol = _protocol(
+        rows_sha256=_sha256(rows_bytes),
+        expected_rows=len(rows),
+        exposure_ledger_sha256=_sha256(exposure_path.read_bytes()),
+    )
+    filtered = holdout.reject_historical_exposures(evaluated, exposure_document)
+    replacement = holdout.select_rows(filtered, protocol)
+    exposed_repository = baseline["analysis_repository_map"][exposed_id]
+    replacement_ids = [
+        instance_id
+        for instance_id, repository in replacement["analysis_repository_map"].items()
+        if repository == exposed_repository
+    ]
+    assert exposed_id not in replacement["analysis_instance_ids"]
+    assert len(replacement_ids) == 1
+
+    protocol_path = _private_file(
+        private / "protocol.json",
+        _canonical(protocol, newline=True),
+    )
+    rows_path = _private_file(private / "rows.jsonl", rows_bytes)
+    selection_path = _private_file(
+        private / "selection.json",
+        _canonical(replacement),
+    )
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    state = prepare.RepositoryState(repository, REVISION, ORIGIN_URL, REVISION)
+    monkeypatch.setattr(prepare, "_repository_state", lambda _root: state)
+    monkeypatch.setattr(prepare, "_assert_repository_unchanged", lambda _state: None)
+    monkeypatch.setattr(prepare.freezer, "validate_acquisition_protocol", lambda *_a, **_k: PINS)
+    monkeypatch.setattr(prepare.holdout, "evaluate_row", evaluate)
+
+    def bundle(*, destination: Path, commit: str, **_kwargs: Any) -> tuple[str, str]:
+        destination.write_bytes(commit.encode())
+        return "f" * 40, _sha256(destination.read_bytes())
+
+    monkeypatch.setattr(prepare, "_create_authenticated_bundle", bundle)
+    output = private / "source-map.json"
+
+    prepare.prepare_sources(
+        protocol_path=protocol_path,
+        expected_acquisition_protocol_sha256=_sha256(protocol_path.read_bytes()),
+        exposure_ledger_path=exposure_path,
+        rows_path=rows_path,
+        selection_path=selection_path,
+        cache_root=private / "bundles",
+        output_path=output,
+        workers=4,
+        root=tmp_path,
+    )
+
+    source_map = json.loads(output.read_bytes())
+    assert exposed_repository in source_map["repositories"]
+    assert source_map["repositories"][exposed_repository]["base_commit"] == next(
+        row["base_commit"] for row in rows if row["instance_id"] == replacement_ids[0]
+    )
 
 
 @pytest.mark.parametrize("workers", [0, 9, True])
@@ -585,6 +964,7 @@ def test_prepare_sources_rejects_invalid_worker_count(
         prepare.prepare_sources(
             protocol_path=tmp_path / "protocol",
             expected_acquisition_protocol_sha256="0" * 64,
+            exposure_ledger_path=tmp_path / "exposure",
             rows_path=tmp_path / "rows",
             selection_path=tmp_path / "selection",
             cache_root=tmp_path / "cache",
@@ -597,26 +977,32 @@ def test_prepare_sources_rejects_protocol_digest_drift_before_cloning(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    protocol_path, rows_path, selection_path, _protocol_value, _selection = _source_fixture(
-        tmp_path,
-        monkeypatch,
-    )
+    (
+        exposure_path,
+        protocol_path,
+        rows_path,
+        selection_path,
+        _protocol_value,
+        _selection,
+    ) = _source_fixture(tmp_path, monkeypatch)
     clone_called = False
 
-    def clone(**_kwargs: Any) -> None:
+    def bundle(**_kwargs: Any) -> tuple[str, str]:
         nonlocal clone_called
         clone_called = True
+        return "f" * 40, "e" * 64
 
-    monkeypatch.setattr(prepare, "_clone_authenticated_mirror", clone)
-    cache = tmp_path / "private-cache" / "mirrors"
-    cache.parent.mkdir(mode=0o700)
-    output = tmp_path / "private-map" / "source-map.json"
-    output.parent.mkdir(mode=0o700)
+    monkeypatch.setattr(prepare, "_create_authenticated_bundle", bundle)
+    private = tmp_path / "private-map"
+    private.mkdir(mode=0o700)
+    cache = private / "bundles"
+    output = private / "source-map.json"
 
     with pytest.raises(prepare.PrepareError, match="expected SHA-256"):
         prepare.prepare_sources(
             protocol_path=protocol_path,
             expected_acquisition_protocol_sha256="0" * 64,
+            exposure_ledger_path=exposure_path,
             rows_path=rows_path,
             selection_path=selection_path,
             cache_root=cache,
@@ -629,36 +1015,152 @@ def test_prepare_sources_rejects_protocol_digest_drift_before_cloning(
     assert not output.exists()
 
 
+def test_prepare_sources_rejects_exposure_ledger_alias(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (
+        _exposure_path,
+        protocol_path,
+        rows_path,
+        selection_path,
+        _protocol_value,
+        _selection,
+    ) = _source_fixture(tmp_path, monkeypatch)
+    private = tmp_path / "private-map"
+    private.mkdir(mode=0o700)
+
+    with pytest.raises(prepare.PrepareError, match="distinct"):
+        prepare.prepare_sources(
+            protocol_path=protocol_path,
+            expected_acquisition_protocol_sha256=_sha256(protocol_path.read_bytes()),
+            exposure_ledger_path=selection_path,
+            rows_path=rows_path,
+            selection_path=selection_path,
+            cache_root=private / "bundles",
+            output_path=private / "source-map.json",
+            root=tmp_path,
+        )
+
+
+def test_prepare_sources_authenticates_exposure_ledger_against_protocol(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (
+        exposure_path,
+        protocol_path,
+        rows_path,
+        selection_path,
+        _protocol_value,
+        _selection,
+    ) = _source_fixture(tmp_path, monkeypatch)
+    exposure_path.write_bytes(
+        _canonical(
+            {
+                "instance_id_hmac_sha256": ["8" * 64],
+                "salt": "9" * 64,
+                "schema_version": 1,
+            }
+        )
+    )
+    private = tmp_path / "private-map"
+    private.mkdir(mode=0o700)
+
+    with pytest.raises(prepare.PrepareError, match="does not match"):
+        prepare.prepare_sources(
+            protocol_path=protocol_path,
+            expected_acquisition_protocol_sha256=_sha256(protocol_path.read_bytes()),
+            exposure_ledger_path=exposure_path,
+            rows_path=rows_path,
+            selection_path=selection_path,
+            cache_root=private / "bundles",
+            output_path=private / "source-map.json",
+            root=tmp_path,
+        )
+
+
+def test_prepare_sources_rejects_exposure_ledger_changed_during_bundling(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (
+        exposure_path,
+        protocol_path,
+        rows_path,
+        selection_path,
+        _protocol_value,
+        _selection,
+    ) = _source_fixture(tmp_path, monkeypatch)
+    mutation_lock = threading.Lock()
+    mutated = False
+
+    def bundle(*, destination: Path, **_kwargs: Any) -> tuple[str, str]:
+        nonlocal mutated
+        destination.write_bytes(b"bundle")
+        with mutation_lock:
+            if not mutated:
+                exposure_path.write_bytes(b"changed")
+                mutated = True
+        return "f" * 40, _sha256(destination.read_bytes())
+
+    monkeypatch.setattr(prepare, "_create_authenticated_bundle", bundle)
+    private = tmp_path / "private-map"
+    private.mkdir(mode=0o700)
+
+    with pytest.raises(prepare.PrepareError, match="inputs changed"):
+        prepare.prepare_sources(
+            protocol_path=protocol_path,
+            expected_acquisition_protocol_sha256=_sha256(protocol_path.read_bytes()),
+            exposure_ledger_path=exposure_path,
+            rows_path=rows_path,
+            selection_path=selection_path,
+            cache_root=private / "bundles",
+            output_path=private / "source-map.json",
+            workers=4,
+            root=tmp_path,
+        )
+
+    assert not (private / "source-map.json").exists()
+    assert not (private / "bundles").exists()
+
+
 def test_prepare_sources_failure_publishes_nothing_and_removes_cache(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    protocol_path, rows_path, selection_path, _protocol_value, _selection = _source_fixture(
-        tmp_path,
-        monkeypatch,
-    )
+    (
+        exposure_path,
+        protocol_path,
+        rows_path,
+        selection_path,
+        _protocol_value,
+        _selection,
+    ) = _source_fixture(tmp_path, monkeypatch)
     calls = 0
     lock = threading.Lock()
 
-    def clone(*, destination: Path, **_kwargs: Any) -> None:
+    def bundle(*, destination: Path, **_kwargs: Any) -> tuple[str, str]:
         nonlocal calls
         with lock:
             calls += 1
             should_fail = calls == 3
-        destination.mkdir()
+        destination.write_bytes(b"bundle")
         if should_fail:
-            raise prepare.PrepareError("source mirror authentication failed")
+            raise prepare.PrepareError("source bundle authentication failed")
+        return "f" * 40, _sha256(destination.read_bytes())
 
-    monkeypatch.setattr(prepare, "_clone_authenticated_mirror", clone)
-    cache = tmp_path / "cache-parent" / "mirrors"
-    cache.parent.mkdir(mode=0o700)
-    output = tmp_path / "map-parent" / "source-map.json"
-    output.parent.mkdir(mode=0o700)
+    monkeypatch.setattr(prepare, "_create_authenticated_bundle", bundle)
+    private = tmp_path / "map-parent"
+    private.mkdir(mode=0o700)
+    cache = private / "bundles"
+    output = private / "source-map.json"
 
     with pytest.raises(prepare.PrepareError, match="authentication failed"):
         prepare.prepare_sources(
             protocol_path=protocol_path,
             expected_acquisition_protocol_sha256=_sha256(protocol_path.read_bytes()),
+            exposure_ledger_path=exposure_path,
             rows_path=rows_path,
             selection_path=selection_path,
             cache_root=cache,
@@ -676,18 +1178,25 @@ def test_prepare_sources_preserves_output_created_by_a_racing_writer(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    protocol_path, rows_path, selection_path, _protocol_value, _selection = _source_fixture(
-        tmp_path,
-        monkeypatch,
-    )
-    monkeypatch.setattr(
-        prepare,
-        "_clone_authenticated_mirror",
-        lambda **kwargs: Path(kwargs["destination"]).mkdir(),
-    )
+    (
+        exposure_path,
+        protocol_path,
+        rows_path,
+        selection_path,
+        _protocol_value,
+        _selection,
+    ) = _source_fixture(tmp_path, monkeypatch)
+
+    def bundle(*, destination: Path, **_kwargs: Any) -> tuple[str, str]:
+        destination.write_bytes(b"bundle")
+        return "f" * 40, _sha256(destination.read_bytes())
+
+    monkeypatch.setattr(prepare, "_create_authenticated_bundle", bundle)
     monkeypatch.setattr(prepare, "_harden_private_tree", lambda _path: None)
-    output = tmp_path / "map-parent" / "source-map.json"
-    cache = tmp_path / "cache"
+    private = tmp_path / "map-parent"
+    private.mkdir(mode=0o700)
+    output = private / "source-map.json"
+    cache = private / "bundles"
     raced_bytes = b"created by another writer"
 
     def race(path: Path, _data: bytes) -> Path:
@@ -700,6 +1209,7 @@ def test_prepare_sources_preserves_output_created_by_a_racing_writer(
         prepare.prepare_sources(
             protocol_path=protocol_path,
             expected_acquisition_protocol_sha256=_sha256(protocol_path.read_bytes()),
+            exposure_ledger_path=exposure_path,
             rows_path=rows_path,
             selection_path=selection_path,
             cache_root=cache,
@@ -716,10 +1226,14 @@ def test_prepare_sources_rejects_nested_cache_and_map(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    protocol_path, rows_path, selection_path, _protocol_value, _selection = _source_fixture(
-        tmp_path,
-        monkeypatch,
-    )
+    (
+        exposure_path,
+        protocol_path,
+        rows_path,
+        selection_path,
+        _protocol_value,
+        _selection,
+    ) = _source_fixture(tmp_path, monkeypatch)
     cache = tmp_path / "private" / "cache"
     cache.parent.mkdir(mode=0o700)
 
@@ -727,6 +1241,7 @@ def test_prepare_sources_rejects_nested_cache_and_map(
         prepare.prepare_sources(
             protocol_path=protocol_path,
             expected_acquisition_protocol_sha256=_sha256(protocol_path.read_bytes()),
+            exposure_ledger_path=exposure_path,
             rows_path=rows_path,
             selection_path=selection_path,
             cache_root=cache,
@@ -746,7 +1261,7 @@ def test_write_environment_matches_freezer_contract(
     )
     repository = tmp_path / "repo"
     repository.mkdir()
-    state = prepare.RepositoryState(repository, REVISION)
+    state = prepare.RepositoryState(repository, REVISION, ORIGIN_URL, REVISION)
     codex = prepare.CodexIdentity(
         path=tmp_path / "codex",
         sha256=protocol["product_inputs"]["codex_binary_sha256"],
@@ -817,7 +1332,7 @@ def test_write_environment_rejects_runtime_drift(
     )
     repository = tmp_path / "repo"
     repository.mkdir()
-    state = prepare.RepositoryState(repository, REVISION)
+    state = prepare.RepositoryState(repository, REVISION, ORIGIN_URL, REVISION)
     codex = prepare.CodexIdentity(
         path=tmp_path / "codex",
         sha256=protocol["product_inputs"]["codex_binary_sha256"],
@@ -899,6 +1414,8 @@ def test_cli_forwards_source_workers_and_prints_no_private_identifiers(
                 str(tmp_path / "protocol"),
                 "--expected-acquisition-protocol-sha256",
                 "0" * 64,
+                "--exposure-ledger",
+                str(tmp_path / "exposure"),
                 "--rows",
                 str(tmp_path / "rows"),
                 "--selection",
@@ -916,9 +1433,10 @@ def test_cli_forwards_source_workers_and_prints_no_private_identifiers(
 
     captured = capsys.readouterr()
     assert observed["workers"] == 7
+    assert observed["exposure_ledger_path"] == tmp_path / "exposure"
     assert captured.err == ""
     assert captured.out == (
-        f"prepared 10 authenticated source mirrors source_map_sha256={'f' * 64}\n"
+        f"prepared 10 authenticated source bundles source_map_sha256={'f' * 64}\n"
     )
     assert "private-task" not in captured.out
 
@@ -941,6 +1459,8 @@ def test_cli_suppresses_private_failure_details(
                 str(tmp_path / "protocol"),
                 "--expected-acquisition-protocol-sha256",
                 "0" * 64,
+                "--exposure-ledger",
+                str(tmp_path / "exposure"),
                 "--rows",
                 str(tmp_path / "rows"),
                 "--selection",

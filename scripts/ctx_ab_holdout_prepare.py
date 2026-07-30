@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import hashlib
+import inspect
 import json
 import math
 import os
@@ -55,6 +56,8 @@ class PrepareError(RuntimeError):
 class RepositoryState:
     root: Path
     revision: str
+    origin_url: str
+    origin_main_revision: str
 
 
 @dataclass(frozen=True)
@@ -171,7 +174,65 @@ def _repository_state(root: Path) -> RepositoryState:
     )
     if status:
         raise PrepareError("repository must be clean before benchmark preparation")
-    return RepositoryState(root=resolved, revision=revision)
+    environment = _sanitized_environment()
+    origin_url = _single_line(
+        _command_bytes(
+            ["git", "remote", "get-url", "origin"],
+            cwd=resolved,
+            timeout=15,
+            env=environment,
+        ),
+        label="repository origin URL",
+        maximum=500,
+    )
+    push_url = _single_line(
+        _command_bytes(
+            ["git", "remote", "get-url", "--push", "origin"],
+            cwd=resolved,
+            timeout=15,
+            env=environment,
+        ),
+        label="repository origin push URL",
+        maximum=500,
+    )
+    if benchmark.GITHUB_REPO_URL.fullmatch(origin_url) is None or push_url != origin_url:
+        raise PrepareError("repository origin must be one credential-free canonical GitHub URL")
+    origin_main_revision = _single_line(
+        _command_bytes(
+            ["git", "rev-parse", "--verify", "refs/remotes/origin/main^{commit}"],
+            cwd=resolved,
+            timeout=15,
+            env=environment,
+        ),
+        label="repository origin/main revision",
+        maximum=40,
+    )
+    remote_main_bytes = _command_bytes(
+        ["git", "ls-remote", "--exit-code", "origin", "refs/heads/main"],
+        cwd=resolved,
+        timeout=60,
+        env=environment,
+    )
+    try:
+        remote_lines = remote_main_bytes.decode("ascii").splitlines()
+    except UnicodeDecodeError as exc:
+        raise PrepareError("remote main identity is invalid") from exc
+    remote_parts = remote_lines[0].split("\t") if len(remote_lines) == 1 else []
+    if (
+        REVISION.fullmatch(origin_main_revision) is None
+        or len(remote_parts) != 2
+        or REVISION.fullmatch(remote_parts[0]) is None
+        or remote_parts[1] != "refs/heads/main"
+        or origin_main_revision != remote_parts[0]
+        or revision != origin_main_revision
+    ):
+        raise PrepareError("repository HEAD must equal the exact current origin/main revision")
+    return RepositoryState(
+        root=resolved,
+        revision=revision,
+        origin_url=origin_url,
+        origin_main_revision=origin_main_revision,
+    )
 
 
 def _assert_repository_unchanged(expected: RepositoryState) -> None:
@@ -657,19 +718,95 @@ def _build_v2_protocol(
     frozen_at: str,
     product_inputs: Mapping[str, str],
     verifier_pins: Mapping[str, Any],
+    exposure_ledger_sha256: str | None = None,
 ) -> dict[str, Any]:
     if product_inputs.get("revision") != revision:
         raise PrepareError("product revision does not match the committed repository")
+    freezer_arguments: dict[str, Any] = {}
+    if (
+        exposure_ledger_sha256 is not None
+        and "exposure_ledger_sha256"
+        in inspect.signature(freezer.build_acquisition_protocol).parameters
+    ):
+        freezer_arguments["exposure_ledger_sha256"] = exposure_ledger_sha256
     try:
-        return freezer.build_acquisition_protocol(
+        protocol = freezer.build_acquisition_protocol(
             v1=v1,
             frozen_at=frozen_at,
             acquisition_frozen_at=frozen_at,
             product_inputs=product_inputs,
             verifier_pins=verifier_pins,
+            **freezer_arguments,
         )
     except freezer.FreezeError as exc:
         raise PrepareError("committed V1 protocol is unsupported") from exc
+    if exposure_ledger_sha256 is not None and "exposure_ledger_sha256" not in protocol:
+        if SHA256.fullmatch(exposure_ledger_sha256) is None:
+            raise PrepareError("exposure ledger SHA-256 is invalid")
+        protocol["exposure_ledger_sha256"] = exposure_ledger_sha256
+    return protocol
+
+
+def _validated_exposure_ledger(path: Path) -> tuple[dict[str, Any], bytes]:
+    ledger, data = _load_private_canonical_json(
+        path,
+        label="exposure ledger",
+        newline=False,
+    )
+    hashes = ledger.get("instance_id_hmac_sha256")
+    if (
+        set(ledger) != {"instance_id_hmac_sha256", "salt", "schema_version"}
+        or ledger.get("schema_version") != 1
+        or isinstance(ledger.get("schema_version"), bool)
+        or SHA256.fullmatch(str(ledger.get("salt") or "")) is None
+        or not isinstance(hashes, list)
+        or not hashes
+        or not all(isinstance(value, str) and SHA256.fullmatch(value) for value in hashes)
+        or hashes != sorted(hashes)
+        or len(hashes) != len(set(hashes))
+    ):
+        raise PrepareError("exposure ledger has an unsupported shape")
+    return ledger, data
+
+
+def _validate_extended_acquisition_protocol(
+    protocol: dict[str, Any],
+    *,
+    benchmark_script_path: Path | None = None,
+    catalog_archive_path: Path | None = None,
+    runtime_availability_path: Path | None = None,
+) -> dict[str, Any]:
+    exposure_sha256 = protocol.get("exposure_ledger_sha256")
+    product_inputs = protocol.get("product_inputs")
+    if (
+        SHA256.fullmatch(str(exposure_sha256 or "")) is None
+        or not isinstance(product_inputs, dict)
+        or set(product_inputs)
+        != set(freezer.PRODUCT_INPUT_KEYS) | {"origin_main_revision", "origin_url"}
+        or benchmark.GITHUB_REPO_URL.fullmatch(str(product_inputs.get("origin_url") or "")) is None
+        or REVISION.fullmatch(str(product_inputs.get("origin_main_revision") or "")) is None
+        or product_inputs.get("origin_main_revision") != product_inputs.get("revision")
+    ):
+        raise PrepareError("acquisition protocol source-trust identity is invalid")
+    base_protocol = json.loads(json.dumps(protocol))
+    if (
+        "exposure_ledger_sha256"
+        not in inspect.signature(freezer.build_acquisition_protocol).parameters
+    ):
+        base_protocol.pop("exposure_ledger_sha256")
+    base_product_inputs = base_protocol["product_inputs"]
+    for field in ("origin_main_revision", "origin_url"):
+        if field not in freezer.PRODUCT_INPUT_KEYS:
+            base_product_inputs.pop(field)
+    try:
+        return freezer.validate_acquisition_protocol(
+            base_protocol,
+            benchmark_script_path=benchmark_script_path,
+            catalog_archive_path=catalog_archive_path,
+            runtime_availability_path=runtime_availability_path,
+        )
+    except freezer.FreezeError as exc:
+        raise PrepareError("acquisition protocol is not supported") from exc
 
 
 def create_protocol(
@@ -681,13 +818,16 @@ def create_protocol(
     swebench_python: Path,
     docker_cli: Path,
     docker_host: str,
+    exposure_ledger_path: Path,
     frozen_at: str,
     root: Path = ROOT,
 ) -> str:
     """Create an authenticated acquisition-frozen V2 protocol."""
     state = _repository_state(root)
     output = _resolved_path(output_path)
+    exposure_file = _resolved_path(exposure_ledger_path)
     _require_private_repository_location(output, root=state.root)
+    _require_private_repository_location(exposure_file, root=state.root)
     product_paths = {
         "benchmark": state.root / "scripts" / "ctx_ab_benchmark.py",
         "catalog": state.root / "graph" / "wiki-graph-runtime.tar.gz",
@@ -696,6 +836,7 @@ def create_protocol(
     _reject_aliases(
         {
             "output": output,
+            "exposure ledger": exposure_file,
             "V1 protocol": state.root / V1_PROTOCOL_RELATIVE,
             "benchmark": product_paths["benchmark"],
             "catalog": product_paths["catalog"],
@@ -707,6 +848,8 @@ def create_protocol(
     )
     _private_parent(output)
     v1 = _committed_v1_protocol(state)
+    _exposure_ledger, exposure_bytes = _validated_exposure_ledger(exposure_file)
+    exposure_sha256 = _sha256(exposure_bytes)
     product_before = {
         name: _stable_digest(path, label=f"product {name}") for name, path in product_paths.items()
     }
@@ -724,6 +867,8 @@ def create_protocol(
         "provider_config_sha256": codex.provider_config_sha256,
         "revision": state.revision,
         "runtime_availability_sha256": product_before["runtime"],
+        "origin_main_revision": state.origin_main_revision,
+        "origin_url": state.origin_url,
     }
     protocol = _build_v2_protocol(
         v1=v1,
@@ -731,16 +876,14 @@ def create_protocol(
         frozen_at=_normalized_timestamp(frozen_at),
         product_inputs=product_inputs,
         verifier_pins=verifier,
+        exposure_ledger_sha256=exposure_sha256,
     )
-    try:
-        freezer.validate_acquisition_protocol(
-            protocol,
-            benchmark_script_path=product_paths["benchmark"],
-            catalog_archive_path=product_paths["catalog"],
-            runtime_availability_path=product_paths["runtime"],
-        )
-    except freezer.FreezeError as exc:
-        raise PrepareError("generated V2 protocol does not satisfy the freezer contract") from exc
+    _validate_extended_acquisition_protocol(
+        protocol,
+        benchmark_script_path=product_paths["benchmark"],
+        catalog_archive_path=product_paths["catalog"],
+        runtime_availability_path=product_paths["runtime"],
+    )
     if product_before != {
         name: _stable_digest(path, label=f"product {name}") for name, path in product_paths.items()
     }:
@@ -757,6 +900,11 @@ def create_protocol(
         != verifier
     ):
         raise PrepareError("official verifier identity changed during protocol preparation")
+    if (
+        _read_regular_bytes(exposure_file, label="exposure ledger", private=True)[1]
+        != exposure_bytes
+    ):
+        raise PrepareError("exposure ledger changed during protocol preparation")
     _assert_repository_unchanged(state)
     data = _canonical_bytes(protocol, newline=True)
     _atomic_private_write(output, data)
@@ -827,10 +975,7 @@ def _load_acquisition_protocol(
     )
     if not secrets.compare_digest(_sha256(data), expected_sha256):
         raise PrepareError("acquisition protocol does not match the expected SHA-256")
-    try:
-        freezer.validate_acquisition_protocol(protocol)
-    except freezer.FreezeError as exc:
-        raise PrepareError("acquisition protocol is not supported") from exc
+    _validate_extended_acquisition_protocol(protocol)
     return protocol, data
 
 
@@ -853,89 +998,298 @@ def _ensure_private_directory_parent(path: Path) -> Path:
     return candidate
 
 
-def _clone_authenticated_mirror(*, url: str, commit: str, destination: Path) -> None:
+def _create_authenticated_bundle(
+    *,
+    url: str,
+    commit: str,
+    destination: Path,
+) -> tuple[str, str]:
+    if (
+        benchmark.GITHUB_REPO_URL.fullmatch(url) is None
+        or REVISION.fullmatch(commit) is None
+        or destination.exists()
+        or destination.is_symlink()
+    ):
+        raise PrepareError("source bundle identity is invalid")
     environment = _sanitized_environment()
-    clone = [
-        "git",
-        "-c",
-        "core.hooksPath=/dev/null",
-        "-c",
-        "protocol.file.allow=never",
-        "clone",
-        "--mirror",
-        "--no-local",
-        "--quiet",
-        "--",
-        url,
-        str(destination),
-    ]
-    _command_bytes(clone, cwd=destination.parent, timeout=1800, env=environment)
-    remote = _single_line(
+    temporary = Path(tempfile.mkdtemp(prefix=f".{destination.stem}.", dir=destination.parent))
+    repository = temporary / "source.git"
+    validation = temporary / "validation.git"
+    try:
         _command_bytes(
-            ["git", "-C", str(destination), "remote", "get-url", "origin"],
+            ["git", "init", "--bare", "--quiet", str(repository)],
             cwd=destination.parent,
             timeout=30,
             env=environment,
-        ),
-        label="source mirror remote",
-        maximum=500,
-    )
-    if remote != url:
-        raise PrepareError("source mirror remote authentication failed")
-    _command_bytes(
-        [
-            "git",
-            "-C",
-            str(destination),
-            "fetch",
-            "--quiet",
-            "--force",
-            "--prune",
-            "--no-tags",
-            "origin",
-            commit,
-        ],
-        cwd=destination.parent,
-        timeout=1800,
-        env=environment,
-    )
-    observed = _single_line(
+        )
         _command_bytes(
-            ["git", "-C", str(destination), "rev-parse", "--verify", f"{commit}^{{commit}}"],
+            ["git", "-C", str(repository), "remote", "add", "origin", url],
             cwd=destination.parent,
             timeout=30,
             env=environment,
-        ),
-        label="source mirror commit",
-        maximum=40,
-    )
-    if observed != commit:
-        raise PrepareError("source mirror commit authentication failed")
-    _command_bytes(
-        ["git", "-C", str(destination), "cat-file", "-e", f"{commit}^{{tree}}"],
-        cwd=destination.parent,
-        timeout=30,
-        env=environment,
-    )
-    _command_bytes(
-        ["git", "-C", str(destination), "fsck", "--full", "--strict", "--no-dangling"],
-        cwd=destination.parent,
-        timeout=1800,
-        env=environment,
-    )
+        )
+        remote = _single_line(
+            _command_bytes(
+                ["git", "-C", str(repository), "remote", "get-url", "origin"],
+                cwd=destination.parent,
+                timeout=30,
+                env=environment,
+            ),
+            label="source repository remote",
+            maximum=500,
+        )
+        if remote != url:
+            raise PrepareError("source repository remote authentication failed")
+        _command_bytes(
+            [
+                "git",
+                "-C",
+                str(repository),
+                "-c",
+                "core.hooksPath=/dev/null",
+                "-c",
+                "protocol.file.allow=never",
+                "fetch",
+                "--quiet",
+                "--force",
+                "--no-tags",
+                "origin",
+                f"{commit}:refs/heads/base",
+            ],
+            cwd=destination.parent,
+            timeout=1800,
+            env=environment,
+        )
+        observed = _single_line(
+            _command_bytes(
+                [
+                    "git",
+                    "-C",
+                    str(repository),
+                    "rev-parse",
+                    "--verify",
+                    "refs/heads/base^{commit}",
+                ],
+                cwd=destination.parent,
+                timeout=30,
+                env=environment,
+            ),
+            label="source bundle commit",
+            maximum=40,
+        )
+        refs = _single_line(
+            _command_bytes(
+                [
+                    "git",
+                    "-C",
+                    str(repository),
+                    "for-each-ref",
+                    "--format=%(objectname) %(refname)",
+                ],
+                cwd=destination.parent,
+                timeout=30,
+                env=environment,
+            ),
+            label="source bundle refs",
+            maximum=100,
+        )
+        if observed != commit or refs != f"{commit} refs/heads/base":
+            raise PrepareError("source bundle commit authentication failed")
+        tree_sha1 = _single_line(
+            _command_bytes(
+                [
+                    "git",
+                    "-C",
+                    str(repository),
+                    "rev-parse",
+                    "--verify",
+                    f"{commit}^{{tree}}",
+                ],
+                cwd=destination.parent,
+                timeout=30,
+                env=environment,
+            ),
+            label="source bundle tree",
+            maximum=40,
+        )
+        if REVISION.fullmatch(tree_sha1) is None:
+            raise PrepareError("source bundle tree authentication failed")
+        _command_bytes(
+            ["git", "-C", str(repository), "remote", "remove", "origin"],
+            cwd=destination.parent,
+            timeout=30,
+            env=environment,
+        )
+        if _command_bytes(
+            ["git", "-C", str(repository), "remote"],
+            cwd=destination.parent,
+            timeout=30,
+            env=environment,
+        ):
+            raise PrepareError("source bundle staging repository retained a remote")
+        _command_bytes(
+            [
+                "git",
+                "-C",
+                str(repository),
+                "reflog",
+                "expire",
+                "--expire=now",
+                "--all",
+            ],
+            cwd=destination.parent,
+            timeout=30,
+            env=environment,
+        )
+        _command_bytes(
+            ["git", "-C", str(repository), "gc", "--prune=now", "--quiet"],
+            cwd=destination.parent,
+            timeout=1800,
+            env=environment,
+        )
+        if _command_bytes(
+            [
+                "git",
+                "-C",
+                str(repository),
+                "fsck",
+                "--full",
+                "--strict",
+                "--unreachable",
+                "--no-reflogs",
+            ],
+            cwd=destination.parent,
+            timeout=1800,
+            env=environment,
+        ):
+            raise PrepareError("source bundle staging repository contains unreachable objects")
+        _command_bytes(
+            [
+                "git",
+                "-C",
+                str(repository),
+                "bundle",
+                "create",
+                str(destination),
+                "refs/heads/base",
+            ],
+            cwd=destination.parent,
+            timeout=1800,
+            env=environment,
+        )
+        bundle_head = _single_line(
+            _command_bytes(
+                ["git", "bundle", "list-heads", str(destination)],
+                cwd=destination.parent,
+                timeout=30,
+                env=environment,
+            ),
+            label="source bundle head",
+            maximum=100,
+        )
+        if bundle_head != f"{commit} refs/heads/base":
+            raise PrepareError("source bundle exposes unsupported refs")
+        _command_bytes(
+            ["git", "init", "--bare", "--quiet", str(validation)],
+            cwd=destination.parent,
+            timeout=30,
+            env=environment,
+        )
+        _command_bytes(
+            [
+                "git",
+                "-C",
+                str(validation),
+                "-c",
+                "protocol.file.allow=always",
+                "fetch",
+                "--quiet",
+                "--no-tags",
+                str(destination),
+                "refs/heads/base:refs/heads/base",
+            ],
+            cwd=destination.parent,
+            timeout=1800,
+            env=environment,
+        )
+        if _command_bytes(
+            ["git", "-C", str(validation), "remote"],
+            cwd=destination.parent,
+            timeout=30,
+            env=environment,
+        ):
+            raise PrepareError("offline source materialization retained a remote")
+        validated_commit = _single_line(
+            _command_bytes(
+                [
+                    "git",
+                    "-C",
+                    str(validation),
+                    "rev-parse",
+                    "--verify",
+                    "refs/heads/base^{commit}",
+                ],
+                cwd=destination.parent,
+                timeout=30,
+                env=environment,
+            ),
+            label="materialized source commit",
+            maximum=40,
+        )
+        validated_tree = _single_line(
+            _command_bytes(
+                [
+                    "git",
+                    "-C",
+                    str(validation),
+                    "rev-parse",
+                    "--verify",
+                    "refs/heads/base^{tree}",
+                ],
+                cwd=destination.parent,
+                timeout=30,
+                env=environment,
+            ),
+            label="materialized source tree",
+            maximum=40,
+        )
+        if validated_commit != commit or validated_tree != tree_sha1:
+            raise PrepareError("offline source materialization changed identity")
+        if _command_bytes(
+            [
+                "git",
+                "-C",
+                str(validation),
+                "fsck",
+                "--full",
+                "--strict",
+                "--unreachable",
+                "--no-reflogs",
+            ],
+            cwd=destination.parent,
+            timeout=1800,
+            env=environment,
+        ):
+            raise PrepareError("offline source materialization contains unreachable objects")
+        return tree_sha1, _stable_digest(destination, label="source bundle")
+    except BaseException:
+        destination.unlink(missing_ok=True)
+        raise
+    finally:
+        _remove_private_tree(temporary)
 
 
 def _harden_private_tree(root: Path) -> None:
     for path in sorted(root.rglob("*"), key=lambda item: len(item.parts), reverse=True):
         if path.is_symlink():
-            raise PrepareError("source mirror contains a symlink")
+            raise PrepareError("source bundle cache contains a symlink")
         if path.is_dir():
             path.chmod(PRIVATE_DIRECTORY_MODE)
         elif path.is_file():
             executable = bool(path.stat().st_mode & stat.S_IXUSR)
             path.chmod(0o700 if executable else PRIVATE_FILE_MODE)
         else:
-            raise PrepareError("source mirror contains an unsupported file type")
+            raise PrepareError("source bundle cache contains an unsupported file type")
     root.chmod(PRIVATE_DIRECTORY_MODE)
 
 
@@ -962,6 +1316,7 @@ def prepare_sources(
     *,
     protocol_path: Path,
     expected_acquisition_protocol_sha256: str,
+    exposure_ledger_path: Path,
     rows_path: Path,
     selection_path: Path,
     cache_root: Path,
@@ -969,20 +1324,23 @@ def prepare_sources(
     workers: int = 4,
     root: Path = ROOT,
 ) -> str:
-    """Clone authenticated mirrors for the ten frozen selected commits."""
+    """Create authenticated offline bundles for the ten frozen selected commits."""
     if isinstance(workers, bool) or not isinstance(workers, int) or not 1 <= workers <= 8:
         raise PrepareError("source worker count must be between one and eight")
     state = _repository_state(root)
     protocol_file = _resolved_path(protocol_path)
+    exposure_file = _resolved_path(exposure_ledger_path)
     rows_file = _resolved_path(rows_path)
     selection_file = _resolved_path(selection_path)
     _require_private_repository_location(cache_root, root=state.root)
     _require_private_repository_location(output_path, root=state.root)
+    _require_private_repository_location(exposure_file, root=state.root)
     cache = _ensure_private_directory_parent(cache_root)
     output = _private_parent(output_path)
     _reject_aliases(
         {
             "protocol": protocol_file,
+            "exposure ledger": exposure_file,
             "rows": rows_file,
             "selection": selection_file,
             "source cache": cache,
@@ -990,11 +1348,24 @@ def prepare_sources(
         }
     )
     _reject_nested_paths(cache, output)
+    source_root = output.parent.resolve(strict=True)
+    if source_root not in cache.parents:
+        raise PrepareError("source bundle cache must be below the source-map parent")
     protocol, protocol_bytes = _load_acquisition_protocol(
         protocol_file,
         expected_sha256=expected_acquisition_protocol_sha256,
     )
-    if protocol["product_inputs"]["revision"] != state.revision:
+    exposure_document, exposure_bytes = _validated_exposure_ledger(exposure_file)
+    if not secrets.compare_digest(
+        _sha256(exposure_bytes),
+        str(protocol.get("exposure_ledger_sha256") or ""),
+    ):
+        raise PrepareError("exposure ledger does not match the acquisition protocol")
+    if (
+        protocol["product_inputs"]["revision"] != state.revision
+        or protocol["product_inputs"]["origin_main_revision"] != state.origin_main_revision
+        or protocol["product_inputs"]["origin_url"] != state.origin_url
+    ):
         raise PrepareError("acquisition protocol does not match the committed product")
     universe = protocol.get("universe")
     if not isinstance(universe, dict) or not isinstance(universe.get("required_columns"), list):
@@ -1013,11 +1384,24 @@ def prepare_sources(
         newline=False,
     )
     try:
+        evaluated_rows = [holdout.evaluate_row(row, protocol) for row in rows]
+        filtered_rows = holdout.reject_historical_exposures(
+            evaluated_rows,
+            exposure_document,
+        )
         expected_selection = holdout.select_rows(
-            [holdout.evaluate_row(row, protocol) for row in rows],
+            filtered_rows,
             protocol,
         )
+        holdout.require_exposure_disjoint_selection(
+            expected_selection,
+            exposure_document,
+        )
         selected_ids, repository_map = holdout._validated_selection(selection, protocol)
+        holdout.require_exposure_disjoint_selection(
+            selection,
+            exposure_document,
+        )
     except (KeyError, TypeError, ValueError) as exc:
         raise PrepareError("canonical selection is invalid") from exc
     if selection != expected_selection:
@@ -1049,7 +1433,7 @@ def prepare_sources(
     previous_umask = os.umask(0o077)
     try:
         destinations = {
-            url: cache / f"{_sha256(url.encode('utf-8'))}.git" for url, _commit in specs
+            url: cache / f"{_sha256(url.encode('utf-8'))}.bundle" for url, _commit in specs
         }
         with ThreadPoolExecutor(
             max_workers=workers,
@@ -1057,21 +1441,47 @@ def prepare_sources(
         ) as executor:
             futures = {
                 url: executor.submit(
-                    _clone_authenticated_mirror,
+                    _create_authenticated_bundle,
                     url=url,
                     commit=commit,
                     destination=destinations[url],
                 )
                 for url, commit in specs
             }
+            identities: dict[str, tuple[str, str]] = {}
             for url, _commit in specs:
-                futures[url].result()
-        source_map = {url: str(destinations[url]) for url, _commit in specs}
+                identities[url] = futures[url].result()
         _harden_private_tree(cache)
+        repositories: dict[str, dict[str, str]] = {}
+        for url, commit in specs:
+            destination = destinations[url]
+            try:
+                relative = destination.relative_to(source_root).as_posix()
+            except ValueError as exc:
+                raise PrepareError("source bundle path escaped the source-map parent") from exc
+            tree_sha1, expected_bundle_sha256 = identities[url]
+            observed_bundle_sha256 = _stable_digest(
+                destination,
+                label="source bundle",
+            )
+            if observed_bundle_sha256 != expected_bundle_sha256:
+                raise PrepareError("source bundle changed during preparation")
+            repositories[url] = {
+                "base_commit": commit,
+                "bundle_path": relative,
+                "bundle_sha256": observed_bundle_sha256,
+                "tree_sha1": tree_sha1,
+            }
+        source_map = {
+            "schema_version": 1,
+            "repositories": repositories,
+        }
         _assert_repository_unchanged(state)
         if (
             _read_regular_bytes(protocol_file, label="acquisition protocol", private=True)[1]
             != protocol_bytes
+            or _read_regular_bytes(exposure_file, label="exposure ledger", private=True)[1]
+            != exposure_bytes
             or _read_regular_bytes(rows_file, label="canonical acquisition rows", private=True)[1]
             != rows_bytes
             or _read_regular_bytes(selection_file, label="canonical selection", private=True)[1]
@@ -1251,12 +1661,14 @@ def main(argv: list[str] | None = None) -> int:
     protocol_parser.add_argument("--output", type=Path, required=True)
     protocol_parser.add_argument("--codex", type=Path, required=True)
     protocol_parser.add_argument("--provider", choices=[PROVIDER], default=PROVIDER)
+    protocol_parser.add_argument("--exposure-ledger", type=Path, required=True)
     protocol_parser.add_argument("--frozen-at", default=_default_timestamp())
     _add_verifier_arguments(protocol_parser)
 
     sources_parser = subparsers.add_parser("sources")
     sources_parser.add_argument("--protocol", type=Path, required=True)
     sources_parser.add_argument("--expected-acquisition-protocol-sha256", required=True)
+    sources_parser.add_argument("--exposure-ledger", type=Path, required=True)
     sources_parser.add_argument("--rows", type=Path, required=True)
     sources_parser.add_argument("--selection", type=Path, required=True)
     sources_parser.add_argument("--cache-root", type=Path, required=True)
@@ -1285,6 +1697,7 @@ def main(argv: list[str] | None = None) -> int:
                 swebench_python=args.swebench_python,
                 docker_cli=args.docker_cli,
                 docker_host=args.docker_host,
+                exposure_ledger_path=args.exposure_ledger,
                 frozen_at=args.frozen_at,
             )
             print(f"prepared acquisition protocol sha256={digest}")
@@ -1292,6 +1705,7 @@ def main(argv: list[str] | None = None) -> int:
             digest = prepare_sources(
                 protocol_path=args.protocol,
                 expected_acquisition_protocol_sha256=(args.expected_acquisition_protocol_sha256),
+                exposure_ledger_path=args.exposure_ledger,
                 rows_path=args.rows,
                 selection_path=args.selection,
                 cache_root=args.cache_root,
@@ -1299,7 +1713,7 @@ def main(argv: list[str] | None = None) -> int:
                 workers=args.workers,
             )
             print(
-                f"prepared {REPOSITORY_COUNT} authenticated source mirrors "
+                f"prepared {REPOSITORY_COUNT} authenticated source bundles "
                 f"source_map_sha256={digest}"
             )
         else:
