@@ -46,6 +46,10 @@ filtering to one scenario does not reset it.
 
 ## Official production-graph V2 campaign
 
+Current status (2026-07-30): the framework is validated, but the official
+campaign has not run (`0/10` controls, `0/30` pairs, `0/60` arms). CTX benefit
+remains unproven; `not_beneficial` is a valid final result.
+
 Run V2 only from a clean worktree at the merged `origin/main` revision. The
 worktree, private scenario artifacts, and run output must be on a persistent
 filesystem, not under `/tmp`, `/private/tmp`, or `/var/tmp`. Use an isolated
