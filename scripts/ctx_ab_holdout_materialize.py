@@ -739,7 +739,7 @@ def _write_artifacts(
         for key, data in artifacts.items():
             path = temp / OUTPUT_FILES[key]
             _private_write(path, data)
-            if stat.S_IMODE(path.stat().st_mode) != 0o600:
+            if os.name != "nt" and stat.S_IMODE(path.stat().st_mode) != 0o600:
                 raise MaterializationError("private artifact permissions are unsafe")
         retained_evidence.rename(temp / VERIFICATION_DIR)
         temp.rename(output)

@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import signal
 import socket
 import stat
 import sys
@@ -64,6 +65,56 @@ def test_verifier_process_runner_is_self_contained(
     assert isinstance(result, bridge.CommandResult)
     assert result.returncode == 0
     assert result.stdout == "authenticated\n"
+
+
+def test_windows_process_launch_and_tree_signal_use_native_controls(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    class FakeProcess:
+        pid = 4321
+        returncode = 0
+        stdout = None
+        stderr = None
+
+        def communicate(
+            self,
+            input: str | None = None,
+            timeout: float | None = None,
+        ) -> tuple[str, str]:
+            captured["communicate"] = (input, timeout)
+            return "ok\n", ""
+
+        def kill(self) -> None:
+            captured["killed"] = True
+
+    def fake_popen(argv: list[str], **kwargs: Any) -> FakeProcess:
+        captured["argv"] = argv
+        captured["popen"] = kwargs
+        return FakeProcess()
+
+    def fake_taskkill(argv: list[str], **kwargs: Any) -> None:
+        captured["taskkill"] = (argv, kwargs)
+
+    monkeypatch.setattr(bridge.os, "name", "nt")
+    monkeypatch.setattr(bridge.subprocess, "CREATE_NEW_PROCESS_GROUP", 512, raising=False)
+    monkeypatch.setattr(bridge.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(bridge.subprocess, "run", fake_taskkill)
+    monkeypatch.setattr(
+        bridge.os,
+        "killpg",
+        lambda *_args: pytest.fail("Windows must not call os.killpg"),
+    )
+
+    result = bridge._run_process(["worker"], cwd=tmp_path, timeout=7)
+    bridge._signal_process_tree(FakeProcess(), signal.SIGTERM)
+
+    assert result.returncode == 0
+    assert captured["popen"]["creationflags"] == 512
+    assert "start_new_session" not in captured["popen"]
+    assert captured["taskkill"][0] == ["taskkill", "/PID", "4321", "/T", "/F"]
 
 
 def _report_entry(*, resolved: bool) -> dict[str, Any]:

@@ -44,6 +44,7 @@ PAIR_COUNT = 30
 TRIALS_PER_SCENARIO = freezer.TRIALS_PER_SCENARIO
 PRIVATE_FILE_MODE = 0o600
 PRIVATE_DIRECTORY_MODE = 0o700
+_IS_WINDOWS = os.name == "nt"
 
 
 class PrepareError(RuntimeError):
@@ -262,7 +263,8 @@ def _atomic_private_write(path: Path, data: bytes) -> Path:
     temporary = Path(temporary_name)
     installed = False
     try:
-        os.fchmod(descriptor, PRIVATE_FILE_MODE)
+        if not _IS_WINDOWS:
+            os.fchmod(descriptor, PRIVATE_FILE_MODE)
         with os.fdopen(descriptor, "wb") as handle:
             descriptor = -1
             handle.write(data)

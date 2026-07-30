@@ -107,6 +107,17 @@ def _descendant_pids(root_pid: int) -> list[int]:
 
 
 def _signal_process_tree(process: subprocess.Popen[str], sig: signal.Signals) -> None:
+    if os.name == "nt":
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                check=False,
+                capture_output=True,
+                timeout=5,
+            )
+        except (OSError, subprocess.SubprocessError):
+            process.kill()
+        return
     descendants = _descendant_pids(process.pid)
     try:
         os.killpg(process.pid, sig)
@@ -211,6 +222,11 @@ def _run_process(
     if process_token is not None:
         child_env = dict(os.environ if env is None else env)
         child_env[PROCESS_MARKER] = process_token
+    process_kwargs: dict[str, Any] = {}
+    if os.name == "nt":
+        process_kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    else:
+        process_kwargs["start_new_session"] = True
     process = subprocess.Popen(
         argv,
         cwd=cwd,
@@ -219,7 +235,7 @@ def _run_process(
         stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        start_new_session=True,
+        **process_kwargs,
     )
     timed_out = False
     reaped = 0

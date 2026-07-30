@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import os
 from pathlib import Path
 import stat
 import subprocess
@@ -423,18 +424,19 @@ def test_materializes_ten_official_controls_and_evaluator_bound_attestations(
         "controls",
     }
     assert len(double.calls) == 20
-    assert stat.S_IMODE(output.stat().st_mode) == 0o700
-    assert all(
-        stat.S_IMODE((output / name).stat().st_mode) == 0o600
-        for name in materializer.OUTPUT_FILES.values()
-    )
     retained = output / materializer.VERIFICATION_DIR
-    assert stat.S_IMODE(retained.stat().st_mode) == 0o700
+    if os.name != "nt":
+        assert stat.S_IMODE(output.stat().st_mode) == 0o700
+        assert all(
+            stat.S_IMODE((output / name).stat().st_mode) == 0o600
+            for name in materializer.OUTPUT_FILES.values()
+        )
+        assert stat.S_IMODE(retained.stat().st_mode) == 0o700
+        assert all(
+            stat.S_IMODE(path.stat().st_mode) == (0o700 if path.is_dir() else 0o600)
+            for path in retained.rglob("*")
+        )
     assert len(list(retained.glob("scenario-*"))) == 10
-    assert all(
-        stat.S_IMODE(path.stat().st_mode) == (0o700 if path.is_dir() else 0o600)
-        for path in retained.rglob("*")
-    )
 
     scenario_bytes = (output / "scenario-pack.json").read_bytes()
     controls_bytes = (output / "control-results.json").read_bytes()

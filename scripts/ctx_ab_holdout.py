@@ -22,6 +22,7 @@ from typing import Any, TextIO
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PROTOCOL = ROOT / "benchmarks" / "ctx_ab" / "holdout-protocol-v1.json"
 PRIVATE_ROOT = ROOT / ".gate" / "ctx-ab-private"
+_IS_WINDOWS = os.name == "nt"
 V2_CANDIDATE_PARTITION_PREFIX = b"ctx-holdout-candidate-partition-v2\0"
 SHA1 = re.compile(r"^[0-9a-f]{40}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -814,7 +815,7 @@ def _private_text_handle(path: Path) -> TextIO:
     if ROOT.resolve() in resolved.parents and private_root not in resolved.parents:
         raise ValueError("holdout evidence inside the repository must use .gate/ctx-ab-private")
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if stat.S_IMODE(path.parent.stat().st_mode) != 0o700:
+    if not _IS_WINDOWS and stat.S_IMODE(path.parent.stat().st_mode) != 0o700:
         raise ValueError("holdout evidence parent must be owner-only")
     if path.is_symlink() or (path.exists() and not path.is_file()):
         raise ValueError("holdout evidence path must be a regular file")
@@ -826,7 +827,8 @@ def _private_text_handle(path: Path) -> TextIO:
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
     descriptor = os.open(path, flags, 0o600)
-    os.fchmod(descriptor, 0o600)
+    if not _IS_WINDOWS:
+        os.fchmod(descriptor, 0o600)
     return os.fdopen(descriptor, "w", encoding="utf-8", newline="")
 
 
@@ -847,7 +849,7 @@ def _remove_stale_selection(path: Path) -> None:
     private_root = PRIVATE_ROOT.resolve()
     if ROOT.resolve() in resolved.parents and private_root not in resolved.parents:
         raise ValueError("stale selection inside the repository must use .gate/ctx-ab-private")
-    if stat.S_IMODE(path.parent.stat().st_mode) != 0o700:
+    if not _IS_WINDOWS and stat.S_IMODE(path.parent.stat().st_mode) != 0o700:
         raise ValueError("stale selection parent must be owner-only")
     if path.is_symlink() or not path.is_file() or path.stat().st_nlink != 1:
         raise ValueError("stale selection must be a single-link regular file")

@@ -24,6 +24,7 @@ from scripts import ctx_ab_holdout as holdout
 
 ROOT = Path(__file__).resolve().parents[1]
 PRIVATE_ROOT = ROOT / ".gate" / "ctx-ab-private"
+_IS_WINDOWS = os.name == "nt"
 V1_PROTOCOL_PATH = ROOT / "benchmarks" / "ctx_ab" / "holdout-protocol-v1.json"
 V1_PROTOCOL_SHA256 = "14c3e623b6a3dced3b41769a9e8b60faed5c921aa4f1456d4bde907f1f8a60fa"
 PROTOCOL_ID = "production-graph-holdout-v2"
@@ -1006,7 +1007,8 @@ def _stage_bytes(path: Path, data: bytes, *, mode: int) -> Path:
     descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     temporary_path = Path(temporary)
     try:
-        os.fchmod(descriptor, mode)
+        if not _IS_WINDOWS:
+            os.fchmod(descriptor, mode)
         with os.fdopen(descriptor, "wb") as handle:
             descriptor = -1
             handle.write(data)

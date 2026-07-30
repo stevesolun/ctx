@@ -346,10 +346,25 @@ def test_atomic_private_write_is_canonical_owner_only_and_no_overwrite(
     prepare._atomic_private_write(output, data)
 
     assert output.read_bytes() == b'{"a":1,"b":2}'
-    assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    if os.name != "nt":
+        assert stat.S_IMODE(output.stat().st_mode) == 0o600
     assert output.stat().st_nlink == 1
     with pytest.raises(prepare.PrepareError, match="exists"):
         prepare._atomic_private_write(output, data)
+
+
+def test_atomic_private_write_does_not_require_fchmod_on_windows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "private" / "artifact.json"
+    monkeypatch.setattr(prepare, "_IS_WINDOWS", True)
+    monkeypatch.delattr(prepare.os, "fchmod", raising=False)
+
+    prepare._atomic_private_write(output, b"{}")
+
+    assert output.read_bytes() == b"{}"
+    assert output.stat().st_nlink == 1
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX permission contract")
@@ -440,7 +455,8 @@ def test_create_protocol_writes_authenticated_canonical_output(
     assert document["frozen_at"] == "2026-07-30T10:00:00Z"
     assert document["product_inputs"]["revision"] == REVISION
     assert document["product_inputs"]["codex_binary_sha256"] == codex.sha256
-    assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    if os.name != "nt":
+        assert stat.S_IMODE(output.stat().st_mode) == 0o600
 
 
 def test_probe_verifier_rejects_runtime_drift(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -556,7 +572,8 @@ def test_prepare_sources_clones_in_bounded_parallel_and_writes_deterministic_map
     assert 2 <= maximum_active <= 4
     assert all("private-task-" not in value for value in source_map.values())
     assert digest == _sha256(output.read_bytes())
-    assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    if os.name != "nt":
+        assert stat.S_IMODE(output.stat().st_mode) == 0o600
 
 
 @pytest.mark.parametrize("workers", [0, 9, True])
@@ -785,7 +802,8 @@ def test_write_environment_matches_freezer_contract(
         "executable_sha256": python.sha256,
         "version": python.version,
     }
-    assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    if os.name != "nt":
+        assert stat.S_IMODE(output.stat().st_mode) == 0o600
 
 
 def test_write_environment_rejects_runtime_drift(
