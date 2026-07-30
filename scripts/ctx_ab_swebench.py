@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 import hashlib
 import importlib
 import importlib.util
@@ -15,6 +16,7 @@ from pathlib import Path, PurePosixPath
 import re
 import secrets
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -39,6 +41,7 @@ CONTAINER_NANO_CPUS = 4_000_000_000
 CONTAINER_PIDS_LIMIT = 2048
 CONTAINER_SECURITY_OPT = "no-new-privileges:true"
 RUN_LABEL = "ctx.benchmark.run_id"
+PROCESS_MARKER = "CTX_SWEBENCH_PROCESS_TOKEN"
 REQUIRED_ARTIFACTS = (
     "report.json",
     "raw-status.json",
@@ -64,10 +67,200 @@ class SWEbenchVerificationError(RuntimeError):
         self.evidence = dict(evidence or {})
 
 
-def _run_process(argv: list[str], **kwargs: Any) -> Any:
-    from scripts import ctx_ab_benchmark as benchmark
+@dataclass(frozen=True)
+class CommandResult:
+    returncode: int
+    stdout: str
+    stderr: str
+    elapsed: float
+    timed_out: bool = False
+    reaped_descendants: int = 0
+    residual_descendants: tuple[int, ...] = ()
 
-    return benchmark.run_process(argv, **kwargs)
+
+def _descendant_pids(root_pid: int) -> list[int]:
+    try:
+        result = subprocess.run(
+            ["/bin/ps", "-axo", "pid=,ppid="],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    children: dict[int, list[int]] = {}
+    for line in result.stdout.splitlines():
+        try:
+            pid_text, parent_text = line.split()
+            children.setdefault(int(parent_text), []).append(int(pid_text))
+        except (ValueError, TypeError):
+            continue
+    found: list[int] = []
+    pending = [root_pid]
+    while pending:
+        current = pending.pop()
+        direct = children.get(current, [])
+        found.extend(direct)
+        pending.extend(direct)
+    return found
+
+
+def _signal_process_tree(process: subprocess.Popen[str], sig: signal.Signals) -> None:
+    descendants = _descendant_pids(process.pid)
+    try:
+        os.killpg(process.pid, sig)
+    except (ProcessLookupError, PermissionError):
+        pass
+    for pid in reversed(descendants):
+        try:
+            os.kill(pid, sig)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+
+def _terminate_process_tree(process: subprocess.Popen[str]) -> tuple[str, str]:
+    _signal_process_tree(process, signal.SIGTERM)
+    try:
+        return process.communicate(timeout=5)
+    except subprocess.TimeoutExpired as first:
+        _signal_process_tree(process, getattr(signal, "SIGKILL", signal.SIGTERM))
+        try:
+            return process.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            for stream in (process.stdout, process.stderr):
+                if stream is not None:
+                    stream.close()
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                pass
+            stdout = first.stdout if isinstance(first.stdout, str) else ""
+            stderr = first.stderr if isinstance(first.stderr, str) else ""
+            return stdout, stderr + "\nprocess tree did not reap within 12 seconds"
+
+
+def _marked_process_pids(token: str) -> tuple[set[int], str | None]:
+    try:
+        result = subprocess.run(
+            ["/bin/ps", "eww", "-A", "-o", "pid=", "-o", "args="],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return set(), f"process marker scan failed: {exc}"
+    if result.returncode:
+        return set(), f"process marker scan exited {result.returncode}"
+    marker = f"{PROCESS_MARKER}={token}"
+    pids: set[int] = set()
+    for line in result.stdout.splitlines():
+        fields = line.strip().split(maxsplit=1)
+        if len(fields) != 2 or marker not in fields[1]:
+            continue
+        try:
+            pid = int(fields[0])
+        except ValueError:
+            continue
+        if pid != os.getpid():
+            pids.add(pid)
+    return pids, None
+
+
+def _cleanup_marked_processes(token: str) -> tuple[int, tuple[int, ...], str | None]:
+    pids, error = _marked_process_pids(token)
+    if error:
+        return 0, (), error
+    signaled = set(pids)
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            pass
+    deadline = time.monotonic() + 2
+    while pids and time.monotonic() < deadline:
+        time.sleep(0.05)
+        pids, error = _marked_process_pids(token)
+        if error:
+            return len(signaled), (), error
+        signaled.update(pids)
+    for pid in pids:
+        try:
+            os.kill(pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+        except (ProcessLookupError, PermissionError):
+            pass
+    if pids:
+        time.sleep(0.05)
+    residual, error = _marked_process_pids(token)
+    return len(signaled), tuple(sorted(residual)), error
+
+
+def _run_process(
+    argv: list[str],
+    *,
+    cwd: Path,
+    env: dict[str, str] | None = None,
+    timeout: float = 600,
+    input_text: str | None = None,
+    contain_descendants: bool = False,
+) -> CommandResult:
+    started = time.perf_counter()
+    process_token = secrets.token_hex(16) if contain_descendants else None
+    child_env = env
+    if process_token is not None:
+        child_env = dict(os.environ if env is None else env)
+        child_env[PROCESS_MARKER] = process_token
+    process = subprocess.Popen(
+        argv,
+        cwd=cwd,
+        env=child_env,
+        text=True,
+        stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    timed_out = False
+    reaped = 0
+    residual: tuple[int, ...] = ()
+    cleanup_error: str | None = None
+
+    def cleanup_marked_processes() -> None:
+        nonlocal reaped, residual, cleanup_error
+        if process_token is None:
+            return
+        count, remaining, error = _cleanup_marked_processes(process_token)
+        reaped += count
+        residual = remaining
+        cleanup_error = cleanup_error or error
+
+    try:
+        stdout, stderr = process.communicate(input=input_text, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        cleanup_marked_processes()
+        stdout, stderr = _terminate_process_tree(process)
+    except BaseException:
+        cleanup_marked_processes()
+        _terminate_process_tree(process)
+        raise
+    finally:
+        cleanup_marked_processes()
+    returncode = process.returncode or (124 if timed_out else 0)
+    if cleanup_error or residual:
+        returncode = returncode or 125
+        detail = cleanup_error or f"residual descendants: {list(residual)}"
+        stderr = f"{stderr}\nprocess containment failed: {detail}".lstrip()
+    return CommandResult(
+        returncode,
+        stdout,
+        stderr,
+        time.perf_counter() - started,
+        timed_out=timed_out,
+        reaped_descendants=reaped,
+        residual_descendants=residual,
+    )
 
 
 def _canonical_bytes(value: Any) -> bytes:
@@ -436,11 +629,60 @@ def _auth_environment() -> dict[str, str]:
     return {
         "GIT_CONFIG_GLOBAL": os.devnull,
         "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_OPTIONAL_LOCKS": "0",
         "LANG": "C",
         "LC_ALL": "C",
         "PATH": os.defpath,
         "PYTHONDONTWRITEBYTECODE": "1",
     }
+
+
+def _freeze_tree(root: Path) -> None:
+    for path in sorted(root.rglob("*"), key=lambda item: len(item.parts), reverse=True):
+        if path.is_symlink():
+            raise SWEbenchVerificationError("authenticated input contains a symlink")
+        if path.is_dir():
+            os.chmod(path, 0o500)
+        elif path.is_file():
+            executable = bool(path.stat().st_mode & 0o111)
+            os.chmod(path, 0o500 if executable else 0o400)
+        else:
+            raise SWEbenchVerificationError("authenticated input has an unsupported file type")
+    os.chmod(root, 0o500)
+
+
+def _snapshot_file(
+    source: Path,
+    *,
+    inputs: Path,
+    label: str,
+    expected_sha256: str,
+) -> Path:
+    if not SHA256_PATTERN.fullmatch(expected_sha256):
+        raise SWEbenchVerificationError(f"{label} snapshot identity is invalid")
+    data = _regular_file(source, label=label).read_bytes()
+    if _sha256(data) != expected_sha256:
+        raise SWEbenchVerificationError(f"{label} identity drifted")
+    inputs.mkdir(mode=0o700, parents=True, exist_ok=True)
+    destination = inputs / f"{label.lower().replace(' ', '-')}-{expected_sha256}{source.suffix}"
+    descriptor = os.open(
+        destination,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+        0o400,
+    )
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            descriptor = -1
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    os.chmod(destination, 0o400)
+    if _sha256(destination.read_bytes()) != expected_sha256:
+        raise SWEbenchVerificationError(f"{label} snapshot drifted")
+    return destination
 
 
 def worker_environment(
@@ -578,6 +820,8 @@ def _materialize_authenticated_harness(
         or observed_sha256 != expected_run_evaluation_sha256
     ):
         raise SWEbenchVerificationError("SWE-bench harness authentication failed")
+    source_manifest = _package_manifest(destination / "swebench")
+    _freeze_tree(destination)
     return {
         "commands": [
             {
@@ -599,6 +843,8 @@ def _materialize_authenticated_harness(
         ],
         "git_revision": expected_revision,
         "run_evaluation_sha256": observed_sha256,
+        "source_file_count": source_manifest["file_count"],
+        "source_sha256": source_manifest["sha256"],
     }
 
 
@@ -738,7 +984,7 @@ def _package_manifest(root: Path) -> dict[str, Any]:
     }
 
 
-def _package_manifest_for_name(package: str) -> dict[str, Any]:
+def _package_root_for_name(package: str) -> Path:
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", package):
         raise SWEbenchVerificationError("Python package name is invalid")
     spec = importlib.util.find_spec(package)
@@ -749,20 +995,44 @@ def _package_manifest_for_name(package: str) -> dict[str, Any]:
         root.relative_to(Path(sys.prefix).resolve(strict=True))
     except ValueError as exc:
         raise SWEbenchVerificationError("Python package escaped the pinned environment") from exc
-    return _package_manifest(root)
+    return root
 
 
-def _python_package_identity(
+def _package_manifest_for_name(package: str) -> dict[str, Any]:
+    return _package_manifest(_package_root_for_name(package))
+
+
+def _package_snapshot_for_name(package: str, destination: Path) -> dict[str, Any]:
+    if not destination.is_absolute() or destination.exists() or destination.is_symlink():
+        raise SWEbenchVerificationError("Python package snapshot destination is invalid")
+    source = _package_root_for_name(package)
+    shutil.copytree(source, destination, symlinks=False)
+    manifest = _package_manifest(destination)
+    _freeze_tree(destination)
+    return manifest
+
+
+def _python_package_snapshot(
     *,
     python: Path,
+    bridge: Path,
     package: str,
     expected_sha256: str,
+    destination: Path,
     cwd: Path,
     deadline: float,
-) -> dict[str, Any]:
+) -> tuple[Path, dict[str, Any]]:
     if not SHA256_PATTERN.fullmatch(expected_sha256):
         raise SWEbenchVerificationError("Python package identity is invalid")
-    command = [str(python), str(SCRIPT_PATH), "package-manifest", "--package", package]
+    command = [
+        str(python),
+        str(bridge),
+        "package-snapshot",
+        "--package",
+        package,
+        "--destination",
+        str(destination),
+    ]
     result = _run_process(
         command,
         cwd=cwd,
@@ -786,14 +1056,19 @@ def _python_package_identity(
         or manifest.get("sha256") != expected_sha256
         or not isinstance(manifest.get("file_count"), int)
         or manifest["file_count"] < 1
+        or not destination.is_dir()
+        or _package_manifest(destination) != manifest
     ):
         raise SWEbenchVerificationError("Python package identity drifted")
-    return {
-        "command": _command_evidence(command),
-        "file_count": manifest["file_count"],
-        "process": _process_evidence(result),
-        "sha256": expected_sha256,
-    }
+    return (
+        destination,
+        {
+            "command": _command_evidence(command),
+            "file_count": manifest["file_count"],
+            "process": _process_evidence(result),
+            "sha256": expected_sha256,
+        },
+    )
 
 
 def _new_run_id(phase: str) -> str:
@@ -1031,7 +1306,12 @@ def _cleanup_containers(
     }
 
 
-def _container_policy_attestation(container: Any, *, run_id: str) -> dict[str, Any]:
+def _container_policy_attestation(
+    container: Any,
+    *,
+    run_id: str,
+    expected_image_id: str,
+) -> dict[str, Any]:
     container.reload()
     attrs = container.attrs
     if not isinstance(attrs, Mapping):
@@ -1047,9 +1327,11 @@ def _container_policy_attestation(container: Any, *, run_id: str) -> dict[str, A
         raise SWEbenchVerificationError("Docker container inspection is incomplete")
     labels = config.get("Labels")
     security_opt = host.get("SecurityOpt") or []
+    cap_drop = host.get("CapDrop") or []
     if (
         not isinstance(labels, Mapping)
         or labels.get(RUN_LABEL) != run_id
+        or attrs.get("Image") != expected_image_id
         or host.get("NetworkMode") != "none"
         or host.get("Memory") != CONTAINER_MEMORY_BYTES
         or host.get("NanoCpus") != CONTAINER_NANO_CPUS
@@ -1059,12 +1341,17 @@ def _container_policy_attestation(container: Any, *, run_id: str) -> dict[str, A
         or host.get("IpcMode") not in (None, "", "private")
         or host.get("UTSMode") not in (None, "")
         or host.get("UsernsMode") not in (None, "")
+        or host.get("CgroupnsMode") != "private"
         or host.get("Binds") not in (None, [])
         or mounts
+        or cap_drop != ["ALL"]
         or CONTAINER_SECURITY_OPT not in security_opt
     ):
         raise SWEbenchVerificationError("Docker container policy was not enforced")
     return {
+        "cap_drop": ["ALL"],
+        "cgroupns_mode": "private",
+        "image_id": expected_image_id,
         "memory_bytes": CONTAINER_MEMORY_BYTES,
         "mount_count": 0,
         "nano_cpus": CONTAINER_NANO_CPUS,
@@ -1081,10 +1368,12 @@ class _HardenedContainerCollection:
         collection: Any,
         *,
         run_id: str,
+        expected_image_id: str,
         attestations: list[dict[str, Any]],
     ) -> None:
         self._collection = collection
         self._run_id = run_id
+        self._expected_image_id = expected_image_id
         self._attestations = attestations
 
     def __getattr__(self, name: str) -> Any:
@@ -1094,7 +1383,7 @@ class _HardenedContainerCollection:
         for field in ("binds", "devices", "device_requests", "mounts", "tmpfs", "volumes"):
             if kwargs.get(field):
                 raise SWEbenchVerificationError("Docker host resources are forbidden")
-        for field in ("ipc_mode", "pid_mode", "uts_mode", "userns_mode"):
+        for field in ("cgroupns", "ipc_mode", "pid_mode", "uts_mode", "userns_mode"):
             if kwargs.get(field):
                 raise SWEbenchVerificationError("Docker host namespaces are forbidden")
         if kwargs.get("privileged") is True or kwargs.get("cap_add"):
@@ -1106,6 +1395,8 @@ class _HardenedContainerCollection:
             raise SWEbenchVerificationError("Docker container labels are invalid")
         kwargs.update(
             {
+                "cap_drop": ["ALL"],
+                "cgroupns": "private",
                 "init": True,
                 "labels": {**dict(labels), RUN_LABEL: self._run_id},
                 "mem_limit": CONTAINER_MEMORY_BYTES,
@@ -1116,8 +1407,19 @@ class _HardenedContainerCollection:
                 "security_opt": [CONTAINER_SECURITY_OPT],
             }
         )
+        if args:
+            args = (self._expected_image_id, *args[1:])
+            kwargs.pop("image", None)
+        else:
+            kwargs["image"] = self._expected_image_id
         container = self._collection.create(*args, **kwargs)
-        self._attestations.append(_container_policy_attestation(container, run_id=self._run_id))
+        self._attestations.append(
+            _container_policy_attestation(
+                container,
+                run_id=self._run_id,
+                expected_image_id=self._expected_image_id,
+            )
+        )
         return container
 
 
@@ -1127,12 +1429,14 @@ class _HardenedDockerClient:
         client: Any,
         *,
         run_id: str,
+        expected_image_id: str,
         attestations: list[dict[str, Any]],
     ) -> None:
         self._client = client
         self.containers = _HardenedContainerCollection(
             client.containers,
             run_id=run_id,
+            expected_image_id=expected_image_id,
             attestations=attestations,
         )
 
@@ -1205,6 +1509,9 @@ def _validate_parent_artifacts(
         or not all(
             item
             == {
+                "cap_drop": ["ALL"],
+                "cgroupns_mode": "private",
+                "image_id": image_id,
                 "memory_bytes": CONTAINER_MEMORY_BYTES,
                 "mount_count": 0,
                 "nano_cpus": CONTAINER_NANO_CPUS,
@@ -1331,21 +1638,37 @@ def verify_swebench(
             raise SWEbenchVerificationError(f"SWE-bench {label} identity drifted")
     authenticated_host, _socket_path = _unix_docker_host(docker_host)
     private_cwd = _prepare_private_cwd(work_dir)
+    inputs = private_cwd / "inputs"
+    inputs.mkdir(mode=0o700)
+    bridge_snapshot = _snapshot_file(
+        SCRIPT_PATH,
+        inputs=inputs,
+        label="bridge",
+        expected_sha256=expected_bridge_sha256,
+    )
+    dataset_snapshot = _snapshot_file(
+        dataset,
+        inputs=inputs,
+        label="dataset",
+        expected_sha256=expected_dataset_sha256,
+    )
     python_environment = _python_environment_identity(
         python=python,
         expected_sha256=expected_python_environment_sha256,
         cwd=private_cwd,
         deadline=deadline,
     )
-    docker_package = _python_package_identity(
+    docker_package_path, docker_package = _python_package_snapshot(
         python=python,
+        bridge=bridge_snapshot,
         package="docker",
         expected_sha256=expected_docker_package_sha256,
+        destination=(inputs / f"docker-package-{expected_docker_package_sha256}" / "docker"),
         cwd=private_cwd,
         deadline=deadline,
     )
     git = _git_executable()
-    checkout = private_cwd / "authenticated-swebench"
+    checkout = inputs / f"swebench-{expected_revision}"
     authentication = _materialize_authenticated_harness(
         source_checkout=source_checkout,
         destination=checkout,
@@ -1354,6 +1677,7 @@ def verify_swebench(
         expected_run_evaluation_sha256=expected_run_evaluation_sha256,
         deadline=deadline,
     )
+    os.chmod(inputs, 0o500)
     environment = worker_environment(
         checkout=checkout,
         private_cwd=private_cwd,
@@ -1393,10 +1717,13 @@ def verify_swebench(
     request = {
         "allow_image_pull": allow_image_pull,
         "allowed_paths": normalized_allowed,
-        "dataset_path": str(dataset),
+        "dataset_path": str(dataset_snapshot),
+        "docker_package_path": str(docker_package_path),
         "expected_docker_daemon_id": expected_docker_daemon_id,
         "expected_docker_package_sha256": expected_docker_package_sha256,
         "expected_docker_server_version": expected_docker_server_version,
+        "expected_harness_source_file_count": authentication["source_file_count"],
+        "expected_harness_source_sha256": authentication["source_sha256"],
         "expected_image_id": expected_image_id,
         "expected_bridge_sha256": expected_bridge_sha256,
         "expected_dataset_sha256": expected_dataset_sha256,
@@ -1420,7 +1747,7 @@ def verify_swebench(
     _private_write_json(request_path, request)
     command = [
         str(python),
-        str(SCRIPT_PATH),
+        str(bridge_snapshot),
         "worker",
         "--request",
         str(request_path),
@@ -1511,6 +1838,12 @@ def verify_swebench(
             "baseline": baseline_inventory_evidence,
             "final": final_inventory_evidence,
         },
+        "input_snapshots": {
+            "bridge_sha256": _sha256(bridge_snapshot.read_bytes()),
+            "dataset_sha256": _sha256(dataset_snapshot.read_bytes()),
+            "docker_package": _package_manifest(docker_package_path),
+            "harness_source": _package_manifest(checkout / "swebench"),
+        },
         "model_name": model_name,
         "patch": patch_evidence,
         "phase": phase,
@@ -1519,12 +1852,58 @@ def verify_swebench(
         "run_id": run_id,
         "schema_version": 1,
     }
+    audit_path = private_cwd / "verification-evidence.json"
+    audit = {
+        "cleanup": {
+            "command_count": len(cleanup["commands"]),
+            "error_count": len(cleanup["errors"]),
+            "ok": cleanup["ok"],
+            "residual_container_count": len(cleanup["residual_container_ids"]),
+            "verification_complete": cleanup["verification_complete"],
+        },
+        "inventory": {
+            stage: {
+                name: {
+                    "count": record.get("count"),
+                    "sha256": record.get("sha256"),
+                }
+                for name, record in records.items()
+            }
+            for stage, records in evidence["inventory"].items()
+        },
+        "phase": phase,
+        "process": evidence["process"],
+        "run_id": run_id,
+        "schema_version": 1,
+    }
+    try:
+        _private_write_json(audit_path, audit)
+        artifacts[audit_path.name] = _artifact_evidence(audit_path, private_cwd)
+    except (OSError, SWEbenchVerificationError) as exc:
+        evidence["audit_error_type"] = type(exc).__name__
+        raise SWEbenchVerificationError(evidence=evidence) from exc
     if artifact_error_type:
         evidence["artifact_error_type"] = artifact_error_type
         raise SWEbenchVerificationError(evidence=evidence)
     if not cleanup["ok"]:
         raise SWEbenchVerificationError(
             "SWE-bench Docker containment failed",
+            evidence=evidence,
+        )
+    if evidence["input_snapshots"] != {
+        "bridge_sha256": expected_bridge_sha256,
+        "dataset_sha256": expected_dataset_sha256,
+        "docker_package": {
+            "file_count": docker_package["file_count"],
+            "sha256": expected_docker_package_sha256,
+        },
+        "harness_source": {
+            "file_count": authentication["source_file_count"],
+            "sha256": authentication["source_sha256"],
+        },
+    }:
+        raise SWEbenchVerificationError(
+            "SWE-bench authenticated inputs drifted",
             evidence=evidence,
         )
     containment_drift = (
@@ -1589,6 +1968,8 @@ def _worker_authenticate(request: Mapping[str, Any]) -> Path:
     expected_revision = str(request["expected_revision"])
     expected_sha256 = str(request["expected_run_evaluation_sha256"])
     expected_bridge_sha256 = str(request["expected_bridge_sha256"])
+    expected_source_sha256 = str(request.get("expected_harness_source_sha256") or "")
+    expected_source_file_count = request.get("expected_harness_source_file_count")
     git = _executable(Path(str(request["git_cli"])), label="Git executable")
     run_evaluation = _regular_file(
         checkout / "swebench/harness/run_evaluation.py",
@@ -1600,6 +1981,10 @@ def _worker_authenticate(request: Mapping[str, Any]) -> Path:
         or not SHA256_PATTERN.fullmatch(expected_bridge_sha256)
         or _sha256(SCRIPT_PATH.read_bytes()) != expected_bridge_sha256
         or _sha256(run_evaluation.read_bytes()) != expected_sha256
+        or not SHA256_PATTERN.fullmatch(expected_source_sha256)
+        or not isinstance(expected_source_file_count, int)
+        or isinstance(expected_source_file_count, bool)
+        or expected_source_file_count < 1
     ):
         raise SWEbenchVerificationError("SWE-bench worker authentication failed")
     revision = subprocess.run(
@@ -1635,6 +2020,12 @@ def _worker_authenticate(request: Mapping[str, Any]) -> Path:
         or dirty.stdout.strip()
     ):
         raise SWEbenchVerificationError("SWE-bench worker authentication failed")
+    source_manifest = _package_manifest(checkout / "swebench")
+    if source_manifest != {
+        "file_count": expected_source_file_count,
+        "sha256": expected_source_sha256,
+    }:
+        raise SWEbenchVerificationError("SWE-bench worker source snapshot drifted")
     return run_evaluation
 
 
@@ -1702,29 +2093,46 @@ def _tracked_mode_map(
     return tracked
 
 
+def _run_official_instance(run_evaluation: Any, *args: Any) -> Any:
+    previous_umask = os.umask(0o022)
+    try:
+        return run_evaluation.run_instance(*args)
+    finally:
+        os.umask(previous_umask)
+
+
 def _worker_run(request: Mapping[str, Any], result_path: Path) -> None:
     os.umask(0o077)
     run_evaluation_path = _worker_authenticate(request)
-    run_evaluation = importlib.import_module("swebench.harness.run_evaluation")
     checkout = Path(str(request["swebench_checkout"])).resolve(strict=True)
-    if Path(str(run_evaluation.__file__)).resolve() != run_evaluation_path:
-        raise SWEbenchVerificationError("imported SWE-bench harness path is not authenticated")
     expected_docker_package_sha256 = request.get("expected_docker_package_sha256")
+    docker_package_path = Path(str(request.get("docker_package_path") or ""))
     if (
         not isinstance(expected_docker_package_sha256, str)
         or not SHA256_PATTERN.fullmatch(expected_docker_package_sha256)
-        or _package_manifest_for_name("docker")["sha256"] != expected_docker_package_sha256
+        or not docker_package_path.is_absolute()
+        or docker_package_path.is_symlink()
+        or not docker_package_path.is_dir()
+        or docker_package_path.name != "docker"
+        or _package_manifest(docker_package_path)["sha256"] != expected_docker_package_sha256
     ):
         raise SWEbenchVerificationError("worker Docker package identity drifted")
+    sys.path.insert(0, str(docker_package_path.parent))
+    importlib.invalidate_caches()
     docker_module = importlib.import_module("docker")
     try:
         Path(str(docker_module.__file__)).resolve(strict=True).relative_to(
-            Path(sys.prefix).resolve(strict=True)
+            docker_package_path.resolve(strict=True)
         )
     except ValueError as exc:
         raise SWEbenchVerificationError(
-            "worker Docker package escaped the pinned environment"
+            "worker Docker package escaped the authenticated snapshot"
         ) from exc
+    if _package_manifest(docker_package_path)["sha256"] != expected_docker_package_sha256:
+        raise SWEbenchVerificationError("worker Docker package changed during import")
+    run_evaluation = importlib.import_module("swebench.harness.run_evaluation")
+    if Path(str(run_evaluation.__file__)).resolve() != run_evaluation_path:
+        raise SWEbenchVerificationError("imported SWE-bench harness path is not authenticated")
     constants = importlib.import_module("swebench.harness.constants")
     docker_build = importlib.import_module("swebench.harness.docker_build")
     docker_utils = importlib.import_module("swebench.harness.docker_utils")
@@ -1791,12 +2199,6 @@ def _worker_run(request: Mapping[str, Any], result_path: Path) -> None:
             or version.get("Version") != request.get("expected_docker_server_version")
         ):
             raise SWEbenchVerificationError("worker Docker daemon identity drifted")
-        container_policy: list[dict[str, Any]] = []
-        hardened_client = _HardenedDockerClient(
-            client,
-            run_id=run_id,
-            attestations=container_policy,
-        )
         allow_image_pull = request.get("allow_image_pull")
         expected_image_id = request.get("expected_image_id")
         if not isinstance(allow_image_pull, bool) or (
@@ -1812,10 +2214,24 @@ def _worker_run(request: Mapping[str, Any], result_path: Path) -> None:
             initial_image_id: str | None = str(initial_image.id)
         except docker_module.errors.ImageNotFound:
             initial_image_id = None
+        if initial_image_id is None and allow_image_pull:
+            client.images.pull(spec.instance_image_key)
+            initial_image = client.images.get(spec.instance_image_key)
+            initial_image_id = str(initial_image.id)
         if not allow_image_pull and initial_image_id is None:
             raise SWEbenchVerificationError("pinned instance image is unavailable")
+        if initial_image_id is None or not IMAGE_ID_PATTERN.fullmatch(initial_image_id):
+            raise SWEbenchVerificationError("instance image identity is invalid")
         if expected_image_id is not None and initial_image_id != expected_image_id:
             raise SWEbenchVerificationError("pinned instance image drifted")
+        pinned_image_id = initial_image_id
+        container_policy: list[dict[str, Any]] = []
+        hardened_client = _HardenedDockerClient(
+            client,
+            run_id=run_id,
+            expected_image_id=pinned_image_id,
+            attestations=container_policy,
+        )
         allowed_paths_value = request.get("allowed_paths")
         if not isinstance(allowed_paths_value, list) or not all(
             isinstance(path, str) for path in allowed_paths_value
@@ -1867,7 +2283,10 @@ def _worker_run(request: Mapping[str, Any], result_path: Path) -> None:
             constants.KEY_MODEL: model_name,
             constants.KEY_PREDICTION: patch,
         }
-        result = run_evaluation.run_instance(
+        # SWE-bench copies host-created patch/eval files into images that may use a
+        # non-root user. The enclosing run directory remains private.
+        result = _run_official_instance(
+            run_evaluation,
             spec,
             prediction,
             False,
@@ -1914,9 +2333,16 @@ def _worker_run(request: Mapping[str, Any], result_path: Path) -> None:
             report_entry=report[instance_id],
             official_resolution=resolution,
         )
+        _worker_authenticate(request)
+        if (
+            _sha256(dataset_path.read_bytes()) != expected_dataset_sha256
+            or _package_manifest(docker_package_path)["sha256"] != expected_docker_package_sha256
+            or _sha256(SCRIPT_PATH.read_bytes()) != request.get("expected_bridge_sha256")
+        ):
+            raise SWEbenchVerificationError("authenticated worker inputs changed during use")
         final_image = client.images.get(spec.instance_image_key)
         image_id = str(final_image.id)
-        if not IMAGE_ID_PATTERN.fullmatch(image_id) or (
+        if image_id != pinned_image_id or (
             expected_image_id is not None and image_id != expected_image_id
         ):
             raise SWEbenchVerificationError("instance image identity drifted")
@@ -1970,11 +2396,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     worker.add_argument("--result", type=Path, required=True)
     package_manifest = subparsers.add_parser("package-manifest")
     package_manifest.add_argument("--package", required=True)
+    package_snapshot = subparsers.add_parser("package-snapshot")
+    package_snapshot.add_argument("--package", required=True)
+    package_snapshot.add_argument("--destination", type=Path, required=True)
     args = parser.parse_args(argv)
     if args.command == "worker":
         return _worker_main(args.request, args.result)
     if args.command == "package-manifest":
         print(json.dumps(_package_manifest_for_name(args.package), sort_keys=True))
+        return 0
+    if args.command == "package-snapshot":
+        print(
+            json.dumps(
+                _package_snapshot_for_name(args.package, args.destination),
+                sort_keys=True,
+            )
+        )
         return 0
     parser.error("unsupported command")
     return 2
