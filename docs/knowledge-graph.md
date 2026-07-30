@@ -55,13 +55,14 @@ ctx-init --graph
 The runtime install includes a small actionable fallback set that does not
 depend on an external catalog or API key:
 
-- skills: `ctx-python-testing`, `ctx-javascript-testing`,
-  `ctx-rust-patterns`, and `ctx-typescript`;
+- skills: `ctx-python-testing`, `ctx-python-state-protocols`,
+  `ctx-python-input-boundaries`, `ctx-python-api-compatibility`,
+  `ctx-javascript-testing`, `ctx-rust-patterns`, and `ctx-typescript`;
 - agent: `ctx-python-reviewer`;
 - MCP server: `ctx-core`, installed only as the exact bare
   `ctx-mcp-server` command.
 
-These six project-owned entities are MIT licensed and use reserved `ctx-*`
+These nine project-owned entities are MIT licensed and use reserved `ctx-*`
 identities. Installation preserves unrelated skill, agent, MCP, and
 converted-skill content; runtime-managed harness pages are refreshed from the
 installed artifact. Installation fails closed on identity or overlay

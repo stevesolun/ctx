@@ -36,13 +36,15 @@ ctx-scan-repo --repo . --recommend
 downloads the matching release asset for a package install. The full packed
 wiki is optional; see the [knowledge graph guide](https://stevesolun.github.io/ctx/knowledge-graph/).
 
-Every clean graph install seeds six project-owned, MIT-licensed, no-key
-fallbacks: `ctx-python-testing`, `ctx-javascript-testing`,
-`ctx-rust-patterns`, `ctx-typescript`, the `ctx-python-reviewer` agent, and the
-local `ctx-core` MCP server. ctx preserves unrelated skill, agent, MCP, and
-converted-skill content; runtime-managed harness pages are refreshed from the
-installed artifact. Installation fails closed if a reserved `ctx-*` identity,
-body, overlay, or parent path is unexpected.
+Every clean graph install seeds nine project-owned, MIT-licensed, no-key
+fallbacks: `ctx-python-testing`, `ctx-python-state-protocols`,
+`ctx-python-input-boundaries`, `ctx-python-api-compatibility`,
+`ctx-javascript-testing`, `ctx-rust-patterns`, `ctx-typescript`, the
+`ctx-python-reviewer` agent, and the local `ctx-core` MCP server.
+ctx preserves unrelated skill, agent, MCP, and converted-skill content.
+Runtime-managed harness pages are refreshed from the installed artifact.
+Installation fails closed if a reserved `ctx-*` identity, body, overlay, or
+parent path is unexpected.
 
 ## Privacy And Telemetry
 
