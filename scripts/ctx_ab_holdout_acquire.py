@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import gzip
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -85,6 +86,27 @@ def _canonicalize_duckdb_rows(
     )
 
 
+def _authenticated_protocol(
+    data: bytes,
+    *,
+    expected_sha256: str | None,
+) -> dict[str, Any]:
+    if expected_sha256 is not None and SHA256.fullmatch(expected_sha256) is None:
+        raise SystemExit("expected acquisition protocol SHA-256 must be 64 lowercase hex digits")
+    if expected_sha256 is not None and not hmac.compare_digest(
+        hashlib.sha256(data).hexdigest(),
+        expected_sha256,
+    ):
+        raise SystemExit("acquisition protocol does not match the expected SHA-256")
+    protocol: dict[str, Any] = json.loads(data)
+    if (
+        protocol.get("schema_version") == 2
+        or protocol.get("protocol_id") == "production-graph-holdout-v2"
+    ) and expected_sha256 is None:
+        raise SystemExit("V2 acquisition requires --expected-acquisition-protocol-sha256")
+    return protocol
+
+
 def canonicalize_parquet(
     parquet_path: Path,
     duckdb_gzip_path: Path,
@@ -153,13 +175,17 @@ def canonicalize_parquet(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--protocol", type=Path, required=True)
+    parser.add_argument("--expected-acquisition-protocol-sha256")
     parser.add_argument("--parquet", type=Path, required=True)
     parser.add_argument("--duckdb-gzip", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     if not _paths_are_distinct([args.protocol, args.parquet, args.duckdb_gzip, args.output]):
         raise SystemExit("canonical output must not overwrite an acquisition input")
-    protocol: dict[str, Any] = json.loads(args.protocol.read_text(encoding="utf-8"))
+    protocol = _authenticated_protocol(
+        args.protocol.read_bytes(),
+        expected_sha256=args.expected_acquisition_protocol_sha256,
+    )
     universe = protocol["universe"]
     if SHA256.fullmatch(str(universe["duckdb_cli_gzip_sha256"])) is None:
         raise SystemExit("protocol DuckDB gzip SHA-256 is invalid")

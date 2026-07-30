@@ -8,6 +8,7 @@ import ast
 import csv
 from collections import defaultdict
 import hashlib
+import hmac
 import json
 import math
 import os
@@ -820,17 +821,38 @@ def _remove_stale_selection(path: Path) -> None:
     path.unlink()
 
 
+def _requires_acquisition_protocol_digest(protocol: dict[str, Any]) -> bool:
+    selection = protocol.get("selection")
+    return (
+        protocol.get("schema_version") == 2
+        or protocol.get("protocol_id") == "production-graph-holdout-v2"
+        or (isinstance(selection, dict) and selection.get("strategy") == "one-per-repository")
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--protocol", type=Path, default=DEFAULT_PROTOCOL)
+    parser.add_argument("--expected-acquisition-protocol-sha256")
     parser.add_argument("--selection-jsonl", type=Path, required=True)
     parser.add_argument("--ledger", type=Path, required=True)
     parser.add_argument("--selection", type=Path, required=True)
     args = parser.parse_args(argv)
     if not _paths_are_distinct([args.protocol, args.selection_jsonl, args.ledger, args.selection]):
         raise SystemExit("protocol, source, ledger, and selection paths must be distinct")
+    expected_protocol_sha256 = args.expected_acquisition_protocol_sha256
+    if expected_protocol_sha256 is not None and SHA256.fullmatch(expected_protocol_sha256) is None:
+        raise SystemExit("expected acquisition protocol SHA-256 must be 64 lowercase hex digits")
+    protocol_bytes = args.protocol.read_bytes()
+    if expected_protocol_sha256 is not None and not hmac.compare_digest(
+        hashlib.sha256(protocol_bytes).hexdigest(),
+        expected_protocol_sha256,
+    ):
+        raise SystemExit("acquisition protocol does not match the expected SHA-256")
+    protocol = json.loads(protocol_bytes)
+    if _requires_acquisition_protocol_digest(protocol) and expected_protocol_sha256 is None:
+        raise SystemExit("V2 selection requires --expected-acquisition-protocol-sha256")
     _remove_stale_selection(args.selection)
-    protocol = json.loads(args.protocol.read_text(encoding="utf-8"))
     universe = protocol["universe"]
     if (
         protocol.get("stage") not in {"acquisition-frozen", "execution-frozen"}

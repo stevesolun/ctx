@@ -656,6 +656,21 @@ def test_acquisition_canonicalizer_is_byte_stable() -> None:
     )
 
 
+def test_v2_acquisition_authenticates_exact_protocol_bytes() -> None:
+    protocol = {
+        "protocol_id": "production-graph-holdout-v2",
+        "schema_version": 2,
+    }
+    data = json.dumps(protocol, sort_keys=True, separators=(",", ":")).encode()
+    digest = hashlib.sha256(data).hexdigest()
+
+    assert acquire._authenticated_protocol(data, expected_sha256=digest) == protocol
+    with pytest.raises(SystemExit, match="requires --expected-acquisition-protocol-sha256"):
+        acquire._authenticated_protocol(data, expected_sha256=None)
+    with pytest.raises(SystemExit, match="does not match the expected SHA-256"):
+        acquire._authenticated_protocol(data + b"\n", expected_sha256=digest)
+
+
 def test_acquisition_runs_pinned_cli_and_verifies_frozen_rerun(tmp_path: Path) -> None:
     protocol = json.loads(PROTOCOL_PATH.read_text(encoding="utf-8"))
     protocol["stage"] = "acquisition-preregistered"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -208,3 +209,132 @@ def test_v2_selection_validation_requires_null_external_canary_fields(
     selection[field] = value
     with pytest.raises(ValueError, match="claim selection is invalid"):
         selector._validated_selection(selection, protocol)
+
+
+def _v2_cli_arguments(
+    tmp_path: Path,
+    *,
+    protocol_bytes: bytes,
+    expected_protocol_sha256: str | None,
+) -> tuple[list[str], Path, Path, Path]:
+    protocol_path = tmp_path / "protocol.json"
+    source_path = tmp_path / "source.jsonl"
+    private = tmp_path / "private"
+    private.mkdir(mode=0o700)
+    ledger_path = private / "ledger.csv"
+    selection_path = private / "selection.json"
+    protocol_path.write_bytes(protocol_bytes)
+    source_path.write_text("{}\n", encoding="utf-8")
+    arguments = [
+        "--protocol",
+        str(protocol_path),
+        "--selection-jsonl",
+        str(source_path),
+        "--ledger",
+        str(ledger_path),
+        "--selection",
+        str(selection_path),
+    ]
+    if expected_protocol_sha256 is not None:
+        arguments.extend(
+            [
+                "--expected-acquisition-protocol-sha256",
+                expected_protocol_sha256,
+            ]
+        )
+    return arguments, source_path, ledger_path, selection_path
+
+
+def _v2_cli_protocol(source_path: Path) -> dict[str, Any]:
+    protocol = _protocol(strategy="one-per-repository", private_canary=False)
+    protocol["schema_version"] = 2
+    protocol["protocol_id"] = "production-graph-holdout-v2"
+    protocol["stage"] = "acquisition-frozen"
+    protocol["universe"]["expected_rows"] = 10
+    protocol["universe"]["raw_parquet_sha256"] = "1" * 64
+    protocol["universe"]["duckdb_cli_sha256"] = "2" * 64
+    protocol["universe"]["selection_jsonl_sha256"] = hashlib.sha256(
+        source_path.read_bytes()
+    ).hexdigest()
+    return protocol
+
+
+def test_v2_selector_cli_accepts_matching_acquisition_protocol_digest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    placeholder_protocol = b"{}"
+    arguments, source_path, ledger_path, selection_path = _v2_cli_arguments(
+        tmp_path,
+        protocol_bytes=placeholder_protocol,
+        expected_protocol_sha256=hashlib.sha256(placeholder_protocol).hexdigest(),
+    )
+    protocol_bytes = json.dumps(
+        _v2_cli_protocol(source_path),
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    protocol_path = tmp_path / "protocol.json"
+    protocol_path.write_bytes(protocol_bytes)
+    digest_index = arguments.index("--expected-acquisition-protocol-sha256") + 1
+    arguments[digest_index] = hashlib.sha256(protocol_bytes).hexdigest()
+    rows = [
+        {
+            **row,
+            "base_commit": "",
+            "production_changed_lines": 0,
+            "rejection_code": "",
+        }
+        for row in _ledger(10)
+    ]
+    monkeypatch.setattr(selector, "_load_jsonl", lambda _: rows)
+    monkeypatch.setattr(selector, "evaluate_row", lambda row, _: row)
+
+    assert selector.main(arguments) == 0
+    assert ledger_path.is_file()
+    assert selection_path.is_file()
+
+
+@pytest.mark.parametrize("failure", ["missing", "drift"])
+def test_v2_selector_cli_authenticates_protocol_before_private_io(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    placeholder_protocol = b"{}"
+    arguments, source_path, ledger_path, selection_path = _v2_cli_arguments(
+        tmp_path,
+        protocol_bytes=placeholder_protocol,
+        expected_protocol_sha256=None,
+    )
+    protocol_bytes = json.dumps(
+        _v2_cli_protocol(source_path),
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    (tmp_path / "protocol.json").write_bytes(protocol_bytes)
+    if failure == "drift":
+        arguments.extend(
+            [
+                "--expected-acquisition-protocol-sha256",
+                hashlib.sha256(protocol_bytes).hexdigest(),
+            ]
+        )
+        (tmp_path / "protocol.json").write_bytes(protocol_bytes + b"\n")
+    ledger_path.write_text("preserve-ledger", encoding="utf-8")
+    selection_path.write_text("preserve-selection", encoding="utf-8")
+
+    def fail_private_read(_: Path) -> list[dict[str, Any]]:
+        raise AssertionError("private rows were read before protocol authentication")
+
+    monkeypatch.setattr(selector, "_load_jsonl", fail_private_read)
+    message = (
+        "requires --expected-acquisition-protocol-sha256"
+        if failure == "missing"
+        else "does not match the expected SHA-256"
+    )
+    with pytest.raises(SystemExit, match=message):
+        selector.main(arguments)
+
+    assert ledger_path.read_text(encoding="utf-8") == "preserve-ledger"
+    assert selection_path.read_text(encoding="utf-8") == "preserve-selection"
