@@ -5822,19 +5822,38 @@ def validate_official_repository_identity(
 
 
 def collect_repository_state() -> dict[str, Any]:
-    head = run_process(["git", "rev-parse", "HEAD"], cwd=ROOT, timeout=30)
-    status = run_process(
-        ["git", "status", "--porcelain=v1", "--untracked-files=all"], cwd=ROOT, timeout=30
+    environment = _official_git_environment()
+    head = run_process(
+        ["git", "rev-parse", "HEAD"],
+        cwd=ROOT,
+        env=environment,
+        timeout=30,
     )
-    tracked_diff = run_process(["git", "diff", "--binary", "HEAD"], cwd=ROOT, timeout=30)
+    status = run_process(
+        ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+        cwd=ROOT,
+        env=environment,
+        timeout=30,
+    )
+    tracked_diff = run_process(
+        ["git", "diff", "--binary", "HEAD"],
+        cwd=ROOT,
+        env=environment,
+        timeout=30,
+    )
+    head_ok = not head.returncode and not head.timed_out and not head.residual_descendants
+    status_ok = not status.returncode and not status.timed_out and not status.residual_descendants
+    diff_ok = (
+        not tracked_diff.returncode
+        and not tracked_diff.timed_out
+        and not tracked_diff.residual_descendants
+    )
     return {
-        "head": head.stdout.strip() if not head.returncode else "unavailable",
-        "clean": not status.returncode and not status.stdout.strip(),
+        "head": head.stdout.strip() if head_ok else "unavailable",
+        "clean": status_ok and diff_ok and not status.stdout.strip(),
         "status": status.stdout.splitlines(),
         "tracked_diff_sha256": (
-            hashlib.sha256(tracked_diff.stdout.encode()).hexdigest()
-            if not tracked_diff.returncode
-            else "unavailable"
+            hashlib.sha256(tracked_diff.stdout.encode()).hexdigest() if diff_ok else "unavailable"
         ),
     }
 

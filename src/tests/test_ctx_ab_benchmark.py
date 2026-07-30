@@ -6436,6 +6436,43 @@ def test_dirty_worktree_fails_pre_arm_identity_check(
         benchmark.validate_official_repository_identity(holdout)
 
 
+def test_repository_state_ignores_ambient_git_repository_redirects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = tmp_path / "repository"
+    alternate_tree = tmp_path / "alternate-tree"
+    repository.mkdir()
+    alternate_tree.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "ctx@example.test"],
+        cwd=repository,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "ctx benchmark"],
+        cwd=repository,
+        check=True,
+    )
+    source = repository / "source.py"
+    source.write_text("clean = True\n", encoding="utf-8")
+    subprocess.run(["git", "add", "source.py"], cwd=repository, check=True)
+    subprocess.run(["git", "commit", "-qm", "base"], cwd=repository, check=True)
+    (alternate_tree / "source.py").write_text("clean = True\n", encoding="utf-8")
+    source.write_text("clean = False\n", encoding="utf-8")
+
+    monkeypatch.setattr(benchmark, "ROOT", repository)
+    monkeypatch.setenv("GIT_DIR", str(repository / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(alternate_tree))
+
+    state = benchmark.collect_repository_state()
+
+    assert state["clean"] is False
+    assert state["status"] == [" M source.py"]
+    assert state["tracked_diff_sha256"] != hashlib.sha256(b"").hexdigest()
+
+
 def test_execution_frozen_holdout_authenticates_all_inputs_and_balanced_schedule(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
