@@ -5907,6 +5907,8 @@ def _official_holdout_fixture(
             scenario_id: f"https://github.com/owner/repo-{index}.git"
             for index, scenario_id in enumerate(scenario_ids)
         },
+        "canary_instance_id": None,
+        "canary_repository": None,
         "protocol_id": "production-graph-holdout-v2",
     }
     schedule_assignments = [
@@ -5952,8 +5954,15 @@ def _official_holdout_fixture(
         "module_sha256": {scenario_id: test_sha256 for scenario_id in scenario_ids},
     }
     collision = {
+        "catalog_archive_sha256": hashlib.sha256(
+            benchmark.PRODUCTION_CATALOG_ARCHIVE.read_bytes()
+        ).hexdigest(),
         "collision_count": 0,
         "collision_free": True,
+        "guard": "runtime-pack-distinctive-evidence-v1",
+        "runtime_availability_sha256": hashlib.sha256(
+            benchmark.PRODUCTION_RUNTIME_AVAILABILITY.read_bytes()
+        ).hexdigest(),
         "scenario_ids": sorted(scenario_ids),
     }
 
@@ -6065,6 +6074,21 @@ def _official_holdout_fixture(
         }
     )
     protocol = {
+        "claim_gates": {
+            "benefiting_repository_definition": (
+                "repository uncached-provider-token effect is strictly less than 1.0"
+            ),
+            "exact_one_sided_repository_support_alpha": 0.05,
+            "minimum_repositories_with_verified_delivery": 10,
+            "paired_trials_per_scenario": 3,
+            "primary_endpoint": "uncached_provider_tokens",
+            "primary_endpoint_aggregation": "overall_token_effect",
+            "primary_endpoint_maximum_ratio": 0.85,
+            "quality_preserved": True,
+            "required_benefiting_repositories": 9,
+            "total_seconds_aggregation": "overall_time_effect",
+            "total_seconds_maximum_ratio": 1.1,
+        },
         "execution_inputs": {
             "acquisition_protocol_sha256": "9" * 64,
             "collision_attestation_sha256": hashlib.sha256(blobs["collision"]).hexdigest(),
@@ -6092,6 +6116,21 @@ def _official_holdout_fixture(
         },
         "protocol_id": "production-graph-holdout-v2",
         "schema_version": 2,
+        "selection": {
+            "analysis_repositories": 10,
+            "analysis_scenarios": 10,
+            "ctx_context": [],
+            "eligible_candidates_per_repository_required": 1,
+            "eligible_repositories_required": 10,
+            "first_scenario_rule": (
+                "first ranked candidate from each of the first ten ranked eligible repositories"
+            ),
+            "private_canary": False,
+            "query": "first 240 characters of whitespace-normalized problem_statement",
+            "replacement_after_control_failure": "forbidden",
+            "strategy": "one-per-repository",
+            "task": "exact problem_statement bytes from the frozen dataset row",
+        },
         "stage": "execution-frozen",
         "timeouts": {"control_verification_seconds": 900},
         "universe": {"selection_jsonl_sha256": "a" * 64},
@@ -6728,6 +6767,9 @@ def test_authenticated_freeze_drives_all_thirty_pairs_and_sixty_arms(
     assert report["assignment_complete"] is True
     assert report["experiment_valid"] is True
     assert report["product_benefit_verdict"] == "not_beneficial"
+    public_summary = json.loads((output / "public-summary.json").read_text())
+    assert public_summary["benefit_verdict"] == "not_beneficial"
+    assert public_summary["official_repository_claim"] == report["official_repository_claim"]
     assert list(csv.DictReader((output / "incidents.csv").open())) == []
 
 
@@ -6744,6 +6786,7 @@ def test_confirmatory_dual_model_failure_is_valid_honest_negative(
         arms=("baseline", "ctx-light"),
         expected_repositories={scenario.id: scenario.repo_url for scenario in holdout.scenarios},
         frozen_schedule=holdout.schedule,
+        official_holdout=holdout,
     )
 
     assert report["experiment_valid"] is True
@@ -6751,6 +6794,8 @@ def test_confirmatory_dual_model_failure_is_valid_honest_negative(
     assert report["quality_complete_pair_count"] == 0
     assert report["execution_complete_pair_count"] == 30
     assert report["product_benefit_verdict"] == "not_beneficial"
+    assert report["official_repository_claim"]["quality_preserved"] is False
+    assert report["official_repository_claim"]["passed"] is False
     expected = {
         (scenario.id, arm, trial)
         for scenario in holdout.scenarios
@@ -6763,6 +6808,115 @@ def test_confirmatory_dual_model_failure_is_valid_honest_negative(
         performance=report,
         unresolved_incidents=0,
     )
+
+
+def _updated_official_rows(
+    rows: list[dict[str, Any]],
+    *,
+    predicate: Any,
+    updates: dict[str, Any],
+) -> list[dict[str, Any]]:
+    updated: list[dict[str, Any]] = []
+    for row in rows:
+        values = dict(row)
+        if predicate(values):
+            values.update(updates)
+        sealed = benchmark._VerifiedProductionResult(values)
+        sealed.seal()
+        updated.append(sealed)
+    return updated
+
+
+def test_official_claim_rejects_time_only_improvement(tmp_path: Path) -> None:
+    holdout, _ = _official_holdout_fixture(tmp_path)
+    rows = _updated_official_rows(
+        _official_result_rows(holdout, status="passed", failure_class=None),
+        predicate=lambda row: row["arm"] == "ctx-light",
+        updates={"development_seconds": 8.0, "measured_phase_seconds": 8.0},
+    )
+
+    report = benchmark.build_performance_report(
+        rows,
+        scenario_ids=[scenario.id for scenario in holdout.scenarios],
+        trials=3,
+        arms=("baseline", "ctx-light"),
+        expected_repositories={scenario.id: scenario.repo_url for scenario in holdout.scenarios},
+        frozen_schedule=holdout.schedule,
+        official_holdout=holdout,
+    )
+
+    assert report["median_time_ratio"] == 0.8
+    assert report["median_uncached_token_ratio"] == 1.0
+    assert report["official_repository_claim"] == {
+        "benefiting_repositories": 0,
+        "evidence_complete": True,
+        "exact_one_sided_sign_p": 1.0,
+        "incident_free": True,
+        "overall_time_ratio": 0.8,
+        "overall_token_ratio": 1.0,
+        "passed": False,
+        "quality_preserved": True,
+        "verified_delivery_repositories": 10,
+    }
+    assert report["benefit_verdict"] == "not_beneficial"
+    assert report["product_beneficial"] is False
+    assert report["product_benefit_verdict"] == "not_beneficial"
+
+
+def test_official_claim_requires_delivery_in_all_ten_repositories(tmp_path: Path) -> None:
+    holdout, _ = _official_holdout_fixture(tmp_path)
+    first_scenario = holdout.scenarios[0].id
+    rows = _updated_official_rows(
+        _official_result_rows(holdout, status="passed", failure_class=None),
+        predicate=lambda row: row["arm"] == "ctx-light",
+        updates={
+            "cached_input_tokens": 20,
+            "input_tokens": 84,
+            "output_tokens": 30,
+            "total_tokens": 114,
+            "uncached_input_tokens": 64,
+        },
+    )
+    rows = _updated_official_rows(
+        rows,
+        predicate=lambda row: row["arm"] == "ctx-light" and row["scenario"] == first_scenario,
+        updates={
+            "adopted_ids": [],
+            "body_fetch_seconds": 0,
+            "catalog_recommendation_lifecycle_verified": True,
+            "context_delivery_verified": False,
+            "delivered_ids": [],
+            "delivered_prompt_sha256": "a" * 64,
+            "evidence_level": benchmark.PRODUCTION_POLICY_ABSTENTION_LEVEL,
+            "lifecycle_actions": ["dev_event", "session_end"],
+            "lifecycle_session_status": "passed",
+            "pinned_head_verified": True,
+            "policy_abstention_applied": True,
+            "policy_abstention_reason": "language_only_match",
+            "policy_abstention_verified": True,
+            "selected_ids": [],
+            "used_ids": [],
+        },
+    )
+
+    report = benchmark.build_performance_report(
+        rows,
+        scenario_ids=[scenario.id for scenario in holdout.scenarios],
+        trials=3,
+        arms=("baseline", "ctx-light"),
+        expected_repositories={scenario.id: scenario.repo_url for scenario in holdout.scenarios},
+        frozen_schedule=holdout.schedule,
+        official_holdout=holdout,
+    )
+
+    assert report["experiment_valid"] is True
+    assert report["median_uncached_token_ratio"] == 0.8
+    assert report["official_repository_claim"]["benefiting_repositories"] == 10
+    assert report["official_repository_claim"]["overall_token_ratio"] == 0.8
+    assert report["official_repository_claim"]["verified_delivery_repositories"] == 9
+    assert report["official_repository_claim"]["passed"] is False
+    assert report["product_beneficial"] is False
+    assert report["product_benefit_verdict"] == "not_beneficial"
 
 
 def test_confirmatory_rejects_unknown_delegated_agent_tokens(tmp_path: Path) -> None:

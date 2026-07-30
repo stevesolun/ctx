@@ -6726,6 +6726,8 @@ def build_performance_report(
     arms: tuple[str, ...],
     expected_repositories: Mapping[str, str] | None = None,
     frozen_schedule: FrozenSchedule | None = None,
+    official_holdout: ExecutionFrozenHoldout | None = None,
+    unresolved_incidents: int = 0,
 ) -> dict[str, Any]:
     official_requested = bool(results) and any(
         row.get("verification_backend") == OFFICIAL_HOLDOUT_BACKEND for row in results
@@ -6965,8 +6967,9 @@ def build_performance_report(
                 pair.update({"complete": False, "reason": "paired evidence ineligible"})
                 pairs.append(pair)
                 continue
-            baseline_seconds = summed(baseline, "measured_phase_seconds")
-            light_seconds = summed(light, "measured_phase_seconds")
+            time_field = "development_seconds" if official_pair else "measured_phase_seconds"
+            baseline_seconds = summed(baseline, time_field)
+            light_seconds = summed(light, time_field)
             baseline_harness_seconds = summed(baseline, "harness_total_seconds")
             light_harness_seconds = summed(light, "harness_total_seconds")
             baseline_tokens = exact_tokens(baseline, "total_tokens")
@@ -7018,9 +7021,29 @@ def build_performance_report(
                 and exact_usage_complete
                 and official_outcomes_valid
             )
-            complete = execution_complete and baseline_passed and light_passed
             pair["execution_complete"] = execution_complete
             pair["fairness_contract_verified"] = fairness_verified
+            if execution_complete:
+                assert baseline_seconds is not None
+                assert light_seconds is not None
+                assert baseline_tokens is not None
+                assert light_tokens is not None
+                assert baseline_uncached is not None
+                assert light_uncached is not None
+                pair.update(
+                    {
+                        "time_ratio": round(light_seconds / baseline_seconds, 6),
+                        "reported_token_ratio": round(light_tokens / baseline_tokens, 6),
+                        "exact_token_ratio": round(light_tokens / baseline_tokens, 6),
+                        "uncached_token_ratio": round(light_uncached / baseline_uncached, 6),
+                        "harness_time_ratio": (
+                            round(light_harness_seconds / baseline_harness_seconds, 6)
+                            if baseline_harness_seconds and light_harness_seconds is not None
+                            else None
+                        ),
+                    }
+                )
+            complete = execution_complete and baseline_passed and light_passed
             if not complete:
                 pair.update(
                     {
@@ -7034,26 +7057,11 @@ def build_performance_report(
                 )
                 pairs.append(pair)
                 continue
-            assert baseline_seconds is not None
-            assert light_seconds is not None
-            assert baseline_tokens is not None
-            assert light_tokens is not None
-            assert baseline_uncached is not None
-            assert light_uncached is not None
             pair.update(
                 {
                     "complete": True,
                     "baseline_first_attempt_passed": baseline[0].get("status") == "passed",
                     "ctx_light_first_attempt_passed": light[0].get("status") == "passed",
-                    "time_ratio": round(light_seconds / baseline_seconds, 6),
-                    "reported_token_ratio": round(light_tokens / baseline_tokens, 6),
-                    "exact_token_ratio": round(light_tokens / baseline_tokens, 6),
-                    "uncached_token_ratio": round(light_uncached / baseline_uncached, 6),
-                    "harness_time_ratio": (
-                        round(light_harness_seconds / baseline_harness_seconds, 6)
-                        if baseline_harness_seconds and light_harness_seconds is not None
-                        else None
-                    ),
                 }
             )
             pairs.append(pair)
@@ -7361,21 +7369,158 @@ def build_performance_report(
         if production_catalog_scored
         else "not_applicable"
     )
-    product_claim_eligible = bool(
-        negative_quality_result or clustered_evidence_complete and benefit_evidence_complete
-    )
-    product_beneficial = (
-        False
-        if negative_quality_result
-        else bool(
-            repository_quality_preserved
-            and all_repositories_non_regressing
-            and repository_support_p_value is not None
-            and repository_support_p_value <= PRODUCT_SUPPORT_ALPHA
+    official_repository_claim: dict[str, Any] | None = None
+    if (
+        official_requested
+        and official_holdout is not None
+        and experiment_valid
+        and expected_repository_map_valid
+        and repository_identity_verified
+    ):
+        if (
+            not isinstance(unresolved_incidents, int)
+            or isinstance(unresolved_incidents, bool)
+            or unresolved_incidents < 0
+        ):
+            raise ValueError("unresolved incident count cannot be negative")
+        protocol_bytes = official_holdout.protocol_path.read_bytes()
+        selection_bytes = official_holdout.selection_path.read_bytes()
+        scenario_pack_bytes = official_holdout.scenario_pack_path.read_bytes()
+        protocol = _strict_json_object(protocol_bytes, label="execution-frozen protocol")
+        selection = _strict_json_object(selection_bytes, label="private selection")
+        scenario_pack = _strict_json_object(scenario_pack_bytes, label="private scenario pack")
+        scenario_documents = scenario_pack.get("scenarios")
+        if not isinstance(scenario_documents, list):
+            raise ValueError("private scenario pack is invalid")
+        reconstructed_tests = {
+            str(row["id"]): str(row["test_body"])
+            for row in scenario_documents
+            if isinstance(row, dict)
+            and isinstance(row.get("id"), str)
+            and isinstance(row.get("test_body"), str)
+        }
+        repository_rows: list[dict[str, Any]] = []
+        for repository in sorted(set(expected_repository_map.values())):
+            repository_scenarios = sorted(
+                scenario_id
+                for scenario_id, expected_repository in expected_repository_map.items()
+                if expected_repository == repository
+            )
+            repository_pairs = [
+                pair
+                for pair in pairs
+                if pair["scenario"] in repository_scenarios and pair.get("execution_complete")
+            ]
+            paired_trials_by_scenario = {
+                scenario_id: sum(pair["scenario"] == scenario_id for pair in repository_pairs)
+                for scenario_id in repository_scenarios
+            }
+            scenario_token_ratios = [
+                median(
+                    float(pair["uncached_token_ratio"])
+                    for pair in repository_pairs
+                    if pair["scenario"] == scenario_id
+                )
+                for scenario_id in repository_scenarios
+            ]
+            scenario_time_ratios = [
+                median(
+                    float(pair["time_ratio"])
+                    for pair in repository_pairs
+                    if pair["scenario"] == scenario_id
+                )
+                for scenario_id in repository_scenarios
+            ]
+            final_repository_rows = [
+                assigned[(scenario_id, arm, trial)][-1]
+                for scenario_id in repository_scenarios
+                for trial in range(1, trials + 1)
+                for arm in ("baseline", "ctx-light")
+            ]
+            final_repository_ctx_rows = [
+                row for row in final_repository_rows if row.get("arm") == "ctx-light"
+            ]
+            expected_repository_pairs = len(repository_scenarios) * trials
+            repository_rows.append(
+                {
+                    "repository": repository,
+                    "scenario_ids": repository_scenarios,
+                    "paired_trials_by_scenario": paired_trials_by_scenario,
+                    "missing_pairs": expected_repository_pairs - len(repository_pairs),
+                    "uncached_provider_tokens_ratio": median(scenario_token_ratios),
+                    "total_seconds_ratio": median(scenario_time_ratios),
+                    "quality_preserved": all(
+                        pair["paired_quality_preserved"]
+                        for pair in pairs
+                        if pair["scenario"] in repository_scenarios
+                    ),
+                    "verified_delivery": any(
+                        row.get("context_delivery_verified") is True
+                        for row in final_repository_ctx_rows
+                    ),
+                    "token_usage_exact": all(
+                        exact_usage_valid(row) for row in final_repository_rows
+                    ),
+                    "trusted_policy_outcomes": all(
+                        eligible(row)
+                        and (
+                            row.get("context_delivery_verified") is True
+                            or verified_policy_abstention(row)
+                        )
+                        for row in final_repository_ctx_rows
+                    ),
+                    "unresolved_incidents": unresolved_incidents,
+                }
+            )
+        if __name__ == "__main__":
+            from ctx_ab_holdout import evaluate_repository_claim
+        else:
+            from scripts.ctx_ab_holdout import evaluate_repository_claim
+
+        official_repository_claim = evaluate_repository_claim(
+            repository_rows,
+            protocol,
+            selection,
+            scenario_pack_bytes=scenario_pack_bytes,
+            collision_attestation_bytes=official_holdout.collision_path.read_bytes(),
+            control_results_bytes=official_holdout.control_results_path.read_bytes(),
+            reconstructed_tests=reconstructed_tests,
         )
-        if product_claim_eligible
-        else None
-    )
+
+    if official_requested:
+        if (
+            official_repository_claim is not None
+            and official_repository_claim["evidence_complete"] is True
+        ):
+            product_claim_eligible = True
+            product_beneficial = bool(official_repository_claim["passed"])
+            beneficial = product_beneficial
+            benefit_evidence_complete = True
+            benefit_verdict = "beneficial" if product_beneficial else "not_beneficial"
+        else:
+            product_claim_eligible = False
+            product_beneficial = None
+            beneficial = None
+            benefit_evidence_complete = False
+            benefit_verdict = (
+                "policy_abstention_only" if abstention_only else "insufficient_evidence"
+            )
+    else:
+        product_claim_eligible = bool(
+            negative_quality_result or clustered_evidence_complete and benefit_evidence_complete
+        )
+        product_beneficial = (
+            False
+            if negative_quality_result
+            else bool(
+                repository_quality_preserved
+                and all_repositories_non_regressing
+                and repository_support_p_value is not None
+                and repository_support_p_value <= PRODUCT_SUPPORT_ALPHA
+            )
+            if product_claim_eligible
+            else None
+        )
     arm_outcomes = {}
     for arm in ("baseline", "ctx-light"):
         rows = [
@@ -7451,6 +7596,7 @@ def build_performance_report(
             else "insufficient_cross_repo_evidence"
         ),
         "product_beneficial": product_beneficial,
+        "official_repository_claim": official_repository_claim,
         "distinct_scenario_count": distinct_scenario_count,
         "distinct_repository_count": len(repositories),
         "repositories": repositories,
@@ -7516,6 +7662,8 @@ def write_performance_report(
     arms: tuple[str, ...],
     expected_repositories: Mapping[str, str],
     frozen_schedule: FrozenSchedule | None = None,
+    official_holdout: ExecutionFrozenHoldout | None = None,
+    unresolved_incidents: int = 0,
 ) -> dict[str, Any]:
     report = build_performance_report(
         results,
@@ -7524,6 +7672,8 @@ def write_performance_report(
         arms=arms,
         expected_repositories=expected_repositories,
         frozen_schedule=frozen_schedule,
+        official_holdout=official_holdout,
+        unresolved_incidents=unresolved_incidents,
     )
     (output / "performance.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     return report
@@ -7597,6 +7747,7 @@ def build_public_holdout_summary(
         "quality_preserved": performance.get("quality_preserved"),
         "benefit_verdict": performance.get("benefit_verdict"),
         "product_benefit_verdict": performance.get("product_benefit_verdict"),
+        "official_repository_claim": performance.get("official_repository_claim"),
         "median_development_time_ratio": performance.get("median_time_ratio"),
         "median_uncached_token_ratio": performance.get("median_uncached_token_ratio"),
         "arms": arm_summary,
@@ -8386,6 +8537,8 @@ def main(argv: list[str] | None = None) -> int:
         arms=arms,
         expected_repositories={scenario.id: scenario.repo_url for scenario in scenarios},
         frozen_schedule=(official_holdout.schedule if official_holdout is not None else None),
+        official_holdout=official_holdout,
+        unresolved_incidents=incidents.unresolved_count(),
     )
     if official_holdout is not None:
         write_public_holdout_summary(output, results, performance, official_holdout)
