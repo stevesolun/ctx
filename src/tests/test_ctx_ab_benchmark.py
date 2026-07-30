@@ -6050,6 +6050,7 @@ def _official_holdout_fixture(
         "protocol_id": "production-graph-holdout-v2",
         "provider": "openai",
         "python": {
+            "dependencies_sha256": benchmark.python_dependencies_sha256(sys.executable),
             "executable_sha256": hashlib.sha256(Path(sys.executable).read_bytes()).hexdigest(),
             "version": benchmark.platform.python_version(),
         },
@@ -6065,6 +6066,7 @@ def _official_holdout_fixture(
     )
     protocol = {
         "execution_inputs": {
+            "acquisition_protocol_sha256": "9" * 64,
             "collision_attestation_sha256": hashlib.sha256(blobs["collision"]).hexdigest(),
             "control_results_sha256": hashlib.sha256(blobs["controls"]).hexdigest(),
             "execution_environment_sha256": hashlib.sha256(blobs["environment"]).hexdigest(),
@@ -6141,6 +6143,7 @@ def test_execution_frozen_holdout_authenticates_all_inputs_and_balanced_schedule
     assert (
         holdout.codex_binary_sha256 == hashlib.sha256(Path(sys.executable).read_bytes()).hexdigest()
     )
+    assert holdout.acquisition_protocol_sha256 == "9" * 64
     assert holdout.provider_config_sha256 == benchmark.codex_provider_config_sha256("openai")
     assert set(holdout.sensitive_paths) == {
         paths[name]
@@ -6222,6 +6225,122 @@ def test_runtime_reauthentication_rejects_mid_campaign_codex_drift(
         benchmark.validate_holdout_execution_conditions(holdout, **conditions)
 
 
+def test_runtime_reauthentication_rejects_python_dependency_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    holdout, _ = _official_holdout_fixture(tmp_path)
+    monkeypatch.setattr(benchmark, "_command_version", lambda _command: "test")
+    monkeypatch.setattr(benchmark, "python_dependencies_sha256", lambda _python: "0" * 64)
+
+    with pytest.raises(ValueError, match="runtime conditions"):
+        benchmark.validate_holdout_execution_conditions(
+            holdout,
+            model="gpt-5.5",
+            timeout=900.0,
+            arms=("baseline", "ctx-light"),
+            trials=3,
+            retries=0,
+            scenario_filters=[],
+            codex=sys.executable,
+        )
+
+
+def test_execution_frozen_holdout_requires_python_dependency_identity(
+    tmp_path: Path,
+) -> None:
+    holdout, paths = _official_holdout_fixture(tmp_path)
+    environment = json.loads(paths["environment"].read_text())
+    del environment["python"]["dependencies_sha256"]
+    paths["environment"].write_text(
+        json.dumps(environment, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    protocol = json.loads(paths["protocol"].read_text())
+    protocol["execution_inputs"]["execution_environment_sha256"] = hashlib.sha256(
+        paths["environment"].read_bytes()
+    ).hexdigest()
+    paths["protocol"].write_text(
+        json.dumps(protocol, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="private execution environment is invalid"):
+        benchmark.load_execution_frozen_holdout(
+            protocol_path=paths["protocol"],
+            expected_protocol_sha256=hashlib.sha256(paths["protocol"].read_bytes()).hexdigest(),
+            selection_path=paths["selection"],
+            scenario_pack_path=paths["scenario_pack"],
+            collision_path=paths["collision"],
+            reconstructed_path=paths["reconstructed"],
+            control_results_path=paths["controls"],
+            environment_path=paths["environment"],
+            schedule_path=paths["schedule"],
+        )
+    assert holdout.execution_conditions["python"]["dependencies_sha256"]
+
+
+def test_python_dependency_identity_is_canonical_and_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = "z-package==2\r\na-package==1\n"
+    second = "a-package==1\nz-package==2\n"
+    assert benchmark.canonical_python_dependencies_bytes(first) == (
+        benchmark.canonical_python_dependencies_bytes(second)
+    )
+
+    monkeypatch.setattr(
+        benchmark,
+        "run_process",
+        lambda *_args, **_kwargs: benchmark.CommandResult(
+            returncode=1,
+            stdout="",
+            stderr="pip unavailable",
+            elapsed=0.1,
+        ),
+    )
+    with pytest.raises(ValueError, match="dependency inventory is unavailable"):
+        benchmark.python_dependencies_sha256(sys.executable)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("missing", "unsupported shape"),
+        ("invalid", "acquisition protocol SHA-256"),
+    ],
+)
+def test_execution_frozen_holdout_rejects_invalid_acquisition_provenance(
+    tmp_path: Path,
+    mutation: str,
+    message: str,
+) -> None:
+    holdout, paths = _official_holdout_fixture(tmp_path)
+    protocol = json.loads(paths["protocol"].read_text())
+    if mutation == "missing":
+        del protocol["execution_inputs"]["acquisition_protocol_sha256"]
+    else:
+        protocol["execution_inputs"]["acquisition_protocol_sha256"] = "not-a-digest"
+    paths["protocol"].write_text(
+        json.dumps(protocol, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=message):
+        benchmark.load_execution_frozen_holdout(
+            protocol_path=paths["protocol"],
+            expected_protocol_sha256=hashlib.sha256(paths["protocol"].read_bytes()).hexdigest(),
+            selection_path=paths["selection"],
+            scenario_pack_path=paths["scenario_pack"],
+            collision_path=paths["collision"],
+            reconstructed_path=paths["reconstructed"],
+            control_results_path=paths["controls"],
+            environment_path=paths["environment"],
+            schedule_path=paths["schedule"],
+        )
+    assert holdout.acquisition_protocol_sha256 == "9" * 64
+
+
 def test_execution_frozen_holdout_rejects_mutated_materialization_input(
     tmp_path: Path,
 ) -> None:
@@ -6293,6 +6412,7 @@ def _official_result_rows(
         "codex_version": "test",
         "provider": "openai",
         "provider_config_sha256": holdout.provider_config_sha256,
+        "python_dependencies_sha256": benchmark.python_dependencies_sha256(sys.executable),
         "python_executable_sha256": hashlib.sha256(Path(sys.executable).read_bytes()).hexdigest(),
         "python_version": benchmark.platform.python_version(),
     }
@@ -6323,6 +6443,9 @@ def _official_result_rows(
                         "frozen_provider_config_sha256": holdout.provider_config_sha256,
                         "harness_total_seconds": 12.0,
                         "holdout_collision_sha256": holdout.collision_sha256,
+                        "holdout_acquisition_protocol_sha256": (
+                            holdout.acquisition_protocol_sha256
+                        ),
                         "holdout_control_results_sha256": holdout.control_results_sha256,
                         "holdout_environment_sha256": holdout.environment_sha256,
                         "holdout_inputs_match_start_at_end": True,
@@ -6383,6 +6506,18 @@ def test_authenticated_freeze_drives_all_thirty_pairs_and_sixty_arms(
         lambda path, *, live: path.resolve(),
     )
     monkeypatch.setattr(benchmark, "_command_version", lambda _command: "test")
+    dependency_identity_checks: list[str] = []
+    frozen_dependencies_sha256 = str(holdout.execution_conditions["python"]["dependencies_sha256"])
+
+    def record_dependency_identity(python: str | Path) -> str:
+        dependency_identity_checks.append(str(python))
+        return frozen_dependencies_sha256
+
+    monkeypatch.setattr(
+        benchmark,
+        "python_dependencies_sha256",
+        record_dependency_identity,
+    )
     validate_runtime = benchmark.validate_holdout_execution_conditions
 
     def record_runtime_identity(*args: Any, **kwargs: Any) -> dict[str, str]:
@@ -6512,6 +6647,9 @@ def test_authenticated_freeze_drives_all_thirty_pairs_and_sixty_arms(
         assert runtime_identity_before_arm["provider_config_sha256"] == (
             holdout.provider_config_sha256
         )
+        assert runtime_identity_before_arm["python_dependencies_sha256"] == (
+            frozen_dependencies_sha256
+        )
         assert catalog_setup_charge_seconds == (1.0 if arm == "ctx-light" else 0.0)
         calls.append((scenario.id, trial, arm))
         result = dict(result_by_key[(scenario.id, trial, arm)])
@@ -6583,6 +6721,8 @@ def test_authenticated_freeze_drives_all_thirty_pairs_and_sixty_arms(
     assert calls == expected_calls
     assert len(calls) == 60
     assert len(runtime_identity_checks) == 62
+    assert len(dependency_identity_checks) == 62
+    assert set(dependency_identity_checks) == {sys.executable}
     assert all(identity == runtime_identity_checks[0] for identity in runtime_identity_checks)
     report = json.loads((output / "performance.json").read_text())
     assert report["assignment_complete"] is True

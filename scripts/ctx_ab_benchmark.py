@@ -241,6 +241,7 @@ class OfficialVerifierRuntime:
 class ExecutionFrozenHoldout:
     protocol_id: str
     protocol_sha256: str
+    acquisition_protocol_sha256: str
     product_revision: str
     codex_binary_sha256: str
     provider_config_sha256: str
@@ -979,6 +980,7 @@ def load_execution_frozen_holdout(
         field="product provider_config_sha256",
     )
     expected_input_fields = {
+        "acquisition_protocol_sha256",
         "selection_output_sha256",
         "scenario_pack_sha256",
         "collision_attestation_sha256",
@@ -989,6 +991,10 @@ def load_execution_frozen_holdout(
     }
     if set(execution_inputs) != expected_input_fields:
         raise ValueError("holdout protocol execution inputs have an unsupported shape")
+    acquisition_protocol_sha256 = _require_sha256(
+        execution_inputs.get("acquisition_protocol_sha256"),
+        field="acquisition protocol SHA-256",
+    )
     selection_path, selection_bytes, selection_sha256 = _authenticated_artifact(
         selection_path,
         expected_sha256=execution_inputs.get("selection_output_sha256"),
@@ -1142,16 +1148,21 @@ def load_execution_frozen_holdout(
         or set(codex_identity) != {"version"}
         or not isinstance(codex_identity.get("version"), str)
         or not isinstance(python_identity, dict)
-        or set(python_identity) != {"executable_sha256", "version"}
+        or set(python_identity) != {"dependencies_sha256", "executable_sha256", "version"}
     ):
         raise ValueError("private execution environment is invalid")
     _require_sha256(
         python_identity.get("executable_sha256"),
         field="execution Python SHA-256",
     )
+    _require_sha256(
+        python_identity.get("dependencies_sha256"),
+        field="execution Python dependencies SHA-256",
+    )
     return ExecutionFrozenHoldout(
         protocol_id=protocol_id,
         protocol_sha256=protocol_sha256,
+        acquisition_protocol_sha256=acquisition_protocol_sha256,
         product_revision=product_revision,
         codex_binary_sha256=codex_binary_sha256,
         provider_config_sha256=provider_config_sha256,
@@ -1216,6 +1227,7 @@ def validate_holdout_execution_conditions(
         python_sha256 = _sha256_bytes(Path(sys.executable).read_bytes())
     except OSError as exc:
         raise ValueError("execution Python is unavailable") from exc
+    python_dependencies = python_dependencies_sha256(sys.executable)
     codex_path = Path(codex).resolve() if Path(codex).is_file() else None
     if codex_path is None:
         resolved_codex = shutil.which(codex)
@@ -1237,6 +1249,7 @@ def validate_holdout_execution_conditions(
         or any(limits.get(key) != value for key, value in expected_limits.items())
         or not isinstance(python_identity, Mapping)
         or python_identity.get("executable_sha256") != python_sha256
+        or python_identity.get("dependencies_sha256") != python_dependencies
         or python_identity.get("version") != platform.python_version()
         or provider != "openai"
         or provider_config_sha256 != holdout.provider_config_sha256
@@ -1257,6 +1270,7 @@ def validate_holdout_execution_conditions(
         "codex_version": codex_version,
         "provider": str(provider),
         "provider_config_sha256": provider_config_sha256,
+        "python_dependencies_sha256": python_dependencies,
         "python_executable_sha256": python_sha256,
         "python_version": platform.python_version(),
     }
@@ -5214,6 +5228,49 @@ def _command_version(argv: list[str]) -> str:
     return (result.stdout or result.stderr).strip() if not result.returncode else "unavailable"
 
 
+def canonical_python_dependencies_bytes(freeze_output: str) -> bytes:
+    """Canonicalize ``pip freeze --all`` output for execution identity."""
+    entries: list[str] = []
+    for raw_line in freeze_output.splitlines():
+        line = unicodedata.normalize("NFC", raw_line.strip())
+        if not line:
+            continue
+        if any(ord(character) < 32 for character in line):
+            raise ValueError("Python dependency inventory contains control characters")
+        entries.append(line)
+    if not entries:
+        raise ValueError("Python dependency inventory is empty")
+    return _canonical_json_bytes(
+        {
+            "entries": sorted(entries),
+            "schema": "python-pip-freeze-all-v1",
+        }
+    )
+
+
+def python_dependencies_sha256(python_executable: str | Path) -> str:
+    """Hash the installed package state used by an official execution."""
+    try:
+        result = run_process(
+            [
+                str(python_executable),
+                "-m",
+                "pip",
+                "freeze",
+                "--all",
+                "--disable-pip-version-check",
+            ],
+            cwd=ROOT,
+            timeout=60,
+            contain_descendants=True,
+        )
+    except OSError as exc:
+        raise ValueError("execution Python dependency inventory is unavailable") from exc
+    if result.returncode or result.timed_out or result.residual_descendants:
+        raise ValueError("execution Python dependency inventory is unavailable")
+    return _sha256_bytes(canonical_python_dependencies_bytes(result.stdout))
+
+
 def collect_repository_state() -> dict[str, Any]:
     head = run_process(["git", "rev-parse", "HEAD"], cwd=ROOT, timeout=30)
     status = run_process(
@@ -6527,6 +6584,11 @@ def run_trial(
             "holdout_protocol_sha256": (
                 official_holdout.protocol_sha256 if official_holdout is not None else None
             ),
+            "holdout_acquisition_protocol_sha256": (
+                official_holdout.acquisition_protocol_sha256
+                if official_holdout is not None
+                else None
+            ),
             "holdout_scenario_pack_sha256": (
                 official_holdout.scenario_pack_sha256 if official_holdout is not None else None
             ),
@@ -6843,6 +6905,7 @@ def build_performance_report(
             "frozen_scenario_sha256",
             "frozen_schedule_sha256",
             "holdout_protocol_sha256",
+            "holdout_acquisition_protocol_sha256",
             "holdout_scenario_pack_sha256",
             "holdout_selection_sha256",
             "holdout_collision_sha256",
@@ -7960,6 +8023,11 @@ def main(argv: list[str] | None = None) -> int:
             ),
             "holdout_protocol_sha256": (
                 official_holdout.protocol_sha256 if official_holdout is not None else None
+            ),
+            "holdout_acquisition_protocol_sha256": (
+                official_holdout.acquisition_protocol_sha256
+                if official_holdout is not None
+                else None
             ),
             "holdout_scenario_pack_sha256": (
                 official_holdout.scenario_pack_sha256 if official_holdout is not None else None
