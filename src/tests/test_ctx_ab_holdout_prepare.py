@@ -175,11 +175,13 @@ def test_build_v2_protocol_preserves_universe_and_sets_exact_design() -> None:
     assert protocol["selection"] == {
         "analysis_repositories": 10,
         "analysis_scenarios": 10,
+        "candidate_slot": 0,
         "ctx_context": [],
         "eligible_candidates_per_repository_required": 1,
         "eligible_repositories_required": 10,
         "first_scenario_rule": (
-            "first ranked candidate from each of the first ten ranked eligible repositories"
+            "candidate at the zero-based candidate_slot from the stable candidate-partition "
+            "ranking for each of the first ten generation-ranked eligible repositories"
         ),
         "private_canary": False,
         "query": "first 240 characters of whitespace-normalized problem_statement",
@@ -215,9 +217,15 @@ def test_build_v2_protocol_preserves_universe_and_sets_exact_design() -> None:
         "fixed literal ctx-holdout-selection-v2 NUL decimal protocol generation "
         "NUL external dataset revision"
     )
+    assert protocol["candidate_partition_seed"] == _sha256(
+        freezer.CANDIDATE_PARTITION_PREFIX + str(v1["universe"]["revision"]).encode()
+    )
+    assert protocol["candidate_partition_seed_input"] == (
+        "fixed literal ctx-holdout-candidate-partition-v2 NUL external dataset revision"
+    )
 
 
-def test_protocol_generation_changes_seed_and_selection_order(
+def test_protocol_generation_changes_seed_and_selects_disjoint_candidate_slots(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     v1 = _v1()
@@ -241,6 +249,11 @@ def test_protocol_generation_changes_seed_and_selection_order(
     assert generation_one["protocol_generation"] == 1
     assert generation_two["protocol_generation"] == 2
     assert generation_one["selection_seed"] != generation_two["selection_seed"]
+    assert generation_one["candidate_partition_seed"] == generation_two["candidate_partition_seed"]
+    assert generation_one["selection"]["candidate_slot"] == 0
+    assert generation_two["selection"]["candidate_slot"] == 1
+    assert generation_one["selection"]["eligible_candidates_per_repository_required"] == 1
+    assert generation_two["selection"]["eligible_candidates_per_repository_required"] == 2
     assert sorted(
         repositories,
         key=lambda repository: (
@@ -253,6 +266,22 @@ def test_protocol_generation_changes_seed_and_selection_order(
             holdout._digest(generation_two["selection_seed"], repository),
             repository,
         ),
+    )
+    ledger = [
+        {
+            "instance_id": f"repo-{repository}-candidate-{candidate}",
+            "repo": f"owner/repo-{repository}",
+            "production_paths": f"src/repo_{repository}/feature_{candidate}.py",
+            "test_path": f"tests/repo_{repository}/test_{candidate}.py",
+            "status": "eligible",
+        }
+        for repository in range(10)
+        for candidate in range(2)
+    ]
+    first_selection = holdout.select_rows(ledger, generation_one)
+    second_selection = holdout.select_rows(ledger, generation_two)
+    assert set(first_selection["analysis_instance_ids"]).isdisjoint(
+        second_selection["analysis_instance_ids"]
     )
 
 

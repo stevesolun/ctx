@@ -22,6 +22,7 @@ from typing import Any, TextIO
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PROTOCOL = ROOT / "benchmarks" / "ctx_ab" / "holdout-protocol-v1.json"
 PRIVATE_ROOT = ROOT / ".gate" / "ctx-ab-private"
+V2_CANDIDATE_PARTITION_PREFIX = b"ctx-holdout-candidate-partition-v2\0"
 SHA1 = re.compile(r"^[0-9a-f]{40}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 DIFF_PATH = re.compile(r"^diff --git a/(.+) b/(.+)$")
@@ -296,6 +297,8 @@ def select_rows(ledger: list[dict[str, Any]], protocol: dict[str, Any]) -> dict[
     candidates_per_repository = int(selection_rules["eligible_candidates_per_repository_required"])
     analysis_repositories = int(selection_rules["analysis_repositories"])
     analysis_scenarios = int(selection_rules["analysis_scenarios"])
+    candidate_seed = seed
+    candidate_slot = 0
     if not isinstance(private_canary, bool):
         raise ValueError("selection.private_canary must be a boolean")
     if legacy_strategy:
@@ -308,6 +311,31 @@ def select_rows(ledger: list[dict[str, Any]], protocol: dict[str, Any]) -> dict[
     elif strategy == "one-per-repository":
         if "private_canary" not in selection_rules:
             raise ValueError("one-per-repository selection requires explicit private_canary")
+        if protocol.get("schema_version") == 2:
+            generation = protocol.get("protocol_generation")
+            dataset_revision = str(protocol.get("universe", {}).get("revision") or "")
+            candidate_seed = str(protocol.get("candidate_partition_seed") or "")
+            candidate_slot_value = selection_rules.get("candidate_slot")
+            expected_candidate_seed = (
+                hashlib.sha256(
+                    V2_CANDIDATE_PARTITION_PREFIX + dataset_revision.encode("ascii")
+                ).hexdigest()
+                if SHA1.fullmatch(dataset_revision)
+                else ""
+            )
+            if (
+                not isinstance(generation, int)
+                or isinstance(generation, bool)
+                or generation < 1
+                or not isinstance(candidate_slot_value, int)
+                or isinstance(candidate_slot_value, bool)
+                or candidate_slot_value != generation - 1
+                or candidates_per_repository != generation
+                or not SHA256.fullmatch(candidate_seed)
+                or not hmac.compare_digest(candidate_seed, expected_candidate_seed)
+            ):
+                raise ValueError("V2 candidate partition contract is invalid")
+            candidate_slot = candidate_slot_value
         expected_repositories = analysis_repositories + (1 if private_canary else 0)
         if (
             analysis_repositories < 1
@@ -371,10 +399,15 @@ def select_rows(ledger: list[dict[str, Any]], protocol: dict[str, Any]) -> dict[
     def ranked(repo: str) -> list[dict[str, Any]]:
         return sorted(
             eligible_by_repo[repo],
-            key=lambda row: (_digest(seed, str(row["instance_id"])), str(row["instance_id"])),
+            key=lambda row: (
+                _digest(candidate_seed, str(row["instance_id"])),
+                str(row["instance_id"]),
+            ),
         )
 
-    analysis = [ranked(repo)[0] for _, _, repo in selected_repositories[:analysis_repositories]]
+    analysis = [
+        ranked(repo)[candidate_slot] for _, _, repo in selected_repositories[:analysis_repositories]
+    ]
     if legacy_strategy:
         first_repo_rows = ranked(selected_repositories[0][2])
         occupied = {
@@ -400,7 +433,7 @@ def select_rows(ledger: list[dict[str, Any]], protocol: dict[str, Any]) -> dict[
     canary_id: str | None = None
     canary_url: str | None = None
     if private_canary:
-        canary = ranked(selected_repositories[analysis_repositories][2])[0]
+        canary = ranked(selected_repositories[analysis_repositories][2])[candidate_slot]
         analysis_urls = {canonical_repo_url(str(row["repo"])) for row in analysis}
         canary_url = canonical_repo_url(str(canary["repo"]))
         canary_id = str(canary["instance_id"])

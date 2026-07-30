@@ -28,6 +28,7 @@ V1_PROTOCOL_PATH = ROOT / "benchmarks" / "ctx_ab" / "holdout-protocol-v1.json"
 V1_PROTOCOL_SHA256 = "14c3e623b6a3dced3b41769a9e8b60faed5c921aa4f1456d4bde907f1f8a60fa"
 PROTOCOL_ID = "production-graph-holdout-v2"
 SEED_PREFIX = b"ctx-holdout-selection-v2\0"
+CANDIDATE_PARTITION_PREFIX = holdout.V2_CANDIDATE_PARTITION_PREFIX
 PROTOCOL_GENERATION = 1
 REPOSITORY_COUNT = 10
 TRIALS_PER_SCENARIO = 3
@@ -362,14 +363,22 @@ def build_acquisition_protocol(
         "fixed literal ctx-holdout-selection-v2 NUL decimal protocol generation "
         "NUL external dataset revision"
     )
+    protocol["candidate_partition_seed"] = _sha256(
+        CANDIDATE_PARTITION_PREFIX + dataset_revision.encode("ascii")
+    )
+    protocol["candidate_partition_seed_input"] = (
+        "fixed literal ctx-holdout-candidate-partition-v2 NUL external dataset revision"
+    )
     protocol["selection"] = {
         "analysis_repositories": REPOSITORY_COUNT,
         "analysis_scenarios": REPOSITORY_COUNT,
+        "candidate_slot": PROTOCOL_GENERATION - 1,
         "ctx_context": [],
-        "eligible_candidates_per_repository_required": 1,
+        "eligible_candidates_per_repository_required": PROTOCOL_GENERATION,
         "eligible_repositories_required": REPOSITORY_COUNT,
         "first_scenario_rule": (
-            "first ranked candidate from each of the first ten ranked eligible repositories"
+            "candidate at the zero-based candidate_slot from the stable candidate-partition "
+            "ranking for each of the first ten generation-ranked eligible repositories"
         ),
         "private_canary": False,
         "query": "first 240 characters of whitespace-normalized problem_statement",

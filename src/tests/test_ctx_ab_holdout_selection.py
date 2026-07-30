@@ -41,6 +41,23 @@ def _protocol(
     return protocol
 
 
+def _v2_protocol(*, generation: int) -> dict[str, Any]:
+    protocol = _protocol(
+        strategy="one-per-repository",
+        private_canary=False,
+        candidates_per_repository=generation,
+    )
+    protocol["schema_version"] = 2
+    protocol["protocol_id"] = "production-graph-holdout-v2"
+    protocol["protocol_generation"] = generation
+    protocol["candidate_partition_seed"] = hashlib.sha256(
+        selector.V2_CANDIDATE_PARTITION_PREFIX
+        + str(protocol["universe"]["revision"]).encode("ascii")
+    ).hexdigest()
+    protocol["selection"]["candidate_slot"] = generation - 1
+    return protocol
+
+
 def _ledger(repositories: int, *, candidates_per_repository: int = 1) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for repo_index in range(repositories):
@@ -152,6 +169,47 @@ def test_one_per_repository_rejects_insufficient_candidates() -> None:
         selector.select_rows(_ledger(10, candidates_per_repository=1), protocol)
 
 
+def test_v2_generations_select_disjoint_candidate_slots() -> None:
+    ledger = _ledger(10, candidates_per_repository=2)
+    first = selector.select_rows(ledger, _v2_protocol(generation=1))
+    second = selector.select_rows(ledger, _v2_protocol(generation=2))
+
+    assert set(first["analysis_instance_ids"]).isdisjoint(second["analysis_instance_ids"])
+    assert set(first["analysis_repository_map"].values()) == set(
+        second["analysis_repository_map"].values()
+    )
+
+
+def test_v2_generation_fails_closed_without_fresh_candidate_slot() -> None:
+    protocol = _v2_protocol(generation=2)
+
+    with pytest.raises(ValueError, match="ten repositories with at least two eligible rows"):
+        selector.select_rows(_ledger(10, candidates_per_repository=1), protocol)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("protocol_generation", 3),
+        ("candidate_partition_seed", "0" * 64),
+    ],
+)
+def test_v2_rejects_candidate_partition_protocol_drift(field: str, value: object) -> None:
+    protocol = _v2_protocol(generation=2)
+    protocol[field] = value
+
+    with pytest.raises(ValueError, match="candidate partition contract"):
+        selector.select_rows(_ledger(10, candidates_per_repository=3), protocol)
+
+
+def test_v2_rejects_candidate_slot_drift() -> None:
+    protocol = _v2_protocol(generation=2)
+    protocol["selection"]["candidate_slot"] = 0
+
+    with pytest.raises(ValueError, match="candidate partition contract"):
+        selector.select_rows(_ledger(10, candidates_per_repository=2), protocol)
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
@@ -249,6 +307,12 @@ def _v2_cli_protocol(source_path: Path) -> dict[str, Any]:
     protocol = _protocol(strategy="one-per-repository", private_canary=False)
     protocol["schema_version"] = 2
     protocol["protocol_id"] = "production-graph-holdout-v2"
+    protocol["protocol_generation"] = 1
+    protocol["candidate_partition_seed"] = hashlib.sha256(
+        selector.V2_CANDIDATE_PARTITION_PREFIX
+        + str(protocol["universe"]["revision"]).encode("ascii")
+    ).hexdigest()
+    protocol["selection"]["candidate_slot"] = 0
     protocol["stage"] = "acquisition-frozen"
     protocol["universe"]["expected_rows"] = 10
     protocol["universe"]["raw_parquet_sha256"] = "1" * 64

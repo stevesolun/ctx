@@ -414,6 +414,18 @@ def _set(document: str, *path: str, value: object) -> Mutation:
         ("protocol-stage", _set("protocol", "stage", value="execution-frozen")),
         ("protocol-seed", _set("protocol", "selection_seed", value="0" * 64)),
         (
+            "protocol-candidate-partition-seed",
+            _set("protocol", "candidate_partition_seed", value="0" * 64),
+        ),
+        (
+            "protocol-candidate-partition-seed-input",
+            _set("protocol", "candidate_partition_seed_input", value="other"),
+        ),
+        (
+            "protocol-candidate-slot",
+            lambda docs: docs["protocol"]["selection"].update(candidate_slot=1),
+        ),
+        (
             "protocol-ranking-order",
             lambda docs: docs["protocol"]["ranking"].update(repository_order="reverse"),
         ),
