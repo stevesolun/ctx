@@ -3154,19 +3154,17 @@ class TestRecommendBundle:
         pack_dir = wiki / "wiki-packs" / "base-export-1"
         pages_path = pack_dir / "pages.jsonl"
         safe_path = f"converted/{_PACKED_CATALOG_INTERNAL_SLUG}/SKILL.md"
-        pages_text = pages_path.read_text(encoding="utf-8")
-        tampered_text = pages_text.replace(
-            safe_path,
-            "converted/../escape/SKILL.md",
+        pages_bytes = pages_path.read_bytes()
+        tampered_bytes = pages_bytes.replace(
+            safe_path.encode(),
+            b"converted/../escape/SKILL.md",
         )
-        assert tampered_text != pages_text
-        pages_path.write_text(tampered_text, encoding="utf-8")
+        assert tampered_bytes != pages_bytes
+        pages_path.write_bytes(tampered_bytes)
 
         manifest_path = pack_dir / "wiki-pack-manifest.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        manifest["checksums"]["pages.jsonl"] = hashlib.sha256(
-            tampered_text.encode("utf-8")
-        ).hexdigest()
+        manifest["checksums"]["pages.jsonl"] = hashlib.sha256(tampered_bytes).hexdigest()
         manifest_path.write_text(
             json.dumps(manifest, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",

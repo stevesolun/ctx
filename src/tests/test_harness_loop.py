@@ -2317,8 +2317,8 @@ class TestTurnController:
                 cancel_event,
             ):
                 assert deadline_monotonic is not None
-                delay = max(0.0, deadline_monotonic - time.monotonic()) + 0.005
-                time.sleep(delay)
+                while time.monotonic() <= deadline_monotonic:
+                    time.sleep(0.001)
                 return TurnPreparation(
                     tools=(),
                     capability_epoch=19,
