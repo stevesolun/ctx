@@ -5,7 +5,9 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import stat
+import subprocess
 from typing import Any, Callable
 
 import pytest
@@ -82,7 +84,12 @@ def _phase(
     }
 
 
-def _fixture_documents() -> dict[str, dict[str, Any]]:
+def _fixture_documents(
+    *,
+    source_commit: str | None = None,
+    source_tree_sha1: str | None = None,
+    source_bundle_sha256: str | None = None,
+) -> dict[str, dict[str, Any]]:
     scenario_ids = [f"owner__repo-{index}-task" for index in range(10)]
     repository_map = {
         scenario_id: f"https://github.com/owner/repo-{index}.git"
@@ -130,7 +137,7 @@ def _fixture_documents() -> dict[str, dict[str, Any]]:
     scenarios: list[dict[str, Any]] = []
     for index, scenario_id in enumerate(scenario_ids):
         allowed_changes = [f"src/feature_{index}.py"]
-        commit = f"{index:x}" * 40
+        commit = source_commit or f"{index:x}" * 40
         fail_to_pass = [f"tests/test_{index}.py::test_{index}"]
         pass_to_pass = [f"tests/test_{index}.py"]
         image_id = "sha256:" + hashlib.sha256(scenario_id.encode()).hexdigest()
@@ -160,7 +167,7 @@ def _fixture_documents() -> dict[str, dict[str, Any]]:
                     "pass_to_pass_sha256": _sha256(_canonical(pass_to_pass)),
                     "python_environment_sha256": PINS["python_environment_sha256"],
                     "python_sha256": PINS["python_sha256"],
-                    "repository_tree_sha1": "f" * 40,
+                    "repository_tree_sha1": source_tree_sha1 or "f" * 40,
                     "repository_url": repository_map[scenario_id],
                     "run_evaluation_sha256": PINS["run_evaluation_sha256"],
                     "runtime_identity_sha256": "a" * 64,
@@ -191,7 +198,7 @@ def _fixture_documents() -> dict[str, dict[str, Any]]:
             row["repo_url"]: {
                 "base_commit": row["commit"],
                 "bundle_path": f"bundles/repo-{index}.bundle",
-                "bundle_sha256": _sha256(f"bundle-{index}\n".encode()),
+                "bundle_sha256": source_bundle_sha256 or _sha256(f"bundle-{index}\n".encode()),
                 "tree_sha1": row["official_verifier_binding"]["repository_tree_sha1"],
             }
             for index, row in enumerate(scenarios)
@@ -305,17 +312,60 @@ def _fixture_paths(
     *,
     mutate: Callable[[dict[str, dict[str, Any]]], None] | None = None,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, Path]]:
-    documents = _fixture_documents()
-    if mutate is not None:
-        mutate(documents)
     private = tmp_path / "private"
     private.mkdir(mode=0o700)
     bundles = private / "bundles"
     bundles.mkdir(mode=0o700)
+    source_repository = tmp_path / "source-repository"
+    source_repository.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=source_repository, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "ctx@example.test"],
+        cwd=source_repository,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "ctx benchmark"],
+        cwd=source_repository,
+        check=True,
+    )
+    (source_repository / "source.py").write_text("value = 'base'\n", encoding="utf-8")
+    subprocess.run(["git", "add", "source.py"], cwd=source_repository, check=True)
+    subprocess.run(["git", "commit", "-qm", "base"], cwd=source_repository, check=True)
+    subprocess.run(["git", "branch", "base", "HEAD"], cwd=source_repository, check=True)
+    source_commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=source_repository,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    source_tree_sha1 = subprocess.run(
+        ["git", "rev-parse", "HEAD^{tree}"],
+        cwd=source_repository,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    first_bundle = bundles / "repo-0.bundle"
+    subprocess.run(
+        ["git", "bundle", "create", str(first_bundle), "refs/heads/base"],
+        cwd=source_repository,
+        check=True,
+    )
+    source_bundle_sha256 = _sha256(first_bundle.read_bytes())
     for index in range(10):
         bundle = bundles / f"repo-{index}.bundle"
-        bundle.write_bytes(f"bundle-{index}\n".encode())
+        if index:
+            shutil.copyfile(first_bundle, bundle)
         bundle.chmod(0o600)
+    documents = _fixture_documents(
+        source_commit=source_commit,
+        source_tree_sha1=source_tree_sha1,
+        source_bundle_sha256=source_bundle_sha256,
+    )
+    if mutate is not None:
+        mutate(documents)
     paths = {
         "protocol_path": _write_json(
             tmp_path / "protocol.json",
@@ -925,6 +975,63 @@ def test_freeze_rejects_selection_intersecting_authenticated_exposure(
     )
 
     with pytest.raises(freezer.FreezeError, match="historical exposure"):
+        _freeze(paths)
+
+    assert not paths["schedule_path"].exists()
+    assert not paths["output_path"].exists()
+
+
+def test_freeze_rejects_empty_authenticated_exposure_ledger(
+    tmp_path: Path,
+) -> None:
+    documents, paths = _fixture_paths(tmp_path)
+    empty_ledger = {
+        "instance_id_hmac_sha256": [],
+        "salt": EXPOSURE_SALT,
+        "schema_version": 1,
+    }
+    exposure_bytes = exposure_ledger.canonical_ledger_bytes(empty_ledger)
+    paths["exposure_ledger_path"].write_bytes(exposure_bytes)
+    paths["exposure_ledger_path"].chmod(0o600)
+    documents["protocol"]["exposure_ledger_sha256"] = _sha256(exposure_bytes)
+    _write_json(paths["protocol_path"], documents["protocol"], newline=True)
+
+    with pytest.raises(freezer.FreezeError, match="must not be empty"):
+        _freeze(paths)
+
+    assert not paths["schedule_path"].exists()
+    assert not paths["output_path"].exists()
+
+
+def test_freeze_rejects_source_bundle_replaced_after_materialization(
+    tmp_path: Path,
+) -> None:
+    documents, paths = _fixture_paths(tmp_path)
+    source_repository = tmp_path / "source-repository"
+    (source_repository / "source.py").write_text("value = 'future gold'\n", encoding="utf-8")
+    subprocess.run(["git", "commit", "-qam", "future gold"], cwd=source_repository, check=True)
+    subprocess.run(["git", "branch", "future", "HEAD"], cwd=source_repository, check=True)
+    poisoned_bundle = tmp_path / "poisoned.bundle"
+    subprocess.run(
+        [
+            "git",
+            "bundle",
+            "create",
+            str(poisoned_bundle),
+            "refs/heads/base",
+            "refs/heads/future",
+        ],
+        cwd=source_repository,
+        check=True,
+    )
+    first = next(iter(documents["source_map"]["repositories"].values()))
+    bundle = paths["source_map_path"].parent / first["bundle_path"]
+    shutil.copyfile(poisoned_bundle, bundle)
+    bundle.chmod(0o600)
+    first["bundle_sha256"] = _sha256(bundle.read_bytes())
+    _write_json(paths["source_map_path"], documents["source_map"])
+
+    with pytest.raises(freezer.FreezeError, match="base-commit closure"):
         _freeze(paths)
 
     assert not paths["schedule_path"].exists()

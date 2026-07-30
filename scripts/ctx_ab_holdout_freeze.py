@@ -632,6 +632,101 @@ def validate_source_map(source_map_path: Path) -> tuple[dict[str, SourceBundle],
     return bundles, _sha256(source_map_bytes)
 
 
+def _validate_source_bundle_closure(source: SourceBundle) -> None:
+    """Prove one authenticated bundle contains only the pinned base closure."""
+    expected_head = f"{source.base_commit} refs/heads/base"
+    try:
+        listed_heads = benchmark._checked_git(
+            ["bundle", "list-heads", str(source.bundle_path)],
+            cwd=source.bundle_path.parent,
+            label="private source bundle head inventory",
+        ).splitlines()
+        if listed_heads != [expected_head]:
+            raise FreezeError("private source bundle is not an exact base-commit closure")
+
+        with tempfile.TemporaryDirectory(
+            prefix=".freeze-source-",
+            dir=source.bundle_path.parent,
+        ) as raw_root:
+            workspace = Path(raw_root) / "repository"
+            benchmark._checked_git(
+                [
+                    "-c",
+                    "core.hooksPath=/dev/null",
+                    "clone",
+                    "--quiet",
+                    "--no-checkout",
+                    "--no-hardlinks",
+                    str(source.bundle_path),
+                    str(workspace),
+                ],
+                cwd=Path(raw_root),
+                label="private source bundle clone",
+                timeout=1800,
+            )
+            benchmark._checked_git(
+                [
+                    "-c",
+                    "core.hooksPath=/dev/null",
+                    "checkout",
+                    "--quiet",
+                    "--detach",
+                    source.base_commit,
+                ],
+                cwd=workspace,
+                label="private source bundle checkout",
+            )
+            head = benchmark._checked_git(
+                ["rev-parse", "HEAD"],
+                cwd=workspace,
+                label="private source bundle commit",
+            )
+            tree = benchmark._checked_git(
+                ["rev-parse", "HEAD^{tree}"],
+                cwd=workspace,
+                label="private source bundle tree",
+            )
+            future = benchmark._checked_git(
+                ["rev-list", "--all", "--not", source.base_commit],
+                cwd=workspace,
+                label="private source bundle future-history audit",
+            )
+            unreachable = benchmark._checked_git(
+                ["fsck", "--full", "--strict", "--unreachable", "--no-reflogs"],
+                cwd=workspace,
+                label="private source bundle object audit",
+                timeout=1800,
+            )
+            benchmark._checked_git(
+                ["remote", "remove", "origin"],
+                cwd=workspace,
+                label="private source bundle remote removal",
+            )
+            remotes = benchmark._checked_git(
+                ["remote"],
+                cwd=workspace,
+                label="private source bundle remote audit",
+            )
+            status = benchmark._checked_git(
+                ["status", "--porcelain=v1", "--untracked-files=all"],
+                cwd=workspace,
+                label="private source bundle clean-tree audit",
+            )
+            if (
+                head != source.base_commit
+                or tree != source.tree_sha1
+                or future
+                or unreachable
+                or remotes
+                or status
+            ):
+                raise FreezeError("private source bundle is not an exact base-commit closure")
+    except FreezeError:
+        raise
+    except RuntimeError as exc:
+        raise FreezeError("private source bundle closure validation failed") from exc
+
+
 def validate_acquisition_protocol(
     protocol: dict[str, Any],
     *,
@@ -1283,6 +1378,8 @@ def freeze_protocol(
         validated_exposure = exposure_ledger.validate_ledger_document(values["exposure_ledger"])
     except ValueError as exc:
         raise FreezeError("authenticated exposure ledger is invalid") from exc
+    if not validated_exposure["instance_id_hmac_sha256"]:
+        raise FreezeError("authenticated exposure ledger must not be empty")
     if blobs["exposure_ledger"] != exposure_ledger.canonical_ledger_bytes(
         validated_exposure
     ) or not secrets.compare_digest(
@@ -1320,10 +1417,19 @@ def freeze_protocol(
     }
     if set(source_bundles) != set(expected_sources):
         raise FreezeError("private source map does not match the selected repositories")
+    validated_source_closures: set[tuple[str, str, str]] = set()
     for repository_url, (base_commit, tree_sha1) in expected_sources.items():
         source = source_bundles[repository_url]
         if source.base_commit != base_commit or source.tree_sha1 != tree_sha1:
             raise FreezeError("private source map repository identity is stale")
+        closure_identity = (
+            source.bundle_sha256,
+            source.base_commit,
+            source.tree_sha1,
+        )
+        if closure_identity not in validated_source_closures:
+            _validate_source_bundle_closure(source)
+            validated_source_closures.add(closure_identity)
     scenario_test_sha256 = {
         str(row["id"]): str(row["reconstructed_test_sha256"]) for row in scenario_rows
     }
