@@ -134,7 +134,10 @@ def load_authenticated_ledger(path: Path, expected_sha256: str) -> dict[str, Any
     actual_sha256 = hashlib.sha256(data).hexdigest()
     if not hmac.compare_digest(actual_sha256, expected_sha256):
         raise ValueError("exposure ledger does not match the authenticated SHA-256")
-    return _parse_canonical_ledger(data)
+    document = _parse_canonical_ledger(data)
+    if not document["instance_id_hmac_sha256"]:
+        raise ValueError("authenticated exposure ledger must not be empty")
+    return document
 
 
 def load_private_ledger(path: Path) -> dict[str, Any]:
@@ -321,6 +324,8 @@ def build_exposure_ledger(
     explicit = list(instance_id_paths)
     ledgers = list(ledger_paths)
     all_inputs = [*selections, *evidence, *explicit, *ledgers]
+    if not all_inputs:
+        raise ValueError("exposure builder requires at least one historical source input")
     _require_distinct_paths([*all_inputs, output])
 
     existing = [load_private_ledger(path) for path in ledgers]
@@ -347,6 +352,8 @@ def build_exposure_ledger(
 
     hashes = {digest for document in existing for digest in document["instance_id_hmac_sha256"]}
     hashes.update(instance_id_hmac_sha256(salt, identity) for identity in identities)
+    if not hashes:
+        raise ValueError("exposure ledger must contain at least one historical task hash")
     document = validate_ledger_document(
         {
             "schema_version": 1,

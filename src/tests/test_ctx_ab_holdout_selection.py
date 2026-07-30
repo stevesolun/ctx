@@ -332,7 +332,7 @@ def _v2_cli_arguments(
     protocol_path.write_bytes(protocol_bytes)
     source_path.write_text("{}\n", encoding="utf-8")
     if exposure_ledger_bytes is None:
-        exposure_ledger_bytes = _canonical_bytes(_exposure_ledger())
+        exposure_ledger_bytes = _canonical_bytes(_exposure_ledger("synthetic-nonmatching-history"))
     exposure_path.write_bytes(exposure_ledger_bytes)
     exposure_path.chmod(0o600)
     arguments = [
@@ -450,12 +450,38 @@ def test_v2_selector_cli_output_is_deterministic_with_authenticated_exposure_led
     assert (ledger_path.read_bytes(), selection_path.read_bytes()) == first
 
 
+def test_v2_selector_cli_rejects_authenticated_empty_exposure_ledger(
+    tmp_path: Path,
+) -> None:
+    exposure = _canonical_bytes(_exposure_ledger())
+    placeholder_protocol = b"{}"
+    arguments, source_path, ledger_path, selection_path = _v2_cli_arguments(
+        tmp_path,
+        protocol_bytes=placeholder_protocol,
+        expected_protocol_sha256=hashlib.sha256(placeholder_protocol).hexdigest(),
+        exposure_ledger_bytes=exposure,
+    )
+    protocol_bytes = _canonical_bytes(_v2_cli_protocol(source_path, exposure))
+    (tmp_path / "protocol.json").write_bytes(protocol_bytes)
+    arguments[arguments.index("--expected-acquisition-protocol-sha256") + 1] = hashlib.sha256(
+        protocol_bytes
+    ).hexdigest()
+    ledger_path.write_text("preserve-ledger", encoding="utf-8")
+    selection_path.write_text("preserve-selection", encoding="utf-8")
+
+    with pytest.raises(SystemExit, match="exposure ledger.*must not be empty"):
+        selector.main(arguments)
+
+    assert ledger_path.read_text(encoding="utf-8") == "preserve-ledger"
+    assert selection_path.read_text(encoding="utf-8") == "preserve-selection"
+
+
 @pytest.mark.parametrize("failure", ["missing-path", "missing-digest", "tampered", "wrong"])
 def test_v2_selector_cli_requires_exact_authenticated_exposure_ledger(
     tmp_path: Path,
     failure: str,
 ) -> None:
-    exposure = _canonical_bytes(_exposure_ledger())
+    exposure = _canonical_bytes(_exposure_ledger("synthetic-nonmatching-history"))
     placeholder_protocol = b"{}"
     arguments, source_path, ledger_path, selection_path = _v2_cli_arguments(
         tmp_path,

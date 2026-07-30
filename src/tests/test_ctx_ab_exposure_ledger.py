@@ -152,3 +152,34 @@ def test_builder_rejects_duplicate_and_unsafe_inputs(tmp_path: Path) -> None:
             instance_id_paths=[link],
             salt="d" * 64,
         )
+
+
+def test_builder_rejects_zero_historical_inputs(tmp_path: Path) -> None:
+    output = tmp_path / "private" / "ledger.json"
+
+    with pytest.raises(ValueError, match="at least one historical source input"):
+        exposure.build_exposure_ledger(
+            output=output,
+            salt="d" * 64,
+        )
+
+    assert not output.exists()
+
+
+def test_builder_rejects_empty_existing_ledger(tmp_path: Path) -> None:
+    private = tmp_path / "private"
+    empty = {
+        "schema_version": 1,
+        "salt": "d" * 64,
+        "instance_id_hmac_sha256": [],
+    }
+    existing = _private_file(private / "existing.json", _canonical(empty))
+    output = private / "merged.json"
+
+    with pytest.raises(ValueError, match="at least one historical task hash"):
+        exposure.build_exposure_ledger(
+            output=output,
+            ledger_paths=[existing],
+        )
+
+    assert not output.exists()
