@@ -21,7 +21,7 @@ import sys
 import tarfile
 import time
 import unicodedata
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from math import comb
@@ -34,19 +34,32 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SCENARIOS = ROOT / "benchmarks" / "ctx_ab" / "scenarios.yaml"
 ORIGINAL_CODEX_HOME = os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))
-SAFE_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+SAFE_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,127}$")
 GITHUB_REPO_URL = re.compile(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\.git")
 INCIDENT_FIELDS = (
     "timestamp",
+    "incident_id",
+    "protocol_id",
+    "protocol_invalidation",
+    "protocol_invalidation_reason",
     "scenario",
     "arm",
     "attempt",
     "stage",
+    "failure_class",
     "severity",
     "status",
     "message",
+    "root_cause",
+    "repro",
+    "risk",
+    "fix",
+    "fix_commit",
+    "rerun_of",
+    "resolved_by",
     "evidence",
 )
+INCIDENT_FAILURE_CLASSES = frozenset({"harness", "evaluator", "model", "baseline", "ctx"})
 PROCESS_MARKER = "CTX_BENCHMARK_PROCESS_TOKEN"
 TREATMENT_ARMS = ("baseline", "ctx-light", "ctx-full")
 PRODUCTION_CATALOG_ENGINE = "codex-production-catalog"
@@ -60,6 +73,14 @@ PRODUCTION_CATALOG_BODY_MAX_BYTES = 16 * 1024
 PRODUCTION_TOOL_OUTPUT_LIMIT_BYTES = 32 * 1024
 PRODUCTION_CATALOG_MCP_TOOLS = ("ctx__recommend_bundle", "ctx__wiki_get")
 PRODUCTION_POLICY_ABSTENTION_LEVEL = "production_catalog_policy_abstention"
+OFFICIAL_HOLDOUT_BACKEND = "official-swebench-docker-v1"
+OFFICIAL_HOLDOUT_GUARD = "ctx-ab-official-controls-v1"
+OFFICIAL_SCHEDULE_SCHEMA_VERSION = 1
+OFFICIAL_CONFIRMATORY_TASKS = 10
+OFFICIAL_CONFIRMATORY_TRIALS = 3
+OFFICIAL_CONFIRMATORY_PAIRS = 30
+OFFICIAL_CONFIRMATORY_FIRST_ARM_COUNT = 15
+OFFICIAL_SANDBOX_CONTRACT = "codex-managed-workspace-write-network-denied-v1"
 PRODUCT_CLAIM_MIN_SCENARIOS = 6
 PRODUCT_CLAIM_MIN_REPOSITORIES = 5
 PRODUCT_CLAIM_MIN_TRIALS = 6
@@ -189,6 +210,84 @@ class CatalogSnapshot:
     prepare_seconds: float = 0.0
 
 
+@dataclass(frozen=True)
+class FrozenSchedule:
+    protocol_id: str
+    sha256: str
+    assignments: tuple[dict[str, Any], ...]
+
+    def arms_for(self, scenario_id: str, trial: int) -> tuple[str, str]:
+        matches = [
+            assignment
+            for assignment in self.assignments
+            if assignment["scenario"] == scenario_id and assignment["trial"] == trial
+        ]
+        if len(matches) != 1:
+            raise RuntimeError("frozen schedule assignment identity is invalid")
+        arms = matches[0]["arms"]
+        return str(arms[0]), str(arms[1])
+
+
+@dataclass(frozen=True)
+class OfficialVerifierRuntime:
+    dataset_path: Path
+    swebench_checkout: Path
+    swebench_python: Path
+    docker_cli: Path
+    docker_host: str
+
+
+@dataclass(frozen=True)
+class ExecutionFrozenHoldout:
+    protocol_id: str
+    protocol_sha256: str
+    product_revision: str
+    codex_binary_sha256: str
+    provider_config_sha256: str
+    protocol_path: Path
+    scenario_pack_path: Path
+    scenario_pack_sha256: str
+    selection_path: Path
+    selection_sha256: str
+    collision_path: Path
+    collision_sha256: str
+    reconstructed_path: Path
+    reconstructed_sha256: str
+    control_results_path: Path
+    control_results_sha256: str
+    environment_path: Path
+    environment_sha256: str
+    schedule_path: Path
+    schedule: FrozenSchedule
+    scenarios: tuple[Scenario, ...]
+    scenario_sha256: Mapping[str, str]
+    image_ids: Mapping[str, str]
+    verifier: Mapping[str, Any]
+    execution_conditions: Mapping[str, Any]
+
+    @property
+    def sensitive_paths(self) -> tuple[Path, ...]:
+        return (
+            self.protocol_path,
+            self.selection_path,
+            self.scenario_pack_path,
+            self.collision_path,
+            self.reconstructed_path,
+            self.control_results_path,
+            self.environment_path,
+            self.schedule_path,
+        )
+
+
+@dataclass(frozen=True)
+class OfficialVerificationResult:
+    passed: bool
+    elapsed: float
+    evidence_sha256: str
+    failure_class: str | None
+    validation: Mapping[str, Any]
+
+
 def _safe_relative_path(value: object, *, field: str) -> str:
     raw = str(value or "").strip()
     path = Path(raw)
@@ -227,20 +326,85 @@ class IncidentLog:
         arm: str,
         attempt: int,
         stage: str,
+        failure_class: str,
         message: str,
+        root_cause: str,
+        repro: str,
         evidence: str,
+        risk: str = "benchmark evidence may be incomplete or misleading",
+        fix: str = "classify and apply the smallest reproducible correction",
+        fix_commit: str | None = None,
+        rerun_of: str | None = None,
+        protocol_id: str = "legacy-unfrozen",
+        protocol_invalidation: str | None = None,
+        protocol_invalidation_reason: str | None = None,
         severity: str = "error",
         status: str = "open",
     ) -> None:
+        if failure_class not in INCIDENT_FAILURE_CLASSES:
+            raise ValueError(f"unsupported incident failure class: {failure_class}")
+        if status not in {"open", "observed", "resolved"}:
+            raise ValueError(f"unsupported incident status: {status}")
+        if protocol_invalidation is None:
+            protocol_invalidation = (
+                "not_applicable"
+                if protocol_id == "legacy-unfrozen"
+                else "not_invalidated"
+                if status == "observed" and failure_class in {"model", "baseline", "ctx"}
+                else "invalidated"
+            )
+        if protocol_invalidation not in {
+            "invalidated",
+            "not_invalidated",
+            "not_applicable",
+        }:
+            raise ValueError("incident protocol invalidation state is invalid")
+        if protocol_invalidation_reason is None:
+            protocol_invalidation_reason = {
+                "invalidated": "frozen execution or evidence contract failed",
+                "not_invalidated": "observed arm outcome retained without protocol tuning",
+                "not_applicable": "no execution-frozen protocol applies",
+            }[protocol_invalidation]
+        fix_commit = fix_commit or ("not-required" if status == "resolved" else "pending")
+        rerun_of = rerun_of or "initial-run"
+        required = {
+            "protocol_id": protocol_id,
+            "protocol_invalidation_reason": protocol_invalidation_reason,
+            "fix_commit": fix_commit,
+            "rerun_of": rerun_of,
+        }
+        if any(not str(value).strip() for value in required.values()):
+            raise ValueError("incident linkage fields must be populated")
+        incident_identity = {
+            "arm": arm,
+            "attempt": attempt,
+            "failure_class": failure_class,
+            "protocol_id": protocol_id,
+            "scenario": scenario,
+            "stage": stage,
+        }
+        incident_id = "inc-" + _sha256_bytes(_canonical_json_bytes(incident_identity))[:20]
         row = {
             "timestamp": datetime.now(UTC).isoformat(),
+            "incident_id": incident_id,
+            "protocol_id": protocol_id,
+            "protocol_invalidation": protocol_invalidation,
+            "protocol_invalidation_reason": protocol_invalidation_reason,
             "scenario": scenario,
             "arm": arm,
             "attempt": attempt,
             "stage": stage,
+            "failure_class": failure_class,
             "severity": severity,
             "status": status,
             "message": message,
+            "root_cause": root_cause,
+            "repro": repro,
+            "risk": risk,
+            "fix": fix,
+            "fix_commit": fix_commit,
+            "rerun_of": rerun_of,
+            "resolved_by": "",
             "evidence": evidence,
         }
         with self.path.open("a", newline="", encoding="utf-8") as fh:
@@ -270,6 +434,9 @@ class IncidentLog:
             ):
                 continue
             row["status"] = "resolved"
+            row["resolved_by"] = f"{scenario}:{arm}:attempt-{resolved_by}"
+            row["fix_commit"] = "recovered-without-code-change"
+            row["rerun_of"] = row.get("incident_id") or "unknown-incident"
             row["evidence"] = (
                 f"{row.get('evidence', '').rstrip()}; recovered by attempt {resolved_by}"
             ).lstrip("; ")
@@ -281,13 +448,848 @@ class IncidentLog:
                 writer.writerows(rows)
         return resolved
 
+    @staticmethod
+    def _linkage_valid(row: Mapping[str, str]) -> bool:
+        try:
+            attempt = int(row["attempt"])
+        except (KeyError, TypeError, ValueError):
+            return False
+        protocol_id = str(row.get("protocol_id") or "")
+        invalidation = str(row.get("protocol_invalidation") or "")
+        incident_id = str(row.get("incident_id") or "")
+        identity = {
+            "arm": str(row.get("arm") or ""),
+            "attempt": attempt,
+            "failure_class": str(row.get("failure_class") or ""),
+            "protocol_id": protocol_id,
+            "scenario": str(row.get("scenario") or ""),
+            "stage": str(row.get("stage") or ""),
+        }
+        expected_id = "inc-" + _sha256_bytes(_canonical_json_bytes(identity))[:20]
+        return bool(
+            secrets.compare_digest(incident_id, expected_id)
+            and protocol_id
+            and invalidation in {"invalidated", "not_invalidated", "not_applicable"}
+            and str(row.get("protocol_invalidation_reason") or "").strip()
+            and str(row.get("fix_commit") or "").strip()
+            and str(row.get("rerun_of") or "").strip()
+            and (
+                (protocol_id == "legacy-unfrozen" and invalidation == "not_applicable")
+                or (
+                    protocol_id != "legacy-unfrozen"
+                    and invalidation in {"invalidated", "not_invalidated"}
+                )
+            )
+        )
+
     def unresolved_count(self) -> int:
         with self.path.open(newline="", encoding="utf-8") as fh:
-            return sum(row.get("status") == "open" for row in csv.DictReader(fh))
+            return sum(
+                row.get("status") == "open" or not self._linkage_valid(row)
+                for row in csv.DictReader(fh)
+            )
+
+
+def _canonical_json_bytes(value: object) -> bytes:
+    return json.dumps(
+        value,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+
+
+def _strict_json_object(data: bytes, *, label: str) -> dict[str, Any]:
+    def pairs(values: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in values:
+            if key in result:
+                raise ValueError(f"{label} contains duplicate JSON keys")
+            result[key] = value
+        return result
+
+    def reject_constant(_value: str) -> None:
+        raise ValueError(f"{label} contains a non-finite JSON number")
+
+    try:
+        value = json.loads(
+            data.decode("utf-8"),
+            object_pairs_hook=pairs,
+            parse_constant=reject_constant,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{label} is not valid UTF-8 JSON") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must contain a JSON object")
+    return value
+
+
+def _sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _require_sha256(value: object, *, field: str) -> str:
+    digest = str(value or "")
+    if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        raise ValueError(f"{field} must be a lowercase SHA-256 digest")
+    return digest
+
+
+def codex_provider_config_sha256(provider: str) -> str:
+    auth_path = Path(ORIGINAL_CODEX_HOME) / "auth.json"
+    auth_sha256 = (
+        _sha256_bytes(auth_path.read_bytes())
+        if auth_path.is_file() and not auth_path.is_symlink()
+        else "unavailable"
+    )
+    return _sha256_bytes(
+        _canonical_json_bytes(
+            {
+                "auth": "codex-cli-oauth",
+                "auth_file_sha256": auth_sha256,
+                "model_provider": provider,
+                "transport": "codex-exec",
+            }
+        )
+    )
+
+
+def _authenticated_artifact(
+    path: Path,
+    *,
+    expected_sha256: object,
+    label: str,
+    private: bool,
+) -> tuple[Path, bytes, str]:
+    expected = _require_sha256(expected_sha256, field=f"{label} SHA-256")
+    if path.is_symlink():
+        raise ValueError(f"{label} must not be a symlink")
+    try:
+        resolved = path.resolve(strict=True)
+        mode = resolved.stat().st_mode
+        data = resolved.read_bytes()
+    except OSError as exc:
+        raise ValueError(f"{label} is unavailable") from exc
+    if not stat.S_ISREG(mode):
+        raise ValueError(f"{label} must be a regular file")
+    if private and os.name != "nt" and stat.S_IMODE(mode) & (stat.S_IRWXG | stat.S_IRWXO):
+        raise ValueError(f"{label} must be owner-only")
+    observed = _sha256_bytes(data)
+    if not secrets.compare_digest(observed, expected):
+        raise ValueError(f"{label} does not match the execution freeze")
+    return resolved, data, observed
+
+
+def validate_frozen_schedule(
+    schedule_bytes: bytes,
+    *,
+    expected_sha256: str,
+    protocol_id: str,
+    scenario_ids: Sequence[str],
+) -> FrozenSchedule:
+    """Authenticate and validate the exact confirmatory arm-order schedule bytes."""
+    expected = _require_sha256(expected_sha256, field="schedule SHA-256")
+    observed = _sha256_bytes(schedule_bytes)
+    if not secrets.compare_digest(observed, expected):
+        raise ValueError("frozen schedule bytes do not match the execution freeze")
+    document = _strict_json_object(schedule_bytes, label="frozen schedule")
+    if set(document) != {
+        "assignment_count",
+        "schema_version",
+        "protocol_id",
+        "baseline_first_count",
+        "ctx_light_first_count",
+        "trials_per_scenario",
+        "assignments",
+    }:
+        raise ValueError("frozen schedule has an unsupported shape")
+    expected_ids = list(scenario_ids)
+    if (
+        len(expected_ids) != OFFICIAL_CONFIRMATORY_TASKS
+        or len(set(expected_ids)) != len(expected_ids)
+        or any(not isinstance(value, str) or not value for value in expected_ids)
+    ):
+        raise ValueError("confirmatory schedule requires ten unique scenario identifiers")
+    if (
+        document.get("schema_version") != OFFICIAL_SCHEDULE_SCHEMA_VERSION
+        or document.get("protocol_id") != protocol_id
+        or document.get("trials_per_scenario") != OFFICIAL_CONFIRMATORY_TRIALS
+        or document.get("assignment_count") != OFFICIAL_CONFIRMATORY_PAIRS
+        or document.get("baseline_first_count") != OFFICIAL_CONFIRMATORY_FIRST_ARM_COUNT
+        or document.get("ctx_light_first_count") != OFFICIAL_CONFIRMATORY_FIRST_ARM_COUNT
+    ):
+        raise ValueError("frozen schedule identity or trial count is invalid")
+    assignments = document.get("assignments")
+    if not isinstance(assignments, list) or len(assignments) != OFFICIAL_CONFIRMATORY_PAIRS:
+        raise ValueError("frozen schedule must contain exactly thirty paired assignments")
+    expected_keys = {
+        (scenario_id, trial)
+        for scenario_id in expected_ids
+        for trial in range(1, OFFICIAL_CONFIRMATORY_TRIALS + 1)
+    }
+    observed_keys: set[tuple[str, int]] = set()
+    baseline_first = 0
+    ctx_first = 0
+    normalized: list[dict[str, Any]] = []
+    for assignment in assignments:
+        if not isinstance(assignment, dict) or set(assignment) != {
+            "scenario",
+            "trial",
+            "arms",
+        }:
+            raise ValueError("frozen schedule assignment has an unsupported shape")
+        scenario_id = assignment.get("scenario")
+        trial = assignment.get("trial")
+        arms = assignment.get("arms")
+        if (
+            not isinstance(scenario_id, str)
+            or scenario_id not in expected_ids
+            or not isinstance(trial, int)
+            or isinstance(trial, bool)
+            or trial not in range(1, OFFICIAL_CONFIRMATORY_TRIALS + 1)
+            or not isinstance(arms, list)
+            or arms
+            not in (
+                ["baseline", "ctx-light"],
+                ["ctx-light", "baseline"],
+            )
+        ):
+            raise ValueError("frozen schedule assignment is invalid")
+        key = (scenario_id, trial)
+        if key in observed_keys:
+            raise ValueError("frozen schedule contains a duplicate paired assignment")
+        observed_keys.add(key)
+        baseline_first += arms[0] == "baseline"
+        ctx_first += arms[0] == "ctx-light"
+        normalized.append(
+            {
+                "scenario": scenario_id,
+                "trial": trial,
+                "arms": list(arms),
+            }
+        )
+    if observed_keys != expected_keys:
+        raise ValueError("frozen schedule does not cover each scenario and trial exactly once")
+    if (
+        baseline_first != OFFICIAL_CONFIRMATORY_FIRST_ARM_COUNT
+        or ctx_first != OFFICIAL_CONFIRMATORY_FIRST_ARM_COUNT
+    ):
+        raise ValueError("frozen schedule must have an exact global 15/15 first-arm split")
+    return FrozenSchedule(
+        protocol_id=protocol_id,
+        sha256=observed,
+        assignments=tuple(normalized),
+    )
+
+
+def _validated_official_verifier(value: object) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError("execution-frozen protocol omitted official verifier identity")
+    required = {
+        "schema_version",
+        "namespace",
+        "revision",
+        "run_evaluation_sha256",
+        "bridge_sha256",
+        "python_sha256",
+        "python_environment_sha256",
+        "docker_package_sha256",
+        "docker_cli_sha256",
+        "docker_daemon_id",
+        "docker_server_version",
+    }
+    if set(value) != required:
+        raise ValueError("official verifier identity has an unsupported shape")
+    if value.get("schema_version") != 1 or value.get("namespace") != "swebench":
+        raise ValueError("execution-frozen protocol requires the official SWE-bench backend")
+    revision = str(value.get("revision") or "")
+    if re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+        raise ValueError("official verifier revision is invalid")
+    for field in required:
+        if field.endswith("_sha256"):
+            _require_sha256(value.get(field), field=f"official verifier {field}")
+    for field in ("docker_daemon_id", "docker_server_version"):
+        text = value.get(field)
+        if not isinstance(text, str) or not text.strip() or len(text) > 200:
+            raise ValueError(f"official verifier {field} is invalid")
+    return {
+        "backend": OFFICIAL_HOLDOUT_BACKEND,
+        "namespace": "swebench",
+        "expected_revision": revision,
+        "expected_run_evaluation_sha256": value["run_evaluation_sha256"],
+        "expected_bridge_sha256": value["bridge_sha256"],
+        "expected_python_sha256": value["python_sha256"],
+        "expected_python_environment_sha256": value["python_environment_sha256"],
+        "expected_docker_package_sha256": value["docker_package_sha256"],
+        "expected_docker_cli_sha256": value["docker_cli_sha256"],
+        "expected_docker_daemon_id": value["docker_daemon_id"],
+        "expected_docker_server_version": value["docker_server_version"],
+    }
+
+
+def _scenario_rows_and_hashes(
+    document: Mapping[str, Any],
+) -> tuple[list[Scenario], dict[str, str]]:
+    raw_rows = document.get("scenarios")
+    if not isinstance(raw_rows, list) or not all(isinstance(row, dict) for row in raw_rows):
+        raise ValueError("scenario pack must contain scenario objects")
+    scenarios = _load_scenarios_document(dict(document))
+    if len(scenarios) != OFFICIAL_CONFIRMATORY_TASKS:
+        raise ValueError("official confirmatory holdout requires exactly ten scenarios")
+    row_by_id = {str(row.get("id") or ""): row for row in raw_rows}
+    if len(row_by_id) != len(raw_rows) or set(row_by_id) != {row.id for row in scenarios}:
+        raise ValueError("scenario pack identifiers are missing or duplicated")
+    if len(
+        {scenario.repo_url.casefold() for scenario in scenarios}
+    ) != OFFICIAL_CONFIRMATORY_TASKS or any(scenario.context for scenario in scenarios):
+        raise ValueError(
+            "official confirmatory holdout requires ten repositories and no embedded context"
+        )
+    return scenarios, {
+        scenario.id: _sha256_bytes(_canonical_json_bytes(row_by_id[scenario.id]))
+        for scenario in scenarios
+    }
+
+
+def _validated_official_controls(
+    document: Mapping[str, Any],
+    *,
+    scenario_pack_sha256: str,
+    selection_sha256: str,
+    scenario_sha256: Mapping[str, str],
+    reconstructed_sha256: Mapping[str, str],
+    verifier_pins_sha256: str,
+) -> dict[str, str]:
+    if set(document) != {
+        "all_scenarios_passed",
+        "guard",
+        "scenario_count",
+        "scenario_pack_sha256",
+        "scenario_results",
+        "selection_sha256",
+        "verifier_pins_sha256",
+    }:
+        raise ValueError("official control results have an unsupported shape")
+    results = document.get("scenario_results")
+    if (
+        document.get("guard") != "holdout-control-results-v1"
+        or document.get("scenario_pack_sha256") != scenario_pack_sha256
+        or document.get("selection_sha256") != selection_sha256
+        or document.get("verifier_pins_sha256") != verifier_pins_sha256
+        or document.get("all_scenarios_passed") is not True
+        or document.get("scenario_count") != OFFICIAL_CONFIRMATORY_TASKS
+        or not isinstance(results, dict)
+        or set(results) != set(scenario_sha256)
+    ):
+        raise ValueError("official control results do not match the execution freeze")
+    image_ids: dict[str, str] = {}
+    for scenario_id, result in results.items():
+        scenario_control_fields = {
+            "changed_test_module_green",
+            "elapsed_seconds",
+            "green_evidence_sha256",
+            "module_evidence_sha256",
+            "official_swebench",
+            "parent_with_test_patch_red",
+            "reconstructed_test_sha256",
+            "red_evidence_sha256",
+            "reference_patch_green",
+            "timeout_compliant",
+            "timeout_seconds",
+        }
+        if not isinstance(result, dict) or set(result) != scenario_control_fields:
+            raise ValueError("official scenario control has an unsupported shape")
+        official = result.get("official_swebench")
+        image_id = official.get("image_id") if isinstance(official, dict) else None
+        elapsed = result.get("elapsed_seconds")
+        timeout = result.get("timeout_seconds")
+        if (
+            result.get("parent_with_test_patch_red") is not True
+            or result.get("reference_patch_green") is not True
+            or result.get("changed_test_module_green") is not True
+            or result.get("timeout_compliant") is not True
+            or result.get("reconstructed_test_sha256") != reconstructed_sha256[scenario_id]
+            or not isinstance(elapsed, int | float)
+            or isinstance(elapsed, bool)
+            or not 0 <= float(elapsed)
+            or not isinstance(timeout, int | float)
+            or isinstance(timeout, bool)
+            or not 0 < float(timeout) <= 3600
+            or float(elapsed) > float(timeout)
+            or not isinstance(official, dict)
+            or set(official) != {"green", "image_id", "pins_sha256", "red"}
+            or official.get("pins_sha256") != verifier_pins_sha256
+            or not isinstance(image_id, str)
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", image_id) is None
+        ):
+            raise ValueError("official scenario control identity is invalid")
+        red_evidence_sha256 = _require_sha256(
+            result.get("red_evidence_sha256"),
+            field="red control evidence SHA-256",
+        )
+        green_evidence_sha256 = _require_sha256(
+            result.get("green_evidence_sha256"),
+            field="green control evidence SHA-256",
+        )
+        module_evidence_sha256 = _require_sha256(
+            result.get("module_evidence_sha256"),
+            field="green module evidence SHA-256",
+        )
+        phases: dict[str, Mapping[str, Any]] = {}
+        for phase, resolved in (("red", False), ("green", True)):
+            evidence = official.get(phase)
+            phase_fields = {
+                "artifact_bytes",
+                "artifact_count",
+                "artifact_manifest_sha256",
+                "container_policy_count",
+                "exact_selector_identity",
+                "fail_to_pass_count",
+                "image_id",
+                "pass_to_pass_count",
+                "phase",
+                "runtime_identity_sha256",
+                "status_counts",
+                "verifier_evidence_sha256",
+            }
+            if (
+                not isinstance(evidence, dict)
+                or set(evidence) != phase_fields
+                or evidence.get("phase") != phase
+                or evidence.get("image_id") != image_id
+                or evidence.get("exact_selector_identity") is not True
+            ):
+                raise ValueError("official red/green control evidence is invalid")
+            for field in (
+                "artifact_manifest_sha256",
+                "runtime_identity_sha256",
+                "verifier_evidence_sha256",
+            ):
+                _require_sha256(
+                    evidence.get(field),
+                    field=f"{phase} control {field}",
+                )
+            for field in ("artifact_bytes", "artifact_count", "container_policy_count"):
+                value = evidence.get(field)
+                if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                    raise ValueError("official red/green count evidence is invalid")
+            for field, minimum in (("fail_to_pass_count", 1), ("pass_to_pass_count", 0)):
+                value = evidence.get(field)
+                if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
+                    raise ValueError("official red/green selector evidence is invalid")
+            verifier_evidence_sha256 = _require_sha256(
+                evidence.get("verifier_evidence_sha256"),
+                field=f"{phase} control evidence SHA-256",
+            )
+            status_counts = evidence.get("status_counts")
+            if (
+                not isinstance(status_counts, dict)
+                or not status_counts
+                or any(
+                    not isinstance(status, str)
+                    or not isinstance(count, int)
+                    or isinstance(count, bool)
+                    or count < 0
+                    for status, count in status_counts.items()
+                )
+                or sum(status_counts.values())
+                != evidence["fail_to_pass_count"] + evidence["pass_to_pass_count"]
+            ):
+                raise ValueError("official red/green status evidence is invalid")
+            observed_resolved = not any(
+                int(status_counts.get(status, 0)) > 0 for status in ("FAILED", "ERROR")
+            )
+            if observed_resolved is not resolved:
+                raise ValueError("official red/green resolution evidence is invalid")
+            if phase == "green" and status_counts != {
+                "PASSED": evidence["fail_to_pass_count"] + evidence["pass_to_pass_count"]
+            }:
+                raise ValueError("official green control did not fully resolve")
+            if (
+                phase == "red"
+                and sum(int(status_counts.get(status, 0)) for status in ("FAILED", "ERROR")) < 1
+            ):
+                raise ValueError("official red control did not preserve a failure")
+            phases[phase] = evidence
+            expected_evidence_sha256 = (
+                red_evidence_sha256 if phase == "red" else green_evidence_sha256
+            )
+            if verifier_evidence_sha256 != expected_evidence_sha256:
+                raise ValueError("official phase evidence linkage is invalid")
+        if phases["green"]["artifact_manifest_sha256"] != module_evidence_sha256:
+            raise ValueError("official green module evidence linkage is invalid")
+        image_ids[scenario_id] = image_id
+    return image_ids
+
+
+def load_execution_frozen_holdout(
+    *,
+    protocol_path: Path,
+    expected_protocol_sha256: str,
+    selection_path: Path,
+    scenario_pack_path: Path,
+    collision_path: Path,
+    reconstructed_path: Path,
+    control_results_path: Path,
+    environment_path: Path,
+    schedule_path: Path,
+) -> ExecutionFrozenHoldout:
+    """Load an exact-byte authenticated private confirmatory holdout."""
+    protocol_path, protocol_bytes, protocol_sha256 = _authenticated_artifact(
+        protocol_path,
+        expected_sha256=expected_protocol_sha256,
+        label="execution-frozen protocol",
+        private=False,
+    )
+    protocol = _strict_json_object(protocol_bytes, label="execution-frozen protocol")
+    protocol_id = protocol.get("protocol_id")
+    execution_inputs = protocol.get("execution_inputs")
+    product_inputs = protocol.get("product_inputs")
+    if (
+        protocol.get("schema_version") != 2
+        or protocol.get("stage") != "execution-frozen"
+        or protocol_id != "production-graph-holdout-v2"
+        or not isinstance(execution_inputs, dict)
+        or not isinstance(product_inputs, dict)
+    ):
+        raise ValueError("holdout protocol is not execution-frozen")
+    product_revision = str(product_inputs.get("revision") or "")
+    if re.fullmatch(r"[0-9a-f]{40}", product_revision) is None:
+        raise ValueError("holdout product revision is invalid")
+    frozen_product_files = {
+        "benchmark_script_sha256": Path(__file__),
+        "catalog_archive_sha256": PRODUCTION_CATALOG_ARCHIVE,
+        "runtime_availability_sha256": PRODUCTION_RUNTIME_AVAILABILITY,
+    }
+    for field, path in frozen_product_files.items():
+        expected = _require_sha256(product_inputs.get(field), field=f"product {field}")
+        try:
+            observed = _sha256_bytes(path.read_bytes())
+        except OSError as exc:
+            raise ValueError(f"frozen product input is unavailable: {field}") from exc
+        if not secrets.compare_digest(observed, expected):
+            raise ValueError(f"frozen product input changed: {field}")
+    codex_binary_sha256 = _require_sha256(
+        product_inputs.get("codex_binary_sha256"),
+        field="product codex_binary_sha256",
+    )
+    provider_config_sha256 = _require_sha256(
+        product_inputs.get("provider_config_sha256"),
+        field="product provider_config_sha256",
+    )
+    expected_input_fields = {
+        "selection_output_sha256",
+        "scenario_pack_sha256",
+        "collision_attestation_sha256",
+        "reconstructed_test_attestation_sha256",
+        "control_results_sha256",
+        "execution_schedule_sha256",
+        "execution_environment_sha256",
+    }
+    if set(execution_inputs) != expected_input_fields:
+        raise ValueError("holdout protocol execution inputs have an unsupported shape")
+    selection_path, selection_bytes, selection_sha256 = _authenticated_artifact(
+        selection_path,
+        expected_sha256=execution_inputs.get("selection_output_sha256"),
+        label="private selection",
+        private=True,
+    )
+    scenario_pack_path, scenario_bytes, scenario_pack_sha256 = _authenticated_artifact(
+        scenario_pack_path,
+        expected_sha256=execution_inputs.get("scenario_pack_sha256"),
+        label="private scenario pack",
+        private=True,
+    )
+    collision_path, collision_bytes, collision_sha256 = _authenticated_artifact(
+        collision_path,
+        expected_sha256=execution_inputs.get("collision_attestation_sha256"),
+        label="private collision attestation",
+        private=True,
+    )
+    reconstructed_path, reconstructed_bytes, reconstructed_sha256 = _authenticated_artifact(
+        reconstructed_path,
+        expected_sha256=execution_inputs.get("reconstructed_test_attestation_sha256"),
+        label="private reconstructed-test attestation",
+        private=True,
+    )
+    control_results_path, control_bytes, control_results_sha256 = _authenticated_artifact(
+        control_results_path,
+        expected_sha256=execution_inputs.get("control_results_sha256"),
+        label="private control results",
+        private=True,
+    )
+    environment_path, environment_bytes, environment_sha256 = _authenticated_artifact(
+        environment_path,
+        expected_sha256=execution_inputs.get("execution_environment_sha256"),
+        label="private execution environment",
+        private=True,
+    )
+    schedule_path, schedule_bytes, schedule_sha256 = _authenticated_artifact(
+        schedule_path,
+        expected_sha256=execution_inputs.get("execution_schedule_sha256"),
+        label="private schedule",
+        private=True,
+    )
+    selection_document = _strict_json_object(selection_bytes, label="private selection")
+    scenario_document = _strict_json_object(scenario_bytes, label="private scenario pack")
+    scenarios, scenario_sha256 = _scenario_rows_and_hashes(scenario_document)
+    selected_ids = selection_document.get("analysis_instance_ids")
+    if not isinstance(selected_ids, list) or selected_ids != [
+        scenario.id for scenario in scenarios
+    ]:
+        raise ValueError("private selection does not match the scenario pack order")
+    collision_document = _strict_json_object(
+        collision_bytes,
+        label="private collision attestation",
+    )
+    if (
+        collision_document.get("collision_free") is not True
+        or collision_document.get("collision_count") != 0
+        or collision_document.get("scenario_ids") != sorted(selected_ids)
+        or collision_document.get("scenarios_sha256") != scenario_pack_sha256
+    ):
+        raise ValueError("private collision attestation does not match the scenario pack")
+    reconstructed_document = _strict_json_object(
+        reconstructed_bytes,
+        label="private reconstructed-test attestation",
+    )
+    reconstructed_hashes = reconstructed_document.get("module_sha256")
+    scenario_test_hashes = {
+        str(row.get("id")): str(row.get("reconstructed_test_sha256"))
+        for row in scenario_document.get("scenarios", [])
+        if isinstance(row, dict)
+    }
+    if (
+        reconstructed_document.get("selection_sha256") != selection_sha256
+        or reconstructed_document.get("guard") != "reconstructed-test-dependency-v1"
+        or reconstructed_hashes != scenario_test_hashes
+    ):
+        raise ValueError("private reconstructed tests do not match the scenario pack")
+    schedule = validate_frozen_schedule(
+        schedule_bytes,
+        expected_sha256=schedule_sha256,
+        protocol_id=protocol_id,
+        scenario_ids=[scenario.id for scenario in scenarios],
+    )
+    control_document = _strict_json_object(control_bytes, label="private control results")
+    raw_verifier = protocol.get("official_swebench_verifier")
+    verifier_pins_sha256 = _sha256_bytes(_canonical_json_bytes(raw_verifier))
+    image_ids = _validated_official_controls(
+        control_document,
+        scenario_pack_sha256=scenario_pack_sha256,
+        selection_sha256=selection_sha256,
+        scenario_sha256=scenario_sha256,
+        reconstructed_sha256=scenario_test_hashes,
+        verifier_pins_sha256=verifier_pins_sha256,
+    )
+    verifier = _validated_official_verifier(raw_verifier)
+    dataset_sha256 = protocol.get("universe", {}).get("selection_jsonl_sha256")
+    verifier["expected_dataset_sha256"] = _require_sha256(
+        dataset_sha256,
+        field="official verifier dataset SHA-256",
+    )
+    timeout = protocol.get("timeouts", {}).get("control_verification_seconds")
+    if (
+        not isinstance(timeout, int | float)
+        or isinstance(timeout, bool)
+        or not 0 < float(timeout) <= 3600
+    ):
+        raise ValueError("official verifier timeout is invalid")
+    verifier["timeout_seconds"] = float(timeout)
+    environment = _strict_json_object(environment_bytes, label="private execution environment")
+    if set(environment) != {
+        "codex",
+        "evaluator",
+        "limits",
+        "model",
+        "product_revision",
+        "protocol_id",
+        "provider",
+        "python",
+        "schema_version",
+    }:
+        raise ValueError("private execution environment has an unsupported shape")
+    evaluator = environment.get("evaluator")
+    limits = environment.get("limits")
+    codex_identity = environment.get("codex")
+    python_identity = environment.get("python")
+    if (
+        environment.get("schema_version") != 1
+        or environment.get("protocol_id") != protocol_id
+        or environment.get("product_revision") != product_revision
+        or not isinstance(environment.get("model"), str)
+        or not str(environment["model"]).strip()
+        or not isinstance(environment.get("provider"), str)
+        or not str(environment["provider"]).strip()
+        or not isinstance(evaluator, dict)
+        or set(evaluator) != {"backend", "pins_sha256"}
+        or evaluator.get("backend") != OFFICIAL_HOLDOUT_BACKEND
+        or evaluator.get("pins_sha256") != verifier_pins_sha256
+        or not isinstance(limits, dict)
+        or set(limits)
+        != {
+            "agent_timeout_seconds",
+            "arms",
+            "measured_concurrency",
+            "pair_count",
+            "retries",
+            "sandbox_contract",
+            "task_count",
+            "trials_per_scenario",
+        }
+        or not isinstance(codex_identity, dict)
+        or set(codex_identity) != {"version"}
+        or not isinstance(codex_identity.get("version"), str)
+        or not isinstance(python_identity, dict)
+        or set(python_identity) != {"executable_sha256", "version"}
+    ):
+        raise ValueError("private execution environment is invalid")
+    _require_sha256(
+        python_identity.get("executable_sha256"),
+        field="execution Python SHA-256",
+    )
+    return ExecutionFrozenHoldout(
+        protocol_id=protocol_id,
+        protocol_sha256=protocol_sha256,
+        product_revision=product_revision,
+        codex_binary_sha256=codex_binary_sha256,
+        provider_config_sha256=provider_config_sha256,
+        protocol_path=protocol_path,
+        selection_path=selection_path,
+        selection_sha256=selection_sha256,
+        scenario_pack_path=scenario_pack_path,
+        scenario_pack_sha256=scenario_pack_sha256,
+        collision_path=collision_path,
+        collision_sha256=collision_sha256,
+        reconstructed_path=reconstructed_path,
+        reconstructed_sha256=reconstructed_sha256,
+        control_results_path=control_results_path,
+        control_results_sha256=control_results_sha256,
+        environment_path=environment_path,
+        environment_sha256=environment_sha256,
+        schedule_path=schedule_path,
+        schedule=schedule,
+        scenarios=tuple(scenarios),
+        scenario_sha256=scenario_sha256,
+        image_ids=image_ids,
+        verifier=verifier,
+        execution_conditions=environment,
+    )
+
+
+def validate_holdout_execution_conditions(
+    holdout: ExecutionFrozenHoldout,
+    *,
+    model: str,
+    timeout: float,
+    arms: tuple[str, ...],
+    trials: int,
+    retries: int,
+    scenario_filters: Sequence[str],
+    codex: str,
+) -> dict[str, str]:
+    environment = holdout.execution_conditions
+    limits = environment.get("limits")
+    frozen_model = environment.get("model")
+    if isinstance(frozen_model, Mapping):
+        model_values = {
+            str(frozen_model[key])
+            for key in ("id", "model", "name")
+            if isinstance(frozen_model.get(key), str) and frozen_model.get(key)
+        }
+    else:
+        model_values = {str(frozen_model)} if isinstance(frozen_model, str) else set()
+    expected_limits = {
+        "agent_timeout_seconds": timeout,
+        "arms": list(arms),
+        "trials_per_scenario": trials,
+        "retries": retries,
+        "task_count": len(holdout.scenarios),
+        "pair_count": len(holdout.schedule.assignments),
+        "measured_concurrency": 1,
+        "sandbox_contract": OFFICIAL_SANDBOX_CONTRACT,
+    }
+    python_identity = environment.get("python")
+    codex_identity = environment.get("codex")
+    try:
+        python_sha256 = _sha256_bytes(Path(sys.executable).read_bytes())
+    except OSError as exc:
+        raise ValueError("execution Python is unavailable") from exc
+    codex_path = Path(codex).resolve() if Path(codex).is_file() else None
+    if codex_path is None:
+        resolved_codex = shutil.which(codex)
+        codex_path = Path(resolved_codex).resolve() if resolved_codex else None
+    if codex_path is None:
+        raise ValueError("execution Codex binary is unavailable")
+    try:
+        codex_sha256 = _sha256_bytes(codex_path.read_bytes())
+    except OSError as exc:
+        raise ValueError("execution Codex binary is unavailable") from exc
+    provider = environment.get("provider")
+    provider_config_sha256 = codex_provider_config_sha256(str(provider))
+    codex_version = _command_version([str(codex_path), "--version"])
+    if (
+        environment.get("schema_version") != 1
+        or environment.get("protocol_id") != holdout.protocol_id
+        or model_values != {model}
+        or not isinstance(limits, Mapping)
+        or any(limits.get(key) != value for key, value in expected_limits.items())
+        or not isinstance(python_identity, Mapping)
+        or python_identity.get("executable_sha256") != python_sha256
+        or python_identity.get("version") != platform.python_version()
+        or provider != "openai"
+        or provider_config_sha256 != holdout.provider_config_sha256
+        or codex_sha256 != holdout.codex_binary_sha256
+        or not isinstance(codex_identity, Mapping)
+        or codex_identity.get("version") != codex_version
+    ):
+        raise ValueError("runtime conditions do not match the execution-frozen protocol")
+    if (
+        arms != ("baseline", "ctx-light")
+        or trials != OFFICIAL_CONFIRMATORY_TRIALS
+        or retries != 0
+        or scenario_filters
+    ):
+        raise ValueError("official confirmatory execution requires all 30 frozen pairs, no retries")
+    return {
+        "codex_binary_sha256": codex_sha256,
+        "codex_version": codex_version,
+        "provider": str(provider),
+        "provider_config_sha256": provider_config_sha256,
+        "python_executable_sha256": python_sha256,
+        "python_version": platform.python_version(),
+    }
+
+
+def holdout_inputs_match_execution_freeze(holdout: ExecutionFrozenHoldout) -> bool:
+    expected = {
+        holdout.protocol_path: holdout.protocol_sha256,
+        holdout.selection_path: holdout.selection_sha256,
+        holdout.scenario_pack_path: holdout.scenario_pack_sha256,
+        holdout.collision_path: holdout.collision_sha256,
+        holdout.reconstructed_path: holdout.reconstructed_sha256,
+        holdout.control_results_path: holdout.control_results_sha256,
+        holdout.environment_path: holdout.environment_sha256,
+        holdout.schedule_path: holdout.schedule.sha256,
+    }
+    for path, digest in expected.items():
+        try:
+            if path.is_symlink() or not path.is_file():
+                return False
+            observed = _sha256_bytes(path.read_bytes())
+        except OSError:
+            return False
+        if not secrets.compare_digest(observed, digest):
+            return False
+    return True
 
 
 def load_scenarios(path: Path) -> list[Scenario]:
-    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    return _load_scenarios_document(yaml.safe_load(path.read_text(encoding="utf-8")))
+
+
+def _load_scenarios_document(raw: object) -> list[Scenario]:
     rows = raw.get("scenarios") if isinstance(raw, dict) else None
     if not isinstance(rows, list) or not rows:
         raise ValueError("scenarios.yaml must contain a non-empty scenarios list")
@@ -2888,7 +3890,10 @@ def codex_command(
     with_ctx: bool,
     agent_home: Path | None = None,
     isolate_evaluator: bool = False,
+    provider: str = "openai",
 ) -> list[str]:
+    if provider != "openai":
+        raise ValueError("production Codex benchmark supports only the frozen OpenAI provider")
     command = [
         codex,
         "-a",
@@ -2897,6 +3902,8 @@ def codex_command(
         "multi_agent",
         "-c",
         'web_search="disabled"',
+        "-c",
+        f"model_provider={json.dumps(provider)}",
     ]
     if with_ctx:
         command.extend(mcp_config(sys.executable))
@@ -3837,6 +4844,308 @@ def verify_workspace(scenario: Scenario, workspace: Path, test_hash: str) -> Com
     return CommandResult(0, stdout, stderr, elapsed)
 
 
+def collect_official_model_patch(
+    scenario: Scenario,
+    workspace: Path,
+) -> tuple[str, list[str], float]:
+    """Collect one allowlisted model patch without materializing hidden evaluator files."""
+    started = time.perf_counter()
+    flags_result, hidden_paths = _hidden_index_flag_paths(workspace)
+    if flags_result.returncode:
+        raise RuntimeError("git index flags could not be authenticated")
+    if hidden_paths:
+        raise RuntimeError("unsupported git index flags are present")
+    status = run_process(
+        _workspace_git_command(
+            workspace,
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            "core.untrackedCache=false",
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=all",
+        ),
+        cwd=workspace,
+        timeout=30,
+    )
+    if status.returncode:
+        raise RuntimeError("git status failed while collecting the model patch")
+    changed_paths = _porcelain_status_paths(status.stdout)
+    if not changed_paths:
+        raise RuntimeError("model produced no patch")
+    disallowed = changed_paths - set(scenario.allowed_changes)
+    if disallowed:
+        raise RuntimeError("model changed paths outside the frozen allowlist")
+    untracked = run_process(
+        _workspace_git_command(workspace, "ls-files", "--others", "-z"),
+        cwd=workspace,
+        timeout=30,
+    )
+    if untracked.returncode:
+        raise RuntimeError("untracked model paths could not be authenticated")
+    untracked_paths = [path for path in untracked.stdout.split("\0") if path]
+    if set(untracked_paths) - set(scenario.allowed_changes):
+        raise RuntimeError("model created paths outside the frozen allowlist")
+    if untracked_paths:
+        intent = run_process(
+            _workspace_git_command(workspace, "add", "-N", "-f", "--", *untracked_paths),
+            cwd=workspace,
+            timeout=30,
+        )
+        if intent.returncode:
+            raise RuntimeError("untracked model paths could not be represented as a patch")
+    check = run_process(
+        _workspace_git_command(workspace, "diff", "--check", scenario.commit),
+        cwd=workspace,
+        timeout=30,
+    )
+    if check.returncode:
+        raise RuntimeError("model patch failed git diff --check")
+    diff = run_process(
+        _workspace_git_command(
+            workspace,
+            "diff",
+            "--binary",
+            "--no-ext-diff",
+            scenario.commit,
+            "--",
+            *scenario.allowed_changes,
+        ),
+        cwd=workspace,
+        timeout=30,
+    )
+    if diff.returncode or not diff.stdout.strip():
+        raise RuntimeError("model patch could not be collected")
+    return diff.stdout, sorted(changed_paths), time.perf_counter() - started
+
+
+def _write_private_json(path: Path, value: Mapping[str, Any]) -> str:
+    encoded = (
+        json.dumps(
+            dict(value),
+            allow_nan=False,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        ).encode("utf-8")
+        + b"\n"
+    )
+    path.parent.mkdir(mode=stat.S_IRWXU, parents=True, exist_ok=True)
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, stat.S_IRUSR | stat.S_IWUSR)
+    with os.fdopen(descriptor, "wb") as handle:
+        handle.write(encoded)
+    return _sha256_bytes(encoded)
+
+
+def _official_failure_class(exc: BaseException) -> str:
+    messages: list[str] = []
+    current: BaseException | None = exc
+    while current is not None:
+        messages.append(str(current))
+        current = current.__cause__
+    joined = " ".join(messages).lower()
+    model_markers = (
+        "fail_to_pass statuses violate",
+        "official report patch or resolution state is invalid",
+        "official resolution does not match",
+        "patch_successfully_applied",
+    )
+    return "model" if any(marker in joined for marker in model_markers) else "evaluator"
+
+
+def official_verifier_contract_sha256(
+    holdout: ExecutionFrozenHoldout,
+    runtime: OfficialVerifierRuntime,
+    scenario: Scenario,
+) -> str:
+    return _sha256_bytes(
+        _canonical_json_bytes(
+            {
+                "allowed_paths": list(scenario.allowed_changes),
+                "backend": OFFICIAL_HOLDOUT_BACKEND,
+                "docker_host_sha256": _sha256_bytes(runtime.docker_host.encode("utf-8")),
+                "image_id": holdout.image_ids[scenario.id],
+                "protocol_sha256": holdout.protocol_sha256,
+                "scenario_sha256": holdout.scenario_sha256[scenario.id],
+                "verifier": dict(holdout.verifier),
+            }
+        )
+    )
+
+
+def verify_official_model_patch(
+    *,
+    holdout: ExecutionFrozenHoldout,
+    runtime: OfficialVerifierRuntime,
+    scenario: Scenario,
+    model_patch: str,
+    run_dir: Path,
+) -> OfficialVerificationResult:
+    """Run the authenticated official evaluator and keep its evidence private."""
+    from scripts.ctx_ab_swebench import (  # noqa: PLC0415
+        SWEbenchVerificationError,
+        verify_swebench,
+    )
+
+    identity = holdout.verifier
+    started = time.perf_counter()
+    try:
+        evidence = verify_swebench(
+            phase="scored",
+            dataset_path=runtime.dataset_path,
+            instance_id=scenario.id,
+            allowed_paths=scenario.allowed_changes,
+            swebench_checkout=runtime.swebench_checkout,
+            swebench_python=runtime.swebench_python,
+            expected_revision=str(identity["expected_revision"]),
+            expected_run_evaluation_sha256=str(identity["expected_run_evaluation_sha256"]),
+            expected_bridge_sha256=str(identity["expected_bridge_sha256"]),
+            expected_dataset_sha256=str(identity["expected_dataset_sha256"]),
+            expected_python_sha256=str(identity["expected_python_sha256"]),
+            expected_python_environment_sha256=str(identity["expected_python_environment_sha256"]),
+            expected_docker_package_sha256=str(identity["expected_docker_package_sha256"]),
+            docker_cli=runtime.docker_cli,
+            expected_docker_cli_sha256=str(identity["expected_docker_cli_sha256"]),
+            docker_host=runtime.docker_host,
+            expected_docker_daemon_id=str(identity["expected_docker_daemon_id"]),
+            expected_docker_server_version=str(identity["expected_docker_server_version"]),
+            work_dir=(run_dir / "official-verification-worker").absolute(),
+            timeout=float(identity["timeout_seconds"]),
+            model_patch=model_patch,
+            namespace="swebench",
+            expected_image_id=holdout.image_ids[scenario.id],
+            allow_image_pull=False,
+        )
+        validation = evidence.get("validation")
+        if (
+            not isinstance(validation, dict)
+            or validation.get("phase") != "scored"
+            or validation.get("resolved") is not True
+            or validation.get("image_id") != holdout.image_ids[scenario.id]
+        ):
+            raise RuntimeError("official scored validation is incomplete")
+        evidence_sha256 = _write_private_json(
+            run_dir / "official-verification-evidence.json",
+            evidence,
+        )
+        return OfficialVerificationResult(
+            passed=True,
+            elapsed=time.perf_counter() - started,
+            evidence_sha256=evidence_sha256,
+            failure_class=None,
+            validation=dict(validation),
+        )
+    except SWEbenchVerificationError as exc:
+        failure_class = _official_failure_class(exc)
+        private_failure = {
+            "error_type": type(exc).__name__,
+            "failure_class": failure_class,
+            "message": str(exc),
+            "evidence": exc.evidence,
+        }
+        evidence_sha256 = _write_private_json(
+            run_dir / "official-verification-failure.json",
+            private_failure,
+        )
+        return OfficialVerificationResult(
+            passed=False,
+            elapsed=time.perf_counter() - started,
+            evidence_sha256=evidence_sha256,
+            failure_class=failure_class,
+            validation={},
+        )
+    except Exception as exc:  # noqa: BLE001 - preserve evaluator boundary failures.
+        private_failure = {
+            "error_type": type(exc).__name__,
+            "failure_class": "evaluator",
+            "message": str(exc),
+        }
+        evidence_sha256 = _write_private_json(
+            run_dir / "official-verification-failure.json",
+            private_failure,
+        )
+        return OfficialVerificationResult(
+            passed=False,
+            elapsed=time.perf_counter() - started,
+            evidence_sha256=evidence_sha256,
+            failure_class="evaluator",
+            validation={},
+        )
+
+
+def actual_entity_type_activity(
+    *,
+    catalog: Mapping[str, Any] | None,
+    selected_items: Sequence[Mapping[str, Any]],
+    lifecycle: Mapping[str, Any] | None,
+) -> dict[str, list[str]]:
+    def types(rows: object) -> list[str]:
+        if not isinstance(rows, (list, tuple)):
+            return []
+        values = {
+            str(row.get("type") or "").strip()
+            for row in rows
+            if isinstance(row, Mapping)
+            and str(row.get("type") or "").strip() in {"skill", "agent", "mcp-server"}
+        }
+        return sorted(values)
+
+    events = lifecycle.get("events") if isinstance(lifecycle, Mapping) else []
+
+    def event_types(action: str) -> list[str]:
+        if not isinstance(events, list):
+            return []
+        return sorted(
+            {
+                str(event.get("entity_type") or "")
+                for event in events
+                if isinstance(event, Mapping)
+                and event.get("action") == action
+                and event.get("entity_type") in {"skill", "agent", "mcp-server"}
+            }
+        )
+
+    deferred = (
+        catalog.get("deferred_activation", {}).get("deferred_candidates", [])
+        if isinstance(catalog, Mapping) and isinstance(catalog.get("deferred_activation"), Mapping)
+        else []
+    )
+    return {
+        "recommended_entity_types": types(catalog.get("candidates", [])) if catalog else [],
+        "selected_entity_types": types(selected_items),
+        "deferred_entity_types": types(deferred),
+        "loaded_entity_types": event_types("load_applied"),
+        "used_entity_types": event_types("used"),
+        "unloaded_entity_types": event_types("unload_applied"),
+    }
+
+
+def trial_timing_totals(
+    *,
+    ctx_setup_seconds: float,
+    catalog_setup_seconds: float,
+    agent_seconds: float,
+    teardown_seconds: float,
+    verification_seconds: float,
+    official_evaluator: bool,
+) -> dict[str, float]:
+    """Separate measured development from workspace setup and hidden evaluation."""
+    development_seconds = (
+        ctx_setup_seconds + catalog_setup_seconds + agent_seconds + teardown_seconds
+    )
+    return {
+        "development_seconds": development_seconds,
+        "measured_phase_seconds": (
+            development_seconds
+            if official_evaluator
+            else development_seconds + verification_seconds
+        ),
+        "total_seconds": development_seconds + verification_seconds,
+    }
+
+
 def validate_evaluator_controls(
     scenario: Scenario,
     *,
@@ -4217,7 +5526,10 @@ def run_production_trial(
             arm=arm,
             attempt=attempt,
             stage="production-ctx-run",
+            failure_class="ctx" if arm == "ctx-light" else "baseline",
             message="production benchmark arm failed",
+            root_cause="; ".join(dict.fromkeys(production_errors)),
+            repro=f"rerun {scenario.id} trial {trial} arm {arm} with the recorded command",
             evidence="; ".join(dict.fromkeys(production_errors)),
         )
     selected_id = lifecycle_evidence.get("selected_id") if lifecycle_evidence else None
@@ -4304,9 +5616,18 @@ def run_trial(
     incidents: IncidentLog,
     catalog_snapshot: CatalogSnapshot | None = None,
     forbidden_agent_reads: Mapping[str, Path] | None = None,
+    official_holdout: ExecutionFrozenHoldout | None = None,
+    official_runtime: OfficialVerifierRuntime | None = None,
+    runtime_identity_before_arm: Mapping[str, str] | None = None,
+    catalog_setup_charge_seconds: float = 0.0,
 ) -> dict[str, Any]:
     trial_started = time.perf_counter()
     production_catalog = catalog_snapshot is not None
+    official_evaluator = official_holdout is not None or official_runtime is not None
+    if (official_holdout is None) != (official_runtime is None):
+        raise ValueError("official holdout and runtime must be supplied together")
+    if official_evaluator and not production_catalog:
+        raise ValueError("official holdout verification requires the production catalog treatment")
     engine_name = PRODUCTION_CATALOG_ENGINE if production_catalog else "codex-controlled"
     ctx_enabled = treatment_level != "baseline"
     full_treatment = treatment_level == "ctx-full"
@@ -4314,6 +5635,12 @@ def run_trial(
         raise ValueError(f"unsupported treatment level: {treatment_level}")
     if production_catalog and full_treatment:
         raise ValueError(f"{PRODUCTION_CATALOG_ENGINE} does not support ctx-full")
+    if catalog_setup_charge_seconds < 0 or (
+        treatment_level == "baseline" and catalog_setup_charge_seconds
+    ):
+        raise ValueError("catalog setup may be charged only to a CTX treatment arm")
+    if official_evaluator and runtime_identity_before_arm is None:
+        raise ValueError("official execution requires a pre-arm runtime identity")
     controlled_context_types = {
         str(item.get("type")) for item in scenario.context if isinstance(item, dict)
     }
@@ -4363,7 +5690,7 @@ def run_trial(
         "unload_seconds": 0.0,
         "session_end_seconds": 0.0,
     }
-    store = make_lifecycle_store(lifecycle_root) if ctx_enabled else None
+    store = None
     session_id = f"ctx-ab-{scenario.id}-{attempt}"
     usage_evidence: dict[str, str] = {}
     session_status = "failed"
@@ -4411,8 +5738,8 @@ def run_trial(
 
     try:
         if ctx_enabled:
-            assert store is not None
             setup_started = time.perf_counter()
+            store = make_lifecycle_store(lifecycle_root)
             if production_catalog:
                 assert catalog_snapshot is not None
                 bind_catalog_snapshot(home, catalog_snapshot)
@@ -4627,6 +5954,11 @@ def run_trial(
             with_ctx=full_treatment,
             agent_home=agent_home if production_catalog else None,
             isolate_evaluator=production_catalog,
+            provider=(
+                str(official_holdout.execution_conditions["provider"])
+                if official_holdout is not None
+                else "openai"
+            ),
         )
         (run_dir / "command.json").write_text(
             json.dumps(
@@ -4664,14 +5996,64 @@ def run_trial(
             head_check.stdout + head_check.stderr,
             encoding="utf-8",
         )
-        if production_catalog:
-            materialize_evaluator_test(
-                scenario,
-                workspace,
-                expected_hash=test_hash,
-                require_pristine=True,
-            )
-        verification = verify_workspace(scenario, workspace, test_hash)
+        official_result: OfficialVerificationResult | None = None
+        official_patch_paths: list[str] = []
+        patch_collection_seconds = 0.0
+        if official_evaluator:
+            assert official_holdout is not None
+            assert official_runtime is not None
+            try:
+                model_patch, official_patch_paths, patch_collection_seconds = (
+                    collect_official_model_patch(scenario, workspace)
+                )
+                model_patch_path = run_dir / "model.patch"
+                model_patch_path.write_text(model_patch, encoding="utf-8")
+                model_patch_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+                official_result = verify_official_model_patch(
+                    holdout=official_holdout,
+                    runtime=official_runtime,
+                    scenario=scenario,
+                    model_patch=model_patch,
+                    run_dir=run_dir,
+                )
+                verification = CommandResult(
+                    0 if official_result.passed else 1,
+                    "",
+                    official_result.failure_class or "",
+                    official_result.elapsed,
+                )
+            except RuntimeError as exc:
+                failure_sha256 = _write_private_json(
+                    run_dir / "official-verification-failure.json",
+                    {
+                        "error_type": type(exc).__name__,
+                        "failure_class": "model",
+                        "message": str(exc),
+                        "stage": "patch_collection",
+                    },
+                )
+                official_result = OfficialVerificationResult(
+                    passed=False,
+                    elapsed=0.0,
+                    evidence_sha256=failure_sha256,
+                    failure_class="model",
+                    validation={},
+                )
+                verification = CommandResult(
+                    1,
+                    "",
+                    str(exc),
+                    0.0,
+                )
+        else:
+            if production_catalog:
+                materialize_evaluator_test(
+                    scenario,
+                    workspace,
+                    expected_hash=test_hash,
+                    require_pristine=True,
+                )
+            verification = verify_workspace(scenario, workspace, test_hash)
         if head_check.returncode:
             verification = CommandResult(
                 1,
@@ -4831,10 +6213,25 @@ def run_trial(
                 arm=arm,
                 attempt=attempt,
                 stage="required-tool",
+                failure_class="ctx",
                 message="required tool attempt failed before recovery",
+                root_cause=failure,
+                repro=f"rerun {scenario.id} trial {trial} arm {arm} with the frozen command",
                 evidence=failure,
                 severity="warning" if policy_valid else "error",
                 status="resolved" if policy_valid else "open",
+                protocol_id=(
+                    official_holdout.protocol_id
+                    if official_holdout is not None
+                    else "legacy-unfrozen"
+                ),
+                protocol_invalidation=(
+                    "not_invalidated"
+                    if official_holdout is not None and policy_valid
+                    else "invalidated"
+                    if official_holdout is not None
+                    else "not_applicable"
+                ),
             )
         passed = not agent.returncode and not verification.returncode and policy_valid
         session_status = "passed" if passed else "failed"
@@ -4874,8 +6271,50 @@ def run_trial(
                 arm=arm,
                 attempt=attempt,
                 stage=PRODUCTION_CATALOG_ENGINE if production_catalog else "live-trial",
+                failure_class=(
+                    official_result.failure_class
+                    if official_result is not None and official_result.failure_class is not None
+                    else "ctx"
+                    if ctx_enabled and not policy_valid
+                    else "ctx"
+                    if arm == "ctx-light"
+                    else "baseline"
+                ),
                 message="benchmark arm failed",
+                root_cause="; ".join(reasons) or "arm did not satisfy the frozen pass contract",
+                repro=f"rerun frozen assignment {scenario.id}:{trial}:{arm} with retries disabled",
+                risk=(
+                    "official quality could be scored incorrectly"
+                    if official_result is not None and official_result.failure_class == "evaluator"
+                    else "the frozen arm did not preserve required task quality"
+                    if official_result is not None and official_result.failure_class == "model"
+                    else "the arm is not eligible for confirmatory evidence"
+                ),
+                fix=(
+                    "repair and reauthenticate the evaluator before any rerun"
+                    if official_result is not None and official_result.failure_class == "evaluator"
+                    else "retain as an observed outcome; do not tune against the holdout"
+                    if official_result is not None and official_result.failure_class == "model"
+                    else "reproduce and apply the smallest owner-specific correction"
+                ),
                 evidence="; ".join(reasons),
+                status=(
+                    "observed"
+                    if official_result is not None and official_result.failure_class == "model"
+                    else "open"
+                ),
+                protocol_id=(
+                    official_holdout.protocol_id
+                    if official_holdout is not None
+                    else "legacy-unfrozen"
+                ),
+                protocol_invalidation=(
+                    "not_invalidated"
+                    if official_result is not None and official_result.failure_class == "model"
+                    else "invalidated"
+                    if official_holdout is not None
+                    else "not_applicable"
+                ),
             )
         if (
             production_catalog
@@ -4941,17 +6380,41 @@ def run_trial(
             evidence_classification["production_efficiency_eligible"]
             and evaluator_isolation_verified
             and model_turn_observed
+            and policy_valid
             and (not ctx_enabled or context_delivery_verified or policy_abstention_verified)
+            and (
+                not official_evaluator
+                or official_result is not None
+                and official_result.failure_class != "evaluator"
+            )
         )
         evidence_level = str(evidence_classification["evidence_level"])
-        if policy_abstention_verified:
+        if official_evaluator and official_result is not None:
+            evidence_level = (
+                "official_swebench_scored"
+                if official_result.passed
+                else "official_swebench_model_quality_failure"
+                if official_result.failure_class == "model"
+                else "official_swebench_evaluator_failure"
+            )
+        elif policy_abstention_verified:
             evidence_level = PRODUCTION_POLICY_ABSTENTION_LEVEL
         elif production_catalog and ctx_enabled and not context_delivery_verified:
             evidence_level = "production_catalog_ctx_noop"
         elif production_catalog and not production_efficiency_eligible:
             evidence_level = "production_catalog_unverified"
-        measured_phase_seconds = (
-            ctx_setup_seconds + agent.elapsed + verification.elapsed + teardown_seconds
+        timing_totals = trial_timing_totals(
+            ctx_setup_seconds=ctx_setup_seconds,
+            catalog_setup_seconds=catalog_setup_charge_seconds,
+            agent_seconds=agent.elapsed,
+            teardown_seconds=teardown_seconds,
+            verification_seconds=verification.elapsed,
+            official_evaluator=official_evaluator,
+        )
+        entity_activity = actual_entity_type_activity(
+            catalog=catalog,
+            selected_items=selected_items,
+            lifecycle=lifecycle,
         )
         return {
             "scenario": scenario.id,
@@ -4971,8 +6434,21 @@ def run_trial(
             "status": "passed" if passed else "failed",
             "verification_passed": not verification.returncode,
             "verification_returncode": verification.returncode,
+            "verification_backend": (
+                OFFICIAL_HOLDOUT_BACKEND if official_evaluator else "local-scenario"
+            ),
+            "verification_failure_class": (
+                official_result.failure_class if official_result is not None else None
+            ),
+            "official_verification_evidence_sha256": (
+                official_result.evidence_sha256 if official_result is not None else None
+            ),
             "agent_returncode": agent.returncode,
             "agent_timed_out": agent.timed_out,
+            "model": model,
+            "scenario_commit": scenario.commit,
+            "agent_timeout_seconds": timeout,
+            "sandbox_contract": (OFFICIAL_SANDBOX_CONTRACT if official_evaluator else None),
             "task_prompt_sha256": prompt_hash,
             "delivered_prompt_sha256": treatment_hash,
             "prompt_bytes": len(base_prompt.encode("utf-8")),
@@ -4994,20 +6470,36 @@ def run_trial(
             "policy_valid": policy_valid,
             "workspace_setup_seconds": round(workspace_setup_seconds, 6),
             "ctx_setup_seconds": round(ctx_setup_seconds, 6),
+            "catalog_setup_charge_seconds": round(catalog_setup_charge_seconds, 6),
             "recommendation_seconds": round(recommendation_seconds, 6),
             "body_fetch_seconds": round(body_fetch_seconds, 6),
             "load_seconds": round(load_seconds, 6),
             "agent_seconds": round(agent.elapsed, 6),
             "verification_seconds": round(verification.elapsed, 6),
+            "patch_collection_seconds": round(patch_collection_seconds, 6),
             "use_seconds": round(lifecycle_timings["use_seconds"], 6),
             "unload_seconds": round(lifecycle_timings["unload_seconds"], 6),
             "teardown_seconds": round(teardown_seconds, 6),
-            "measured_phase_seconds": round(measured_phase_seconds, 6),
-            "total_seconds": round(measured_phase_seconds, 6),
+            "development_seconds": round(timing_totals["development_seconds"], 6),
+            "measured_phase_seconds": round(
+                timing_totals["measured_phase_seconds"],
+                6,
+            ),
+            "total_seconds": round(timing_totals["total_seconds"], 6),
             "harness_total_seconds": round(time.perf_counter() - trial_started, 6),
+            "measurement_scope": (
+                "development=ctx_setup+model+teardown; verification=official_docker; "
+                "total=development+verification; workspace_prep_excluded"
+                if official_evaluator
+                else "legacy_engine_measurement"
+            ),
             "token_attribution": usage.pop("attribution"),
-            "token_scope": "terminal_codex_turn",
-            "team_token_completeness": "unknown" if agent_attempted else "not_applicable",
+            "token_scope": (
+                "terminal_codex_turn; delegated-agent usage required separately"
+                if agent_attempted
+                else "terminal_codex_turn; no delegated agent executed"
+            ),
+            "team_token_completeness": "unknown" if agent_attempted else "complete",
             "skill_use_observed": (
                 None if production_catalog else skill_used if ctx_enabled else None
             ),
@@ -5021,6 +6513,7 @@ def run_trial(
             "review_agent_use_observed": agent_used if ctx_enabled else None,
             "review_agent_attempt_observed": agent_attempted if ctx_enabled else None,
             "required_tool_failures": tool_failures,
+            "patch_paths": official_patch_paths if official_evaluator else None,
             "lifecycle_actions": lifecycle["actions"] if lifecycle else [],
             "lifecycle_sha256": lifecycle["sha256"] if lifecycle else None,
             "lifecycle_session_status": lifecycle["session_status"] if lifecycle else None,
@@ -5029,7 +6522,63 @@ def run_trial(
             "residual_descendants": list(agent.residual_descendants),
             **trace_efficiency,
             **usage,
+            **entity_activity,
             **catalog_result_fields(),
+            "holdout_protocol_sha256": (
+                official_holdout.protocol_sha256 if official_holdout is not None else None
+            ),
+            "holdout_scenario_pack_sha256": (
+                official_holdout.scenario_pack_sha256 if official_holdout is not None else None
+            ),
+            "holdout_selection_sha256": (
+                official_holdout.selection_sha256 if official_holdout is not None else None
+            ),
+            "holdout_collision_sha256": (
+                official_holdout.collision_sha256 if official_holdout is not None else None
+            ),
+            "holdout_reconstructed_sha256": (
+                official_holdout.reconstructed_sha256 if official_holdout is not None else None
+            ),
+            "holdout_control_results_sha256": (
+                official_holdout.control_results_sha256 if official_holdout is not None else None
+            ),
+            "holdout_environment_sha256": (
+                official_holdout.environment_sha256 if official_holdout is not None else None
+            ),
+            "frozen_codex_binary_sha256": (
+                official_holdout.codex_binary_sha256 if official_holdout is not None else None
+            ),
+            "frozen_provider_config_sha256": (
+                official_holdout.provider_config_sha256 if official_holdout is not None else None
+            ),
+            "frozen_provider": (
+                official_holdout.execution_conditions["provider"]
+                if official_holdout is not None
+                else None
+            ),
+            "runtime_identity_before_arm": (
+                dict(runtime_identity_before_arm)
+                if runtime_identity_before_arm is not None
+                else None
+            ),
+            "runtime_identity_verified_before_arm": runtime_identity_before_arm is not None,
+            "frozen_schedule_sha256": (
+                official_holdout.schedule.sha256 if official_holdout is not None else None
+            ),
+            "frozen_scenario_sha256": (
+                official_holdout.scenario_sha256[scenario.id]
+                if official_holdout is not None
+                else None
+            ),
+            "evaluator_contract_sha256": (
+                official_verifier_contract_sha256(
+                    official_holdout,
+                    official_runtime,
+                    scenario,
+                )
+                if official_holdout is not None and official_runtime is not None
+                else None
+            ),
             "artifact_dir": str(run_dir),
             "lifecycle_events": str(lifecycle_root / "events.jsonl") if ctx_enabled else None,
         }
@@ -5114,7 +6663,12 @@ def build_performance_report(
     trials: int,
     arms: tuple[str, ...],
     expected_repositories: Mapping[str, str] | None = None,
+    frozen_schedule: FrozenSchedule | None = None,
 ) -> dict[str, Any]:
+    official_requested = bool(results) and any(
+        row.get("verification_backend") == OFFICIAL_HOLDOUT_BACKEND for row in results
+    )
+
     def verified_policy_abstention(row: Mapping[str, Any]) -> bool:
         task_hash = row.get("task_prompt_sha256")
         body_fetch_seconds = row.get("body_fetch_seconds")
@@ -5144,7 +6698,11 @@ def build_performance_report(
         )
 
     def eligible(row: dict[str, Any]) -> bool:
-        measured = row.get("measured_phase_seconds")
+        measured = (
+            row.get("development_seconds")
+            if row.get("verification_backend") == OFFICIAL_HOLDOUT_BACKEND
+            else row.get("measured_phase_seconds")
+        )
         if (
             row.get("production_efficiency_eligible") is not True
             or not isinstance(measured, int | float)
@@ -5159,6 +6717,12 @@ def build_performance_report(
         if (
             row.get("repository_state_matches_start_at_end") is not True
             or row.get("environment_manifest_matches_start_at_end") is not True
+        ):
+            return False
+        if row.get("verification_backend") == OFFICIAL_HOLDOUT_BACKEND and (
+            row.get("holdout_inputs_match_start_at_end") is not True
+            or row.get("runtime_identity_matches_start_at_end") is not True
+            or row.get("runtime_identity_verified_before_arm") is not True
         ):
             return False
         if row.get("evaluator_isolation_verified") is not True:
@@ -5230,6 +6794,74 @@ def build_performance_report(
             total += value
         return total
 
+    def exact_usage_valid(row: Mapping[str, Any]) -> bool:
+        if row.get("token_attribution") != "exact":
+            return False
+        values = {
+            field: row.get(field)
+            for field in (
+                "input_tokens",
+                "cached_input_tokens",
+                "uncached_input_tokens",
+                "output_tokens",
+                "total_tokens",
+            )
+        }
+        if not all(
+            isinstance(value, int) and not isinstance(value, bool) and value >= 0
+            for value in values.values()
+        ):
+            return False
+        input_tokens = values["input_tokens"]
+        cached_input_tokens = values["cached_input_tokens"]
+        uncached_input_tokens = values["uncached_input_tokens"]
+        output_tokens = values["output_tokens"]
+        total_tokens = values["total_tokens"]
+        assert isinstance(input_tokens, int)
+        assert isinstance(cached_input_tokens, int)
+        assert isinstance(uncached_input_tokens, int)
+        assert isinstance(output_tokens, int)
+        assert isinstance(total_tokens, int)
+        return bool(
+            cached_input_tokens <= input_tokens
+            and uncached_input_tokens == input_tokens - cached_input_tokens
+            and total_tokens == input_tokens + output_tokens
+        )
+
+    def official_pair_contract_equal(
+        baseline_row: Mapping[str, Any],
+        ctx_row: Mapping[str, Any],
+    ) -> bool:
+        fields = (
+            "repo_url",
+            "task_prompt_sha256",
+            "model",
+            "scenario_commit",
+            "agent_timeout_seconds",
+            "sandbox_contract",
+            "evaluator_contract_sha256",
+            "frozen_scenario_sha256",
+            "frozen_schedule_sha256",
+            "holdout_protocol_sha256",
+            "holdout_scenario_pack_sha256",
+            "holdout_selection_sha256",
+            "holdout_collision_sha256",
+            "holdout_reconstructed_sha256",
+            "holdout_control_results_sha256",
+            "holdout_environment_sha256",
+            "frozen_codex_binary_sha256",
+            "frozen_provider_config_sha256",
+            "frozen_provider",
+            "runtime_identity_before_arm",
+            "runtime_identity_matches_start_at_end",
+            "runtime_identity_verified_before_arm",
+            "holdout_inputs_match_start_at_end",
+        )
+        return all(
+            baseline_row.get(field) is not None and baseline_row.get(field) == ctx_row.get(field)
+            for field in fields
+        )
+
     pairs: list[dict[str, Any]] = []
     for scenario_id in scenario_ids:
         for trial in range(1, trials + 1):
@@ -5241,6 +6873,12 @@ def build_performance_report(
                 baseline_assigned and baseline_assigned[-1].get("status") == "passed"
             )
             light_passed = bool(light_assigned and light_assigned[-1].get("status") == "passed")
+            official_pair = bool(
+                baseline_assigned
+                and light_assigned
+                and baseline_assigned[-1].get("verification_backend") == OFFICIAL_HOLDOUT_BACKEND
+                and light_assigned[-1].get("verification_backend") == OFFICIAL_HOLDOUT_BACKEND
+            )
             pair: dict[str, Any] = {
                 "scenario": scenario_id,
                 "trial": trial,
@@ -5252,7 +6890,9 @@ def build_performance_report(
                 ),
                 "baseline_passed": baseline_passed,
                 "ctx_light_passed": light_passed,
-                "paired_quality_preserved": not baseline_passed or light_passed,
+                "paired_quality_preserved": baseline_passed and light_passed,
+                "execution_complete": False,
+                "fairness_contract_verified": False,
             }
             if not baseline_assigned or not light_assigned:
                 pair.update({"complete": False, "reason": "paired arms missing"})
@@ -5270,10 +6910,8 @@ def build_performance_report(
             light_tokens = exact_tokens(light, "total_tokens")
             baseline_uncached = exact_tokens(baseline, "uncached_input_tokens")
             light_uncached = exact_tokens(light, "uncached_input_tokens")
-            complete = (
-                baseline_passed
-                and light_passed
-                and baseline_seconds is not None
+            numeric_evidence_complete = (
+                baseline_seconds is not None
                 and light_seconds is not None
                 and baseline_seconds > 0
                 and light_seconds > 0
@@ -5289,11 +6927,46 @@ def build_performance_report(
                     row.get("team_token_completeness") != "unknown" for row in [*baseline, *light]
                 )
             )
+            fairness_verified = bool(
+                not official_pair
+                or len(baseline_assigned) == len(light_assigned) == 1
+                and official_pair_contract_equal(
+                    baseline_assigned[-1],
+                    light_assigned[-1],
+                )
+            )
+            exact_usage_complete = bool(
+                not official_pair
+                or exact_usage_valid(baseline_assigned[-1])
+                and exact_usage_valid(light_assigned[-1])
+            )
+            official_outcomes_valid = bool(
+                not official_pair
+                or all(
+                    row.get("verification_failure_class") in {None, "model"}
+                    and row.get("status") in {"passed", "failed"}
+                    and isinstance(row.get("verification_passed"), bool)
+                    for row in (baseline_assigned[-1], light_assigned[-1])
+                )
+            )
+            execution_complete = bool(
+                numeric_evidence_complete
+                and fairness_verified
+                and exact_usage_complete
+                and official_outcomes_valid
+            )
+            complete = execution_complete and baseline_passed and light_passed
+            pair["execution_complete"] = execution_complete
+            pair["fairness_contract_verified"] = fairness_verified
             if not complete:
                 pair.update(
                     {
                         "complete": False,
-                        "reason": "status time or token evidence missing",
+                        "reason": (
+                            "quality not preserved"
+                            if execution_complete and not (baseline_passed and light_passed)
+                            else "status time token or fairness evidence missing"
+                        ),
                     }
                 )
                 pairs.append(pair)
@@ -5322,17 +6995,45 @@ def build_performance_report(
             )
             pairs.append(pair)
     complete_pairs = [pair for pair in pairs if pair.get("complete")]
+    execution_complete_pairs = [pair for pair in pairs if pair.get("execution_complete")]
     expected_pairs = len(scenario_ids) * trials
     assignment_complete = (
         set(assigned) == expected_result_keys
+        and (not official_requested or len(results) == len(expected_result_keys))
         and len(pairs) == expected_pairs
         and all(
             pair["baseline_status"] != "missing" and pair["ctx_light_status"] != "missing"
             for pair in pairs
         )
     )
-    evidence_required = (
-        trials >= 6 and {"baseline", "ctx-light"}.issubset(set(arms)) and efficiency_claim_allowed
+    frozen_schedule_valid = bool(
+        frozen_schedule is not None
+        and frozen_schedule.protocol_id
+        and len(frozen_schedule.assignments) == OFFICIAL_CONFIRMATORY_PAIRS
+        and {str(row["scenario"]) for row in frozen_schedule.assignments} == set(scenario_ids)
+        and all(row.get("frozen_schedule_sha256") == frozen_schedule.sha256 for row in results)
+    )
+    confirmatory_design_valid = bool(
+        official_requested
+        and len(scenario_ids) == OFFICIAL_CONFIRMATORY_TASKS
+        and trials == OFFICIAL_CONFIRMATORY_TRIALS
+        and arms == ("baseline", "ctx-light")
+        and expected_pairs == OFFICIAL_CONFIRMATORY_PAIRS
+        and frozen_schedule_valid
+    )
+    experiment_valid = bool(
+        confirmatory_design_valid
+        and efficiency_claim_allowed
+        and assignment_complete
+        and len(execution_complete_pairs) == expected_pairs
+    )
+    evidence_required = bool(
+        (
+            trials >= PRODUCT_CLAIM_MIN_TRIALS
+            and {"baseline", "ctx-light"}.issubset(set(arms))
+            and efficiency_claim_allowed
+        )
+        or confirmatory_design_valid
     )
     evidence_complete = (
         efficiency_claim_allowed and assignment_complete and len(complete_pairs) == expected_pairs
@@ -5511,11 +7212,20 @@ def build_performance_report(
         if repository_effects
         else None
     )
+    minimum_scenarios = (
+        OFFICIAL_CONFIRMATORY_TASKS if official_requested else PRODUCT_CLAIM_MIN_SCENARIOS
+    )
+    minimum_repositories = (
+        OFFICIAL_CONFIRMATORY_TASKS if official_requested else PRODUCT_CLAIM_MIN_REPOSITORIES
+    )
+    minimum_trials = (
+        OFFICIAL_CONFIRMATORY_TRIALS if official_requested else PRODUCT_CLAIM_MIN_TRIALS
+    )
     clustered_evidence_complete = bool(
         evidence_complete
-        and distinct_scenario_count >= PRODUCT_CLAIM_MIN_SCENARIOS
-        and len(repositories) >= PRODUCT_CLAIM_MIN_REPOSITORIES
-        and trials >= PRODUCT_CLAIM_MIN_TRIALS
+        and distinct_scenario_count >= minimum_scenarios
+        and len(repositories) >= minimum_repositories
+        and trials >= minimum_trials
         and repository_identity_verified
         and len(complete_scenario_effects) == distinct_scenario_count
         and len(repository_effects) == len(repositories)
@@ -5542,16 +7252,23 @@ def build_performance_report(
     benefit_evidence_required = bool(
         production_catalog_scored
         and {"baseline", "ctx-light"}.issubset(set(arms))
-        and expected_pairs >= 6
+        and expected_pairs
+        >= (OFFICIAL_CONFIRMATORY_PAIRS if official_requested else PRODUCT_CLAIM_MIN_TRIALS)
     )
     benefit_evidence_complete = bool(
         benefit_evidence_required
         and assignment_complete
         and efficiency_claim_allowed
         and delivered_context_count > 0
+        and (not official_requested or experiment_valid)
+    )
+    negative_quality_result = bool(
+        official_requested and experiment_valid and not quality_preserved
     )
     beneficial = (
-        bool(
+        False
+        if negative_quality_result
+        else bool(
             quality_preserved
             and evidence_complete
             and median_time_ratio is not None
@@ -5581,9 +7298,13 @@ def build_performance_report(
         if production_catalog_scored
         else "not_applicable"
     )
-    product_claim_eligible = bool(clustered_evidence_complete and benefit_evidence_complete)
+    product_claim_eligible = bool(
+        negative_quality_result or clustered_evidence_complete and benefit_evidence_complete
+    )
     product_beneficial = (
-        bool(
+        False
+        if negative_quality_result
+        else bool(
             repository_quality_preserved
             and all_repositories_non_regressing
             and repository_support_p_value is not None
@@ -5610,7 +7331,9 @@ def build_performance_report(
         }
     return {
         "status": (
-            "functional_only"
+            "complete"
+            if experiment_valid
+            else "functional_only"
             if not efficiency_claim_allowed
             else "passed"
             if gate_passed is True
@@ -5619,6 +7342,13 @@ def build_performance_report(
             else "diagnostic"
         ),
         "production_efficiency_claim_allowed": efficiency_claim_allowed,
+        "official_confirmatory_requested": official_requested,
+        "confirmatory_design_valid": confirmatory_design_valid,
+        "frozen_schedule_authenticated": frozen_schedule_valid,
+        "expected_pair_count": expected_pairs,
+        "execution_complete_pair_count": len(execution_complete_pairs),
+        "quality_complete_pair_count": len(complete_pairs),
+        "experiment_valid": experiment_valid,
         "excluded_result_count": len(excluded_results),
         "excluded_evidence_levels": sorted(
             {str(row.get("evidence_level") or "unspecified") for row in excluded_results}
@@ -5674,9 +7404,9 @@ def build_performance_report(
             "independent_unit": "repository",
             "repeated_trials_count_as_independent_units": False,
             "complete": clustered_evidence_complete,
-            "minimum_scenarios": PRODUCT_CLAIM_MIN_SCENARIOS,
-            "minimum_independent_repositories": PRODUCT_CLAIM_MIN_REPOSITORIES,
-            "minimum_trials_per_scenario": PRODUCT_CLAIM_MIN_TRIALS,
+            "minimum_scenarios": minimum_scenarios,
+            "minimum_independent_repositories": minimum_repositories,
+            "minimum_trials_per_scenario": minimum_trials,
             "independent_repository_count": len(repository_effects),
             "benefit_support_count": repository_support_count,
             "benefit_support_p_value": repository_support_p_value,
@@ -5692,9 +7422,11 @@ def build_performance_report(
             "median_reported_token_ratio_max": PRODUCT_OTHER_RATIO_MAX,
         },
         "benefit_thresholds": {
-            "minimum_complete_pairs": PRODUCT_CLAIM_MIN_TRIALS,
-            "minimum_scenarios": PRODUCT_CLAIM_MIN_SCENARIOS,
-            "minimum_independent_repositories": PRODUCT_CLAIM_MIN_REPOSITORIES,
+            "minimum_complete_pairs": (
+                OFFICIAL_CONFIRMATORY_PAIRS if official_requested else PRODUCT_CLAIM_MIN_TRIALS
+            ),
+            "minimum_scenarios": minimum_scenarios,
+            "minimum_independent_repositories": minimum_repositories,
             "improvement_ratio_max": PRODUCT_BENEFIT_RATIO_MAX,
             "other_ratio_max": PRODUCT_OTHER_RATIO_MAX,
             "primary_token_metric": "uncached_input_tokens",
@@ -5720,6 +7452,7 @@ def write_performance_report(
     trials: int,
     arms: tuple[str, ...],
     expected_repositories: Mapping[str, str],
+    frozen_schedule: FrozenSchedule | None = None,
 ) -> dict[str, Any]:
     report = build_performance_report(
         results,
@@ -5727,9 +7460,128 @@ def write_performance_report(
         trials=trials,
         arms=arms,
         expected_repositories=expected_repositories,
+        frozen_schedule=frozen_schedule,
     )
     (output / "performance.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     return report
+
+
+def build_public_holdout_summary(
+    results: Sequence[Mapping[str, Any]],
+    performance: Mapping[str, Any],
+    holdout: ExecutionFrozenHoldout,
+) -> dict[str, Any]:
+    """Build an aggregate summary with no task, repository, identifier, patch, or path data."""
+
+    def numeric_values(arm: str, field: str) -> list[float]:
+        return [
+            float(row[field])
+            for row in results
+            if row.get("arm") == arm
+            and isinstance(row.get(field), int | float)
+            and not isinstance(row.get(field), bool)
+        ]
+
+    arm_summary: dict[str, Any] = {}
+    for arm in ("baseline", "ctx-light"):
+        rows = [row for row in results if row.get("arm") == arm]
+        development = numeric_values(arm, "development_seconds")
+        verification = numeric_values(arm, "verification_seconds")
+        uncached = numeric_values(arm, "uncached_input_tokens")
+        arm_summary[arm] = {
+            "assigned": len(rows),
+            "quality_passed": sum(row.get("status") == "passed" for row in rows),
+            "median_development_seconds": (round(median(development), 6) if development else None),
+            "median_verification_seconds": (
+                round(median(verification), 6) if verification else None
+            ),
+            "median_uncached_input_tokens": (round(median(uncached), 6) if uncached else None),
+        }
+    activity_fields = (
+        "recommended_entity_types",
+        "selected_entity_types",
+        "deferred_entity_types",
+        "loaded_entity_types",
+        "used_entity_types",
+        "unloaded_entity_types",
+    )
+
+    def _entity_type_values(value: object) -> list[str]:
+        return [str(item) for item in value] if isinstance(value, list) else []
+
+    activity = {
+        field: sorted(
+            {
+                entity_type
+                for row in results
+                for entity_type in _entity_type_values(row.get(field))
+                if entity_type in {"skill", "agent", "mcp-server"}
+            }
+        )
+        for field in activity_fields
+    }
+    return {
+        "schema_version": 1,
+        "protocol_id": holdout.protocol_id,
+        "protocol_sha256": holdout.protocol_sha256,
+        "schedule_sha256": holdout.schedule.sha256,
+        "verification_backend": OFFICIAL_HOLDOUT_BACKEND,
+        "assigned_arm_count": len(results),
+        "expected_pair_count": OFFICIAL_CONFIRMATORY_PAIRS,
+        "execution_complete_pair_count": performance.get("execution_complete_pair_count"),
+        "quality_complete_pair_count": performance.get("quality_complete_pair_count"),
+        "experiment_valid": performance.get("experiment_valid"),
+        "quality_preserved": performance.get("quality_preserved"),
+        "benefit_verdict": performance.get("benefit_verdict"),
+        "product_benefit_verdict": performance.get("product_benefit_verdict"),
+        "median_development_time_ratio": performance.get("median_time_ratio"),
+        "median_uncached_token_ratio": performance.get("median_uncached_token_ratio"),
+        "arms": arm_summary,
+        "entity_type_activity": activity,
+        "privacy": {
+            "contains_scenario_identifiers": False,
+            "contains_repository_identifiers": False,
+            "contains_tasks": False,
+            "contains_hidden_tests": False,
+            "contains_reference_or_model_patches": False,
+            "contains_private_paths": False,
+        },
+    }
+
+
+def write_public_holdout_summary(
+    output: Path,
+    results: Sequence[Mapping[str, Any]],
+    performance: Mapping[str, Any],
+    holdout: ExecutionFrozenHoldout,
+) -> Path:
+    path = output / "public-summary.json"
+    path.write_text(
+        json.dumps(
+            build_public_holdout_summary(results, performance, holdout),
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def confirmatory_run_succeeded(
+    *,
+    final_keys: set[tuple[str, str, int]],
+    expected_keys: set[tuple[str, str, int]],
+    performance: Mapping[str, Any],
+    unresolved_incidents: int,
+) -> bool:
+    """Accept an honest valid positive or negative confirmatory result."""
+    return bool(
+        final_keys == expected_keys
+        and performance.get("experiment_valid") is True
+        and performance.get("product_benefit_verdict") in {"beneficial", "not_beneficial"}
+        and unresolved_incidents == 0
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -5755,6 +7607,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--provider-timeout", type=float, default=120.0)
     parser.add_argument("--cache-root", type=Path, default=Path.home() / ".cache/ctx-ab")
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--holdout-protocol", type=Path)
+    parser.add_argument("--holdout-protocol-sha256")
+    parser.add_argument("--holdout-selection", type=Path)
+    parser.add_argument("--holdout-scenario-pack", type=Path)
+    parser.add_argument("--holdout-collision", type=Path)
+    parser.add_argument("--holdout-reconstructed", type=Path)
+    parser.add_argument("--holdout-controls", type=Path)
+    parser.add_argument("--holdout-environment", type=Path)
+    parser.add_argument("--holdout-schedule", type=Path)
+    parser.add_argument("--swebench-dataset", type=Path)
+    parser.add_argument("--swebench-checkout", type=Path)
+    parser.add_argument("--swebench-python", type=Path)
+    parser.add_argument("--docker-cli", type=Path)
+    parser.add_argument("--docker-host")
     parser.add_argument("--trials", type=int, default=1)
     parser.add_argument("--retries", type=int, default=1)
     parser.add_argument("--timeout", type=float, default=900)
@@ -5839,6 +7705,67 @@ def _validate_production_scenarios_path(path: Path, *, live: bool) -> Path:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     independence_attestation: dict[str, str] | None = None
+    official_holdout: ExecutionFrozenHoldout | None = None
+    official_runtime: OfficialVerifierRuntime | None = None
+    official_runtime_identity_start: dict[str, str] | None = None
+    holdout_values = (
+        args.holdout_protocol,
+        args.holdout_protocol_sha256,
+        args.holdout_selection,
+        args.holdout_scenario_pack,
+        args.holdout_collision,
+        args.holdout_reconstructed,
+        args.holdout_controls,
+        args.holdout_environment,
+        args.holdout_schedule,
+        args.swebench_dataset,
+        args.swebench_checkout,
+        args.swebench_python,
+        args.docker_cli,
+        args.docker_host,
+    )
+    holdout_requested = any(value is not None for value in holdout_values)
+    if holdout_requested and not all(value is not None for value in holdout_values):
+        raise SystemExit("official holdout execution requires every holdout and verifier argument")
+    if holdout_requested:
+        if args.engine != PRODUCTION_CATALOG_ENGINE:
+            raise SystemExit("official holdout execution requires codex-production-catalog")
+        if args.list or args.dry_run:
+            raise SystemExit("official holdout tasks cannot be listed or run as wiring-only")
+        try:
+            assert args.holdout_protocol is not None
+            assert args.holdout_protocol_sha256 is not None
+            assert args.holdout_selection is not None
+            assert args.holdout_scenario_pack is not None
+            assert args.holdout_collision is not None
+            assert args.holdout_reconstructed is not None
+            assert args.holdout_controls is not None
+            assert args.holdout_environment is not None
+            assert args.holdout_schedule is not None
+            official_holdout = load_execution_frozen_holdout(
+                protocol_path=args.holdout_protocol,
+                expected_protocol_sha256=args.holdout_protocol_sha256,
+                selection_path=args.holdout_selection,
+                scenario_pack_path=args.holdout_scenario_pack,
+                collision_path=args.holdout_collision,
+                reconstructed_path=args.holdout_reconstructed,
+                control_results_path=args.holdout_controls,
+                environment_path=args.holdout_environment,
+                schedule_path=args.holdout_schedule,
+            )
+            args.scenarios = official_holdout.scenario_pack_path
+            scenarios = list(official_holdout.scenarios)
+            official_runtime = OfficialVerifierRuntime(
+                dataset_path=args.swebench_dataset,
+                swebench_checkout=args.swebench_checkout,
+                swebench_python=args.swebench_python,
+                docker_cli=args.docker_cli,
+                docker_host=args.docker_host,
+            )
+        except (AssertionError, ValueError, OSError) as exc:
+            raise SystemExit(f"official holdout authentication failed: {exc}") from exc
+    else:
+        scenarios = []
     if args.engine == PRODUCTION_CATALOG_ENGINE:
         try:
             args.scenarios = _validate_production_scenarios_path(
@@ -5847,13 +7774,29 @@ def main(argv: list[str] | None = None) -> int:
             )
         except ValueError as exc:
             raise SystemExit(str(exc)) from exc
-    scenarios = load_scenarios(args.scenarios)
-    if args.scenario:
+    if not holdout_requested:
+        scenarios = load_scenarios(args.scenarios)
+    if args.scenario and not holdout_requested:
         requested = set(args.scenario)
         scenarios = [scenario for scenario in scenarios if scenario.id in requested]
         missing = requested - {scenario.id for scenario in scenarios}
         if missing:
             raise SystemExit(f"unknown scenarios: {', '.join(sorted(missing))}")
+    arms = arms_for_mode(args.arm)
+    if official_holdout is not None:
+        try:
+            official_runtime_identity_start = validate_holdout_execution_conditions(
+                official_holdout,
+                model=args.model,
+                timeout=args.timeout,
+                arms=arms,
+                trials=args.trials,
+                retries=args.retries,
+                scenario_filters=args.scenario,
+                codex=args.codex,
+            )
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
     if args.list:
         for scenario in scenarios:
             print(f"{scenario.id}\t{scenario.commit}\t{scenario.repo_url}")
@@ -5878,6 +7821,12 @@ def main(argv: list[str] | None = None) -> int:
     if sys.platform != "darwin":
         raise SystemExit("benchmark execution currently requires macOS sandbox-exec")
     repository_state = collect_repository_state()
+    if official_holdout is not None and (
+        repository_state.get("head") != official_holdout.product_revision
+        or official_holdout.execution_conditions.get("product_revision")
+        != official_holdout.product_revision
+    ):
+        raise SystemExit("current product revision does not match the execution freeze")
     try:
         require_clean_production_repository(
             repository_state,
@@ -5908,7 +7857,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.engine == PRODUCTION_CATALOG_ENGINE:
         output.chmod(stat.S_IRWXU)
     incidents = IncidentLog(output / "incidents.csv")
-    arms = arms_for_mode(args.arm)
     if args.engine in {"production-ctx-run", PRODUCTION_CATALOG_ENGINE} and "ctx-full" in arms:
         raise SystemExit(f"{args.engine} supports only baseline, ctx-light, or both")
     if args.engine == PRODUCTION_CATALOG_ENGINE and args.retries:
@@ -5940,13 +7888,33 @@ def main(argv: list[str] | None = None) -> int:
                 arm="control",
                 attempt=1,
                 stage="production-catalog-cache",
+                failure_class="harness",
                 message=type(exc).__name__,
+                root_cause=str(exc),
+                repro="rerun production catalog preparation against the frozen catalog inputs",
                 evidence=str(exc),
+                protocol_id=(
+                    official_holdout.protocol_id
+                    if official_holdout is not None
+                    else "legacy-unfrozen"
+                ),
             )
             write_summary(output, [])
             print(output)
             return 1
-    schedule = trial_schedule(scenarios, arms, args.trials)
+    schedule = (
+        [dict(assignment) for assignment in official_holdout.schedule.assignments]
+        if official_holdout is not None
+        else trial_schedule(scenarios, arms, args.trials)
+    )
+    ctx_assignment_count = sum(
+        arm != "baseline" for assignment in schedule for arm in assignment["arms"]
+    )
+    catalog_setup_charge_seconds = (
+        catalog_snapshot.prepare_seconds / ctx_assignment_count
+        if catalog_snapshot is not None and ctx_assignment_count
+        else 0.0
+    )
     environment_manifest = write_environment_manifest(
         output=output,
         scenarios_path=args.scenarios,
@@ -5978,19 +7946,49 @@ def main(argv: list[str] | None = None) -> int:
             "catalog_prepare_seconds": (
                 round(catalog_snapshot.prepare_seconds, 6) if catalog_snapshot is not None else None
             ),
+            "catalog_setup_charge_seconds_per_ctx_arm": round(
+                catalog_setup_charge_seconds,
+                6,
+            ),
             "repair_policy": (
                 "fail_closed_no_retries"
                 if args.engine == PRODUCTION_CATALOG_ENGINE
                 else "engine_default"
+            ),
+            "verification_backend": (
+                OFFICIAL_HOLDOUT_BACKEND if official_holdout is not None else "local-scenario"
+            ),
+            "holdout_protocol_sha256": (
+                official_holdout.protocol_sha256 if official_holdout is not None else None
+            ),
+            "holdout_scenario_pack_sha256": (
+                official_holdout.scenario_pack_sha256 if official_holdout is not None else None
+            ),
+            "holdout_selection_sha256": (
+                official_holdout.selection_sha256 if official_holdout is not None else None
+            ),
+            "holdout_collision_sha256": (
+                official_holdout.collision_sha256 if official_holdout is not None else None
+            ),
+            "holdout_reconstructed_sha256": (
+                official_holdout.reconstructed_sha256 if official_holdout is not None else None
+            ),
+            "holdout_control_results_sha256": (
+                official_holdout.control_results_sha256 if official_holdout is not None else None
+            ),
+            "holdout_environment_sha256": (
+                official_holdout.environment_sha256 if official_holdout is not None else None
+            ),
+            "frozen_schedule_sha256": (
+                official_holdout.schedule.sha256 if official_holdout is not None else None
             ),
         },
         schedule=schedule,
         repository_state=repository_state,
     )
     results: list[dict[str, Any]] = []
-    schedule_by_key = {
-        (str(row["scenario"]), int(row["trial"])): tuple(row["arms"]) for row in schedule
-    }
+    scenarios_by_id = {scenario.id: scenario for scenario in scenarios}
+    scenario_caches: dict[str, Path] = {}
     for scenario in scenarios:
         cache: Path | None = None
         failed_cache_attempts: set[int] = set()
@@ -6012,30 +8010,64 @@ def main(argv: list[str] | None = None) -> int:
                     arm="control",
                     attempt=cache_attempt + 1,
                     stage="repo-cache",
+                    failure_class="harness",
                     message=type(exc).__name__,
+                    root_cause=str(exc),
+                    repro=f"materialize frozen repository {scenario.id} at {scenario.commit}",
                     evidence=str(exc),
+                    protocol_id=(
+                        official_holdout.protocol_id
+                        if official_holdout is not None
+                        else "legacy-unfrozen"
+                    ),
                 )
         if cache is None:
             continue
-        try:
-            validate_evaluator_controls(scenario, cache=cache, output=output)
-        except Exception as exc:  # noqa: BLE001 - persist control failures.
-            incidents.add(
-                scenario=scenario.id,
-                arm="control",
-                attempt=1,
-                stage="evaluator-control",
-                message=type(exc).__name__,
-                evidence=str(exc),
-            )
-            continue
-        for trial in range(1, args.trials + 1):
-            for arm in schedule_by_key[(scenario.id, trial)]:
+        if official_holdout is None:
+            try:
+                validate_evaluator_controls(scenario, cache=cache, output=output)
+            except Exception as exc:  # noqa: BLE001 - persist control failures.
+                incidents.add(
+                    scenario=scenario.id,
+                    arm="control",
+                    attempt=1,
+                    stage="evaluator-control",
+                    failure_class="evaluator",
+                    message=type(exc).__name__,
+                    root_cause=str(exc),
+                    repro=f"run red and reference controls for {scenario.id}",
+                    evidence=str(exc),
+                )
+                continue
+        scenario_caches[scenario.id] = cache
+    for assignment in schedule:
+        scenario = scenarios_by_id[str(assignment["scenario"])]
+        cache = scenario_caches.get(scenario.id)
+        trial = int(assignment["trial"])
+        if cache is not None:
+            for arm in assignment["arms"]:
                 treatment_level = arm
                 failed_attempts: set[int] = set()
                 for retry in range(args.retries + 1):
                     attempt = (trial - 1) * (args.retries + 1) + retry + 1
                     try:
+                        runtime_identity_before_arm: dict[str, str] | None = None
+                        if official_holdout is not None:
+                            runtime_identity_before_arm = validate_holdout_execution_conditions(
+                                official_holdout,
+                                model=args.model,
+                                timeout=args.timeout,
+                                arms=arms,
+                                trials=args.trials,
+                                retries=args.retries,
+                                scenario_filters=args.scenario,
+                                codex=args.codex,
+                            )
+                            if runtime_identity_before_arm != official_runtime_identity_start:
+                                raise ValueError(
+                                    "runtime identity changed after the execution freeze was "
+                                    "authenticated"
+                                )
                         if args.engine == "production-ctx-run":
                             result = run_production_trial(
                                 scenario,
@@ -6078,13 +8110,31 @@ def main(argv: list[str] | None = None) -> int:
                                 forbidden_agent_reads=(
                                     {
                                         "scenario_source": args.scenarios.resolve(),
-                                        "evaluator_control": output
-                                        / scenario.id
-                                        / "controls"
-                                        / "control.json",
+                                        **(
+                                            {
+                                                f"holdout_input_{index}": path
+                                                for index, path in enumerate(
+                                                    official_holdout.sensitive_paths,
+                                                    start=1,
+                                                )
+                                            }
+                                            if official_holdout is not None
+                                            else {
+                                                "evaluator_control": output
+                                                / scenario.id
+                                                / "controls"
+                                                / "control.json"
+                                            }
+                                        ),
                                     }
                                     if args.engine == PRODUCTION_CATALOG_ENGINE and not args.dry_run
                                     else None
+                                ),
+                                official_holdout=official_holdout,
+                                official_runtime=official_runtime,
+                                runtime_identity_before_arm=runtime_identity_before_arm,
+                                catalog_setup_charge_seconds=(
+                                    catalog_setup_charge_seconds if arm != "baseline" else 0.0
                                 ),
                             )
                     except Exception as exc:  # noqa: BLE001 - persist harness failures.
@@ -6093,8 +8143,16 @@ def main(argv: list[str] | None = None) -> int:
                             arm=arm,
                             attempt=attempt,
                             stage="harness",
+                            failure_class="harness",
                             message=type(exc).__name__,
+                            root_cause=str(exc),
+                            repro=f"rerun assignment {scenario.id}:{trial}:{arm}",
                             evidence=str(exc),
+                            protocol_id=(
+                                official_holdout.protocol_id
+                                if official_holdout is not None
+                                else "legacy-unfrozen"
+                            ),
                         )
                         result = {
                             "scenario": scenario.id,
@@ -6156,25 +8214,75 @@ def main(argv: list[str] | None = None) -> int:
         repository_state,
         environment_manifest,
     )
+    holdout_inputs_match = (
+        holdout_inputs_match_execution_freeze(official_holdout)
+        if official_holdout is not None
+        else True
+    )
+    runtime_identity_matches = True
+    runtime_identity_end: dict[str, str] | None = None
+    runtime_identity_error: str | None = None
+    if official_holdout is not None:
+        try:
+            runtime_identity_end = validate_holdout_execution_conditions(
+                official_holdout,
+                model=args.model,
+                timeout=args.timeout,
+                arms=arms,
+                trials=args.trials,
+                retries=args.retries,
+                scenario_filters=args.scenario,
+                codex=args.codex,
+            )
+            runtime_identity_matches = runtime_identity_end == official_runtime_identity_start
+            if not runtime_identity_matches:
+                runtime_identity_error = "runtime identity changed before final attestation"
+        except (OSError, ValueError) as exc:
+            runtime_identity_matches = False
+            runtime_identity_error = str(exc)
     if args.engine == PRODUCTION_CATALOG_ENGINE:
         for result in results:
             result["repository_state_matches_start_at_end"] = repository_state_matches
             result["environment_manifest_matches_start_at_end"] = environment_manifest_matches
-        if not repository_state_matches or not environment_manifest_matches:
+            result["holdout_inputs_match_start_at_end"] = holdout_inputs_match
+            result["runtime_identity_matches_start_at_end"] = runtime_identity_matches
+            result["runtime_identity_end"] = runtime_identity_end
+        if (
+            not repository_state_matches
+            or not environment_manifest_matches
+            or not holdout_inputs_match
+            or not runtime_identity_matches
+        ):
             incidents.add(
                 scenario="control",
                 arm="control",
                 attempt=1,
                 stage="run-attestation",
+                failure_class="harness",
                 message="RunAttestationChanged",
+                root_cause=(
+                    "repository, environment manifest, or frozen holdout input changed "
+                    "during the run, or the runtime identity drifted"
+                ),
+                repro="compare every recorded start and end run attestation",
+                risk="the measured arms may not share the same authenticated inputs",
+                fix="discard the run, restore exact frozen bytes, and use a fresh execution",
                 evidence=json.dumps(
                     {
                         "repository_state_start": repository_state,
                         "repository_state_end": repository_state_end,
                         "repository_state_matches_start_at_end": repository_state_matches,
                         "environment_manifest_matches_start_at_end": (environment_manifest_matches),
+                        "holdout_inputs_match_start_at_end": holdout_inputs_match,
+                        "runtime_identity_matches_start_at_end": runtime_identity_matches,
+                        "runtime_identity_error": runtime_identity_error,
                     },
                     sort_keys=True,
+                ),
+                protocol_id=(
+                    official_holdout.protocol_id
+                    if official_holdout is not None
+                    else "legacy-unfrozen"
                 ),
             )
             for result in results:
@@ -6185,6 +8293,8 @@ def main(argv: list[str] | None = None) -> int:
                 isinstance(result, _VerifiedProductionResult)
                 and repository_state_matches
                 and environment_manifest_matches
+                and holdout_inputs_match
+                and runtime_identity_matches
             ):
                 result.seal()
     write_summary(output, results)
@@ -6207,7 +8317,10 @@ def main(argv: list[str] | None = None) -> int:
         trials=args.trials,
         arms=arms,
         expected_repositories={scenario.id: scenario.repo_url for scenario in scenarios},
+        frozen_schedule=(official_holdout.schedule if official_holdout is not None else None),
     )
+    if official_holdout is not None:
+        write_public_holdout_summary(output, results, performance, official_holdout)
     final: dict[tuple[str, str, int], dict[str, Any]] = {}
     for row in results:
         final[
@@ -6218,6 +8331,17 @@ def main(argv: list[str] | None = None) -> int:
             )
         ] = row
     print(output)
+    if official_holdout is not None:
+        return (
+            0
+            if confirmatory_run_succeeded(
+                final_keys=set(final),
+                expected_keys=expected_keys,
+                performance=performance,
+                unresolved_incidents=incidents.unresolved_count(),
+            )
+            else 1
+        )
     return (
         0
         if set(final) == expected_keys

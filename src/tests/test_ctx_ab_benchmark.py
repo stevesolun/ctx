@@ -2187,14 +2187,45 @@ def test_incident_log_appends_machine_readable_rows(tmp_path: Path) -> None:
         arm="ctx-light",
         attempt=1,
         stage="verification",
+        failure_class="evaluator",
         message="focused test failed",
+        root_cause="official evaluator returned exit 1",
+        repro="rerun the frozen evaluator command",
+        risk="quality could be scored incorrectly",
+        fix="repair the evaluator boundary and rerun",
         evidence="exit 1",
     )
 
     with path.open(newline="", encoding="utf-8") as fh:
         rows = list(csv.DictReader(fh))
     assert rows[0]["scenario"] == "click-echo-json"
+    assert rows[0]["failure_class"] == "evaluator"
+    assert rows[0]["risk"] == "quality could be scored incorrectly"
+    assert rows[0]["fix"] == "repair the evaluator boundary and rerun"
     assert rows[0]["status"] == "open"
+    assert rows[0]["incident_id"].startswith("inc-")
+    assert rows[0]["fix_commit"] == "pending"
+    assert rows[0]["rerun_of"] == "initial-run"
+    assert rows[0]["protocol_id"] == "legacy-unfrozen"
+    assert rows[0]["protocol_invalidation"] == "not_applicable"
+    assert rows[0]["protocol_invalidation_reason"]
+
+    duplicate_path = tmp_path / "duplicate-incidents.csv"
+    duplicate = benchmark.IncidentLog(duplicate_path)
+    duplicate.add(
+        scenario="click-echo-json",
+        arm="ctx-light",
+        attempt=1,
+        stage="verification",
+        failure_class="evaluator",
+        message="different diagnostic prose",
+        root_cause="same incident identity",
+        repro="same repro",
+        evidence="new evidence",
+    )
+    with duplicate_path.open(newline="", encoding="utf-8") as fh:
+        duplicate_row = next(csv.DictReader(fh))
+    assert duplicate_row["incident_id"] == rows[0]["incident_id"]
 
     assert (
         incidents.resolve_attempts(
@@ -2209,7 +2240,53 @@ def test_incident_log_appends_machine_readable_rows(tmp_path: Path) -> None:
     with path.open(newline="", encoding="utf-8") as fh:
         resolved = list(csv.DictReader(fh))
     assert resolved[0]["status"] == "resolved"
+    assert resolved[0]["fix_commit"] == "recovered-without-code-change"
+    assert resolved[0]["rerun_of"] == resolved[0]["incident_id"]
     assert "recovered by attempt 2" in resolved[0]["evidence"]
+
+
+def test_incident_log_fails_closed_on_incomplete_protocol_linkage(tmp_path: Path) -> None:
+    path = tmp_path / "incidents.csv"
+    incidents = benchmark.IncidentLog(path)
+
+    with pytest.raises(ValueError, match="linkage fields"):
+        incidents.add(
+            scenario="owner__repo",
+            arm="baseline",
+            attempt=1,
+            stage="verification",
+            failure_class="model",
+            message="no patch",
+            root_cause="model returned no patch",
+            repro="run the frozen assignment",
+            evidence="empty patch",
+            protocol_id="production-graph-holdout-v2",
+            protocol_invalidation="not_invalidated",
+            protocol_invalidation_reason="",
+        )
+
+    incidents.add(
+        scenario="owner__repo",
+        arm="baseline",
+        attempt=1,
+        stage="verification",
+        failure_class="model",
+        message="no patch",
+        root_cause="model returned no patch",
+        repro="run the frozen assignment",
+        evidence="empty patch",
+        protocol_id="production-graph-holdout-v2",
+        protocol_invalidation="not_invalidated",
+        status="observed",
+    )
+    with path.open(newline="", encoding="utf-8") as fh:
+        rows = list(csv.DictReader(fh))
+    rows[0]["fix_commit"] = ""
+    with path.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=benchmark.INCIDENT_FIELDS)
+        writer.writeheader()
+        writer.writerows(rows)
+    assert incidents.unresolved_count() == 1
 
 
 def _sealed_production_rows(
@@ -3317,6 +3394,7 @@ def test_codex_command_keeps_control_flags_equal(tmp_path: Path) -> None:
     assert baseline[:5] == ["codex", "-a", "never", "--disable", "multi_agent"]
     assert treated[:5] == ["codex", "-a", "never", "--enable", "multi_agent"]
     assert baseline[5:7] == ["-c", 'web_search="disabled"']
+    assert 'model_provider="openai"' in baseline
     assert "--ephemeral" in baseline
     assert "--ignore-user-config" in baseline
     assert "ctx-wiki" not in " ".join(baseline)
@@ -3325,6 +3403,16 @@ def test_codex_command_keeps_control_flags_equal(tmp_path: Path) -> None:
     assert 'default_tools_approval_mode="approve"' in treated_config
     assert 'enabled_tools=["ctx__wiki_get"]' in treated_config
     assert "mcp_servers.ctx-wiki.required=true" in treated_config
+
+    with pytest.raises(ValueError, match="frozen OpenAI provider"):
+        benchmark.codex_command(
+            codex="codex",
+            model="model",
+            workspace=tmp_path,
+            prompt="task",
+            with_ctx=False,
+            provider="other",
+        )
 
 
 def test_agent_command_uses_isolated_named_profile(tmp_path: Path) -> None:
@@ -5773,3 +5861,930 @@ def test_detached_descendant_holding_parent_pipes_is_contained(tmp_path: Path) -
     child_pid = int(pid_file.read_text())
     with pytest.raises(ProcessLookupError):
         os.kill(child_pid, 0)
+
+
+def _official_holdout_fixture(
+    tmp_path: Path,
+    *,
+    codex_path: Path | None = None,
+) -> tuple[Any, dict[str, Path]]:
+    codex_path = codex_path or Path(sys.executable)
+    scenario_ids = [f"owner__repo-{index}" for index in range(10)]
+    test_source = "def test_feature():\n    assert True\n"
+    test_sha256 = hashlib.sha256(test_source.encode()).hexdigest()
+    scenario_rows = [
+        {
+            "allowed_changes": ["src/feature.py"],
+            "benchmark_class": "historical",
+            "commit": f"{index + 1:040x}",
+            "ctx_context": [],
+            "expected_test_count": 1,
+            "id": scenario_id,
+            "language": "python",
+            "query": f"implement feature {index}",
+            "red_failure_contains": "FAILED",
+            "reference_patch": (
+                "diff --git a/src/feature.py b/src/feature.py\n"
+                "--- a/src/feature.py\n"
+                "+++ b/src/feature.py\n"
+                "@@ -0,0 +1 @@\n"
+                "+VALUE = 1\n"
+            ),
+            "regression_verify": [["{python}", "-m", "pytest", "-q", "tests/test_feature.py"]],
+            "repo_url": f"https://github.com/owner/repo-{index}.git",
+            "reconstructed_test_sha256": test_sha256,
+            "task": f"Implement frozen feature {index}.",
+            "test_body": test_source,
+            "test_path": "tests/test_feature.py",
+            "verify": ["{python}", "-m", "pytest", "-q", "tests/test_feature.py"],
+        }
+        for index, scenario_id in enumerate(scenario_ids)
+    ]
+    scenario_pack = {"scenarios": scenario_rows, "version": 1}
+    selection = {
+        "analysis_instance_ids": scenario_ids,
+        "analysis_repository_map": {
+            scenario_id: f"https://github.com/owner/repo-{index}.git"
+            for index, scenario_id in enumerate(scenario_ids)
+        },
+        "protocol_id": "production-graph-holdout-v2",
+    }
+    schedule_assignments = [
+        {
+            "arms": (
+                ["baseline", "ctx-light"]
+                if (index + trial - 1) % 2 == 0
+                else ["ctx-light", "baseline"]
+            ),
+            "scenario": scenario_id,
+            "trial": trial,
+        }
+        for trial in range(1, 4)
+        for index, scenario_id in enumerate(scenario_ids)
+    ]
+    schedule = {
+        "assignment_count": 30,
+        "assignments": schedule_assignments,
+        "baseline_first_count": 15,
+        "ctx_light_first_count": 15,
+        "protocol_id": "production-graph-holdout-v2",
+        "schema_version": 1,
+        "trials_per_scenario": 3,
+    }
+    verifier = {
+        "bridge_sha256": "1" * 64,
+        "docker_cli_sha256": "2" * 64,
+        "docker_daemon_id": "daemon",
+        "docker_package_sha256": "3" * 64,
+        "docker_server_version": "29.5.2",
+        "namespace": "swebench",
+        "python_environment_sha256": "4" * 64,
+        "python_sha256": "5" * 64,
+        "revision": "6" * 40,
+        "run_evaluation_sha256": "7" * 64,
+        "schema_version": 1,
+    }
+    verifier_sha256 = hashlib.sha256(
+        json.dumps(verifier, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    reconstructed = {
+        "guard": "reconstructed-test-dependency-v1",
+        "module_sha256": {scenario_id: test_sha256 for scenario_id in scenario_ids},
+    }
+    collision = {
+        "collision_count": 0,
+        "collision_free": True,
+        "scenario_ids": sorted(scenario_ids),
+    }
+
+    def encoded(value: object) -> bytes:
+        return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+
+    blobs = {
+        "selection": encoded(selection),
+        "scenario_pack": encoded(scenario_pack),
+        "schedule": encoded(schedule),
+    }
+    selection_sha256 = hashlib.sha256(blobs["selection"]).hexdigest()
+    scenario_pack_sha256 = hashlib.sha256(blobs["scenario_pack"]).hexdigest()
+    reconstructed["selection_sha256"] = selection_sha256
+    collision["scenarios_sha256"] = scenario_pack_sha256
+
+    def control_phase(scenario_id: str, phase: str) -> dict[str, Any]:
+        failed = phase == "red"
+        image_id = "sha256:" + hashlib.sha256(scenario_id.encode()).hexdigest()
+        return {
+            "artifact_bytes": 100,
+            "artifact_count": 2,
+            "artifact_manifest_sha256": hashlib.sha256(
+                f"{scenario_id}:module".encode()
+            ).hexdigest(),
+            "container_policy_count": 1,
+            "exact_selector_identity": True,
+            "fail_to_pass_count": 1,
+            "image_id": image_id,
+            "pass_to_pass_count": 1,
+            "phase": phase,
+            "runtime_identity_sha256": hashlib.sha256(
+                f"{scenario_id}:runtime".encode()
+            ).hexdigest(),
+            "status_counts": {"FAILED": 1, "PASSED": 1} if failed else {"PASSED": 2},
+            "verifier_evidence_sha256": hashlib.sha256(
+                f"{scenario_id}:{phase}:evidence".encode()
+            ).hexdigest(),
+        }
+
+    controls = {
+        "all_scenarios_passed": True,
+        "guard": "holdout-control-results-v1",
+        "scenario_count": 10,
+        "scenario_pack_sha256": scenario_pack_sha256,
+        "scenario_results": {
+            scenario_id: {
+                "changed_test_module_green": True,
+                "elapsed_seconds": 10.0,
+                "green_evidence_sha256": control_phase(scenario_id, "green")[
+                    "verifier_evidence_sha256"
+                ],
+                "module_evidence_sha256": control_phase(scenario_id, "green")[
+                    "artifact_manifest_sha256"
+                ],
+                "official_swebench": {
+                    "green": control_phase(scenario_id, "green"),
+                    "image_id": "sha256:" + hashlib.sha256(scenario_id.encode()).hexdigest(),
+                    "pins_sha256": verifier_sha256,
+                    "red": control_phase(scenario_id, "red"),
+                },
+                "parent_with_test_patch_red": True,
+                "reconstructed_test_sha256": test_sha256,
+                "red_evidence_sha256": control_phase(scenario_id, "red")[
+                    "verifier_evidence_sha256"
+                ],
+                "reference_patch_green": True,
+                "timeout_compliant": True,
+                "timeout_seconds": 900,
+            }
+            for scenario_id in scenario_ids
+        },
+        "selection_sha256": selection_sha256,
+        "verifier_pins_sha256": verifier_sha256,
+    }
+    environment = {
+        "codex": {"version": "test"},
+        "evaluator": {
+            "backend": benchmark.OFFICIAL_HOLDOUT_BACKEND,
+            "pins_sha256": verifier_sha256,
+        },
+        "limits": {
+            "agent_timeout_seconds": 900.0,
+            "arms": ["baseline", "ctx-light"],
+            "measured_concurrency": 1,
+            "pair_count": 30,
+            "retries": 0,
+            "sandbox_contract": benchmark.OFFICIAL_SANDBOX_CONTRACT,
+            "task_count": 10,
+            "trials_per_scenario": 3,
+        },
+        "model": "gpt-5.5",
+        "product_revision": "a" * 40,
+        "protocol_id": "production-graph-holdout-v2",
+        "provider": "openai",
+        "python": {
+            "executable_sha256": hashlib.sha256(Path(sys.executable).read_bytes()).hexdigest(),
+            "version": benchmark.platform.python_version(),
+        },
+        "schema_version": 1,
+    }
+    blobs.update(
+        {
+            "collision": encoded(collision),
+            "reconstructed": encoded(reconstructed),
+            "controls": encoded(controls),
+            "environment": encoded(environment),
+        }
+    )
+    protocol = {
+        "execution_inputs": {
+            "collision_attestation_sha256": hashlib.sha256(blobs["collision"]).hexdigest(),
+            "control_results_sha256": hashlib.sha256(blobs["controls"]).hexdigest(),
+            "execution_environment_sha256": hashlib.sha256(blobs["environment"]).hexdigest(),
+            "execution_schedule_sha256": hashlib.sha256(blobs["schedule"]).hexdigest(),
+            "reconstructed_test_attestation_sha256": hashlib.sha256(
+                blobs["reconstructed"]
+            ).hexdigest(),
+            "scenario_pack_sha256": scenario_pack_sha256,
+            "selection_output_sha256": selection_sha256,
+        },
+        "official_swebench_verifier": verifier,
+        "product_inputs": {
+            "benchmark_script_sha256": hashlib.sha256(SCRIPT.read_bytes()).hexdigest(),
+            "catalog_archive_sha256": hashlib.sha256(
+                benchmark.PRODUCTION_CATALOG_ARCHIVE.read_bytes()
+            ).hexdigest(),
+            "codex_binary_sha256": hashlib.sha256(codex_path.read_bytes()).hexdigest(),
+            "provider_config_sha256": benchmark.codex_provider_config_sha256("openai"),
+            "revision": "a" * 40,
+            "runtime_availability_sha256": hashlib.sha256(
+                benchmark.PRODUCTION_RUNTIME_AVAILABILITY.read_bytes()
+            ).hexdigest(),
+        },
+        "protocol_id": "production-graph-holdout-v2",
+        "schema_version": 2,
+        "stage": "execution-frozen",
+        "timeouts": {"control_verification_seconds": 900},
+        "universe": {"selection_jsonl_sha256": "a" * 64},
+    }
+    paths: dict[str, Path] = {}
+    for name, data in blobs.items():
+        path = tmp_path / f"{name}.json"
+        path.write_bytes(data)
+        path.chmod(0o600)
+        paths[name] = path
+    protocol_path = tmp_path / "protocol.json"
+    protocol_path.write_bytes(encoded(protocol))
+    paths["protocol"] = protocol_path
+    loaded = benchmark.load_execution_frozen_holdout(
+        protocol_path=protocol_path,
+        expected_protocol_sha256=hashlib.sha256(protocol_path.read_bytes()).hexdigest(),
+        selection_path=paths["selection"],
+        scenario_pack_path=paths["scenario_pack"],
+        collision_path=paths["collision"],
+        reconstructed_path=paths["reconstructed"],
+        control_results_path=paths["controls"],
+        environment_path=paths["environment"],
+        schedule_path=paths["schedule"],
+    )
+    return loaded, paths
+
+
+def test_execution_frozen_holdout_authenticates_all_inputs_and_balanced_schedule(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    holdout, paths = _official_holdout_fixture(tmp_path)
+    monkeypatch.setattr(benchmark, "_command_version", lambda _command: "test")
+
+    assert len(holdout.scenarios) == 10
+    assert len(holdout.schedule.assignments) == 30
+    assert sum(row["arms"][0] == "baseline" for row in holdout.schedule.assignments) == 15
+    assert sum(row["arms"][0] == "ctx-light" for row in holdout.schedule.assignments) == 15
+    benchmark.validate_holdout_execution_conditions(
+        holdout,
+        model="gpt-5.5",
+        timeout=900.0,
+        arms=("baseline", "ctx-light"),
+        trials=3,
+        retries=0,
+        scenario_filters=[],
+        codex=sys.executable,
+    )
+    assert (
+        holdout.codex_binary_sha256 == hashlib.sha256(Path(sys.executable).read_bytes()).hexdigest()
+    )
+    assert holdout.provider_config_sha256 == benchmark.codex_provider_config_sha256("openai")
+    assert set(holdout.sensitive_paths) == {
+        paths[name]
+        for name in (
+            "protocol",
+            "selection",
+            "scenario_pack",
+            "collision",
+            "reconstructed",
+            "controls",
+            "environment",
+            "schedule",
+        )
+    }
+
+
+def test_execution_frozen_holdout_rejects_codex_or_provider_identity_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    holdout, _ = _official_holdout_fixture(tmp_path)
+    monkeypatch.setattr(benchmark, "_command_version", lambda _command: "different")
+
+    with pytest.raises(ValueError, match="runtime conditions"):
+        benchmark.validate_holdout_execution_conditions(
+            holdout,
+            model="gpt-5.5",
+            timeout=900.0,
+            arms=("baseline", "ctx-light"),
+            trials=3,
+            retries=0,
+            scenario_filters=[],
+            codex=sys.executable,
+        )
+
+    provider_drift = replace(
+        holdout,
+        provider_config_sha256="0" * 64,
+    )
+    monkeypatch.setattr(benchmark, "_command_version", lambda _command: "test")
+    with pytest.raises(ValueError, match="runtime conditions"):
+        benchmark.validate_holdout_execution_conditions(
+            provider_drift,
+            model="gpt-5.5",
+            timeout=900.0,
+            arms=("baseline", "ctx-light"),
+            trials=3,
+            retries=0,
+            scenario_filters=[],
+            codex=sys.executable,
+        )
+
+
+def test_runtime_reauthentication_rejects_mid_campaign_codex_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    codex = tmp_path / "codex"
+    codex.write_bytes(b"frozen-codex-binary")
+    holdout_root = tmp_path / "holdout"
+    holdout_root.mkdir()
+    holdout, _ = _official_holdout_fixture(holdout_root, codex_path=codex)
+    monkeypatch.setattr(benchmark, "_command_version", lambda _command: "test")
+    conditions = {
+        "model": "gpt-5.5",
+        "timeout": 900.0,
+        "arms": ("baseline", "ctx-light"),
+        "trials": 3,
+        "retries": 0,
+        "scenario_filters": [],
+        "codex": str(codex),
+    }
+
+    first = benchmark.validate_holdout_execution_conditions(holdout, **conditions)
+    codex.write_bytes(b"drifted-codex-binary")
+
+    assert first["codex_binary_sha256"] == holdout.codex_binary_sha256
+    with pytest.raises(ValueError, match="runtime conditions"):
+        benchmark.validate_holdout_execution_conditions(holdout, **conditions)
+
+
+def test_execution_frozen_holdout_rejects_mutated_materialization_input(
+    tmp_path: Path,
+) -> None:
+    holdout, paths = _official_holdout_fixture(tmp_path)
+    paths["selection"].write_bytes(paths["selection"].read_bytes() + b"\n")
+
+    assert benchmark.holdout_inputs_match_execution_freeze(holdout) is False
+    with pytest.raises(ValueError, match="does not match the execution freeze"):
+        benchmark.load_execution_frozen_holdout(
+            protocol_path=holdout.protocol_path,
+            expected_protocol_sha256=holdout.protocol_sha256,
+            selection_path=paths["selection"],
+            scenario_pack_path=paths["scenario_pack"],
+            collision_path=paths["collision"],
+            reconstructed_path=paths["reconstructed"],
+            control_results_path=paths["controls"],
+            environment_path=paths["environment"],
+            schedule_path=paths["schedule"],
+        )
+
+
+def test_execution_frozen_holdout_rejects_incomplete_evaluator_closure(
+    tmp_path: Path,
+) -> None:
+    holdout, paths = _official_holdout_fixture(tmp_path)
+    controls = json.loads(paths["controls"].read_text())
+    scenario_id = next(iter(controls["scenario_results"]))
+    del controls["scenario_results"][scenario_id]["official_swebench"]["green"][
+        "runtime_identity_sha256"
+    ]
+    paths["controls"].write_text(
+        json.dumps(controls, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    protocol = json.loads(paths["protocol"].read_text())
+    protocol["execution_inputs"]["control_results_sha256"] = hashlib.sha256(
+        paths["controls"].read_bytes()
+    ).hexdigest()
+    paths["protocol"].write_text(
+        json.dumps(protocol, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="red/green control evidence"):
+        benchmark.load_execution_frozen_holdout(
+            protocol_path=paths["protocol"],
+            expected_protocol_sha256=hashlib.sha256(paths["protocol"].read_bytes()).hexdigest(),
+            selection_path=paths["selection"],
+            scenario_pack_path=paths["scenario_pack"],
+            collision_path=paths["collision"],
+            reconstructed_path=paths["reconstructed"],
+            control_results_path=paths["controls"],
+            environment_path=paths["environment"],
+            schedule_path=paths["schedule"],
+        )
+    assert holdout.image_ids
+
+
+def _official_result_rows(
+    holdout: Any,
+    *,
+    status: str,
+    failure_class: str | None,
+    team_token_completeness: str = "not_applicable",
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    runtime_identity = {
+        "codex_binary_sha256": holdout.codex_binary_sha256,
+        "codex_version": "test",
+        "provider": "openai",
+        "provider_config_sha256": holdout.provider_config_sha256,
+        "python_executable_sha256": hashlib.sha256(Path(sys.executable).read_bytes()).hexdigest(),
+        "python_version": benchmark.platform.python_version(),
+    }
+    for scenario in holdout.scenarios:
+        for trial in range(1, 4):
+            for arm in ("baseline", "ctx-light"):
+                row = benchmark._VerifiedProductionResult(
+                    {
+                        "agent_timeout_seconds": 900.0,
+                        "arm": arm,
+                        "cached_input_tokens": 20,
+                        "context_delivery_verified": arm == "ctx-light",
+                        "delivered_prompt_sha256": "b" * 64,
+                        "development_seconds": 10.0,
+                        "engine": benchmark.PRODUCTION_CATALOG_ENGINE,
+                        "environment_manifest_matches_start_at_end": True,
+                        "evaluator_contract_sha256": "c" * 64,
+                        "evaluator_isolation_verified": True,
+                        "evidence_level": (
+                            "official_swebench_scored"
+                            if status == "passed"
+                            else "official_swebench_model_quality_failure"
+                        ),
+                        "frozen_scenario_sha256": holdout.scenario_sha256[scenario.id],
+                        "frozen_schedule_sha256": holdout.schedule.sha256,
+                        "frozen_codex_binary_sha256": holdout.codex_binary_sha256,
+                        "frozen_provider": "openai",
+                        "frozen_provider_config_sha256": holdout.provider_config_sha256,
+                        "harness_total_seconds": 12.0,
+                        "holdout_collision_sha256": holdout.collision_sha256,
+                        "holdout_control_results_sha256": holdout.control_results_sha256,
+                        "holdout_environment_sha256": holdout.environment_sha256,
+                        "holdout_inputs_match_start_at_end": True,
+                        "holdout_protocol_sha256": holdout.protocol_sha256,
+                        "holdout_reconstructed_sha256": holdout.reconstructed_sha256,
+                        "holdout_scenario_pack_sha256": holdout.scenario_pack_sha256,
+                        "holdout_selection_sha256": holdout.selection_sha256,
+                        "input_tokens": 100,
+                        "measured_phase_seconds": 10.0,
+                        "model": "gpt-5.5",
+                        "output_tokens": 30,
+                        "policy_valid": True,
+                        "production_efficiency_eligible": True,
+                        "repo_url": scenario.repo_url,
+                        "repository_state_matches_start_at_end": True,
+                        "runtime_identity_before_arm": runtime_identity,
+                        "runtime_identity_matches_start_at_end": True,
+                        "runtime_identity_verified_before_arm": True,
+                        "sandbox_contract": benchmark.OFFICIAL_SANDBOX_CONTRACT,
+                        "scenario": scenario.id,
+                        "scenario_commit": scenario.commit,
+                        "status": status,
+                        "task_prompt_sha256": "a" * 64,
+                        "team_token_completeness": team_token_completeness,
+                        "token_attribution": "exact",
+                        "total_tokens": 130,
+                        "trial": trial,
+                        "uncached_input_tokens": 80,
+                        "verification_backend": benchmark.OFFICIAL_HOLDOUT_BACKEND,
+                        "verification_failure_class": failure_class,
+                        "verification_passed": status == "passed",
+                    }
+                )
+                row.seal()
+                rows.append(row)
+    return rows
+
+
+def test_authenticated_freeze_drives_all_thirty_pairs_and_sixty_arms(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    holdout, paths = _official_holdout_fixture(tmp_path)
+    result_by_key = {
+        (row["scenario"], row["trial"], row["arm"]): dict(row)
+        for row in _official_result_rows(holdout, status="passed", failure_class=None)
+    }
+    calls: list[tuple[str, int, str]] = []
+    runtime_identity_checks: list[dict[str, str]] = []
+    run_root = tmp_path / "runs"
+    output = run_root / "confirmatory"
+    cache_root = tmp_path / "cache"
+
+    monkeypatch.setattr(benchmark, "PRODUCTION_PRIVATE_RUN_ROOT", run_root)
+    monkeypatch.setattr(
+        benchmark,
+        "_validate_production_scenarios_path",
+        lambda path, *, live: path.resolve(),
+    )
+    monkeypatch.setattr(benchmark, "_command_version", lambda _command: "test")
+    validate_runtime = benchmark.validate_holdout_execution_conditions
+
+    def record_runtime_identity(*args: Any, **kwargs: Any) -> dict[str, str]:
+        identity = validate_runtime(*args, **kwargs)
+        runtime_identity_checks.append(identity)
+        return identity
+
+    monkeypatch.setattr(
+        benchmark,
+        "validate_holdout_execution_conditions",
+        record_runtime_identity,
+    )
+    monkeypatch.setattr(
+        benchmark,
+        "collect_repository_state",
+        lambda: {
+            "clean": True,
+            "head": "a" * 40,
+            "status": [],
+            "tracked_diff_sha256": "d" * 64,
+        },
+    )
+    monkeypatch.setattr(
+        benchmark,
+        "validate_runtime_pack_scenario_independence",
+        lambda *_args, **_kwargs: {
+            "guard": "runtime-pack-distinctive-evidence-v1",
+            "runtime_availability_sha256": "e" * 64,
+        },
+    )
+    monkeypatch.setattr(
+        benchmark,
+        "prepare_production_catalog",
+        lambda _cache_root: benchmark.CatalogSnapshot(
+            wiki_dir=tmp_path / "wiki",
+            provenance={
+                "archive_sha256": "f" * 64,
+                "graph_export_id": "frozen-export",
+                "graph_export_manifest_sha256": "1" * 64,
+                "overlay_records": 0,
+                "overlay_sha256": "2" * 64,
+                "runtime_availability_sha256": "3" * 64,
+            },
+            prepare_seconds=30.0,
+        ),
+    )
+    monkeypatch.setattr(
+        benchmark,
+        "verify_scenario_independence_attestation",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        benchmark,
+        "ensure_repo_cache",
+        lambda scenario, _cache_root: tmp_path / "repos" / scenario.id,
+    )
+
+    def write_manifest(**kwargs: Any) -> dict[str, Any]:
+        manifest = {
+            "model": kwargs["model"],
+            "schedule": kwargs["schedule"],
+            "scenarios_sha256": holdout.scenario_pack_sha256,
+        }
+        (kwargs["output"] / "environment.json").write_text(
+            json.dumps(manifest, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return manifest
+
+    monkeypatch.setattr(benchmark, "write_environment_manifest", write_manifest)
+    monkeypatch.setattr(
+        benchmark,
+        "write_final_repository_attestation",
+        lambda *_args, **_kwargs: (
+            True,
+            True,
+            {
+                "clean": True,
+                "head": "a" * 40,
+                "status": [],
+                "tracked_diff_sha256": "d" * 64,
+            },
+        ),
+    )
+
+    def run_trial(
+        scenario: Any,
+        *,
+        arm: str,
+        treatment_level: str,
+        attempt: int,
+        trial: int,
+        retry: int,
+        cache: Path,
+        output: Path,
+        codex: str,
+        model: str,
+        timeout: float,
+        dry_run: bool,
+        incidents: Any,
+        catalog_snapshot: Any,
+        forbidden_agent_reads: Any,
+        official_holdout: Any,
+        official_runtime: Any,
+        runtime_identity_before_arm: Any,
+        catalog_setup_charge_seconds: float,
+    ) -> dict[str, Any]:
+        assert treatment_level == arm
+        assert attempt == trial
+        assert retry == 0
+        assert cache == tmp_path / "repos" / scenario.id
+        assert output == run_root / "confirmatory"
+        assert codex == sys.executable
+        assert model == "gpt-5.5"
+        assert timeout == 900.0
+        assert dry_run is False
+        assert isinstance(incidents, benchmark.IncidentLog)
+        assert catalog_snapshot.prepare_seconds == 30.0
+        assert forbidden_agent_reads["scenario_source"] == paths["scenario_pack"].resolve()
+        assert official_holdout.protocol_sha256 == holdout.protocol_sha256
+        assert official_runtime.dataset_path == tmp_path / "dataset.jsonl"
+        assert official_runtime.swebench_checkout == tmp_path / "swebench"
+        assert official_runtime.swebench_python == tmp_path / "swebench-python"
+        assert official_runtime.docker_cli == tmp_path / "docker"
+        assert official_runtime.docker_host == "unix:///private/docker.sock"
+        assert runtime_identity_before_arm["codex_binary_sha256"] == holdout.codex_binary_sha256
+        assert runtime_identity_before_arm["provider_config_sha256"] == (
+            holdout.provider_config_sha256
+        )
+        assert catalog_setup_charge_seconds == (1.0 if arm == "ctx-light" else 0.0)
+        calls.append((scenario.id, trial, arm))
+        result = dict(result_by_key[(scenario.id, trial, arm)])
+        result["runtime_identity_before_arm"] = dict(runtime_identity_before_arm)
+        return result
+
+    monkeypatch.setattr(benchmark, "run_trial", run_trial)
+    verifier_inputs = {
+        "swebench-dataset": tmp_path / "dataset.jsonl",
+        "swebench-checkout": tmp_path / "swebench",
+        "swebench-python": tmp_path / "swebench-python",
+        "docker-cli": tmp_path / "docker",
+    }
+
+    exit_code = benchmark.main(
+        [
+            "--engine",
+            benchmark.PRODUCTION_CATALOG_ENGINE,
+            "--arm",
+            "both",
+            "--trials",
+            "3",
+            "--retries",
+            "0",
+            "--timeout",
+            "900",
+            "--model",
+            "gpt-5.5",
+            "--codex",
+            sys.executable,
+            "--cache-root",
+            str(cache_root),
+            "--output",
+            str(output),
+            "--holdout-protocol",
+            str(paths["protocol"]),
+            "--holdout-protocol-sha256",
+            holdout.protocol_sha256,
+            "--holdout-selection",
+            str(paths["selection"]),
+            "--holdout-scenario-pack",
+            str(paths["scenario_pack"]),
+            "--holdout-collision",
+            str(paths["collision"]),
+            "--holdout-reconstructed",
+            str(paths["reconstructed"]),
+            "--holdout-controls",
+            str(paths["controls"]),
+            "--holdout-environment",
+            str(paths["environment"]),
+            "--holdout-schedule",
+            str(paths["schedule"]),
+            *[
+                value
+                for option, path in verifier_inputs.items()
+                for value in (f"--{option}", str(path))
+            ],
+            "--docker-host",
+            "unix:///private/docker.sock",
+        ]
+    )
+
+    expected_calls = [
+        (str(assignment["scenario"]), int(assignment["trial"]), str(arm))
+        for assignment in holdout.schedule.assignments
+        for arm in assignment["arms"]
+    ]
+    assert exit_code == 0
+    assert calls == expected_calls
+    assert len(calls) == 60
+    assert len(runtime_identity_checks) == 62
+    assert all(identity == runtime_identity_checks[0] for identity in runtime_identity_checks)
+    report = json.loads((output / "performance.json").read_text())
+    assert report["assignment_complete"] is True
+    assert report["experiment_valid"] is True
+    assert report["product_benefit_verdict"] == "not_beneficial"
+    assert list(csv.DictReader((output / "incidents.csv").open())) == []
+
+
+def test_confirmatory_dual_model_failure_is_valid_honest_negative(
+    tmp_path: Path,
+) -> None:
+    holdout, _ = _official_holdout_fixture(tmp_path)
+    rows = _official_result_rows(holdout, status="failed", failure_class="model")
+
+    report = benchmark.build_performance_report(
+        rows,
+        scenario_ids=[scenario.id for scenario in holdout.scenarios],
+        trials=3,
+        arms=("baseline", "ctx-light"),
+        expected_repositories={scenario.id: scenario.repo_url for scenario in holdout.scenarios},
+        frozen_schedule=holdout.schedule,
+    )
+
+    assert report["experiment_valid"] is True
+    assert report["quality_preserved"] is False
+    assert report["quality_complete_pair_count"] == 0
+    assert report["execution_complete_pair_count"] == 30
+    assert report["product_benefit_verdict"] == "not_beneficial"
+    expected = {
+        (scenario.id, arm, trial)
+        for scenario in holdout.scenarios
+        for trial in range(1, 4)
+        for arm in ("baseline", "ctx-light")
+    }
+    assert benchmark.confirmatory_run_succeeded(
+        final_keys=expected,
+        expected_keys=expected,
+        performance=report,
+        unresolved_incidents=0,
+    )
+
+
+def test_confirmatory_rejects_unknown_delegated_agent_tokens(tmp_path: Path) -> None:
+    holdout, _ = _official_holdout_fixture(tmp_path)
+    rows = _official_result_rows(
+        holdout,
+        status="passed",
+        failure_class=None,
+        team_token_completeness="unknown",
+    )
+
+    report = benchmark.build_performance_report(
+        rows,
+        scenario_ids=[scenario.id for scenario in holdout.scenarios],
+        trials=3,
+        arms=("baseline", "ctx-light"),
+        expected_repositories={scenario.id: scenario.repo_url for scenario in holdout.scenarios},
+        frozen_schedule=holdout.schedule,
+    )
+
+    assert report["experiment_valid"] is False
+    assert report["execution_complete_pair_count"] == 0
+
+
+def test_entity_activity_claims_only_observed_lifecycle_transitions() -> None:
+    catalog = {
+        "candidates": [
+            {"id": "skill:s", "type": "skill"},
+            {"id": "agent:a", "type": "agent"},
+            {"id": "mcp-server:m", "type": "mcp-server"},
+        ],
+        "deferred_activation": {"deferred_candidates": [{"id": "agent:a", "type": "agent"}]},
+    }
+    lifecycle = {
+        "events": [
+            {"action": "load_applied", "entity_type": "skill"},
+            {"action": "used", "entity_type": "skill"},
+            {"action": "unload_applied", "entity_type": "skill"},
+        ]
+    }
+
+    assert benchmark.actual_entity_type_activity(
+        catalog=catalog,
+        selected_items=[{"id": "skill:s", "type": "skill"}],
+        lifecycle=lifecycle,
+    ) == {
+        "recommended_entity_types": ["agent", "mcp-server", "skill"],
+        "selected_entity_types": ["skill"],
+        "deferred_entity_types": ["agent"],
+        "loaded_entity_types": ["skill"],
+        "used_entity_types": ["skill"],
+        "unloaded_entity_types": ["skill"],
+    }
+
+
+def test_official_verifier_is_the_scored_quality_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts import ctx_ab_swebench
+
+    holdout, _ = _official_holdout_fixture(tmp_path)
+    scenario = holdout.scenarios[0]
+    captured: dict[str, Any] = {}
+
+    def fake_verify(**kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return {
+            "validation": {
+                "image_id": holdout.image_ids[scenario.id],
+                "phase": "scored",
+                "resolved": True,
+            }
+        }
+
+    monkeypatch.setattr(ctx_ab_swebench, "verify_swebench", fake_verify)
+    run_dir = tmp_path / "scored"
+    run_dir.mkdir()
+    runtime = benchmark.OfficialVerifierRuntime(
+        dataset_path=tmp_path / "dataset.jsonl",
+        swebench_checkout=tmp_path / "swebench",
+        swebench_python=tmp_path / "python",
+        docker_cli=tmp_path / "docker",
+        docker_host="unix:///private/docker.sock",
+    )
+
+    result = benchmark.verify_official_model_patch(
+        holdout=holdout,
+        runtime=runtime,
+        scenario=scenario,
+        model_patch="diff --git a/src/feature.py b/src/feature.py\n",
+        run_dir=run_dir,
+    )
+
+    assert result.passed is True
+    assert captured["phase"] == "scored"
+    assert captured["instance_id"] == scenario.id
+    assert captured["model_patch"].startswith("diff --git")
+    assert captured["expected_image_id"] == holdout.image_ids[scenario.id]
+    assert captured["allow_image_pull"] is False
+    assert "test_body" not in captured
+    assert "reference_patch" not in captured
+    assert (run_dir / "official-verification-evidence.json").is_file()
+
+
+def test_official_development_timing_includes_ctx_catalog_but_excludes_evaluator() -> None:
+    totals = benchmark.trial_timing_totals(
+        ctx_setup_seconds=2.0,
+        catalog_setup_seconds=4.0,
+        agent_seconds=10.0,
+        teardown_seconds=3.0,
+        verification_seconds=40.0,
+        official_evaluator=True,
+    )
+
+    assert totals == {
+        "development_seconds": 19.0,
+        "measured_phase_seconds": 19.0,
+        "total_seconds": 59.0,
+    }
+    baseline = benchmark.trial_timing_totals(
+        ctx_setup_seconds=0.0,
+        catalog_setup_seconds=0.0,
+        agent_seconds=10.0,
+        teardown_seconds=0.0,
+        verification_seconds=40.0,
+        official_evaluator=True,
+    )
+    assert baseline["development_seconds"] == 10.0
+
+
+def test_official_verifier_boundary_classifies_unexpected_failures_as_evaluator(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts import ctx_ab_swebench
+
+    holdout, _ = _official_holdout_fixture(tmp_path)
+    scenario = holdout.scenarios[0]
+
+    def fail(**_kwargs: Any) -> dict[str, Any]:
+        raise OSError("docker daemon unavailable")
+
+    monkeypatch.setattr(ctx_ab_swebench, "verify_swebench", fail)
+    run_dir = tmp_path / "failed-scored"
+    run_dir.mkdir()
+    result = benchmark.verify_official_model_patch(
+        holdout=holdout,
+        runtime=benchmark.OfficialVerifierRuntime(
+            dataset_path=tmp_path / "dataset.jsonl",
+            swebench_checkout=tmp_path / "swebench",
+            swebench_python=tmp_path / "python",
+            docker_cli=tmp_path / "docker",
+            docker_host="unix:///private/docker.sock",
+        ),
+        scenario=scenario,
+        model_patch="diff --git a/src/feature.py b/src/feature.py\n",
+        run_dir=run_dir,
+    )
+
+    assert result.passed is False
+    assert result.failure_class == "evaluator"
+    failure = json.loads((run_dir / "official-verification-failure.json").read_text())
+    assert failure["error_type"] == "OSError"
+    assert failure["failure_class"] == "evaluator"
