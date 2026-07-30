@@ -26,7 +26,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from math import comb
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from statistics import median
 from typing import Any
 
@@ -77,6 +77,7 @@ PRODUCTION_POLICY_ABSTENTION_LEVEL = "production_catalog_policy_abstention"
 OFFICIAL_HOLDOUT_BACKEND = "official-swebench-docker-v1"
 OFFICIAL_HOLDOUT_GUARD = "ctx-ab-official-controls-v1"
 OFFICIAL_SCHEDULE_SCHEMA_VERSION = 1
+OFFICIAL_SOURCE_MAP_SCHEMA_VERSION = 1
 OFFICIAL_CONFIRMATORY_TASKS = 10
 OFFICIAL_CONFIRMATORY_TRIALS = 3
 OFFICIAL_CONFIRMATORY_PAIRS = 30
@@ -239,6 +240,15 @@ class OfficialVerifierRuntime:
 
 
 @dataclass(frozen=True)
+class OfficialSourceBundle:
+    canonical_url: str
+    base_commit: str
+    bundle_path: Path
+    bundle_sha256: str
+    tree_sha1: str
+
+
+@dataclass(frozen=True)
 class ExecutionFrozenHoldout:
     protocol_id: str
     protocol_sha256: str
@@ -269,6 +279,12 @@ class ExecutionFrozenHoldout:
     schedule_path: Path
     schedule_bytes: bytes
     schedule: FrozenSchedule
+    source_map_path: Path
+    source_map_bytes: bytes
+    source_map_sha256: str
+    source_bundles: Mapping[str, OfficialSourceBundle]
+    origin_url: str
+    origin_main_revision: str
     scenarios: tuple[Scenario, ...]
     scenario_sha256: Mapping[str, str]
     image_ids: Mapping[str, str]
@@ -286,6 +302,8 @@ class ExecutionFrozenHoldout:
             self.control_results_path,
             self.environment_path,
             self.schedule_path,
+            self.source_map_path,
+            *(source.bundle_path for source in self.source_bundles.values()),
         )
 
 
@@ -933,6 +951,131 @@ def _validated_official_controls(
     return image_ids
 
 
+def _validate_acquisition_design(
+    freezer: Any,
+    acquisition_protocol: Mapping[str, Any],
+) -> None:
+    """Validate the base freeze while preserving newer authenticated extensions."""
+    try:
+        freezer.validate_acquisition_protocol(
+            dict(acquisition_protocol),
+            benchmark_script_path=Path(__file__),
+            catalog_archive_path=PRODUCTION_CATALOG_ARCHIVE,
+            runtime_availability_path=PRODUCTION_RUNTIME_AVAILABILITY,
+        )
+        return
+    except freezer.FreezeError:
+        integrated_contract = {
+            "origin_url",
+            "origin_main_revision",
+        }.issubset(freezer.PRODUCT_INPUT_KEYS) and "source_map_sha256" in (
+            freezer.ACQUISITION_EXECUTION_INPUT_KEYS
+        )
+        if integrated_contract:
+            raise
+
+    # Temporary compatibility for focused runtime tests before the freezer lane lands.
+    validation_protocol = json.loads(json.dumps(acquisition_protocol))
+    validation_protocol.pop("exposure_ledger_sha256", None)
+    product_inputs = validation_protocol.get("product_inputs")
+    if isinstance(product_inputs, dict):
+        for field in ("origin_url", "origin_main_revision"):
+            if field not in freezer.PRODUCT_INPUT_KEYS:
+                product_inputs.pop(field, None)
+    execution_inputs = validation_protocol.get("execution_inputs")
+    if (
+        isinstance(execution_inputs, dict)
+        and "source_map_sha256" not in freezer.ACQUISITION_EXECUTION_INPUT_KEYS
+    ):
+        execution_inputs.pop("source_map_sha256", None)
+    freezer.validate_acquisition_protocol(
+        validation_protocol,
+        benchmark_script_path=Path(__file__),
+        catalog_archive_path=PRODUCTION_CATALOG_ARCHIVE,
+        runtime_availability_path=PRODUCTION_RUNTIME_AVAILABILITY,
+    )
+
+
+def _validated_official_source_map(
+    source_map_bytes: bytes,
+    *,
+    source_map_path: Path,
+    scenarios: Sequence[Scenario],
+) -> dict[str, OfficialSourceBundle]:
+    document = _strict_json_object(source_map_bytes, label="private source map")
+    repositories = document.get("repositories")
+    expected = {scenario.repo_url: scenario for scenario in scenarios}
+    if (
+        set(document) != {"repositories", "schema_version"}
+        or document.get("schema_version") != OFFICIAL_SOURCE_MAP_SCHEMA_VERSION
+        or not isinstance(repositories, dict)
+        or set(repositories) != set(expected)
+    ):
+        raise ValueError("private source map has an unsupported shape")
+    source_root = source_map_path.parent.resolve(strict=True)
+    bundles: dict[str, OfficialSourceBundle] = {}
+    resolved_paths: set[Path] = set()
+    for canonical_url, value in repositories.items():
+        if (
+            GITHUB_REPO_URL.fullmatch(canonical_url) is None
+            or not isinstance(value, dict)
+            or set(value)
+            != {
+                "base_commit",
+                "bundle_path",
+                "bundle_sha256",
+                "tree_sha1",
+            }
+        ):
+            raise ValueError("private source map repository entry is invalid")
+        base_commit = str(value.get("base_commit") or "")
+        tree_sha1 = str(value.get("tree_sha1") or "")
+        if (
+            re.fullmatch(r"[0-9a-f]{40}", base_commit) is None
+            or base_commit != expected[canonical_url].commit
+            or re.fullmatch(r"[0-9a-f]{40}", tree_sha1) is None
+        ):
+            raise ValueError("private source map repository identity is invalid")
+        raw_bundle_path = value.get("bundle_path")
+        if not isinstance(raw_bundle_path, str) or "\\" in raw_bundle_path:
+            raise ValueError("source bundle path must be a normalized relative POSIX path")
+        relative = PurePosixPath(raw_bundle_path)
+        if (
+            relative.is_absolute()
+            or not relative.parts
+            or any(part in {"", ".", ".."} for part in relative.parts)
+            or relative.as_posix() != raw_bundle_path
+        ):
+            raise ValueError("source bundle path must be a normalized relative POSIX path")
+        candidate = source_root.joinpath(*relative.parts)
+        cursor = source_root
+        for part in relative.parts:
+            cursor = cursor / part
+            if cursor.is_symlink():
+                raise ValueError("official source bundle path must not traverse a symlink")
+        try:
+            resolved = candidate.resolve(strict=True)
+        except OSError as exc:
+            raise ValueError("official source bundle is unavailable") from exc
+        if source_root not in resolved.parents or resolved in resolved_paths:
+            raise ValueError("official source bundle path is invalid or duplicated")
+        resolved, _bundle_bytes, bundle_sha256 = _authenticated_artifact(
+            resolved,
+            expected_sha256=value.get("bundle_sha256"),
+            label=f"official source bundle for {canonical_url}",
+            private=True,
+        )
+        resolved_paths.add(resolved)
+        bundles[canonical_url] = OfficialSourceBundle(
+            canonical_url=canonical_url,
+            base_commit=base_commit,
+            bundle_path=resolved,
+            bundle_sha256=bundle_sha256,
+            tree_sha1=tree_sha1,
+        )
+    return bundles
+
+
 def load_execution_frozen_holdout(
     *,
     protocol_path: Path,
@@ -944,6 +1087,7 @@ def load_execution_frozen_holdout(
     control_results_path: Path,
     environment_path: Path,
     schedule_path: Path,
+    source_map_path: Path,
 ) -> ExecutionFrozenHoldout:
     """Load an exact-byte authenticated private confirmatory holdout."""
     protocol_path, protocol_bytes, protocol_sha256 = _authenticated_artifact(
@@ -972,7 +1116,8 @@ def load_execution_frozen_holdout(
             raise
         freezer = importlib.import_module("ctx_ab_holdout_freeze")
 
-    expected_input_fields = freezer.ACQUISITION_EXECUTION_INPUT_KEYS
+    acquisition_input_fields = set(freezer.ACQUISITION_EXECUTION_INPUT_KEYS)
+    expected_input_fields = acquisition_input_fields | {"source_map_sha256"}
     if set(execution_inputs) != expected_input_fields:
         raise ValueError("holdout protocol execution inputs have an unsupported shape")
     acquisition_protocol_sha256 = _require_sha256(
@@ -988,12 +1133,7 @@ def load_execution_frozen_holdout(
             execution_frozen_at,
             label="protocol execution_frozen_at",
         )
-        freezer.validate_acquisition_protocol(
-            acquisition_protocol,
-            benchmark_script_path=Path(__file__),
-            catalog_archive_path=PRODUCTION_CATALOG_ARCHIVE,
-            runtime_availability_path=PRODUCTION_RUNTIME_AVAILABILITY,
-        )
+        _validate_acquisition_design(freezer, acquisition_protocol)
     except freezer.FreezeError as exc:
         raise ValueError(str(exc)) from exc
     reconstructed_acquisition_sha256 = _sha256_bytes(
@@ -1009,6 +1149,14 @@ def load_execution_frozen_holdout(
     product_revision = str(product_inputs.get("revision") or "")
     if re.fullmatch(r"[0-9a-f]{40}", product_revision) is None:
         raise ValueError("holdout product revision is invalid")
+    origin_url = str(product_inputs.get("origin_url") or "")
+    origin_main_revision = str(product_inputs.get("origin_main_revision") or "")
+    if (
+        GITHUB_REPO_URL.fullmatch(origin_url) is None
+        or re.fullmatch(r"[0-9a-f]{40}", origin_main_revision) is None
+        or origin_main_revision != product_revision
+    ):
+        raise ValueError("holdout origin identity is invalid")
     frozen_product_files = {
         "benchmark_script_sha256": Path(__file__),
         "catalog_archive_sha256": PRODUCTION_CATALOG_ARCHIVE,
@@ -1072,9 +1220,20 @@ def load_execution_frozen_holdout(
         label="private schedule",
         private=True,
     )
+    source_map_path, source_map_bytes, source_map_sha256 = _authenticated_artifact(
+        source_map_path,
+        expected_sha256=execution_inputs.get("source_map_sha256"),
+        label="private source map",
+        private=True,
+    )
     selection_document = _strict_json_object(selection_bytes, label="private selection")
     scenario_document = _strict_json_object(scenario_bytes, label="private scenario pack")
     scenarios, scenario_sha256 = _scenario_rows_and_hashes(scenario_document)
+    source_bundles = _validated_official_source_map(
+        source_map_bytes,
+        source_map_path=source_map_path,
+        scenarios=scenarios,
+    )
     selected_ids = selection_document.get("analysis_instance_ids")
     if not isinstance(selected_ids, list) or selected_ids != [
         scenario.id for scenario in scenarios
@@ -1224,6 +1383,12 @@ def load_execution_frozen_holdout(
         schedule_path=schedule_path,
         schedule_bytes=schedule_bytes,
         schedule=schedule,
+        source_map_path=source_map_path,
+        source_map_bytes=source_map_bytes,
+        source_map_sha256=source_map_sha256,
+        source_bundles=source_bundles,
+        origin_url=origin_url,
+        origin_main_revision=origin_main_revision,
         scenarios=tuple(scenarios),
         scenario_sha256=scenario_sha256,
         image_ids=image_ids,
@@ -1329,6 +1494,8 @@ def holdout_inputs_match_execution_freeze(holdout: ExecutionFrozenHoldout) -> bo
         holdout.control_results_path: holdout.control_results_sha256,
         holdout.environment_path: holdout.environment_sha256,
         holdout.schedule_path: holdout.schedule.sha256,
+        holdout.source_map_path: holdout.source_map_sha256,
+        **{source.bundle_path: source.bundle_sha256 for source in holdout.source_bundles.values()},
     }
     for path, digest in expected.items():
         try:
@@ -1352,6 +1519,7 @@ def _require_authenticated_holdout_snapshot(holdout: ExecutionFrozenHoldout) -> 
         (holdout.control_results_bytes, holdout.control_results_sha256),
         (holdout.environment_bytes, holdout.environment_sha256),
         (holdout.schedule_bytes, holdout.schedule.sha256),
+        (holdout.source_map_bytes, holdout.source_map_sha256),
     )
     if any(
         not secrets.compare_digest(_sha256_bytes(data), expected) for data, expected in snapshots
@@ -1819,6 +1987,109 @@ def prepare_workspace(
     )
     if checked_out.returncode:
         raise RuntimeError(f"checkout failed: {checked_out.stderr.strip()}")
+    test_hash = hashlib.sha256(scenario.test_body.encode("utf-8")).hexdigest()
+    if include_evaluator_test:
+        materialize_evaluator_test(scenario, destination, expected_hash=test_hash)
+    return test_hash
+
+
+def _checked_git(
+    argv: list[str],
+    *,
+    cwd: Path,
+    label: str,
+    timeout: float = 60,
+) -> str:
+    result = run_process(["git", *argv], cwd=cwd, timeout=timeout)
+    if result.returncode or result.timed_out or result.residual_descendants:
+        detail = result.stderr.strip() or result.stdout.strip() or f"exit {result.returncode}"
+        raise RuntimeError(f"{label} failed: {detail}")
+    return result.stdout.strip()
+
+
+def _authenticate_official_source_bundle(source: OfficialSourceBundle) -> None:
+    _authenticated_artifact(
+        source.bundle_path,
+        expected_sha256=source.bundle_sha256,
+        label=f"official source bundle for {source.canonical_url}",
+        private=True,
+    )
+
+
+def prepare_official_workspace(
+    scenario: Scenario,
+    source: OfficialSourceBundle,
+    destination: Path,
+    *,
+    include_evaluator_test: bool,
+) -> str:
+    """Materialize an official arm from one authenticated commit-only bundle."""
+    if (
+        source.canonical_url != scenario.repo_url
+        or source.base_commit != scenario.commit
+        or destination.exists()
+    ):
+        raise RuntimeError("official source bundle does not match the frozen scenario")
+    _authenticate_official_source_bundle(source)
+    cloned = run_process(
+        [
+            "git",
+            "-c",
+            "protocol.file.allow=always",
+            "clone",
+            "--no-local",
+            "--no-tags",
+            str(source.bundle_path),
+            str(destination),
+        ],
+        cwd=destination.parent,
+        timeout=300,
+    )
+    if cloned.returncode or cloned.timed_out or cloned.residual_descendants:
+        raise RuntimeError(f"official bundle clone failed: {cloned.stderr.strip()}")
+    _checked_git(
+        ["checkout", "--detach", source.base_commit],
+        cwd=destination,
+        label="official base checkout",
+    )
+    remotes = _checked_git(["remote"], cwd=destination, label="official remote inventory")
+    if remotes:
+        _checked_git(
+            ["remote", "remove", "origin"],
+            cwd=destination,
+            label="official remote removal",
+        )
+    if _checked_git(["remote"], cwd=destination, label="official remote verification"):
+        raise RuntimeError("official workspace retained a Git remote")
+    head = _checked_git(["rev-parse", "HEAD"], cwd=destination, label="official HEAD identity")
+    tree = _checked_git(
+        ["rev-parse", "HEAD^{tree}"],
+        cwd=destination,
+        label="official tree identity",
+    )
+    if head != source.base_commit or tree != source.tree_sha1:
+        raise RuntimeError("official workspace commit or tree does not match the source map")
+    commits_outside_base = _checked_git(
+        ["rev-list", "--all", "--not", source.base_commit],
+        cwd=destination,
+        label="official reachable-object audit",
+    )
+    if commits_outside_base:
+        raise RuntimeError("official workspace exposes commits outside the frozen base history")
+    fsck = run_process(
+        ["git", "fsck", "--full", "--no-reflogs", "--unreachable", "--no-progress"],
+        cwd=destination,
+        timeout=120,
+    )
+    if (
+        fsck.returncode
+        or fsck.timed_out
+        or fsck.residual_descendants
+        or fsck.stdout.strip()
+        or fsck.stderr.strip()
+    ):
+        detail = fsck.stderr.strip() or fsck.stdout.strip() or f"exit {fsck.returncode}"
+        raise RuntimeError(f"official workspace object closure failed: {detail}")
     test_hash = hashlib.sha256(scenario.test_body.encode("utf-8")).hexdigest()
     if include_evaluator_test:
         materialize_evaluator_test(scenario, destination, expected_hash=test_hash)
@@ -5337,6 +5608,215 @@ def python_dependencies_sha256(python_executable: str | Path) -> str:
     return _sha256_bytes(canonical_python_dependencies_bytes(result.stdout))
 
 
+def _ensure_owner_only_directory(path: Path, *, label: str) -> Path:
+    if path.is_symlink():
+        raise RuntimeError(f"{label} must not be a symlink")
+    created = False
+    try:
+        path.mkdir(mode=stat.S_IRWXU, parents=True, exist_ok=False)
+        created = True
+    except FileExistsError:
+        pass
+    if path.is_symlink() or not path.is_dir():
+        raise RuntimeError(f"{label} must be a directory")
+    if created:
+        path.chmod(stat.S_IRWXU)
+    if os.name != "nt" and stat.S_IMODE(path.stat().st_mode) & (stat.S_IRWXG | stat.S_IRWXO):
+        raise RuntimeError(f"{label} must be owner-only")
+    return path.resolve(strict=True)
+
+
+def _official_campaign_state_root() -> Path:
+    result = run_process(
+        ["git", "rev-parse", "--git-common-dir"],
+        cwd=ROOT,
+        timeout=30,
+    )
+    if result.returncode or result.timed_out or result.residual_descendants:
+        raise RuntimeError("official campaign Git common directory is unavailable")
+    common_dir = Path(result.stdout.strip())
+    if not common_dir.is_absolute():
+        common_dir = ROOT / common_dir
+    try:
+        resolved = common_dir.resolve(strict=True)
+    except OSError as exc:
+        raise RuntimeError("official campaign Git common directory is unavailable") from exc
+    if not resolved.is_dir() or resolved.name != ".git":
+        raise RuntimeError("official campaign requires a non-bare shared Git repository")
+    return resolved.parent / ".gate" / "ctx-ab-private"
+
+
+def _write_exclusive_owner_file(path: Path, payload: Mapping[str, Any]) -> None:
+    flags = (
+        os.O_WRONLY
+        | os.O_CREAT
+        | os.O_EXCL
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    descriptor = os.open(path, flags, stat.S_IRUSR | stat.S_IWUSR)
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            raise RuntimeError("official campaign state file is not a single-link regular file")
+        data = _canonical_json_bytes(payload) + b"\n"
+        with os.fdopen(descriptor, "wb") as handle:
+            descriptor = -1
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+@dataclass
+class OfficialCampaignLock:
+    path: Path
+    token: str
+    released: bool = False
+
+    @classmethod
+    def acquire(cls, state_root: Path) -> OfficialCampaignLock:
+        private_root = _ensure_owner_only_directory(
+            state_root,
+            label="official campaign private state root",
+        )
+        guard_root = _ensure_owner_only_directory(
+            private_root / "runtime-guard",
+            label="official campaign guard directory",
+        )
+        path = guard_root / "campaign.lock"
+        token = secrets.token_hex(32)
+        try:
+            _write_exclusive_owner_file(
+                path,
+                {
+                    "created_at": datetime.now(UTC).isoformat(),
+                    "hostname": socket.gethostname(),
+                    "pid": os.getpid(),
+                    "schema_version": 1,
+                    "token": token,
+                },
+            )
+        except FileExistsError as exc:
+            raise RuntimeError(
+                f"official campaign lock is already held at {path}; stale locks are never "
+                "removed automatically"
+            ) from exc
+        return cls(path=path, token=token)
+
+    def release(self) -> None:
+        if self.released:
+            raise RuntimeError("official campaign lock was already released")
+        if self.path.is_symlink():
+            raise RuntimeError("official campaign lock changed before release")
+        try:
+            metadata = self.path.stat()
+            document = _strict_json_object(
+                self.path.read_bytes(),
+                label="official campaign lock",
+            )
+        except OSError as exc:
+            raise RuntimeError("official campaign lock disappeared before release") from exc
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_nlink != 1
+            or document.get("token") != self.token
+        ):
+            raise RuntimeError("official campaign lock ownership changed before release")
+        self.path.unlink()
+        self.released = True
+
+
+def claim_official_protocol(
+    *,
+    state_root: Path,
+    protocol_sha256: str,
+    selection_sha256: str,
+    output: Path,
+) -> Path:
+    protocol_sha256 = _require_sha256(
+        protocol_sha256,
+        field="official execution protocol SHA-256",
+    )
+    selection_sha256 = _require_sha256(
+        selection_sha256,
+        field="official selection SHA-256",
+    )
+    private_root = _ensure_owner_only_directory(
+        state_root,
+        label="official campaign private state root",
+    )
+    ledger_root = _ensure_owner_only_directory(
+        private_root / "protocol-consumption",
+        label="official protocol-consumption ledger",
+    )
+    claim_path = ledger_root / f"{protocol_sha256}.json"
+    try:
+        _write_exclusive_owner_file(
+            claim_path,
+            {
+                "claimed_at": datetime.now(UTC).isoformat(),
+                "hostname": socket.gethostname(),
+                "output": str(output.resolve()),
+                "pid": os.getpid(),
+                "protocol_sha256": protocol_sha256,
+                "schema_version": 1,
+                "selection_sha256": selection_sha256,
+            },
+        )
+    except FileExistsError as exc:
+        raise RuntimeError(
+            "official execution protocol was already consumed; a different output path "
+            "cannot reuse a measured selection"
+        ) from exc
+    return claim_path
+
+
+def collect_official_repository_identity() -> dict[str, str]:
+    head = _checked_git(["rev-parse", "HEAD"], cwd=ROOT, label="official repository HEAD")
+    origin_main = _checked_git(
+        ["rev-parse", "refs/remotes/origin/main"],
+        cwd=ROOT,
+        label="official origin/main identity",
+    )
+    fetch_urls = _checked_git(
+        ["remote", "get-url", "--all", "origin"],
+        cwd=ROOT,
+        label="official origin fetch URL",
+    ).splitlines()
+    push_urls = _checked_git(
+        ["remote", "get-url", "--push", "--all", "origin"],
+        cwd=ROOT,
+        label="official origin push URL",
+    ).splitlines()
+    if len(fetch_urls) != 1 or len(push_urls) != 1:
+        raise RuntimeError("official origin must have one exact fetch and push URL")
+    return {
+        "head": head,
+        "origin_fetch_url": fetch_urls[0],
+        "origin_main_revision": origin_main,
+        "origin_push_url": push_urls[0],
+    }
+
+
+def validate_official_repository_identity(
+    holdout: ExecutionFrozenHoldout,
+) -> dict[str, str]:
+    identity = collect_official_repository_identity()
+    if (
+        identity["head"] != holdout.origin_main_revision
+        or identity["origin_main_revision"] != holdout.origin_main_revision
+        or identity["origin_fetch_url"] != holdout.origin_url
+        or identity["origin_push_url"] != holdout.origin_url
+    ):
+        raise ValueError(
+            "current HEAD, origin/main, or origin URL does not match the execution freeze"
+        )
+    return identity
+
+
 def collect_repository_state() -> dict[str, Any]:
     head = run_process(["git", "rev-parse", "HEAD"], cwd=ROOT, timeout=30)
     status = run_process(
@@ -5743,6 +6223,7 @@ def run_trial(
     forbidden_agent_reads: Mapping[str, Path] | None = None,
     official_holdout: ExecutionFrozenHoldout | None = None,
     official_runtime: OfficialVerifierRuntime | None = None,
+    official_source: OfficialSourceBundle | None = None,
     runtime_identity_before_arm: Mapping[str, str] | None = None,
     catalog_setup_charge_seconds: float = 0.0,
 ) -> dict[str, Any]:
@@ -5751,6 +6232,8 @@ def run_trial(
     official_evaluator = official_holdout is not None or official_runtime is not None
     if (official_holdout is None) != (official_runtime is None):
         raise ValueError("official holdout and runtime must be supplied together")
+    if official_evaluator != (official_source is not None):
+        raise ValueError("official execution requires one authenticated source bundle")
     if official_evaluator and not production_catalog:
         raise ValueError("official holdout verification requires the production catalog treatment")
     engine_name = PRODUCTION_CATALOG_ENGINE if production_catalog else "codex-controlled"
@@ -5781,7 +6264,14 @@ def run_trial(
     run_dir.mkdir(parents=True, exist_ok=True)
     workspace_setup_started = time.perf_counter()
     test_hash = (
-        prepare_workspace(
+        prepare_official_workspace(
+            scenario,
+            official_source,
+            workspace,
+            include_evaluator_test=False,
+        )
+        if official_source is not None
+        else prepare_workspace(
             scenario,
             cache,
             workspace,
@@ -7901,6 +8391,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--holdout-controls", type=Path)
     parser.add_argument("--holdout-environment", type=Path)
     parser.add_argument("--holdout-schedule", type=Path)
+    parser.add_argument("--holdout-source-map", type=Path)
     parser.add_argument("--swebench-dataset", type=Path)
     parser.add_argument("--swebench-checkout", type=Path)
     parser.add_argument("--swebench-python", type=Path)
@@ -7987,13 +8478,8 @@ def _validate_production_scenarios_path(path: Path, *, live: bool) -> Path:
     return resolved
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    independence_attestation: dict[str, str] | None = None
-    official_holdout: ExecutionFrozenHoldout | None = None
-    official_runtime: OfficialVerifierRuntime | None = None
-    official_runtime_identity_start: dict[str, str] | None = None
-    holdout_values = (
+def _holdout_argument_values(args: argparse.Namespace) -> tuple[object, ...]:
+    return (
         args.holdout_protocol,
         args.holdout_protocol_sha256,
         args.holdout_selection,
@@ -8003,12 +8489,44 @@ def main(argv: list[str] | None = None) -> int:
         args.holdout_controls,
         args.holdout_environment,
         args.holdout_schedule,
+        args.holdout_source_map,
         args.swebench_dataset,
         args.swebench_checkout,
         args.swebench_python,
         args.docker_cli,
         args.docker_host,
     )
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    holdout_values = _holdout_argument_values(args)
+    campaign_lock: OfficialCampaignLock | None = None
+    official_state_root: Path | None = None
+    if holdout_values and all(value is not None for value in holdout_values):
+        try:
+            official_state_root = _official_campaign_state_root()
+            campaign_lock = OfficialCampaignLock.acquire(official_state_root)
+        except RuntimeError as exc:
+            raise SystemExit(f"official campaign lock failed: {exc}") from exc
+    try:
+        return _run_main(args, official_state_root=official_state_root)
+    finally:
+        if campaign_lock is not None:
+            campaign_lock.release()
+
+
+def _run_main(
+    args: argparse.Namespace,
+    *,
+    official_state_root: Path | None,
+) -> int:
+    independence_attestation: dict[str, str] | None = None
+    official_holdout: ExecutionFrozenHoldout | None = None
+    official_runtime: OfficialVerifierRuntime | None = None
+    official_runtime_identity_start: dict[str, str] | None = None
+    official_repository_identity_start: dict[str, str] | None = None
+    holdout_values = _holdout_argument_values(args)
     holdout_requested = any(value is not None for value in holdout_values)
     if holdout_requested and not all(value is not None for value in holdout_values):
         raise SystemExit("official holdout execution requires every holdout and verifier argument")
@@ -8027,6 +8545,7 @@ def main(argv: list[str] | None = None) -> int:
             assert args.holdout_controls is not None
             assert args.holdout_environment is not None
             assert args.holdout_schedule is not None
+            assert args.holdout_source_map is not None
             official_holdout = load_execution_frozen_holdout(
                 protocol_path=args.holdout_protocol,
                 expected_protocol_sha256=args.holdout_protocol_sha256,
@@ -8037,6 +8556,7 @@ def main(argv: list[str] | None = None) -> int:
                 control_results_path=args.holdout_controls,
                 environment_path=args.holdout_environment,
                 schedule_path=args.holdout_schedule,
+                source_map_path=args.holdout_source_map,
             )
             args.scenarios = official_holdout.scenario_pack_path
             scenarios = list(official_holdout.scenarios)
@@ -8119,6 +8639,15 @@ def main(argv: list[str] | None = None) -> int:
         )
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
+    if official_holdout is not None:
+        if official_state_root is None:
+            raise SystemExit("official campaign state root was not acquired")
+        try:
+            official_repository_identity_start = validate_official_repository_identity(
+                official_holdout
+            )
+        except (RuntimeError, ValueError) as exc:
+            raise SystemExit(f"official repository authentication failed: {exc}") from exc
     run_name = f"ctx-ab-{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{secrets.token_hex(4)}"
     output = args.output or (
         PRODUCTION_PRIVATE_RUN_ROOT / run_name
@@ -8269,6 +8798,15 @@ def main(argv: list[str] | None = None) -> int:
             "holdout_environment_sha256": (
                 official_holdout.environment_sha256 if official_holdout is not None else None
             ),
+            "holdout_source_map_sha256": (
+                official_holdout.source_map_sha256 if official_holdout is not None else None
+            ),
+            "frozen_origin_url": (
+                official_holdout.origin_url if official_holdout is not None else None
+            ),
+            "frozen_origin_main_revision": (
+                official_holdout.origin_main_revision if official_holdout is not None else None
+            ),
             "frozen_schedule_sha256": (
                 official_holdout.schedule.sha256 if official_holdout is not None else None
             ),
@@ -8279,12 +8817,21 @@ def main(argv: list[str] | None = None) -> int:
     results: list[dict[str, Any]] = []
     scenarios_by_id = {scenario.id: scenario for scenario in scenarios}
     scenario_caches: dict[str, Path] = {}
+    scenario_sources: dict[str, OfficialSourceBundle] = {}
     for scenario in scenarios:
         cache: Path | None = None
         failed_cache_attempts: set[int] = set()
         for cache_attempt in range(args.retries + 1):
             try:
-                cache = ensure_repo_cache(scenario, args.cache_root)
+                if official_holdout is not None:
+                    source = official_holdout.source_bundles.get(scenario.repo_url)
+                    if source is None or source.base_commit != scenario.commit:
+                        raise RuntimeError("official source map omitted the frozen scenario")
+                    _authenticate_official_source_bundle(source)
+                    cache = source.bundle_path
+                    scenario_sources[scenario.id] = source
+                else:
+                    cache = ensure_repo_cache(scenario, args.cache_root)
                 if failed_cache_attempts:
                     incidents.resolve_attempts(
                         scenario=scenario.id,
@@ -8330,6 +8877,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 continue
         scenario_caches[scenario.id] = cache
+    protocol_claimed = False
     for assignment in schedule:
         scenario = scenarios_by_id[str(assignment["scenario"])]
         cache = scenario_caches.get(scenario.id)
@@ -8340,6 +8888,20 @@ def main(argv: list[str] | None = None) -> int:
                 failed_attempts: set[int] = set()
                 for retry in range(args.retries + 1):
                     attempt = (trial - 1) * (args.retries + 1) + retry + 1
+                    official_source = scenario_sources.get(scenario.id)
+                    if official_holdout is not None:
+                        try:
+                            repository_identity_before_arm = validate_official_repository_identity(
+                                official_holdout
+                            )
+                            if repository_identity_before_arm != official_repository_identity_start:
+                                raise ValueError(
+                                    "official repository identity changed after startup"
+                                )
+                        except (RuntimeError, ValueError) as exc:
+                            raise SystemExit(
+                                f"official pre-arm repository authentication failed: {exc}"
+                            ) from exc
                     try:
                         runtime_identity_before_arm: dict[str, str] | None = None
                         if official_holdout is not None:
@@ -8358,6 +8920,20 @@ def main(argv: list[str] | None = None) -> int:
                                     "runtime identity changed after the execution freeze was "
                                     "authenticated"
                                 )
+                            if not protocol_claimed:
+                                assert official_state_root is not None
+                                try:
+                                    claim_official_protocol(
+                                        state_root=official_state_root,
+                                        protocol_sha256=official_holdout.protocol_sha256,
+                                        selection_sha256=official_holdout.selection_sha256,
+                                        output=output,
+                                    )
+                                except RuntimeError as exc:
+                                    raise SystemExit(
+                                        f"official protocol claim failed: {exc}"
+                                    ) from exc
+                                protocol_claimed = True
                         if args.engine == "production-ctx-run":
                             result = run_production_trial(
                                 scenario,
@@ -8422,6 +8998,7 @@ def main(argv: list[str] | None = None) -> int:
                                 ),
                                 official_holdout=official_holdout,
                                 official_runtime=official_runtime,
+                                official_source=official_source,
                                 runtime_identity_before_arm=runtime_identity_before_arm,
                                 catalog_setup_charge_seconds=(
                                     catalog_setup_charge_seconds if arm != "baseline" else 0.0
@@ -8512,6 +9089,9 @@ def main(argv: list[str] | None = None) -> int:
     runtime_identity_matches = True
     runtime_identity_end: dict[str, str] | None = None
     runtime_identity_error: str | None = None
+    repository_identity_matches = True
+    repository_identity_end: dict[str, str] | None = None
+    repository_identity_error: str | None = None
     if official_holdout is not None:
         try:
             runtime_identity_end = validate_holdout_execution_conditions(
@@ -8530,6 +9110,18 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, ValueError) as exc:
             runtime_identity_matches = False
             runtime_identity_error = str(exc)
+        try:
+            repository_identity_end = validate_official_repository_identity(official_holdout)
+            repository_identity_matches = (
+                repository_identity_end == official_repository_identity_start
+            )
+            if not repository_identity_matches:
+                repository_identity_error = (
+                    "official repository identity changed before final attestation"
+                )
+        except (RuntimeError, ValueError) as exc:
+            repository_identity_matches = False
+            repository_identity_error = str(exc)
     if args.engine == PRODUCTION_CATALOG_ENGINE:
         for result in results:
             result["repository_state_matches_start_at_end"] = repository_state_matches
@@ -8537,11 +9129,16 @@ def main(argv: list[str] | None = None) -> int:
             result["holdout_inputs_match_start_at_end"] = holdout_inputs_match
             result["runtime_identity_matches_start_at_end"] = runtime_identity_matches
             result["runtime_identity_end"] = runtime_identity_end
+            result["official_repository_identity_matches_start_at_end"] = (
+                repository_identity_matches
+            )
+            result["official_repository_identity_end"] = repository_identity_end
         if (
             not repository_state_matches
             or not environment_manifest_matches
             or not holdout_inputs_match
             or not runtime_identity_matches
+            or not repository_identity_matches
         ):
             incidents.add(
                 scenario="control",
@@ -8566,6 +9163,10 @@ def main(argv: list[str] | None = None) -> int:
                         "holdout_inputs_match_start_at_end": holdout_inputs_match,
                         "runtime_identity_matches_start_at_end": runtime_identity_matches,
                         "runtime_identity_error": runtime_identity_error,
+                        "official_repository_identity_matches_start_at_end": (
+                            repository_identity_matches
+                        ),
+                        "official_repository_identity_error": repository_identity_error,
                     },
                     sort_keys=True,
                 ),
@@ -8585,6 +9186,7 @@ def main(argv: list[str] | None = None) -> int:
                 and environment_manifest_matches
                 and holdout_inputs_match
                 and runtime_identity_matches
+                and repository_identity_matches
             ):
                 result.seal()
     write_summary(output, results)

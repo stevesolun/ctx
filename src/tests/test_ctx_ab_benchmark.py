@@ -5930,6 +5930,23 @@ def _official_holdout_fixture(
         for index, scenario_id in enumerate(scenario_ids)
     ]
     scenario_pack = {"scenarios": scenario_rows, "version": 1}
+    source_root = tmp_path / "sources"
+    source_root.mkdir()
+    source_repositories: dict[str, dict[str, str]] = {}
+    for index, row in enumerate(scenario_rows):
+        bundle = source_root / f"repo-{index}.bundle"
+        bundle.write_bytes(f"fixture-bundle-{index}\n".encode())
+        bundle.chmod(0o600)
+        source_repositories[str(row["repo_url"])] = {
+            "base_commit": str(row["commit"]),
+            "bundle_path": f"sources/repo-{index}.bundle",
+            "bundle_sha256": hashlib.sha256(bundle.read_bytes()).hexdigest(),
+            "tree_sha1": f"{index + 101:040x}",
+        }
+    source_map = {
+        "repositories": source_repositories,
+        "schema_version": 1,
+    }
     selection = {
         "analysis_instance_ids": scenario_ids,
         "analysis_repository_map": {
@@ -6002,6 +6019,7 @@ def _official_holdout_fixture(
         "selection": encoded(selection),
         "scenario_pack": encoded(scenario_pack),
         "schedule": encoded(schedule),
+        "source_map": encoded(source_map),
     }
     selection_sha256 = hashlib.sha256(blobs["selection"]).hexdigest()
     scenario_pack_sha256 = hashlib.sha256(blobs["scenario_pack"]).hexdigest()
@@ -6111,6 +6129,8 @@ def _official_holdout_fixture(
         ).hexdigest(),
         "codex_binary_sha256": hashlib.sha256(codex_path.read_bytes()).hexdigest(),
         "provider_config_sha256": benchmark.codex_provider_config_sha256("openai"),
+        "origin_main_revision": "a" * 40,
+        "origin_url": "https://github.com/stevesolun/ctx.git",
         "revision": "a" * 40,
         "runtime_availability_sha256": hashlib.sha256(
             benchmark.PRODUCTION_RUNTIME_AVAILABILITY.read_bytes()
@@ -6123,6 +6143,7 @@ def _official_holdout_fixture(
         product_inputs=product_inputs,
         verifier_pins=verifier,
     )
+    acquisition_protocol["execution_inputs"]["source_map_sha256"] = None
     acquisition_protocol_bytes = freezer._canonical_bytes(
         acquisition_protocol,
         newline=True,
@@ -6139,6 +6160,7 @@ def _official_holdout_fixture(
         "reconstructed_test_attestation_sha256": hashlib.sha256(blobs["reconstructed"]).hexdigest(),
         "scenario_pack_sha256": scenario_pack_sha256,
         "selection_output_sha256": selection_sha256,
+        "source_map_sha256": hashlib.sha256(blobs["source_map"]).hexdigest(),
     }
     paths: dict[str, Path] = {}
     for name, data in blobs.items():
@@ -6159,8 +6181,151 @@ def _official_holdout_fixture(
         control_results_path=paths["controls"],
         environment_path=paths["environment"],
         schedule_path=paths["schedule"],
+        source_map_path=paths["source_map"],
     )
     return loaded, paths
+
+
+def test_official_workspace_cannot_access_future_gold_commit(
+    tmp_path: Path,
+) -> None:
+    source_repo = tmp_path / "source"
+    source_repo.mkdir()
+
+    def git(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", *args],
+            cwd=source_repo,
+            check=check,
+            capture_output=True,
+            text=True,
+        )
+
+    git("init", "-b", "main")
+    git("config", "user.email", "benchmark@example.invalid")
+    git("config", "user.name", "Benchmark")
+    feature = source_repo / "feature.py"
+    feature.write_text("VALUE = 1\n", encoding="utf-8")
+    git("add", "feature.py")
+    git("commit", "-m", "base")
+    base_commit = git("rev-parse", "HEAD").stdout.strip()
+    base_tree = git("rev-parse", "HEAD^{tree}").stdout.strip()
+    bundle = tmp_path / "base.bundle"
+    git("bundle", "create", str(bundle), "--all")
+    bundle.chmod(0o600)
+    feature.write_text("VALUE = 2  # gold\n", encoding="utf-8")
+    git("commit", "-am", "future gold")
+    future_commit = git("rev-parse", "HEAD").stdout.strip()
+    template = benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0]
+    scenario = replace(
+        template,
+        repo_url="https://github.com/owner/repo.git",
+        commit=base_commit,
+    )
+    source = benchmark.OfficialSourceBundle(
+        canonical_url=scenario.repo_url,
+        base_commit=base_commit,
+        bundle_path=bundle,
+        bundle_sha256=hashlib.sha256(bundle.read_bytes()).hexdigest(),
+        tree_sha1=base_tree,
+    )
+    workspace = tmp_path / "workspace"
+
+    benchmark.prepare_official_workspace(
+        scenario,
+        source,
+        workspace,
+        include_evaluator_test=False,
+    )
+
+    assert (
+        subprocess.run(
+            ["git", "cat-file", "-e", f"{future_commit}^{{commit}}"],
+            cwd=workspace,
+            check=False,
+            capture_output=True,
+        ).returncode
+        != 0
+    )
+    assert (
+        future_commit
+        not in subprocess.run(
+            ["git", "log", "--all", "--format=%H"],
+            cwd=workspace,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    )
+    assert (
+        subprocess.run(
+            ["git", "remote"],
+            cwd=workspace,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        == ""
+    )
+
+
+def test_official_protocol_claim_is_one_shot(tmp_path: Path) -> None:
+    state_root = tmp_path / "private"
+    protocol_sha256 = "1" * 64
+    first = benchmark.claim_official_protocol(
+        state_root=state_root,
+        protocol_sha256=protocol_sha256,
+        selection_sha256="2" * 64,
+        output=tmp_path / "first",
+    )
+    original = first.read_bytes()
+
+    with pytest.raises(RuntimeError, match="already consumed"):
+        benchmark.claim_official_protocol(
+            state_root=state_root,
+            protocol_sha256=protocol_sha256,
+            selection_sha256="2" * 64,
+            output=tmp_path / "second",
+        )
+
+    assert first.read_bytes() == original
+
+
+def test_official_campaign_lock_rejects_concurrency_and_releases(
+    tmp_path: Path,
+) -> None:
+    state_root = tmp_path / "private"
+    first = benchmark.OfficialCampaignLock.acquire(state_root)
+
+    with pytest.raises(RuntimeError, match="already held"):
+        benchmark.OfficialCampaignLock.acquire(state_root)
+
+    assert first.path.is_file()
+    first.release()
+    assert not first.path.exists()
+    second = benchmark.OfficialCampaignLock.acquire(state_root)
+    second.release()
+    assert not second.path.exists()
+
+
+def test_origin_main_drift_fails_pre_arm_identity_check(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    holdout, _ = _official_holdout_fixture(tmp_path)
+    monkeypatch.setattr(
+        benchmark,
+        "collect_official_repository_identity",
+        lambda: {
+            "head": holdout.origin_main_revision,
+            "origin_fetch_url": holdout.origin_url,
+            "origin_main_revision": "b" * 40,
+            "origin_push_url": holdout.origin_url,
+        },
+    )
+
+    with pytest.raises(ValueError, match="origin/main"):
+        benchmark.validate_official_repository_identity(holdout)
 
 
 def test_execution_frozen_holdout_authenticates_all_inputs_and_balanced_schedule(
@@ -6205,8 +6370,11 @@ def test_execution_frozen_holdout_authenticates_all_inputs_and_balanced_schedule
             "controls",
             "environment",
             "schedule",
+            "source_map",
         )
-    }
+    } | {source.bundle_path for source in holdout.source_bundles.values()}
+    assert holdout.origin_url == "https://github.com/stevesolun/ctx.git"
+    assert holdout.origin_main_revision == "a" * 40
 
 
 def test_execution_frozen_holdout_loads_from_documented_module_mode(
@@ -6337,6 +6505,7 @@ def test_execution_frozen_holdout_requires_python_dependency_identity(
             control_results_path=paths["controls"],
             environment_path=paths["environment"],
             schedule_path=paths["schedule"],
+            source_map_path=paths["source_map"],
         )
     assert holdout.execution_conditions["python"]["dependencies_sha256"]
 
@@ -6401,6 +6570,7 @@ def test_execution_frozen_holdout_rejects_invalid_acquisition_provenance(
             control_results_path=paths["controls"],
             environment_path=paths["environment"],
             schedule_path=paths["schedule"],
+            source_map_path=paths["source_map"],
         )
     assert holdout.acquisition_protocol_sha256 != "9" * 64
 
@@ -6436,6 +6606,7 @@ def test_execution_frozen_holdout_rejects_rehashed_claim_gate_drift(
             control_results_path=paths["controls"],
             environment_path=paths["environment"],
             schedule_path=paths["schedule"],
+            source_map_path=paths["source_map"],
         )
 
 
@@ -6468,6 +6639,7 @@ def test_execution_frozen_holdout_rejects_noncanonical_acquisition_digest(
             control_results_path=paths["controls"],
             environment_path=paths["environment"],
             schedule_path=paths["schedule"],
+            source_map_path=paths["source_map"],
         )
 
 
@@ -6489,6 +6661,7 @@ def test_execution_frozen_holdout_rejects_mutated_materialization_input(
             control_results_path=paths["controls"],
             environment_path=paths["environment"],
             schedule_path=paths["schedule"],
+            source_map_path=paths["source_map"],
         )
 
 
@@ -6525,6 +6698,7 @@ def test_execution_frozen_holdout_rejects_incomplete_evaluator_closure(
             control_results_path=paths["controls"],
             environment_path=paths["environment"],
             schedule_path=paths["schedule"],
+            source_map_path=paths["source_map"],
         )
     assert holdout.image_ids
 
@@ -6663,8 +6837,17 @@ def test_authenticated_freeze_drives_all_thirty_pairs_and_sixty_arms(
     run_root = tmp_path / "runs"
     output = run_root / "confirmatory"
     cache_root = tmp_path / "cache"
+    state_root = tmp_path / "private-state"
+    repository_identity_checks: list[dict[str, str]] = []
+    repository_identity = {
+        "head": holdout.origin_main_revision,
+        "origin_fetch_url": holdout.origin_url,
+        "origin_main_revision": holdout.origin_main_revision,
+        "origin_push_url": holdout.origin_url,
+    }
 
     monkeypatch.setattr(benchmark, "PRODUCTION_PRIVATE_RUN_ROOT", run_root)
+    monkeypatch.setattr(benchmark, "_official_campaign_state_root", lambda: state_root)
     monkeypatch.setattr(
         benchmark,
         "_validate_production_scenarios_path",
@@ -6705,6 +6888,16 @@ def test_authenticated_freeze_drives_all_thirty_pairs_and_sixty_arms(
             "tracked_diff_sha256": "d" * 64,
         },
     )
+
+    def record_repository_identity() -> dict[str, str]:
+        repository_identity_checks.append(dict(repository_identity))
+        return dict(repository_identity)
+
+    monkeypatch.setattr(
+        benchmark,
+        "collect_official_repository_identity",
+        record_repository_identity,
+    )
     monkeypatch.setattr(
         benchmark,
         "validate_runtime_pack_scenario_independence",
@@ -6734,11 +6927,11 @@ def test_authenticated_freeze_drives_all_thirty_pairs_and_sixty_arms(
         "verify_scenario_independence_attestation",
         lambda *_args, **_kwargs: None,
     )
-    monkeypatch.setattr(
-        benchmark,
-        "ensure_repo_cache",
-        lambda scenario, _cache_root: tmp_path / "repos" / scenario.id,
-    )
+
+    def reject_repo_cache(*_args: Any, **_kwargs: Any) -> Path:
+        raise AssertionError("official execution must not use the network cache")
+
+    monkeypatch.setattr(benchmark, "ensure_repo_cache", reject_repo_cache)
 
     def write_manifest(**kwargs: Any) -> dict[str, Any]:
         manifest = {
@@ -6787,13 +6980,15 @@ def test_authenticated_freeze_drives_all_thirty_pairs_and_sixty_arms(
         forbidden_agent_reads: Any,
         official_holdout: Any,
         official_runtime: Any,
+        official_source: Any,
         runtime_identity_before_arm: Any,
         catalog_setup_charge_seconds: float,
     ) -> dict[str, Any]:
         assert treatment_level == arm
         assert attempt == trial
         assert retry == 0
-        assert cache == tmp_path / "repos" / scenario.id
+        assert official_source == holdout.source_bundles[scenario.repo_url]
+        assert cache == official_source.bundle_path
         assert output == run_root / "confirmatory"
         assert codex == sys.executable
         assert model == "gpt-5.5"
@@ -6867,6 +7062,8 @@ def test_authenticated_freeze_drives_all_thirty_pairs_and_sixty_arms(
             str(paths["environment"]),
             "--holdout-schedule",
             str(paths["schedule"]),
+            "--holdout-source-map",
+            str(paths["source_map"]),
             *[
                 value
                 for option, path in verifier_inputs.items()
@@ -6886,6 +7083,7 @@ def test_authenticated_freeze_drives_all_thirty_pairs_and_sixty_arms(
     assert calls == expected_calls
     assert len(calls) == 60
     assert len(runtime_identity_checks) == 62
+    assert len(repository_identity_checks) == 62
     assert len(dependency_identity_checks) == 62
     assert set(dependency_identity_checks) == {sys.executable}
     assert all(identity == runtime_identity_checks[0] for identity in runtime_identity_checks)
@@ -6897,6 +7095,8 @@ def test_authenticated_freeze_drives_all_thirty_pairs_and_sixty_arms(
     assert public_summary["benefit_verdict"] == "not_beneficial"
     assert public_summary["official_repository_claim"] == report["official_repository_claim"]
     assert list(csv.DictReader((output / "incidents.csv").open())) == []
+    assert not (state_root / "runtime-guard" / "campaign.lock").exists()
+    assert (state_root / "protocol-consumption" / f"{holdout.protocol_sha256}.json").is_file()
 
 
 def test_confirmatory_dual_model_failure_is_valid_honest_negative(
