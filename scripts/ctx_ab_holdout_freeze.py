@@ -1094,6 +1094,8 @@ def freeze_protocol(
 
     protocol = _json_object(protocol_bytes, label="protocol")
     pins = _validated_protocol(protocol)
+    if protocol_bytes != _canonical_bytes(protocol, newline=True):
+        raise FreezeError("acquisition protocol must use canonical JSON bytes")
     input_paths = {
         "selection": selection_path,
         "scenario_pack": scenario_pack_path,

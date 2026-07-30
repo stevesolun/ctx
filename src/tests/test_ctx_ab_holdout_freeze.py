@@ -241,9 +241,17 @@ def _fixture_documents() -> dict[str, dict[str, Any]]:
     }
 
 
-def _write_json(path: Path, value: object, *, canonical: bool = True) -> Path:
+def _write_json(
+    path: Path,
+    value: object,
+    *,
+    canonical: bool = True,
+    newline: bool = False,
+) -> Path:
     path.write_bytes(
-        _canonical(value) if canonical else (json.dumps(value, indent=2) + "\n").encode()
+        _canonical(value, newline=newline)
+        if canonical
+        else (json.dumps(value, indent=2) + "\n").encode()
     )
     path.chmod(0o600)
     return path
@@ -263,7 +271,7 @@ def _fixture_paths(
         "protocol_path": _write_json(
             tmp_path / "protocol.json",
             documents["protocol"],
-            canonical=False,
+            newline=True,
         ),
         "selection_path": _write_json(
             private / "selection.json",
@@ -668,6 +676,24 @@ def test_freeze_authenticates_acquisition_bytes_before_downstream_inputs(
             paths,
             expected_acquisition_protocol_sha256=expected,
         )
+
+    assert not paths["schedule_path"].exists()
+    assert not paths["output_path"].exists()
+
+
+def test_freeze_rejects_noncanonical_acquisition_protocol_bytes(
+    tmp_path: Path,
+) -> None:
+    documents, paths = _fixture_paths(tmp_path)
+    paths["protocol_path"].write_bytes(
+        (json.dumps(documents["protocol"], indent=2) + "\n").encode()
+    )
+
+    with pytest.raises(
+        freezer.FreezeError,
+        match="acquisition protocol must use canonical JSON bytes",
+    ):
+        _freeze(paths)
 
     assert not paths["schedule_path"].exists()
     assert not paths["output_path"].exists()

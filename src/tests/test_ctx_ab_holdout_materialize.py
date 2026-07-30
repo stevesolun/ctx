@@ -143,6 +143,10 @@ def _canonical(value: object) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
 
 
+def _canonical_acquisition(value: object) -> bytes:
+    return _canonical(value) + b"\n"
+
+
 def _executable(path: Path) -> Path:
     path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     path.chmod(0o700)
@@ -213,7 +217,7 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Fixture:
         protocol,
     )
     protocol_path = tmp_path / "protocol.json"
-    protocol_path.write_bytes(_canonical(protocol))
+    protocol_path.write_bytes(_canonical_acquisition(protocol))
     selection_path = tmp_path / "selection.json"
     selection_path.write_bytes(_canonical(selection))
     source_map_path = tmp_path / "sources.json"
@@ -717,7 +721,7 @@ def test_requires_exactly_ten_repositories_before_verifier_execution(
             "eligible_repositories_required": 9,
         }
     )
-    fixture.protocol_path.write_bytes(_canonical(fixture.protocol))
+    fixture.protocol_path.write_bytes(_canonical_acquisition(fixture.protocol))
     fixture.selection = holdout.select_rows(
         [holdout.evaluate_row(row, fixture.protocol) for row in fixture.rows],
         fixture.protocol,
@@ -811,7 +815,7 @@ def test_requires_exact_frozen_timeout_before_private_work(
     fixture = _fixture(tmp_path, monkeypatch)
     double = _install_verifier(fixture, monkeypatch)
     fixture.protocol["timeouts"]["control_verification_seconds"] = 899
-    fixture.protocol_path.write_bytes(_canonical(fixture.protocol))
+    fixture.protocol_path.write_bytes(_canonical_acquisition(fixture.protocol))
 
     with pytest.raises(
         materializer.MaterializationError,
@@ -910,7 +914,7 @@ def test_requires_complete_pinned_verifier_identity_before_private_work(
     fixture = _fixture(tmp_path, monkeypatch)
     double = _install_verifier(fixture, monkeypatch)
     del fixture.protocol[materializer.VERIFIER_PROTOCOL_KEY]["bridge_sha256"]
-    fixture.protocol_path.write_bytes(_canonical(fixture.protocol))
+    fixture.protocol_path.write_bytes(_canonical_acquisition(fixture.protocol))
 
     with pytest.raises(materializer.MaterializationError, match="unsupported shape"):
         _run(fixture)
@@ -934,7 +938,7 @@ def test_rejects_protocol_shapes_the_freezer_would_reject_before_private_work(
     fixture = _fixture(tmp_path, monkeypatch)
     double = _install_verifier(fixture, monkeypatch)
     mutate(fixture.protocol)
-    fixture.protocol_path.write_bytes(_canonical(fixture.protocol))
+    fixture.protocol_path.write_bytes(_canonical_acquisition(fixture.protocol))
 
     with pytest.raises(materializer.MaterializationError, match="fresh supported V2"):
         _run(fixture)
@@ -950,7 +954,7 @@ def test_cli_failure_suppresses_private_identifiers_and_tasks(
 ) -> None:
     fixture = _fixture(tmp_path, monkeypatch)
     fixture.protocol["timeouts"]["control_verification_seconds"] = 899
-    fixture.protocol_path.write_bytes(_canonical(fixture.protocol))
+    fixture.protocol_path.write_bytes(_canonical_acquisition(fixture.protocol))
     with pytest.raises(SystemExit) as raised:
         materializer.main(
             [
