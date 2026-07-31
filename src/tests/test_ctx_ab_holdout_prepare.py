@@ -35,6 +35,13 @@ PINS = {
     "run_evaluation_sha256": "7" * 64,
     "schema_version": 1,
 }
+MODEL_REASONING_EFFORT = "high"
+MODEL_AUTO_COMPACT_TOKEN_LIMIT = 200_000
+CODEX_RUNTIME_CONTRACT = {
+    "arms": ["baseline", "ctx-light"],
+    "model_auto_compact_token_limit": MODEL_AUTO_COMPACT_TOKEN_LIMIT,
+    "model_reasoning_effort": MODEL_REASONING_EFFORT,
+}
 
 
 def _canonical(value: object, *, newline: bool = False) -> bytes:
@@ -1287,6 +1294,8 @@ def test_write_environment_matches_freezer_contract(
         expected_acquisition_protocol_sha256=_sha256(protocol_path.read_bytes()),
         output_path=output,
         model="gpt-5.5",
+        model_reasoning_effort=MODEL_REASONING_EFFORT,
+        model_auto_compact_token_limit=MODEL_AUTO_COMPACT_TOKEN_LIMIT,
         provider="openai",
         agent_timeout_seconds=900,
         codex_path=tmp_path / "codex",
@@ -1304,6 +1313,7 @@ def test_write_environment_matches_freezer_contract(
     assert document["limits"] == {
         "agent_timeout_seconds": 900,
         "arms": ["baseline", "ctx-light"],
+        "catalog_cache_hit": False,
         "measured_concurrency": 1,
         "pair_count": 30,
         "retries": 0,
@@ -1311,7 +1321,10 @@ def test_write_environment_matches_freezer_contract(
         "task_count": 10,
         "trials_per_scenario": 3,
     }
-    assert document["codex"] == {"version": "codex 1.2.3"}
+    assert document["codex"] == {
+        "runtime_contract": CODEX_RUNTIME_CONTRACT,
+        "version": "codex 1.2.3",
+    }
     assert document["python"] == {
         "dependencies_sha256": python.dependencies_sha256,
         "executable_sha256": python.sha256,
@@ -1362,6 +1375,8 @@ def test_write_environment_rejects_runtime_drift(
             expected_acquisition_protocol_sha256=_sha256(protocol_path.read_bytes()),
             output_path=output,
             model="gpt-5.5",
+            model_reasoning_effort=MODEL_REASONING_EFFORT,
+            model_auto_compact_token_limit=MODEL_AUTO_COMPACT_TOKEN_LIMIT,
             provider="openai",
             agent_timeout_seconds=900,
             codex_path=tmp_path / "codex",
@@ -1382,6 +1397,35 @@ def test_write_environment_rejects_noncanonical_model() -> None:
             expected_acquisition_protocol_sha256="0" * 64,
             output_path=Path("/environment"),
             model=" gpt-5.5 ",
+            model_reasoning_effort=MODEL_REASONING_EFFORT,
+            model_auto_compact_token_limit=MODEL_AUTO_COMPACT_TOKEN_LIMIT,
+            provider="openai",
+            agent_timeout_seconds=900,
+            codex_path=Path("/codex"),
+            execution_python=Path("/python"),
+            swebench_checkout=Path("/swebench"),
+            swebench_python=Path("/swebench-python"),
+            docker_cli=Path("/docker"),
+            docker_host="unix:///tmp/docker.sock",
+        )
+
+
+@pytest.mark.parametrize(
+    ("reasoning_effort", "auto_compact_token_limit"),
+    [("HIGH", MODEL_AUTO_COMPACT_TOKEN_LIMIT), (MODEL_REASONING_EFFORT, 0)],
+)
+def test_write_environment_rejects_noncanonical_codex_runtime_contract(
+    reasoning_effort: str,
+    auto_compact_token_limit: int,
+) -> None:
+    with pytest.raises(prepare.PrepareError, match="runtime contract"):
+        prepare.write_environment(
+            protocol_path=Path("/protocol"),
+            expected_acquisition_protocol_sha256="0" * 64,
+            output_path=Path("/environment"),
+            model="gpt-5.5",
+            model_reasoning_effort=reasoning_effort,
+            model_auto_compact_token_limit=auto_compact_token_limit,
             provider="openai",
             agent_timeout_seconds=900,
             codex_path=Path("/codex"),

@@ -222,6 +222,7 @@ LIMIT_KEYS = frozenset(
     {
         "agent_timeout_seconds",
         "arms",
+        "catalog_cache_hit",
         "measured_concurrency",
         "pair_count",
         "retries",
@@ -1168,7 +1169,11 @@ def _validate_environment(
         raise FreezeError("execution environment identity is invalid")
     _exact_keys(limits, LIMIT_KEYS, label="execution limits")
     _exact_keys(evaluator, frozenset({"backend", "pins_sha256"}), label="evaluator identity")
-    _exact_keys(codex, frozenset({"version"}), label="Codex identity")
+    _exact_keys(
+        codex,
+        frozenset({"runtime_contract", "version"}),
+        label="Codex identity",
+    )
     _exact_keys(
         python,
         frozenset({"dependencies_sha256", "executable_sha256", "version"}),
@@ -1181,6 +1186,7 @@ def _validate_environment(
         or limits.get("trials_per_scenario") != 3
         or limits.get("retries") != 0
         or limits.get("arms") != list(ARMS)
+        or limits.get("catalog_cache_hit") is not False
         or limits.get("task_count") != 10
         or limits.get("pair_count") != 30
         or limits.get("measured_concurrency") != 1
@@ -1190,6 +1196,14 @@ def _validate_environment(
         or not 0 < float(timeout) <= 3600
     ):
         raise FreezeError("execution environment values are unsupported")
+    try:
+        normalized_runtime_contract = benchmark.normalize_codex_runtime_contract(
+            codex.get("runtime_contract")
+        )
+    except ValueError as exc:
+        raise FreezeError("Codex runtime contract is invalid") from exc
+    if codex.get("runtime_contract") != normalized_runtime_contract:
+        raise FreezeError("Codex runtime contract is not normalized")
     _require_text(environment.get("model"), label="model")
     provider = _require_text(environment.get("provider"), label="provider")
     if provider != "openai":

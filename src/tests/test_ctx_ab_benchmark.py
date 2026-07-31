@@ -31,6 +31,11 @@ assert SPEC is not None and SPEC.loader is not None
 benchmark = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = benchmark
 SPEC.loader.exec_module(benchmark)
+CODEX_RUNTIME_CONTRACT = {
+    "arms": ["baseline", "ctx-light"],
+    "model_auto_compact_token_limit": 200_000,
+    "model_reasoning_effort": "high",
+}
 
 
 def _pid_is_running(pid: int) -> bool:
@@ -2086,6 +2091,8 @@ def test_production_catalog_cache_uses_shipped_installer_once(
     second = benchmark.prepare_production_catalog(cache_root, archive=archive)
 
     assert len(install_calls) == 1
+    assert first.cache_hit is False
+    assert second.cache_hit is True
     assert first.wiki_dir == second.wiki_dir
     assert first.provenance["installer"] == "ctx_init.build_graph"
     assert first.provenance["install_mode"] == "runtime"
@@ -2112,6 +2119,7 @@ def test_production_catalog_cache_uses_shipped_installer_once(
     _write_runtime_availability(availability, content=runtime_content, version=2)
     third = benchmark.prepare_production_catalog(cache_root, archive=archive)
     assert len(install_calls) == 2
+    assert third.cache_hit is False
     assert third.wiki_dir != first.wiki_dir
     benchmark._remove_catalog_staging(cache_root / "production-catalog")
 
@@ -3300,6 +3308,51 @@ def test_invalid_treatment_fails_before_workspace_or_codex(
     assert not (tmp_path / "output").exists()
 
 
+def test_official_arm_mismatch_fails_before_workspace_or_codex(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    holdout_root = tmp_path / "holdout"
+    holdout_root.mkdir()
+    holdout, _ = _official_holdout_fixture(holdout_root)
+    scenario = holdout.scenarios[0]
+
+    def side_effect_forbidden(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("arm mismatch must fail before external work")
+
+    monkeypatch.setattr(benchmark, "prepare_official_workspace", side_effect_forbidden)
+    monkeypatch.setattr(benchmark, "run_process", side_effect_forbidden)
+
+    with pytest.raises(ValueError, match="arm does not match"):
+        benchmark.run_trial(
+            scenario,
+            arm="baseline",
+            treatment_level="ctx-light",
+            attempt=1,
+            trial=1,
+            retry=0,
+            cache=tmp_path / "cache",
+            output=tmp_path / "output",
+            codex="codex",
+            model="gpt-5.5",
+            timeout=900,
+            dry_run=False,
+            incidents=benchmark.IncidentLog(tmp_path / "incidents.csv"),
+            catalog_snapshot=benchmark.CatalogSnapshot(tmp_path / "catalog", {}),
+            official_holdout=holdout,
+            official_runtime=benchmark.OfficialVerifierRuntime(
+                dataset_path=tmp_path / "dataset.jsonl",
+                swebench_checkout=tmp_path / "swebench",
+                swebench_python=tmp_path / "swebench-python",
+                docker_cli=tmp_path / "docker",
+                docker_host="unix:///tmp/docker.sock",
+            ),
+            official_source=holdout.source_bundles[scenario.repo_url],
+        )
+
+    assert not (tmp_path / "output").exists()
+
+
 def test_codex_controlled_dry_run_is_accepted_as_complete() -> None:
     result = {
         "scenario": "scenario-a",
@@ -3408,10 +3461,20 @@ def test_aggregation_excludes_missing_and_error_eligibility(tmp_path: Path) -> N
 
 def test_codex_command_keeps_control_flags_equal(tmp_path: Path) -> None:
     baseline = benchmark.codex_command(
-        codex="codex", model="model", workspace=tmp_path, prompt="task", with_ctx=False
+        codex="codex",
+        model="model",
+        workspace=tmp_path,
+        prompt="task",
+        with_ctx=False,
+        runtime_contract=CODEX_RUNTIME_CONTRACT,
     )
     treated = benchmark.codex_command(
-        codex="codex", model="model", workspace=tmp_path, prompt="task", with_ctx=True
+        codex="codex",
+        model="model",
+        workspace=tmp_path,
+        prompt="task",
+        with_ctx=True,
+        runtime_contract=CODEX_RUNTIME_CONTRACT,
     )
 
     assert treated[treated.index("exec") :] == baseline[baseline.index("exec") :]
@@ -3419,6 +3482,9 @@ def test_codex_command_keeps_control_flags_equal(tmp_path: Path) -> None:
     assert treated[:5] == ["codex", "-a", "never", "--enable", "multi_agent"]
     assert baseline[5:7] == ["-c", 'web_search="disabled"']
     assert 'model_provider="openai"' in baseline
+    for command in (baseline, treated):
+        assert command.count('model_reasoning_effort="high"') == 1
+        assert command.count("model_auto_compact_token_limit=200000") == 1
     assert "--ephemeral" in baseline
     assert "--ignore-user-config" in baseline
     assert "ctx-wiki" not in " ".join(baseline)
@@ -3436,6 +3502,17 @@ def test_codex_command_keeps_control_flags_equal(tmp_path: Path) -> None:
             prompt="task",
             with_ctx=False,
             provider="other",
+        )
+
+    mismatched = {**CODEX_RUNTIME_CONTRACT, "arms": ["ctx-light", "baseline"]}
+    with pytest.raises(ValueError, match="arm mismatch"):
+        benchmark.codex_command(
+            codex="codex",
+            model="model",
+            workspace=tmp_path,
+            prompt="task",
+            with_ctx=False,
+            runtime_contract=mismatched,
         )
 
 
@@ -6097,7 +6174,10 @@ def _official_holdout_fixture(
         "verifier_pins_sha256": verifier_sha256,
     }
     environment = {
-        "codex": {"version": "test"},
+        "codex": {
+            "runtime_contract": dict(CODEX_RUNTIME_CONTRACT),
+            "version": "test",
+        },
         "evaluator": {
             "backend": benchmark.OFFICIAL_HOLDOUT_BACKEND,
             "pins_sha256": verifier_sha256,
@@ -6105,6 +6185,7 @@ def _official_holdout_fixture(
         "limits": {
             "agent_timeout_seconds": 900.0,
             "arms": ["baseline", "ctx-light"],
+            "catalog_cache_hit": False,
             "measured_concurrency": 1,
             "pair_count": 30,
             "retries": 0,
@@ -6488,7 +6569,7 @@ def test_execution_frozen_holdout_authenticates_all_inputs_and_balanced_schedule
     assert len(holdout.schedule.assignments) == 30
     assert sum(row["arms"][0] == "baseline" for row in holdout.schedule.assignments) == 15
     assert sum(row["arms"][0] == "ctx-light" for row in holdout.schedule.assignments) == 15
-    benchmark.validate_holdout_execution_conditions(
+    runtime_identity = benchmark.validate_holdout_execution_conditions(
         holdout,
         model="gpt-5.5",
         timeout=900.0,
@@ -6497,6 +6578,9 @@ def test_execution_frozen_holdout_authenticates_all_inputs_and_balanced_schedule
         retries=0,
         scenario_filters=[],
         codex=sys.executable,
+    )
+    assert runtime_identity["codex_runtime_contract_sha256"] == (
+        benchmark.codex_runtime_contract_sha256(CODEX_RUNTIME_CONTRACT)
     )
     assert (
         holdout.codex_binary_sha256 == hashlib.sha256(Path(sys.executable).read_bytes()).hexdigest()
@@ -6524,6 +6608,16 @@ def test_execution_frozen_holdout_authenticates_all_inputs_and_balanced_schedule
     } | {source.bundle_path for source in holdout.source_bundles.values()}
     assert holdout.origin_url == "https://github.com/stevesolun/ctx.git"
     assert holdout.origin_main_revision == "a" * 40
+
+
+def test_official_catalog_requires_the_frozen_cold_cache_contract(tmp_path: Path) -> None:
+    holdout, _ = _official_holdout_fixture(tmp_path)
+    cold = benchmark.CatalogSnapshot(tmp_path / "cold", {}, cache_hit=False)
+    warm = benchmark.CatalogSnapshot(tmp_path / "warm", {}, cache_hit=True)
+
+    benchmark.validate_official_catalog_cache_contract(holdout, cold)
+    with pytest.raises(ValueError, match="cold catalog cache"):
+        benchmark.validate_official_catalog_cache_contract(holdout, warm)
 
 
 def test_execution_frozen_holdout_loads_from_documented_module_mode(
@@ -6657,6 +6751,40 @@ def test_execution_frozen_holdout_requires_python_dependency_identity(
             source_map_path=paths["source_map"],
         )
     assert holdout.execution_conditions["python"]["dependencies_sha256"]
+
+
+def test_execution_frozen_holdout_rejects_authenticated_runtime_arm_mismatch(
+    tmp_path: Path,
+) -> None:
+    _, paths = _official_holdout_fixture(tmp_path)
+    environment = json.loads(paths["environment"].read_text())
+    environment["codex"]["runtime_contract"]["arms"] = ["ctx-light", "baseline"]
+    paths["environment"].write_text(
+        json.dumps(environment, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    protocol = json.loads(paths["protocol"].read_text())
+    protocol["execution_inputs"]["execution_environment_sha256"] = hashlib.sha256(
+        paths["environment"].read_bytes()
+    ).hexdigest()
+    paths["protocol"].write_text(
+        json.dumps(protocol, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="runtime contract is invalid"):
+        benchmark.load_execution_frozen_holdout(
+            protocol_path=paths["protocol"],
+            expected_protocol_sha256=hashlib.sha256(paths["protocol"].read_bytes()).hexdigest(),
+            selection_path=paths["selection"],
+            scenario_pack_path=paths["scenario_pack"],
+            collision_path=paths["collision"],
+            reconstructed_path=paths["reconstructed"],
+            control_results_path=paths["controls"],
+            environment_path=paths["environment"],
+            schedule_path=paths["schedule"],
+            source_map_path=paths["source_map"],
+        )
 
 
 def test_python_dependency_identity_is_canonical_and_fail_closed(
@@ -6862,6 +6990,9 @@ def _official_result_rows(
     rows: list[dict[str, Any]] = []
     runtime_identity = {
         "codex_binary_sha256": holdout.codex_binary_sha256,
+        "codex_runtime_contract_sha256": benchmark.codex_runtime_contract_sha256(
+            CODEX_RUNTIME_CONTRACT
+        ),
         "codex_version": "test",
         "provider": "openai",
         "provider_config_sha256": holdout.provider_config_sha256,
@@ -6877,6 +7008,7 @@ def _official_result_rows(
                         "agent_timeout_seconds": 900.0,
                         "arm": arm,
                         "cached_input_tokens": 20,
+                        "catalog_cache_hit": False,
                         "context_delivery_verified": arm == "ctx-light",
                         "delivered_prompt_sha256": "b" * 64,
                         "development_seconds": 10.0,
@@ -6892,6 +7024,9 @@ def _official_result_rows(
                         "frozen_scenario_sha256": holdout.scenario_sha256[scenario.id],
                         "frozen_schedule_sha256": holdout.schedule.sha256,
                         "frozen_codex_binary_sha256": holdout.codex_binary_sha256,
+                        "codex_runtime_contract_sha256": (
+                            benchmark.codex_runtime_contract_sha256(CODEX_RUNTIME_CONTRACT)
+                        ),
                         "frozen_provider": "openai",
                         "frozen_provider_config_sha256": holdout.provider_config_sha256,
                         "harness_total_seconds": 12.0,
@@ -7153,6 +7288,9 @@ def test_authenticated_freeze_drives_all_thirty_pairs_and_sixty_arms(
         assert official_runtime.docker_cli == tmp_path / "docker"
         assert official_runtime.docker_host == "unix:///private/docker.sock"
         assert runtime_identity_before_arm["codex_binary_sha256"] == holdout.codex_binary_sha256
+        assert runtime_identity_before_arm["codex_runtime_contract_sha256"] == (
+            benchmark.codex_runtime_contract_sha256(CODEX_RUNTIME_CONTRACT)
+        )
         assert runtime_identity_before_arm["provider_config_sha256"] == (
             holdout.provider_config_sha256
         )
@@ -7242,7 +7380,16 @@ def test_authenticated_freeze_drives_all_thirty_pairs_and_sixty_arms(
     assert report["product_benefit_verdict"] == "not_beneficial"
     public_summary = json.loads((output / "public-summary.json").read_text())
     assert public_summary["benefit_verdict"] == "not_beneficial"
-    assert public_summary["official_repository_claim"] == report["official_repository_claim"]
+    assert public_summary["quality_gate"] == {
+        "criterion": "all assigned arm outcomes observed and passed",
+        "label": "observed quality preservation",
+        "passed": True,
+    }
+    expected_public_claim = dict(report["official_repository_claim"])
+    expected_public_claim["observed_quality_preservation"] = expected_public_claim.pop(
+        "quality_preserved"
+    )
+    assert public_summary["official_repository_claim"] == expected_public_claim
     assert list(csv.DictReader((output / "incidents.csv").open())) == []
     assert not (state_root / "runtime-guard" / "campaign.lock").exists()
     assert (state_root / "protocol-consumption" / f"{holdout.protocol_sha256}.json").is_file()
@@ -7271,6 +7418,11 @@ def test_confirmatory_dual_model_failure_is_valid_honest_negative(
     assert report["product_benefit_verdict"] == "not_beneficial"
     assert report["official_repository_claim"]["quality_preserved"] is False
     assert report["official_repository_claim"]["passed"] is False
+    public_summary = benchmark.build_public_holdout_summary(rows, report, holdout)
+    assert public_summary["quality_gate"]["passed"] is False
+    assert public_summary["quality_gate"]["label"] == "observed quality preservation"
+    assert public_summary["official_repository_claim"]["observed_quality_preservation"] is False
+    assert "non-inferiority" not in json.dumps(public_summary).lower()
     expected = {
         (scenario.id, arm, trial)
         for scenario in holdout.scenarios
