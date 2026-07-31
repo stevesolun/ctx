@@ -794,17 +794,31 @@ def test_python_probes_reject_symlink_launchers(
 
 
 def test_execution_python_probe_accepts_real_copied_venv(tmp_path: Path) -> None:
-    python = shutil.which("python3.12")
-    if python is None:
+    discovered = shutil.which("python3.12")
+    candidates = [
+        Path("/opt/homebrew/bin/python3.12"),
+        Path("/usr/local/bin/python3.12"),
+        *((Path(discovered),) if discovered is not None else ()),
+    ]
+    unique_candidates = list(dict.fromkeys(path for path in candidates if path.is_file()))
+    if not unique_candidates:
         pytest.skip("official benchmark Python 3.12 is unavailable")
-    venv = tmp_path / "copied-venv"
-    subprocess.run(
-        [python, "-m", "venv", "--copies", str(venv)],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    launcher = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+    launcher: Path | None = None
+    for index, python in enumerate(unique_candidates):
+        venv = tmp_path / f"copied-venv-{index}"
+        result = subprocess.run(
+            [str(python), "-m", "venv", "--copies", str(venv)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        candidate = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        if result.returncode == 0 and candidate.is_file() and not candidate.is_symlink():
+            launcher = candidate
+            break
+    if launcher is None:
+        pytest.skip("no available Python 3.12 runtime can create a copied virtual environment")
 
     identity = prepare._probe_execution_python(launcher)
 
