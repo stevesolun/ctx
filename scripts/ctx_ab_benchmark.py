@@ -275,6 +275,7 @@ class ExecutionFrozenHoldout:
     selection_path: Path
     selection_bytes: bytes
     selection_sha256: str
+    assignment_sha256: str
     collision_path: Path
     collision_bytes: bytes
     collision_sha256: str
@@ -820,6 +821,41 @@ def _scenario_rows_and_hashes(
     }
 
 
+def official_assignment_sha256(selection: Mapping[str, Any]) -> str:
+    """Return a privacy-safe, order-independent identity for frozen assignments."""
+    analysis_ids = selection.get("analysis_instance_ids")
+    repository_map = selection.get("analysis_repository_map")
+    canary_id = selection.get("canary_instance_id")
+    canary_repository = selection.get("canary_repository")
+    if (
+        not isinstance(analysis_ids, list)
+        or not analysis_ids
+        or not all(isinstance(value, str) and value for value in analysis_ids)
+        or len(set(analysis_ids)) != len(analysis_ids)
+        or not isinstance(repository_map, Mapping)
+        or set(repository_map) != set(analysis_ids)
+        or not all(
+            isinstance(key, str) and isinstance(value, str) and value
+            for key, value in repository_map.items()
+        )
+        or ((canary_id is None) != (canary_repository is None))
+        or (canary_id is not None and (not isinstance(canary_id, str) or not canary_id))
+        or (
+            canary_repository is not None
+            and (not isinstance(canary_repository, str) or not canary_repository)
+        )
+    ):
+        raise ValueError("official assignment identity is invalid")
+    payload = {
+        "analysis_assignments": sorted(
+            [[instance_id, str(repository_map[instance_id])] for instance_id in analysis_ids]
+        ),
+        "canary_assignment": ([canary_id, canary_repository] if canary_id is not None else None),
+        "schema": "official-assignment-identity-v1",
+    }
+    return _sha256_bytes(_canonical_json_bytes(payload))
+
+
 def _validated_official_controls(
     document: Mapping[str, Any],
     *,
@@ -1236,16 +1272,23 @@ def load_execution_frozen_holdout(
     selection_document = _strict_json_object(selection_bytes, label="private selection")
     scenario_document = _strict_json_object(scenario_bytes, label="private scenario pack")
     scenarios, scenario_sha256 = _scenario_rows_and_hashes(scenario_document)
+    try:
+        selected_ids, repository_map = freezer._validated_selection(
+            selection_document,
+            acquisition_protocol,
+        )
+    except freezer.FreezeError as exc:
+        raise ValueError("private selection does not match the scenario pack") from exc
     source_bundles = _validated_official_source_map(
         source_map_bytes,
         source_map_path=source_map_path,
         scenarios=scenarios,
     )
-    selected_ids = selection_document.get("analysis_instance_ids")
-    if not isinstance(selected_ids, list) or selected_ids != [
-        scenario.id for scenario in scenarios
-    ]:
+    if selected_ids != [scenario.id for scenario in scenarios]:
         raise ValueError("private selection does not match the scenario pack order")
+    if repository_map != {scenario.id: scenario.repo_url for scenario in scenarios}:
+        raise ValueError("private selection does not match the scenario pack repositories")
+    assignment_sha256 = official_assignment_sha256(selection_document)
     collision_document = _strict_json_object(
         collision_bytes,
         label="private collision attestation",
@@ -1380,6 +1423,7 @@ def load_execution_frozen_holdout(
         selection_path=selection_path,
         selection_bytes=selection_bytes,
         selection_sha256=selection_sha256,
+        assignment_sha256=assignment_sha256,
         scenario_pack_path=scenario_pack_path,
         scenario_pack_bytes=scenario_bytes,
         scenario_pack_sha256=scenario_pack_sha256,
@@ -5688,22 +5732,67 @@ def python_dependencies_sha256(python_executable: str | Path) -> str:
     return _sha256_bytes(canonical_python_dependencies_bytes(result.stdout))
 
 
-def _ensure_owner_only_directory(path: Path, *, label: str) -> Path:
-    if path.is_symlink():
-        raise RuntimeError(f"{label} must not be a symlink")
-    created = False
+def _fsync_directory(path: Path) -> None:
+    if os.name == "nt":
+        return
+    if not hasattr(os, "O_DIRECTORY") or not hasattr(os, "O_NOFOLLOW"):
+        raise RuntimeError("durable official campaign state is unavailable")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+    descriptor = os.open(path, flags)
     try:
-        path.mkdir(mode=stat.S_IRWXU, parents=True, exist_ok=False)
-        created = True
-    except FileExistsError:
-        pass
+        if not stat.S_ISDIR(os.fstat(descriptor).st_mode):
+            raise RuntimeError("official campaign state path is not a directory")
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _ensure_owner_only_directory(path: Path, *, label: str) -> Path:
+    missing: list[Path] = []
+    cursor = path
+    while not cursor.exists():
+        if cursor.is_symlink():
+            raise RuntimeError(f"{label} must not traverse a symlink")
+        missing.append(cursor)
+        parent = cursor.parent
+        if parent == cursor:
+            raise RuntimeError(f"{label} has no existing parent directory")
+        cursor = parent
+    if cursor.is_symlink():
+        raise RuntimeError(f"{label} must not traverse a symlink")
+    if not cursor.is_dir():
+        raise RuntimeError(f"{label} must have an existing directory ancestor")
+    resolved_anchor = cursor.resolve(strict=True)
+    _fsync_directory(resolved_anchor)
+    _fsync_directory(resolved_anchor.parent)
+
+    for directory in reversed(missing):
+        created = False
+        try:
+            directory.mkdir(mode=stat.S_IRWXU, exist_ok=False)
+            created = True
+        except FileExistsError:
+            pass
+        if directory.is_symlink() or not directory.is_dir():
+            raise RuntimeError(f"{label} must be a directory")
+        if created:
+            directory.chmod(stat.S_IRWXU)
+        if os.name != "nt" and stat.S_IMODE(directory.stat().st_mode) & (
+            stat.S_IRWXG | stat.S_IRWXO
+        ):
+            raise RuntimeError(f"{label} must be owner-only")
+        resolved_directory = directory.resolve(strict=True)
+        _fsync_directory(resolved_directory)
+        _fsync_directory(resolved_directory.parent)
+
     if path.is_symlink() or not path.is_dir():
         raise RuntimeError(f"{label} must be a directory")
-    if created:
-        path.chmod(stat.S_IRWXU)
     if os.name != "nt" and stat.S_IMODE(path.stat().st_mode) & (stat.S_IRWXG | stat.S_IRWXO):
         raise RuntimeError(f"{label} must be owner-only")
-    return path.resolve(strict=True)
+    resolved = path.resolve(strict=True)
+    _fsync_directory(resolved)
+    _fsync_directory(resolved.parent)
+    return resolved
 
 
 def _official_campaign_state_root(*, repository_url: str | None = None) -> Path:
@@ -5744,6 +5833,7 @@ def _write_exclusive_owner_file(path: Path, payload: Mapping[str, Any]) -> None:
     finally:
         if descriptor >= 0:
             os.close(descriptor)
+    _fsync_directory(path.parent)
 
 
 @dataclass
@@ -5808,10 +5898,15 @@ class OfficialCampaignLock:
 def claim_official_protocol(
     *,
     state_root: Path,
+    assignment_sha256: str,
     protocol_sha256: str,
     selection_sha256: str,
     output: Path,
 ) -> Path:
+    assignment_sha256 = _require_sha256(
+        assignment_sha256,
+        field="official assignment SHA-256",
+    )
     protocol_sha256 = _require_sha256(
         protocol_sha256,
         field="official execution protocol SHA-256",
@@ -5824,30 +5919,63 @@ def claim_official_protocol(
         state_root,
         label="official campaign private state root",
     )
-    ledger_root = _ensure_owner_only_directory(
-        private_root / "protocol-consumption",
+    assignment_ledger_path = private_root / "assignment-consumption"
+    selection_ledger_path = private_root / "selection-consumption"
+    protocol_ledger_path = private_root / "protocol-consumption"
+    if not assignment_ledger_path.exists() and (
+        selection_ledger_path.exists() or protocol_ledger_path.exists()
+    ):
+        raise RuntimeError(
+            "legacy official consumption state lacks assignment identities and requires "
+            "manual audit"
+        )
+    assignment_ledger_root = _ensure_owner_only_directory(
+        assignment_ledger_path,
+        label="official assignment-consumption ledger",
+    )
+    selection_ledger_root = _ensure_owner_only_directory(
+        selection_ledger_path,
+        label="official selection-consumption ledger",
+    )
+    protocol_ledger_root = _ensure_owner_only_directory(
+        protocol_ledger_path,
         label="official protocol-consumption ledger",
     )
-    claim_path = ledger_root / f"{protocol_sha256}.json"
+    payload = {
+        "assignment_sha256": assignment_sha256,
+        "claimed_at": datetime.now(UTC).isoformat(),
+        "hostname": socket.gethostname(),
+        "output": str(output.resolve()),
+        "pid": os.getpid(),
+        "protocol_sha256": protocol_sha256,
+        "schema_version": 1,
+        "selection_sha256": selection_sha256,
+    }
+    assignment_claim_path = assignment_ledger_root / f"{assignment_sha256}.json"
     try:
-        _write_exclusive_owner_file(
-            claim_path,
-            {
-                "claimed_at": datetime.now(UTC).isoformat(),
-                "hostname": socket.gethostname(),
-                "output": str(output.resolve()),
-                "pid": os.getpid(),
-                "protocol_sha256": protocol_sha256,
-                "schema_version": 1,
-                "selection_sha256": selection_sha256,
-            },
-        )
+        _write_exclusive_owner_file(assignment_claim_path, payload)
     except FileExistsError as exc:
         raise RuntimeError(
-            "official execution protocol was already consumed; a different output path "
-            "cannot reuse a measured selection"
+            "official assignments were already consumed; reordered selection bytes, a "
+            "different execution protocol, or a different output path cannot reuse them"
         ) from exc
-    return claim_path
+    selection_claim_path = selection_ledger_root / f"{selection_sha256}.json"
+    try:
+        _write_exclusive_owner_file(selection_claim_path, payload)
+    except FileExistsError as exc:
+        raise RuntimeError(
+            "official selection was already consumed; a different execution protocol or "
+            "output path cannot reuse measured assignments"
+        ) from exc
+    protocol_claim_path = protocol_ledger_root / f"{protocol_sha256}.json"
+    try:
+        _write_exclusive_owner_file(protocol_claim_path, payload)
+    except FileExistsError as exc:
+        raise RuntimeError(
+            "official execution protocol was already consumed; the newly claimed selection "
+            "remains consumed so the campaign fails closed"
+        ) from exc
+    return assignment_claim_path
 
 
 def collect_official_repository_identity() -> dict[str, str]:
@@ -9068,6 +9196,7 @@ def _run_main(
                                 try:
                                     claim_official_protocol(
                                         state_root=official_state_root,
+                                        assignment_sha256=official_holdout.assignment_sha256,
                                         protocol_sha256=official_holdout.protocol_sha256,
                                         selection_sha256=official_holdout.selection_sha256,
                                         output=output,

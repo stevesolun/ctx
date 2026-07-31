@@ -6,6 +6,7 @@ import inspect
 import json
 import os
 from pathlib import Path
+import shutil
 import stat
 import subprocess
 import threading
@@ -42,6 +43,20 @@ CODEX_RUNTIME_CONTRACT = {
     "model_auto_compact_token_limit": MODEL_AUTO_COMPACT_TOKEN_LIMIT,
     "model_reasoning_effort": MODEL_REASONING_EFFORT,
 }
+
+
+def test_documented_official_environment_command_covers_runtime_contract() -> None:
+    readme = (prepare.ROOT / "benchmarks" / "ctx_ab" / "README.md").read_text(encoding="utf-8")
+    command = readme.split(
+        '"$PY" -m scripts.ctx_ab_holdout_prepare environment',
+        maxsplit=1,
+    )[1].split(
+        '"$PY" -m scripts.ctx_ab_holdout_freeze',
+        maxsplit=1,
+    )[0]
+
+    assert '--model-reasoning-effort "$MODEL_REASONING_EFFORT"' in command
+    assert '--model-auto-compact-token-limit "$MODEL_AUTO_COMPACT_TOKEN_LIMIT"' in command
 
 
 def _canonical(value: object, *, newline: bool = False) -> bytes:
@@ -654,6 +669,149 @@ def test_probe_verifier_rejects_runtime_drift(monkeypatch: pytest.MonkeyPatch) -
             docker_cli=Path("/docker"),
             docker_host="unix:///tmp/docker.sock",
         )
+
+
+def test_verifier_snapshot_executes_authenticated_python_launcher(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    python_launcher = tmp_path / "venv-python"
+    python_launcher.write_bytes(b"python-runtime")
+    python_launcher.chmod(0o700)
+    docker = tmp_path / "docker"
+    docker.write_bytes(b"docker-runtime")
+    docker.chmod(0o700)
+    observed: list[Path] = []
+
+    monkeypatch.setattr(prepare, "_checkout_snapshot", lambda _path: (REVISION, "1" * 64))
+    monkeypatch.setattr(prepare, "_stable_digest", lambda *_args, **_kwargs: "2" * 64)
+
+    def python_environment(path: Path) -> str:
+        observed.append(path)
+        return "3" * 64
+
+    def docker_package(path: Path) -> str:
+        observed.append(path)
+        return "4" * 64
+
+    monkeypatch.setattr(prepare, "_python_environment_sha256", python_environment)
+    monkeypatch.setattr(prepare, "_docker_package_sha256", docker_package)
+    monkeypatch.setattr(prepare, "_docker_identity", lambda *_args: ("daemon", "29.5.2"))
+
+    snapshot = prepare._verifier_snapshot(
+        swebench_checkout=tmp_path,
+        swebench_python=python_launcher,
+        docker_cli=docker,
+        docker_host="unix:///tmp/docker.sock",
+    )
+
+    assert observed == [python_launcher, python_launcher]
+    assert snapshot["python_sha256"] == _sha256(python_launcher.read_bytes())
+
+
+def test_verifier_snapshot_rejects_python_target_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    python_launcher = tmp_path / "venv-python"
+    python_launcher.write_bytes(b"python-runtime")
+    python_launcher.chmod(0o700)
+    docker = tmp_path / "docker"
+    docker.write_bytes(b"docker-runtime")
+    docker.chmod(0o700)
+
+    monkeypatch.setattr(prepare, "_checkout_snapshot", lambda _path: (REVISION, "1" * 64))
+    monkeypatch.setattr(prepare, "_stable_digest", lambda *_args, **_kwargs: "2" * 64)
+    monkeypatch.setattr(prepare, "_python_environment_sha256", lambda _path: "3" * 64)
+
+    def change_python(_path: Path) -> str:
+        python_launcher.write_bytes(b"changed-runtime")
+        return "4" * 64
+
+    monkeypatch.setattr(prepare, "_docker_package_sha256", change_python)
+    monkeypatch.setattr(prepare, "_docker_identity", lambda *_args: ("daemon", "29.5.2"))
+
+    with pytest.raises(prepare.PrepareError, match="Python changed"):
+        prepare._verifier_snapshot(
+            swebench_checkout=tmp_path,
+            swebench_python=python_launcher,
+            docker_cli=docker,
+            docker_host="unix:///tmp/docker.sock",
+        )
+
+
+def test_execution_python_probe_uses_authenticated_launcher(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    python_launcher = tmp_path / "venv-python"
+    python_launcher.write_bytes(b"python-runtime")
+    python_launcher.chmod(0o700)
+    observed: dict[str, Path] = {}
+
+    def command(argv: list[str], **_kwargs: Any) -> bytes:
+        observed["command"] = Path(argv[0])
+        return b"3.12.13\n"
+
+    def dependencies(path: Path) -> str:
+        observed["dependencies"] = path
+        return "5" * 64
+
+    monkeypatch.setattr(prepare, "_command_bytes", command)
+    monkeypatch.setattr(prepare.benchmark, "python_dependencies_sha256", dependencies)
+
+    identity = prepare._probe_execution_python(python_launcher)
+
+    assert observed == {
+        "command": python_launcher,
+        "dependencies": python_launcher,
+    }
+    assert identity.path == python_launcher
+    assert identity.sha256 == _sha256(python_launcher.read_bytes())
+
+
+def test_python_probes_reject_symlink_launchers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "python-target"
+    target.write_bytes(b"python-runtime")
+    target.chmod(0o700)
+    launcher = tmp_path / "venv-python"
+    launcher.symlink_to(target)
+
+    monkeypatch.setattr(prepare, "_checkout_snapshot", lambda _path: (REVISION, "1" * 64))
+
+    with pytest.raises(prepare.PrepareError, match="must be a regular file"):
+        prepare._verifier_snapshot(
+            swebench_checkout=tmp_path,
+            swebench_python=launcher,
+            docker_cli=target,
+            docker_host="unix:///tmp/docker.sock",
+        )
+    with pytest.raises(prepare.PrepareError, match="must be a regular file"):
+        prepare._probe_execution_python(launcher)
+
+
+def test_execution_python_probe_accepts_real_copied_venv(tmp_path: Path) -> None:
+    python = shutil.which("python3.12")
+    if python is None:
+        pytest.skip("official benchmark Python 3.12 is unavailable")
+    venv = tmp_path / "copied-venv"
+    subprocess.run(
+        [python, "-m", "venv", "--copies", str(venv)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    launcher = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+    identity = prepare._probe_execution_python(launcher)
+
+    assert not launcher.is_symlink()
+    assert identity.path == launcher
+    assert identity.version.startswith("3.12.")
+    assert len(identity.dependencies_sha256) == 64
 
 
 def test_command_runner_requires_descendant_containment(

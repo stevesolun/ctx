@@ -589,7 +589,6 @@ def _verifier_snapshot(
         swebench_python,
         label="SWE-bench Python",
         executable=True,
-        allow_symlink_to_file=True,
     )
     docker_path, docker_bytes = _read_regular_bytes(
         docker_cli,
@@ -601,6 +600,13 @@ def _verifier_snapshot(
     environment_sha256 = _python_environment_sha256(python_path)
     package_sha256 = _docker_package_sha256(python_path)
     daemon_id, server_version = _docker_identity(docker_path, docker_host)
+    python_path_after, python_bytes_after = _read_regular_bytes(
+        swebench_python,
+        label="SWE-bench Python",
+        executable=True,
+    )
+    if python_path_after != python_path or python_bytes_after != python_bytes:
+        raise PrepareError("SWE-bench Python changed during authentication")
     return {
         "bridge_sha256": bridge_sha256,
         "docker_cli_sha256": _sha256(docker_bytes),
@@ -645,7 +651,6 @@ def _probe_execution_python(path: Path) -> PythonIdentity:
         path,
         label="execution Python",
         executable=True,
-        allow_symlink_to_file=True,
     )
     version = _single_line(
         _command_bytes(
@@ -666,7 +671,6 @@ def _probe_execution_python(path: Path) -> PythonIdentity:
         path,
         label="execution Python",
         executable=True,
-        allow_symlink_to_file=True,
     )
     if resolved_after != resolved or before != after:
         raise PrepareError("execution Python identity changed during authentication")

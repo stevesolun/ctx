@@ -67,7 +67,7 @@ test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
 test -z "$(git status --porcelain=v1 --untracked-files=all)"
 
 mkdir -p .gate
-python3.12 -m venv .gate/venv
+python3.12 -m venv --copies .gate/venv
 PY="$RUN/.gate/venv/bin/python"
 "$PY" -m pip install -e '.[dev]'
 test "$("$PY" -c 'import sys; print(sys.version_info[:2])')" = "(3, 12)"
@@ -78,10 +78,13 @@ CODEX=/absolute/path/to/codex
 PARQUET=/absolute/path/to/test.parquet
 DUCKDB_GZIP=/absolute/path/to/duckdb-cli.gz
 SWEBENCH_CHECKOUT=/absolute/path/to/SWE-bench
+# Must be a regular-file launcher from a virtual environment created with --copies.
 SWEBENCH_PYTHON=/absolute/path/to/swebench-python
 DOCKER_CLI=/absolute/path/to/docker
 DOCKER_HOST=unix:///absolute/path/to/docker.sock
 MODEL=gpt-5.5
+MODEL_REASONING_EFFORT=high
+MODEL_AUTO_COMPACT_TOKEN_LIMIT=200000
 
 # Private historical evidence must cover every task previously shown to CTX,
 # an LLM, or a benchmark arm. Repeat --selection/--evidence as needed.
@@ -161,6 +164,8 @@ ACQ_SHA="$("$PY" -c \
   --expected-acquisition-protocol-sha256 "$ACQ_SHA" \
   --output "$PRIVATE/execution-environment.json" \
   --model "$MODEL" \
+  --model-reasoning-effort "$MODEL_REASONING_EFFORT" \
+  --model-auto-compact-token-limit "$MODEL_AUTO_COMPACT_TOKEN_LIMIT" \
   --agent-timeout-seconds 900 \
   --codex "$CODEX" \
   --python "$PY" \
@@ -248,9 +253,12 @@ earlier generations. If any of the ten repositories lacks a fresh eligible
 candidate, selection fails closed and a new pinned universe must be
 preregistered. Never reuse the observed V2 selection for a confirmatory claim.
 The runner also keeps a host-wide one-shot claim under
-`~/.ctx/benchmark-state/`, keyed by the canonical repository URL. A frozen
-protocol cannot run concurrently or be replayed from another clone or output
-directory.
+`~/.ctx/benchmark-state/`, keyed by the canonical repository URL. Immediately
+before model work it atomically consumes an order-independent identity derived
+from the frozen task/repository assignments, then records the exact selection
+and execution-protocol identities as secondary fail-closed indexes. Reordering
+or re-freezing the same assignments cannot permit another protocol, concurrent
+run, clone, or output directory to replay them.
 
 ## Evidence
 

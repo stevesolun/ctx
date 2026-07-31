@@ -6,6 +6,7 @@ import importlib.util
 import io
 import json
 import os
+import stat
 import subprocess
 import sys
 import tarfile
@@ -6401,6 +6402,7 @@ def test_official_protocol_claim_is_one_shot(tmp_path: Path) -> None:
     protocol_sha256 = "1" * 64
     first = benchmark.claim_official_protocol(
         state_root=state_root,
+        assignment_sha256="3" * 64,
         protocol_sha256=protocol_sha256,
         selection_sha256="2" * 64,
         output=tmp_path / "first",
@@ -6410,12 +6412,481 @@ def test_official_protocol_claim_is_one_shot(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="already consumed"):
         benchmark.claim_official_protocol(
             state_root=state_root,
+            assignment_sha256="3" * 64,
             protocol_sha256=protocol_sha256,
             selection_sha256="2" * 64,
             output=tmp_path / "second",
         )
 
     assert first.read_bytes() == original
+
+
+def test_official_assignment_identity_is_order_independent_and_canary_sensitive() -> None:
+    first = {
+        "analysis_instance_ids": ["task-b", "task-a"],
+        "analysis_repository_map": {
+            "task-a": "https://github.com/owner/a.git",
+            "task-b": "https://github.com/owner/b.git",
+        },
+        "canary_instance_id": "task-c",
+        "canary_repository": "https://github.com/owner/c.git",
+        "protocol_id": "protocol-a",
+    }
+    reordered = {
+        **first,
+        "analysis_instance_ids": ["task-a", "task-b"],
+        "protocol_id": "protocol-b",
+    }
+    changed_canary = {**reordered, "canary_instance_id": "task-d"}
+
+    assert benchmark.official_assignment_sha256(first) == benchmark.official_assignment_sha256(
+        reordered
+    )
+    assert benchmark.official_assignment_sha256(first) != benchmark.official_assignment_sha256(
+        changed_canary
+    )
+
+
+def test_official_assignment_claim_rejects_reordered_selection_replay(
+    tmp_path: Path,
+) -> None:
+    first_selection = {
+        "analysis_instance_ids": ["task-b", "task-a"],
+        "analysis_repository_map": {
+            "task-a": "https://github.com/owner/a.git",
+            "task-b": "https://github.com/owner/b.git",
+        },
+        "canary_instance_id": "task-c",
+        "canary_repository": "https://github.com/owner/c.git",
+    }
+    reordered_selection = {
+        **first_selection,
+        "analysis_instance_ids": ["task-a", "task-b"],
+    }
+    first_selection_sha256 = benchmark._sha256_bytes(
+        benchmark._canonical_json_bytes(first_selection)
+    )
+    reordered_selection_sha256 = benchmark._sha256_bytes(
+        benchmark._canonical_json_bytes(reordered_selection)
+    )
+    assignment_sha256 = benchmark.official_assignment_sha256(first_selection)
+
+    assert first_selection_sha256 != reordered_selection_sha256
+    assert assignment_sha256 == benchmark.official_assignment_sha256(reordered_selection)
+    benchmark.claim_official_protocol(
+        state_root=tmp_path / "private",
+        assignment_sha256=assignment_sha256,
+        protocol_sha256="1" * 64,
+        selection_sha256=first_selection_sha256,
+        output=tmp_path / "first",
+    )
+
+    with pytest.raises(RuntimeError, match="assignments were already consumed"):
+        benchmark.claim_official_protocol(
+            state_root=tmp_path / "private",
+            assignment_sha256=assignment_sha256,
+            protocol_sha256="2" * 64,
+            selection_sha256=reordered_selection_sha256,
+            output=tmp_path / "second",
+        )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="official measured execution is POSIX-only")
+def test_official_claim_durably_syncs_regular_files_and_directories(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fsynced_types: list[str] = []
+    real_fsync = os.fsync
+
+    def observed_fsync(descriptor: int) -> None:
+        mode = os.fstat(descriptor).st_mode
+        fsynced_types.append("directory" if stat.S_ISDIR(mode) else "file")
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(benchmark.os, "fsync", observed_fsync)
+
+    benchmark.claim_official_protocol(
+        state_root=tmp_path / "private",
+        assignment_sha256="3" * 64,
+        protocol_sha256="1" * 64,
+        selection_sha256="2" * 64,
+        output=tmp_path / "output",
+    )
+
+    assert fsynced_types.count("file") == 3
+    assert fsynced_types.count("directory") >= 3
+    first_file = fsynced_types.index("file")
+    assert fsynced_types[first_file:] == ["file", "directory"] * 3
+
+
+@pytest.mark.skipif(os.name == "nt", reason="official measured execution is POSIX-only")
+def test_official_claim_syncs_every_new_state_ancestor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_root = tmp_path / "new-home" / ".ctx" / "benchmark-state" / "repository-key"
+    synced_directories: list[Path] = []
+    real_sync = benchmark._fsync_directory
+
+    def observed_sync(path: Path) -> None:
+        synced_directories.append(path.resolve(strict=True))
+        real_sync(path)
+
+    monkeypatch.setattr(benchmark, "_fsync_directory", observed_sync)
+
+    benchmark.claim_official_protocol(
+        state_root=state_root,
+        assignment_sha256="3" * 64,
+        protocol_sha256="1" * 64,
+        selection_sha256="2" * 64,
+        output=tmp_path / "output",
+    )
+
+    created_directories = [
+        state_root.parents[2],
+        state_root.parents[1],
+        state_root.parent,
+        state_root,
+        state_root / "assignment-consumption",
+        state_root / "selection-consumption",
+        state_root / "protocol-consumption",
+    ]
+    for directory in created_directories:
+        assert directory.resolve(strict=True) in synced_directories
+        assert directory.parent.resolve(strict=True) in synced_directories
+
+
+@pytest.mark.skipif(os.name == "nt", reason="official measured execution is POSIX-only")
+def test_official_state_observer_syncs_concurrently_created_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_root = tmp_path / "private-state"
+    resolved_state_root = state_root.resolve(strict=False)
+    creator_blocked = threading.Event()
+    release_creator = threading.Event()
+    creator_ident: list[int] = []
+    creator_errors: list[BaseException] = []
+    observer_syncs: list[Path] = []
+    real_sync = benchmark._fsync_directory
+
+    def controlled_sync(path: Path) -> None:
+        resolved = path.resolve(strict=True)
+        if threading.get_ident() in creator_ident and resolved == resolved_state_root:
+            creator_blocked.set()
+            if not release_creator.wait(timeout=5):
+                raise RuntimeError("creator sync was not released")
+        else:
+            observer_syncs.append(resolved)
+        real_sync(path)
+
+    def create_state_root() -> None:
+        creator_ident.append(threading.get_ident())
+        try:
+            benchmark._ensure_owner_only_directory(state_root, label="test state root")
+        except BaseException as exc:  # pragma: no cover - reported in the parent thread
+            creator_errors.append(exc)
+
+    monkeypatch.setattr(benchmark, "_fsync_directory", controlled_sync)
+    creator = threading.Thread(target=create_state_root)
+    creator.start()
+    assert creator_blocked.wait(timeout=5)
+    try:
+        observed = benchmark._ensure_owner_only_directory(state_root, label="test state root")
+    finally:
+        release_creator.set()
+        creator.join(timeout=5)
+
+    assert not creator.is_alive()
+    assert creator_errors == []
+    assert observed == state_root.resolve(strict=True)
+    assert resolved_state_root in observer_syncs
+    assert state_root.parent.resolve(strict=True) in observer_syncs
+
+
+@pytest.mark.skipif(os.name == "nt", reason="official measured execution is POSIX-only")
+def test_official_state_observer_syncs_contested_intermediate_parent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_base = tmp_path / "state-base"
+    state_base.mkdir()
+    intermediate = state_base / "intermediate"
+    state_root = intermediate / "repository-key"
+    initial_anchor_barrier = threading.Barrier(2)
+    anchored_threads: set[int] = set()
+    publisher_ident: list[int] = []
+    publisher_blocked = threading.Event()
+    release_publisher = threading.Event()
+    observer_done = threading.Event()
+    observer_syncs: list[Path] = []
+    worker_errors: list[BaseException] = []
+    synchronization_lock = threading.Lock()
+    real_sync = benchmark._fsync_directory
+
+    def controlled_sync(path: Path) -> None:
+        resolved = path.resolve(strict=True)
+        ident = threading.get_ident()
+        initial_anchor = False
+        block_publisher = False
+        with synchronization_lock:
+            if resolved == state_base and ident not in anchored_threads:
+                anchored_threads.add(ident)
+                initial_anchor = True
+        if initial_anchor:
+            initial_anchor_barrier.wait(timeout=5)
+        with synchronization_lock:
+            if resolved == intermediate and not publisher_ident:
+                publisher_ident.append(ident)
+                publisher_blocked.set()
+                block_publisher = True
+            elif publisher_ident and ident != publisher_ident[0]:
+                observer_syncs.append(resolved)
+        if block_publisher and not release_publisher.wait(timeout=5):
+            raise RuntimeError("intermediate publisher sync was not released")
+        real_sync(path)
+
+    def ensure_state_root() -> None:
+        ident = threading.get_ident()
+        try:
+            benchmark._ensure_owner_only_directory(state_root, label="test state root")
+            with synchronization_lock:
+                is_observer = bool(publisher_ident) and ident != publisher_ident[0]
+            if is_observer:
+                observer_done.set()
+        except BaseException as exc:  # pragma: no cover - reported in the parent thread
+            worker_errors.append(exc)
+
+    monkeypatch.setattr(benchmark, "_fsync_directory", controlled_sync)
+    workers = [threading.Thread(target=ensure_state_root) for _ in range(2)]
+    for worker in workers:
+        worker.start()
+    assert publisher_blocked.wait(timeout=5)
+    try:
+        assert observer_done.wait(timeout=5)
+    finally:
+        release_publisher.set()
+        for worker in workers:
+            worker.join(timeout=5)
+
+    assert all(not worker.is_alive() for worker in workers)
+    assert worker_errors == []
+    assert state_base.resolve(strict=True) in observer_syncs
+
+
+def test_official_selection_claim_is_one_shot_across_protocol_refreezes(
+    tmp_path: Path,
+) -> None:
+    state_root = tmp_path / "private"
+    assignment_sha256 = "b" * 64
+    selection_sha256 = "a" * 64
+    first = benchmark.claim_official_protocol(
+        state_root=state_root,
+        assignment_sha256=assignment_sha256,
+        protocol_sha256="1" * 64,
+        selection_sha256=selection_sha256,
+        output=tmp_path / "first",
+    )
+    original = first.read_bytes()
+
+    with pytest.raises(RuntimeError, match="assignments were already consumed"):
+        benchmark.claim_official_protocol(
+            state_root=state_root,
+            assignment_sha256=assignment_sha256,
+            protocol_sha256="2" * 64,
+            selection_sha256=selection_sha256,
+            output=tmp_path / "second",
+        )
+
+    assert first == state_root / "assignment-consumption" / f"{assignment_sha256}.json"
+    assert first.read_bytes() == original
+    assert len(list((state_root / "protocol-consumption").glob("*.json"))) == 1
+
+
+def test_official_selection_claim_fails_closed_between_dual_index_writes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_root = tmp_path / "private"
+    assignment_sha256 = "b" * 64
+    selection_sha256 = "a" * 64
+    real_write = benchmark._write_exclusive_owner_file
+    writes = 0
+
+    def interrupt_second_write(path: Path, payload: dict[str, Any]) -> None:
+        nonlocal writes
+        writes += 1
+        if writes == 2:
+            raise OSError("injected interruption")
+        real_write(path, payload)
+
+    monkeypatch.setattr(benchmark, "_write_exclusive_owner_file", interrupt_second_write)
+
+    with pytest.raises(OSError, match="injected interruption"):
+        benchmark.claim_official_protocol(
+            state_root=state_root,
+            assignment_sha256=assignment_sha256,
+            protocol_sha256="1" * 64,
+            selection_sha256=selection_sha256,
+            output=tmp_path / "interrupted",
+        )
+
+    assert (state_root / "assignment-consumption" / f"{assignment_sha256}.json").is_file()
+    with pytest.raises(RuntimeError, match="assignments were already consumed"):
+        benchmark.claim_official_protocol(
+            state_root=state_root,
+            assignment_sha256=assignment_sha256,
+            protocol_sha256="2" * 64,
+            selection_sha256=selection_sha256,
+            output=tmp_path / "retry",
+        )
+
+
+def test_official_selection_claim_is_atomic_across_concurrent_protocols(
+    tmp_path: Path,
+) -> None:
+    state_root = tmp_path / "private"
+    assignment_sha256 = "b" * 64
+    selection_sha256 = "a" * 64
+    barrier = threading.Barrier(2)
+    outcomes: list[str] = []
+
+    def claim(protocol_sha256: str) -> None:
+        barrier.wait()
+        try:
+            benchmark.claim_official_protocol(
+                state_root=state_root,
+                assignment_sha256=assignment_sha256,
+                protocol_sha256=protocol_sha256,
+                selection_sha256=selection_sha256,
+                output=tmp_path / protocol_sha256,
+            )
+        except RuntimeError as exc:
+            outcomes.append(str(exc))
+        else:
+            outcomes.append("claimed")
+
+    threads = [
+        threading.Thread(target=claim, args=("1" * 64,)),
+        threading.Thread(target=claim, args=("2" * 64,)),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert outcomes.count("claimed") == 1
+    assert sum("assignments were already consumed" in outcome for outcome in outcomes) == 1
+    assert len(list((state_root / "assignment-consumption").glob("*.json"))) == 1
+    assert len(list((state_root / "selection-consumption").glob("*.json"))) == 1
+    assert len(list((state_root / "protocol-consumption").glob("*.json"))) == 1
+
+
+def test_official_selection_claim_is_private_single_link_and_contains_no_task_id(
+    tmp_path: Path,
+) -> None:
+    state_root = tmp_path / "private"
+    assignment_sha256 = "3" * 64
+    protocol_sha256 = "1" * 64
+    selection_sha256 = "2" * 64
+
+    assignment_claim = benchmark.claim_official_protocol(
+        state_root=state_root,
+        assignment_sha256=assignment_sha256,
+        protocol_sha256=protocol_sha256,
+        selection_sha256=selection_sha256,
+        output=tmp_path / "output",
+    )
+    selection_claim = state_root / "selection-consumption" / f"{selection_sha256}.json"
+    protocol_claim = state_root / "protocol-consumption" / f"{protocol_sha256}.json"
+
+    for claim in (assignment_claim, selection_claim, protocol_claim):
+        metadata = claim.stat()
+        document = json.loads(claim.read_bytes())
+        assert metadata.st_nlink == 1
+        if os.name != "nt":
+            assert stat.S_IMODE(metadata.st_mode) == 0o600
+        assert set(document) == {
+            "assignment_sha256",
+            "claimed_at",
+            "hostname",
+            "output",
+            "pid",
+            "protocol_sha256",
+            "schema_version",
+            "selection_sha256",
+        }
+        assert "task" not in json.dumps(document).lower()
+
+
+def test_official_selection_claim_rejects_existing_malformed_state(tmp_path: Path) -> None:
+    state_root = tmp_path / "private"
+    state_root.mkdir(mode=0o700)
+    ledger = state_root / "assignment-consumption"
+    ledger.mkdir(mode=0o700)
+    assignment_sha256 = "3" * 64
+    selection_sha256 = "2" * 64
+    claim = ledger / f"{assignment_sha256}.json"
+    claim.write_text("not-json\n", encoding="utf-8")
+    claim.chmod(0o600)
+
+    with pytest.raises(RuntimeError, match="assignments were already consumed"):
+        benchmark.claim_official_protocol(
+            state_root=state_root,
+            assignment_sha256=assignment_sha256,
+            protocol_sha256="1" * 64,
+            selection_sha256=selection_sha256,
+            output=tmp_path / "output",
+        )
+
+
+def test_official_assignment_claim_rejects_legacy_two_index_state(tmp_path: Path) -> None:
+    state_root = tmp_path / "private"
+    state_root.mkdir(mode=0o700)
+    (state_root / "protocol-consumption").mkdir(mode=0o700)
+
+    with pytest.raises(RuntimeError, match="legacy official consumption state"):
+        benchmark.claim_official_protocol(
+            state_root=state_root,
+            assignment_sha256="3" * 64,
+            protocol_sha256="1" * 64,
+            selection_sha256="2" * 64,
+            output=tmp_path / "output",
+        )
+
+    assert not (state_root / "assignment-consumption").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX link-state regression")
+@pytest.mark.parametrize("link_kind", ["symlink", "hardlink"])
+def test_official_selection_claim_rejects_existing_link_state(
+    tmp_path: Path,
+    link_kind: str,
+) -> None:
+    state_root = tmp_path / "private"
+    state_root.mkdir(mode=0o700)
+    ledger = state_root / "assignment-consumption"
+    ledger.mkdir(mode=0o700)
+    assignment_sha256 = "3" * 64
+    selection_sha256 = "2" * 64
+    target = tmp_path / "existing-claim"
+    target.write_text("existing\n", encoding="utf-8")
+    target.chmod(0o600)
+    claim = ledger / f"{assignment_sha256}.json"
+    if link_kind == "symlink":
+        claim.symlink_to(target)
+    else:
+        os.link(target, claim)
+
+    with pytest.raises(RuntimeError, match="assignments were already consumed"):
+        benchmark.claim_official_protocol(
+            state_root=state_root,
+            assignment_sha256=assignment_sha256,
+            protocol_sha256="1" * 64,
+            selection_sha256=selection_sha256,
+            output=tmp_path / "output",
+        )
 
 
 def test_official_campaign_lock_rejects_concurrency_and_releases(
@@ -6446,6 +6917,7 @@ def test_official_campaign_state_is_shared_by_independent_clones(
 
     benchmark.claim_official_protocol(
         state_root=first_root,
+        assignment_sha256="3" * 64,
         protocol_sha256="1" * 64,
         selection_sha256="2" * 64,
         output=tmp_path / "first-clone-output",
@@ -6455,6 +6927,7 @@ def test_official_campaign_state_is_shared_by_independent_clones(
     with pytest.raises(RuntimeError, match="already consumed"):
         benchmark.claim_official_protocol(
             state_root=second_root,
+            assignment_sha256="3" * 64,
             protocol_sha256="1" * 64,
             selection_sha256="2" * 64,
             output=tmp_path / "second-clone-output",
@@ -6608,6 +7081,70 @@ def test_execution_frozen_holdout_authenticates_all_inputs_and_balanced_schedule
     } | {source.bundle_path for source in holdout.source_bundles.values()}
     assert holdout.origin_url == "https://github.com/stevesolun/ctx.git"
     assert holdout.origin_main_revision == "a" * 40
+
+
+def test_execution_frozen_holdout_rejects_selection_repository_map_replay(
+    tmp_path: Path,
+) -> None:
+    holdout_root = tmp_path / "holdout"
+    holdout_root.mkdir()
+    holdout, paths = _official_holdout_fixture(holdout_root)
+    state_root = tmp_path / "private-state"
+    benchmark.claim_official_protocol(
+        state_root=state_root,
+        assignment_sha256=holdout.assignment_sha256,
+        protocol_sha256=holdout.protocol_sha256,
+        selection_sha256=holdout.selection_sha256,
+        output=tmp_path / "first-output",
+    )
+
+    selection = json.loads(paths["selection"].read_text())
+    first_id = selection["analysis_instance_ids"][0]
+    selection["analysis_repository_map"][first_id] = "https://github.com/owner/forged.git"
+    paths["selection"].write_text(
+        json.dumps(selection, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    forged_selection_sha256 = hashlib.sha256(paths["selection"].read_bytes()).hexdigest()
+    forged_assignment_sha256 = benchmark.official_assignment_sha256(selection)
+    assert forged_assignment_sha256 != holdout.assignment_sha256
+
+    linked_inputs = (
+        ("reconstructed", "reconstructed_test_attestation_sha256"),
+        ("controls", "control_results_sha256"),
+    )
+    for name, _field in linked_inputs:
+        document = json.loads(paths[name].read_text())
+        document["selection_sha256"] = forged_selection_sha256
+        paths[name].write_text(
+            json.dumps(document, sort_keys=True, separators=(",", ":")),
+            encoding="utf-8",
+        )
+    protocol = json.loads(paths["protocol"].read_text())
+    protocol["execution_inputs"]["selection_output_sha256"] = forged_selection_sha256
+    for name, field in linked_inputs:
+        protocol["execution_inputs"][field] = hashlib.sha256(paths[name].read_bytes()).hexdigest()
+    paths["protocol"].write_text(
+        json.dumps(protocol, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="selection does not match the scenario pack"):
+        benchmark.load_execution_frozen_holdout(
+            protocol_path=paths["protocol"],
+            expected_protocol_sha256=hashlib.sha256(paths["protocol"].read_bytes()).hexdigest(),
+            selection_path=paths["selection"],
+            scenario_pack_path=paths["scenario_pack"],
+            collision_path=paths["collision"],
+            reconstructed_path=paths["reconstructed"],
+            control_results_path=paths["controls"],
+            environment_path=paths["environment"],
+            schedule_path=paths["schedule"],
+            source_map_path=paths["source_map"],
+        )
+
+    assert len(list((state_root / "assignment-consumption").glob("*.json"))) == 1
+    assert not (state_root / "assignment-consumption" / f"{forged_assignment_sha256}.json").exists()
 
 
 def test_official_catalog_requires_the_frozen_cold_cache_contract(tmp_path: Path) -> None:
@@ -7392,6 +7929,8 @@ def test_authenticated_freeze_drives_all_thirty_pairs_and_sixty_arms(
     assert public_summary["official_repository_claim"] == expected_public_claim
     assert list(csv.DictReader((output / "incidents.csv").open())) == []
     assert not (state_root / "runtime-guard" / "campaign.lock").exists()
+    assert (state_root / "assignment-consumption" / f"{holdout.assignment_sha256}.json").is_file()
+    assert (state_root / "selection-consumption" / f"{holdout.selection_sha256}.json").is_file()
     assert (state_root / "protocol-consumption" / f"{holdout.protocol_sha256}.json").is_file()
 
 
