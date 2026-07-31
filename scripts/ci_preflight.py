@@ -137,14 +137,14 @@ def _run_git_text(args: list[str], *, allow_failure: bool = False) -> str:
     return proc.stdout
 
 
-def _diff_base(base_ref: str) -> str:
-    merge_base = _run_git(["merge-base", base_ref, "HEAD"], allow_failure=True)
+def _diff_base(base_ref: str, head_ref: str = "HEAD") -> str:
+    merge_base = _run_git(["merge-base", base_ref, head_ref], allow_failure=True)
     return merge_base[0] if merge_base else base_ref
 
 
-def changed_files(base_ref: str) -> list[str]:
-    base = _diff_base(base_ref)
-    paths = set(_run_git(["diff", "--name-only", base, "HEAD"], allow_failure=True))
+def changed_files(base_ref: str, *, head_ref: str = "HEAD") -> list[str]:
+    base = _diff_base(base_ref, head_ref)
+    paths = set(_run_git(["diff", "--name-only", base, head_ref], allow_failure=True))
     paths.update(_run_git(["diff", "--name-only"], allow_failure=True))
     paths.update(_run_git(["diff", "--cached", "--name-only"], allow_failure=True))
     paths.update(_run_git(["ls-files", "--others", "--exclude-standard"], allow_failure=True))

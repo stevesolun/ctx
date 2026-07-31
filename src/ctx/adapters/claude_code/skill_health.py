@@ -22,10 +22,10 @@ The dashboard is consumed two ways:
     - nothing destructive ever touches SKILL.md or agent .md files
 
 Usage:
-    python src/skill_health.py scan
-    python src/skill_health.py dashboard
-    python src/skill_health.py check --strict   # exit 2 if any ERROR issues
-    python src/skill_health.py heal
+    ctx-skill-health scan
+    ctx-skill-health dashboard
+    ctx-skill-health check --strict   # exit 2 if any ERROR issues
+    ctx-skill-health heal
 """
 
 from __future__ import annotations

@@ -12,6 +12,8 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import as_completed
 from dataclasses import dataclass
+from datetime import UTC
+from datetime import datetime
 import json
 import os
 from pathlib import Path
@@ -160,13 +162,13 @@ def _is_worktree_dirty() -> bool:
     return bool(_git_stdout(["status", "--porcelain"]).strip())
 
 
-def _create_worktree(lane: str) -> Path:
+def _create_worktree(lane: str, *, revision: str) -> Path:
     parent = Path(tempfile.mkdtemp(prefix="ctx-local-fast-"))
     worktree = parent / lane
     env = os.environ.copy()
     env.setdefault("GIT_LFS_SKIP_SMUDGE", "1")
     subprocess.check_call(
-        ["git", "worktree", "add", "--detach", str(worktree), "HEAD"],
+        ["git", "worktree", "add", "--detach", str(worktree), revision],
         cwd=REPO_ROOT,
         env=env,
         stdout=subprocess.DEVNULL,
@@ -202,9 +204,9 @@ def _run_check(check: Check, *, cwd: Path, index: int, total: int, lane: str) ->
     return proc.returncode
 
 
-def run_lane(lane: Lane, *, keep_worktrees: bool) -> LaneResult:
+def run_lane(lane: Lane, *, keep_worktrees: bool, revision: str = "HEAD") -> LaneResult:
     start = time.monotonic()
-    worktree = _create_worktree(lane.name)
+    worktree = _create_worktree(lane.name, revision=revision)
     summary_worktree = worktree if keep_worktrees else None
     try:
         for index, check in enumerate(lane.checks, start=1):
@@ -245,6 +247,7 @@ def run_lanes(
     *,
     jobs: int,
     keep_worktrees: bool = False,
+    revision: str = "HEAD",
 ) -> GateResult:
     start = time.monotonic()
     if not lanes:
@@ -256,7 +259,13 @@ def run_lanes(
     results: list[LaneResult] = []
     with ThreadPoolExecutor(max_workers=worker_count) as executor:
         futures = {
-            executor.submit(run_lane, lane, keep_worktrees=keep_worktrees): lane for lane in lanes
+            executor.submit(
+                run_lane,
+                lane,
+                keep_worktrees=keep_worktrees,
+                revision=revision,
+            ): lane
+            for lane in lanes
         }
         for future in as_completed(futures):
             result = future.result()
@@ -280,9 +289,31 @@ def run_lanes(
     )
 
 
-def write_summary_json(path: Path, result: GateResult) -> None:
+def write_summary_json(
+    path: Path,
+    result: GateResult,
+    *,
+    head_sha: str,
+    base_ref: str,
+    base_sha: str,
+    profile: str,
+    source_worktree_dirty_at_selection: bool,
+    changed_file_paths: list[str],
+    started_at: str,
+    finished_at: str,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
+        "schema_version": 2,
+        "head_sha": head_sha,
+        "base_ref": base_ref,
+        "base_sha": base_sha,
+        "profile": profile,
+        "committed_head_only": True,
+        "source_worktree_dirty_at_selection": source_worktree_dirty_at_selection,
+        "changed_file_paths": changed_file_paths,
+        "started_at": started_at,
+        "finished_at": finished_at,
         "returncode": result.returncode,
         "elapsed_seconds": round(result.elapsed, 3),
         "worker_count": result.worker_count,
@@ -332,15 +363,25 @@ def main(argv: list[str] | None = None) -> int:
 
     if not shutil.which("git"):
         raise SystemExit("git is required for local_fast_gate")
-    if not args.dry_run and not args.allow_dirty and _is_worktree_dirty():
-        raise SystemExit(
-            "local-fast runs committed HEAD in temp worktrees; commit or stash changes first "
-            "(or pass --allow-dirty if you only need a committed-HEAD gate)."
-        )
-
-    files = changed_files(args.base)
+    if args.dry_run:
+        files = changed_files(args.base)
+        selection_base = args.base
+    else:
+        started_at = datetime.now(UTC).isoformat()
+        source_worktree_dirty_at_selection = _is_worktree_dirty()
+        if not args.allow_dirty and source_worktree_dirty_at_selection:
+            raise SystemExit(
+                "local-fast runs committed HEAD in temp worktrees; commit or stash changes first "
+                "(or pass --allow-dirty if you only need a committed-HEAD gate)."
+            )
+        head_sha = _git_stdout(["rev-parse", "HEAD"]).strip()
+        base_sha = _git_stdout(["merge-base", args.base, head_sha]).strip()
+        if not head_sha or not base_sha:
+            raise SystemExit("could not resolve committed HEAD and comparison base")
+        files = changed_files(base_sha, head_ref=head_sha)
+        selection_base = base_sha
     checks, notes = select_checks(
-        base_ref=args.base,
+        base_ref=selection_base,
         files=files,
         profile=args.profile,
         python=args.python,
@@ -356,9 +397,28 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         print_dry_run(lanes)
         return 0
-    result = run_lanes(lanes, jobs=args.jobs, keep_worktrees=args.keep_worktrees)
+    if _git_stdout(["rev-parse", "HEAD"]).strip() != head_sha:
+        raise SystemExit("HEAD changed while local-fast selected checks")
+    result = run_lanes(
+        lanes,
+        jobs=args.jobs,
+        keep_worktrees=args.keep_worktrees,
+        revision=head_sha,
+    )
+    finished_at = datetime.now(UTC).isoformat()
     if args.summary_json:
-        write_summary_json(args.summary_json, result)
+        write_summary_json(
+            args.summary_json,
+            result,
+            head_sha=head_sha,
+            base_ref=args.base,
+            base_sha=base_sha,
+            profile=args.profile,
+            source_worktree_dirty_at_selection=source_worktree_dirty_at_selection,
+            changed_file_paths=files,
+            started_at=started_at,
+            finished_at=finished_at,
+        )
     return result.returncode
 
 

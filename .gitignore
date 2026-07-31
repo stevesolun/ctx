@@ -43,11 +43,10 @@ Thumbs.db
 /skills/skill-router/check-gates.md
 /skills/skill-router/failure-log.md
 
-# Agent directives (cloned from global ~/.claude/CLAUDE.md — personal, not for sharing)
-CLAUDE.md
-
-# Per-workspace Claude Code settings (local permissions, user-specific)
-.claude/
+# Track project skills; keep Claude Code settings and runtime state local.
+.claude/*
+!.claude/skills/
+!.claude/skills/**
 
 # Wiki (runtime knowledge store, not source)
 # Uncomment to exclude the wiki from the repo:

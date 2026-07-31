@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import patch
 
@@ -19,7 +20,12 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from ctx.utils import _fs_utils as fs_utils  # noqa: E402
-from ctx.utils._fs_utils import atomic_write_bytes, atomic_write_json, atomic_write_text  # noqa: E402
+from ctx.utils._fs_utils import (  # noqa: E402
+    atomic_write_bytes,
+    atomic_write_json,
+    atomic_write_text,
+    safe_atomic_write_text,
+)
 
 
 # ── atomic_write_text ─────────────────────────────────────────────────────────
@@ -49,6 +55,50 @@ def test_write_text_custom_encoding(tmp_path: Path) -> None:
     text = "caf\u00e9"  # contains non-ASCII
     atomic_write_text(target, text, encoding="utf-8")
     assert target.read_text(encoding="utf-8") == text
+
+
+@pytest.mark.parametrize("writer", [atomic_write_text, safe_atomic_write_text])
+def test_text_writers_preserve_lf_bytes(
+    tmp_path: Path,
+    writer: Callable[[Path, str], None],
+) -> None:
+    target = tmp_path / "out.txt"
+
+    writer(target, "first\nsecond\n")
+
+    assert target.read_bytes() == b"first\nsecond\n"
+
+
+@pytest.mark.skipif(
+    not fs_utils.supports_secure_directory_fds(),
+    reason="directory-relative writer is unavailable",
+)
+def test_directory_relative_text_writer_disables_newline_translation(tmp_path: Path) -> None:
+    directory_fd = os.open(tmp_path, fs_utils._DIRECTORY_OPEN_FLAGS)
+    try:
+        directory = fs_utils._SecureDirectory(tmp_path, directory_fd)
+        with patch("ctx.utils._fs_utils.os.fdopen", wraps=os.fdopen) as fdopen:
+            fs_utils._atomic_write_text_at(directory, "out.txt", "first\nsecond\n", "utf-8")
+    finally:
+        os.close(directory_fd)
+
+    assert fdopen.call_args.kwargs["newline"] == ""
+    assert (tmp_path / "out.txt").read_bytes() == b"first\nsecond\n"
+
+
+def test_guarded_path_text_writer_disables_newline_translation(tmp_path: Path) -> None:
+    directory = fs_utils._SecureDirectory(tmp_path, None)
+
+    with patch("ctx.utils._fs_utils.os.fdopen", wraps=os.fdopen) as fdopen:
+        fs_utils._atomic_write_text_guarded_path(
+            directory,
+            "out.txt",
+            "first\nsecond\n",
+            "utf-8",
+        )
+
+    assert fdopen.call_args.kwargs["newline"] == ""
+    assert (tmp_path / "out.txt").read_bytes() == b"first\nsecond\n"
 
 
 def test_write_text_no_temp_file_left_on_success(tmp_path: Path) -> None:

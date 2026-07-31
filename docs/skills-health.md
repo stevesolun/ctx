@@ -1,6 +1,6 @@
 # Skill health dashboard
 
-[`src/skill_health.py`](https://github.com/stevesolun/ctx/blob/main/src/skill_health.py)
+[`src/ctx/adapters/claude_code/skill_health.py`](https://github.com/stevesolun/ctx/blob/main/src/ctx/adapters/claude_code/skill_health.py)
 scans `~/.claude/skills/` and `~/.claude/agents/` for structural and
 catalog issues, then produces a JSON or human-readable dashboard. It
 also self-heals catalog drift — without ever modifying a SKILL.md.

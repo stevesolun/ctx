@@ -443,8 +443,10 @@ class CtxCoreToolbox:
         self._allowed_entity_types = _normalise_allowed_entity_types(allowed_entity_types)
         self._graph: Any | None = None  # networkx.Graph
         self._pages: list[Any] | None = None  # list[SkillPage]
+        self._pack_pages: dict[str, str] | None = None
         self._graph_signature: GraphSignature | None = None
         self._pages_signature: PageSignature | None = None
+        self._pack_pages_signature: PackSignature | None = None
         self._semantic_signature: tuple[FileSignature | None, ...] | None = None
 
     # ── Public Protocol surface ─────────────────────────────────────────
@@ -972,6 +974,9 @@ class CtxCoreToolbox:
         )
 
         tags = _query_to_tags(query)
+        language = _normalize_language_hint(_optional_str(args.get("language")))
+        if language and language not in tags:
+            tags.append(language)
         use_semantic_query = bool(args.get("use_semantic_query"))
         if not tags and not use_semantic_query:
             return json.dumps(
@@ -1011,6 +1016,7 @@ class CtxCoreToolbox:
             baseline_context = list(_DEFAULT_BASELINE_CONTEXT)
         recommendation_context = _recommendation_context_from_args(query, args)
         wiki_dir = self._wiki_dir_resolved()
+        pack_pages = self._ensure_pack_pages() if "skill" in entity_types else None
         external_catalog_path = self._external_catalog_path()
 
         graph: Any | None = None
@@ -1057,6 +1063,7 @@ class CtxCoreToolbox:
                             candidate_filter=lambda row: _recommendation_candidate_allowed(
                                 row,
                                 wiki_dir=wiki_dir,
+                                pack_pages=pack_pages,
                                 excluded=excluded,
                                 context=recommendation_context,
                             ),
@@ -1093,6 +1100,7 @@ class CtxCoreToolbox:
                 candidate_filter=lambda row: _recommendation_candidate_allowed(
                     row,
                     wiki_dir=wiki_dir,
+                    pack_pages=pack_pages,
                     excluded=excluded,
                     context=recommendation_context,
                 ),
@@ -1100,7 +1108,11 @@ class CtxCoreToolbox:
         results: list[dict[str, Any]] = []
         for r in raw:
             row = _with_recommendation_selection_metadata(
-                _base_recommendation_row(r, wiki_dir=wiki_dir)
+                _base_recommendation_row(
+                    r,
+                    wiki_dir=wiki_dir,
+                    pack_pages=pack_pages,
+                )
             )
             candidate_keys = _recommendation_selection_keys(
                 [_recommendation_identity(row), str(row.get("name") or "")]
@@ -1197,6 +1209,8 @@ class CtxCoreToolbox:
 
         rejected = self._recommendation_rejections(graph, args)
         excluded = _recommendation_selection_keys(selected + rejected)
+        wiki_dir = self._wiki_dir_resolved()
+        pack_pages = self._ensure_pack_pages() if self._entity_type_allowed("skill") else None
         seed_ids = _recommendation_selection_node_ids(graph, selected)
         raw = _resolve_related_recommendation_rows(
             graph,
@@ -1217,7 +1231,11 @@ class CtxCoreToolbox:
             related_row = dict(r)
             related_row["matching_tags"] = shared_tags
             row = _with_recommendation_selection_metadata(
-                _base_recommendation_row(related_row, wiki_dir=self._wiki_dir_resolved())
+                _base_recommendation_row(
+                    related_row,
+                    wiki_dir=wiki_dir,
+                    pack_pages=pack_pages,
+                )
             )
             row["shared_tags"] = shared_tags
             row["via"] = r.get("via", [])
@@ -1358,7 +1376,7 @@ class CtxCoreToolbox:
             return json.dumps({"error": "no entity types are allowed"})
         candidates = _wiki_get_candidates(wiki, slug, candidate_entity_types)
         try:
-            pack_pages = _wiki_pack_pages(wiki)
+            pack_pages = self._ensure_pack_pages()
         except Exception as exc:  # noqa: BLE001 - surface corrupt pack state to callers.
             return json.dumps({"error": f"could not read wiki-packs: {exc}"})
 
@@ -1384,15 +1402,33 @@ class CtxCoreToolbox:
                 )
 
         if "skill" in candidate_entity_types:
-            converted_path = _safe_converted_skill_path(wiki, slug)
-            if converted_path is not None:
-                return self._serialise_page(
-                    converted_path,
+            body_slugs = _skill_body_slugs(slug, include_catalog_alias=True)
+            packed_body = _packed_skill_body(pack_pages, body_slugs)
+            if packed_body is not None:
+                source_path, text = packed_body
+                return self._serialise_page_text(
+                    wiki / source_path,
+                    text,
                     "skill",
                     _wiki_entity_link(slug, "skill"),
                     _response_format_from_args(args),
                     slug=slug,
+                    source_path=source_path,
                 )
+            for body_slug in body_slugs:
+                converted_path = _safe_converted_skill_path(wiki, body_slug)
+                if converted_path is not None:
+                    return self._serialise_page(
+                        converted_path,
+                        "skill",
+                        _wiki_entity_link(slug, "skill"),
+                        _response_format_from_args(args),
+                        slug=slug,
+                        source_path=_recommendation_source_ref(
+                            converted_path,
+                            wiki_dir=wiki,
+                        ),
+                    )
 
         return json.dumps(
             {
@@ -1636,6 +1672,7 @@ class CtxCoreToolbox:
         response_format: str,
         *,
         slug: str | None = None,
+        source_path: str | None = None,
     ) -> str:
         try:
             with secure_directory(path.parent) as directory:
@@ -1649,6 +1686,7 @@ class CtxCoreToolbox:
             wikilink,
             response_format,
             slug=slug,
+            source_path=source_path,
         )
 
     def _serialise_page_text(
@@ -1660,6 +1698,7 @@ class CtxCoreToolbox:
         response_format: str,
         *,
         slug: str | None = None,
+        source_path: str | None = None,
     ) -> str:
         from ctx.core.wiki.wiki_utils import parse_frontmatter_and_body  # noqa: PLC0415
 
@@ -1679,7 +1718,7 @@ class CtxCoreToolbox:
                 "slug": page_slug,
                 "entity_type": entity_type,
                 "wikilink": wikilink,
-                "path": _wiki_entity_relpath(entity_type, page_slug),
+                "path": source_path or _wiki_entity_relpath(entity_type, page_slug),
                 "frontmatter": fm,
                 "body": body,
                 "body_truncated": body_truncated,
@@ -1732,6 +1771,19 @@ class CtxCoreToolbox:
         self._pages = load_all_pages(wiki)
         self._pages_signature = signature
         return self._pages
+
+    def _ensure_pack_pages(self) -> dict[str, str] | None:
+        wiki = self._wiki_dir_resolved()
+        if wiki is None:
+            self._pack_pages = None
+            self._pack_pages_signature = None
+            return None
+        signature = _pack_dir_signature(wiki / "wiki-packs")
+        if signature == self._pack_pages_signature:
+            return self._pack_pages
+        self._pack_pages = _wiki_pack_pages(wiki)
+        self._pack_pages_signature = signature
+        return self._pack_pages
 
     def _graph_file_path(self) -> Path | None:
         if self._graph_path is not None:
@@ -1819,6 +1871,37 @@ def _safe_converted_skill_path(wiki: Path, slug: str) -> Path | None:
     except (OSError, ValueError):
         return None
     return resolved_candidate if resolved_candidate.is_file() else None
+
+
+def _skill_body_slugs(slug: str, *, include_catalog_alias: bool) -> tuple[str, ...]:
+    from ctx.core.wiki.wiki_utils import validate_skill_name  # noqa: PLC0415
+
+    candidates = [slug]
+    if include_catalog_alias and not slug.startswith("skills-sh-"):
+        candidates.append(f"skills-sh-{slug}")
+    valid: list[str] = []
+    for candidate in candidates:
+        try:
+            validate_skill_name(candidate)
+        except ValueError:
+            continue
+        if candidate not in valid:
+            valid.append(candidate)
+    return tuple(valid)
+
+
+def _packed_skill_body(
+    pack_pages: Mapping[str, str] | None,
+    body_slugs: Iterable[str],
+) -> tuple[str, str] | None:
+    if pack_pages is None:
+        return None
+    for body_slug in body_slugs:
+        source_path = f"converted/{body_slug}/SKILL.md"
+        text = pack_pages.get(source_path)
+        if text is not None:
+            return source_path, text
+    return None
 
 
 def _normalise_allowed_tool_names(
@@ -2007,7 +2090,12 @@ def _recommendation_identity(row: Mapping[str, Any]) -> str:
     return f"{entity_type}:{name}"
 
 
-def _base_recommendation_row(row: Mapping[str, Any], *, wiki_dir: Path | None) -> dict[str, Any]:
+def _base_recommendation_row(
+    row: Mapping[str, Any],
+    *,
+    wiki_dir: Path | None,
+    pack_pages: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
     base = {
         "name": row["name"],
         "type": row["type"],
@@ -2028,7 +2116,13 @@ def _base_recommendation_row(row: Mapping[str, Any], *, wiki_dir: Path | None) -
         "invoke_command": row.get("invoke_command"),
         "security_review": row.get("security_review"),
     }
-    base.update(_recommendation_availability(base, wiki_dir=wiki_dir))
+    base.update(
+        _recommendation_availability(
+            base,
+            wiki_dir=wiki_dir,
+            pack_pages=pack_pages,
+        )
+    )
     return base
 
 
@@ -2046,6 +2140,7 @@ def _recommendation_availability(
     row: Mapping[str, Any],
     *,
     wiki_dir: Path | None,
+    pack_pages: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     entity_type = str(row.get("type") or "").strip()
     slug = str(row.get("name") or "").strip()
@@ -2064,8 +2159,27 @@ def _recommendation_availability(
         result["load_status"] = "wiki-unavailable"
         return result
     if entity_type == "skill":
-        converted = wiki_dir / "converted" / slug
-        if converted.is_dir() and not converted.is_symlink():
+        body_slugs = _skill_body_slugs(
+            slug,
+            include_catalog_alias=source_catalog.lower() in {"skill-index", "skills.sh"},
+        )
+        packed_body = _packed_skill_body(pack_pages, body_slugs)
+        if packed_body is not None:
+            source_path, _text = packed_body
+            result.update(
+                {
+                    "installable": True,
+                    "load_status": "local-wiki",
+                    "source_path": source_path,
+                    "body_provenance": "wiki-pack",
+                }
+            )
+            return result
+        missing_converted: Path | None = None
+        for body_slug in body_slugs:
+            converted = wiki_dir / "converted" / body_slug
+            if not converted.is_dir() or converted.is_symlink():
+                continue
             for candidate in (converted / "SKILL.md", converted / "SKILL.md.original"):
                 if candidate.is_file() and not candidate.is_symlink():
                     result.update(
@@ -2076,10 +2190,15 @@ def _recommendation_availability(
                         }
                     )
                     return result
+            missing_converted = missing_converted or converted
+        if missing_converted is not None:
             result.update(
                 {
                     "load_status": "wiki-no-loadable-body",
-                    "source_path": _recommendation_source_ref(converted, wiki_dir=wiki_dir),
+                    "source_path": _recommendation_source_ref(
+                        missing_converted,
+                        wiki_dir=wiki_dir,
+                    ),
                 }
             )
             return result
@@ -2134,9 +2253,9 @@ def _is_local_loadable_skill_row(row: Mapping[str, Any]) -> bool:
     if load_status and load_status != "local-wiki":
         return False
     if status in _REMOTE_SKILL_LOAD_STATUSES:
-        return False
+        return row.get("body_provenance") == "wiki-pack"
     if source_catalog == "skill-index" or install_command:
-        return False
+        return row.get("body_provenance") == "wiki-pack"
     return True
 
 
@@ -2209,10 +2328,15 @@ def _recommendation_candidate_allowed(
     row: Mapping[str, Any],
     *,
     wiki_dir: Path | None,
+    pack_pages: Mapping[str, str] | None,
     excluded: set[str],
     context: Mapping[str, Any],
 ) -> bool:
-    candidate = _base_recommendation_row(row, wiki_dir=wiki_dir)
+    candidate = _base_recommendation_row(
+        row,
+        wiki_dir=wiki_dir,
+        pack_pages=pack_pages,
+    )
     candidate_keys = _recommendation_selection_keys(
         [_recommendation_identity(candidate), str(candidate.get("name") or "")]
     )

@@ -48,15 +48,29 @@ scripts, and `.no-mistakes.yaml` as contract files; include focused
 `src/tests/...` coverage unless the diff is a proven version or stats-only
 release metadata update.
 
-GitHub PRs skip the broad OS/Python `test` matrix for ordinary changes.
-Changes under `.github/workflows/**` set `ci_changed`, run the full
-Ubuntu/Windows/macOS pytest matrix on the PR, and make the stable required
-aggregate fail if that matrix is skipped.
+## Package-layout migration
+
+The legacy flat modules and the `ctx` package intentionally coexist during the
+staged migration. `pyproject.toml` is the authoritative inventory of packaged
+modules, packages, and console-script targets; `src/tests/test_package_scaffold.py`
+pins the import and distribution surface.
+
+When moving a module, preserve its documented CLI and import behavior, update
+the relevant `pyproject.toml` entries, and add focused tests for the canonical
+path and any compatibility shim. Do not remove a flat shim merely because the
+new package path exists: shim removal requires an explicit migration phase plus
+clean-install and packaging evidence. Run the package-scaffold tests and the
+affected module tests before the repository gates.
+
+GitHub PRs skip the broad OS/Python `test` matrix. The full
+Ubuntu/Windows/macOS pytest matrix runs after merge on `main`; PRs use focused
+required jobs selected from the changed surface.
 
 PRs matching `WINDOWS_PATTERNS` in `scripts/ci_classifier.py` also run the
-required `windows-high-risk` job on native Windows 3.12, focused on the
-DesignDotMD, Matt Pocock, and Strix importer suites. Local-fast and preflight
-remain the first pass, but they do not replace that native Windows evidence.
+required `windows-high-risk` job on native Windows 3.12, focused on Windows
+sensitive importers and benchmark process/filesystem behavior. Local-fast and
+preflight remain the first pass, but they do not replace that native Windows
+evidence. After merge, the full Windows matrix supersedes the focused job.
 
 ## Documentation changes
 

@@ -114,7 +114,7 @@ def test_public_docs_describe_clean_install_fallback_contract() -> None:
     node_ids = {node["id"] for node in nodes}
     entry_ids = {entry["id"] for entry in manifest["entries"]}
 
-    assert len(node_ids) == 6
+    assert len(node_ids) == 9
     assert node_ids == entry_ids
     assert all(node["project_owned"] is True for node in nodes)
     assert all(node["license"] == "MIT" for node in nodes)

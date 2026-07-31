@@ -16,10 +16,98 @@
         "label": "ctx-python-testing",
         "title": "ctx Python Testing",
         "type": "skill",
-        "description": "Project-owned local Python testing workflow for focused regressions and configured quality gates.",
+        "description": "Project-owned context-efficient Python workflow for focused regressions and configured quality gates.",
         "tags": ["ctx", "python", "testing", "pytest", "local", "no-api-key"],
         "source": "ctx-runtime-availability",
         "source_keys": ["https://github.com/stevesolun/ctx"],
+        "license": "MIT",
+        "status": "local-wiki",
+        "project_owned": true,
+        "requires_api_keys": false
+      },
+      {
+        "id": "skill:ctx-python-state-protocols",
+        "label": "ctx-python-state-protocols",
+        "title": "ctx Python State and Protocols",
+        "type": "skill",
+        "description": "Project-owned Python workflow for state restoration, protocol entry points, and lifecycle invariants.",
+        "tags": [
+          "ctx",
+          "python",
+          "state",
+          "context",
+          "manager",
+          "protocol",
+          "iterator",
+          "initialization",
+          "lifecycle",
+          "local",
+          "no-api-key"
+        ],
+        "source": "ctx-runtime-availability",
+        "source_keys": [
+          "https://github.com/stevesolun/ctx"
+        ],
+        "license": "MIT",
+        "status": "local-wiki",
+        "project_owned": true,
+        "requires_api_keys": false
+      },
+      {
+        "id": "skill:ctx-python-input-boundaries",
+        "label": "ctx-python-input-boundaries",
+        "title": "ctx Python Input Boundaries",
+        "type": "skill",
+        "description": "Project-owned Python workflow for malformed parser input, Unicode text, and progress invariants.",
+        "tags": [
+          "ctx",
+          "python",
+          "input",
+          "parsing",
+          "parser",
+          "malformed",
+          "parameter",
+          "parameters",
+          "text",
+          "scanner",
+          "unicode",
+          "progress",
+          "local",
+          "no-api-key"
+        ],
+        "source": "ctx-runtime-availability",
+        "source_keys": [
+          "https://github.com/stevesolun/ctx"
+        ],
+        "license": "MIT",
+        "status": "local-wiki",
+        "project_owned": true,
+        "requires_api_keys": false
+      },
+      {
+        "id": "skill:ctx-python-api-compatibility",
+        "label": "ctx-python-api-compatibility",
+        "title": "ctx Python API Compatibility",
+        "type": "skill",
+        "description": "Project-owned Python workflow for public API additions, compatibility matrices, and existing output paths.",
+        "tags": [
+          "ctx",
+          "python",
+          "api",
+          "compatibility",
+          "public",
+          "output",
+          "serialization",
+          "cli",
+          "constructor",
+          "frozen",
+          "local",
+          "no-api-key"
+        ],
+        "source": "ctx-runtime-availability",
+        "source_keys": [
+          "https://github.com/stevesolun/ctx"
+        ],
         "license": "MIT",
         "status": "local-wiki",
         "project_owned": true,
@@ -73,7 +161,16 @@
         "title": "ctx Python Reviewer",
         "type": "agent",
         "description": "Project-owned local Python review agent for correctness, regressions, security, typing, and tests.",
-        "tags": ["ctx", "python", "reviewer", "testing", "security", "local", "no-api-key"],
+        "tags": [
+          "ctx",
+          "python",
+          "review",
+          "reviewer",
+          "testing",
+          "security",
+          "local",
+          "no-api-key"
+        ],
         "source": "ctx-runtime-availability",
         "source_keys": ["https://github.com/stevesolun/ctx"],
         "license": "MIT",
@@ -106,7 +203,40 @@
       "files": [
         {
           "path": "converted/ctx-python-testing/SKILL.md",
-          "content": "---\nname: ctx-python-testing\ndescription: Project-owned local Python testing with pytest, focused regressions, and configured quality gates.\nsource: ctx-runtime-availability\nlicense: MIT\nrequires_api_keys: false\n---\n\n# ctx Python Testing\n\nUse this skill for local Python test design and failure diagnosis.\n\n1. Read the behavior and nearby tests before changing code.\n2. Reproduce the failure with the narrowest deterministic pytest case.\n3. Implement the smallest behavior-preserving fix.\n4. Run the focused test, affected subsystem, and configured quality gates.\n5. Keep fixtures isolated from network and wall-clock dependencies.\n"
+          "content": "---\nname: ctx-python-testing\ndescription: Project-owned context-efficient Python testing with focused regressions and quality gates.\nsource: ctx-runtime-availability\nlicense: MIT\nrequires_api_keys: false\n---\n\n# ctx Python Testing\n\nKeep Python changes correct without bloating the working context.\n\n1. Search only task-relevant symbols and roots. Never combine explicit roots with `.` or dump the full repository; narrow or cap large results.\n2. Read the implementation and nearest tests before changing code.\n3. Reproduce failures with the narrowest deterministic pytest case.\n4. For environment-sensitive behavior, explicitly control the relevant variables.\n5. Run the affected suite and configured gates; avoid network and wall-clock dependencies.\n"
+        }
+      ]
+    },
+    {
+      "id": "skill:ctx-python-state-protocols",
+      "type": "skill",
+      "no_api_keys": true,
+      "files": [
+        {
+          "path": "converted/ctx-python-state-protocols/SKILL.md",
+          "content": "---\nname: ctx-python-state-protocols\ndescription: Project-owned Python state restoration, protocol entry-point, and lifecycle invariant guidance.\nsource: ctx-runtime-availability\nlicense: MIT\nrequires_api_keys: false\n---\n\n# ctx Python State and Protocols\n\nUse this context when behavior depends on state or on more than one public entry point.\n\n1. List every public path into the behavior before editing; do not assume callers entered through one protocol method.\n2. Establish required invariants at construction or at the narrowest shared boundary.\n3. Restore the exact prior state in `finally`, including nested and exceptional exits.\n4. Keep repeated protocol calls idempotent unless the public contract explicitly resets state.\n5. Cover direct, normal-iteration, nested, already-active, and exception paths that apply.\n"
+        }
+      ]
+    },
+    {
+      "id": "skill:ctx-python-input-boundaries",
+      "type": "skill",
+      "no_api_keys": true,
+      "files": [
+        {
+          "path": "converted/ctx-python-input-boundaries/SKILL.md",
+          "content": "---\nname: ctx-python-input-boundaries\ndescription: Project-owned Python malformed-input, Unicode text, and parser progress guidance.\nsource: ctx-runtime-availability\nlicense: MIT\nrequires_api_keys: false\n---\n\n# ctx Python Input Boundaries\n\nUse this context for parsers, scanners, and malformed or Unicode input.\n\n1. State the loop progress invariant: every iteration must consume input, emit output, or terminate.\n2. Distinguish absent, valueless, empty, and malformed fields before normalizing them.\n3. Skip only the invalid unit while preserving valid neighboring data and existing fallbacks.\n4. Keep zero-width data attached to the documented side without inventing visible output.\n5. Verify the smallest malformed boundary plus representative valid and fallback cases.\n"
+        }
+      ]
+    },
+    {
+      "id": "skill:ctx-python-api-compatibility",
+      "type": "skill",
+      "no_api_keys": true,
+      "files": [
+        {
+          "path": "converted/ctx-python-api-compatibility/SKILL.md",
+          "content": "---\nname: ctx-python-api-compatibility\ndescription: Project-owned Python public API, compatibility matrix, and output-path guidance.\nsource: ctx-runtime-availability\nlicense: MIT\nrequires_api_keys: false\n---\n\n# ctx Python API Compatibility\n\nUse this context for public API changes and compatibility-sensitive behavior.\n\n1. Trace the public export chain and reuse the package's existing output or conversion path.\n2. Preserve defaults, exception behavior, and old call forms unless the task changes them explicitly.\n3. Separate construction-time allowances from runtime mutation or enforcement policy.\n4. Test the smallest meaningful compatibility matrix across supported aliases, modes, and defaults.\n5. Keep the implementation at the shared public boundary and avoid parallel behavior paths.\n"
         }
       ]
     },
@@ -150,7 +280,7 @@
       "files": [
         {
           "path": "entities/agents/ctx-python-reviewer.md",
-          "content": "---\ntitle: ctx-python-reviewer\ntype: agent\nstatus: available\ntags: [ctx, python, reviewer, testing, security]\nsource: ctx-runtime-availability\nlicense: MIT\nrequires_api_keys: false\n---\n\n# ctx Python Reviewer\n\nProject-owned review agent for local Python changes. It reports findings with evidence, reproduction, risk, a minimal fix recommendation, and a verdict.\n"
+          "content": "---\ntitle: ctx-python-reviewer\ntype: agent\nstatus: available\ntags: [ctx, python, review, reviewer, testing, security]\nsource: ctx-runtime-availability\nlicense: MIT\nrequires_api_keys: false\n---\n\n# ctx Python Reviewer\n\nProject-owned review agent for local Python changes. It reports findings with evidence, reproduction, risk, a minimal fix recommendation, and a verdict.\n"
         },
         {
           "path": "converted-agents/ctx-python-reviewer.md",

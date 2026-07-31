@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from datetime import datetime
 import hashlib
 import json
 import shlex
 from pathlib import Path
 
+import pytest
 import yaml  # type: ignore[import-untyped]
 
 from scripts import ci_preflight
@@ -256,11 +258,28 @@ def test_local_fast_summary_json_records_lane_timings(tmp_path: Path) -> None:
         ),
     )
 
-    local_fast_gate.write_summary_json(summary_path, result)
+    local_fast_gate.write_summary_json(
+        summary_path,
+        result,
+        head_sha="a" * 40,
+        base_ref="origin/main",
+        base_sha="c" * 40,
+        profile="pr",
+        source_worktree_dirty_at_selection=False,
+        changed_file_paths=["README.md"],
+        started_at="2026-07-28T00:00:00+00:00",
+        finished_at="2026-07-28T00:00:01+00:00",
+    )
 
     payload = json.loads(summary_path.read_text(encoding="utf-8"))
     assert payload == {
+        "base_ref": "origin/main",
+        "base_sha": "c" * 40,
+        "changed_file_paths": ["README.md"],
+        "committed_head_only": True,
         "elapsed_seconds": 1.234,
+        "finished_at": "2026-07-28T00:00:01+00:00",
+        "head_sha": "a" * 40,
         "lanes": [
             {
                 "check_count": 3,
@@ -270,9 +289,120 @@ def test_local_fast_summary_json_records_lane_timings(tmp_path: Path) -> None:
                 "worktree": None,
             }
         ],
+        "profile": "pr",
         "returncode": 0,
+        "schema_version": 2,
+        "source_worktree_dirty_at_selection": False,
+        "started_at": "2026-07-28T00:00:00+00:00",
         "worker_count": 2,
     }
+
+
+def test_local_fast_main_pins_head_and_writes_provenance(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    head_sha = "b" * 40
+    base_sha = "c" * 40
+    summary_path = tmp_path / "summary.json"
+    captured: dict[str, object] = {}
+    selected_inputs: dict[str, object] = {}
+    changed_file_inputs: list[tuple[str, str]] = []
+    checks = [Check("whitespace", ("python", "-V"))]
+    monkeypatch.setattr(local_fast_gate.shutil, "which", lambda _name: "/usr/bin/git")
+    monkeypatch.setattr(local_fast_gate, "_is_worktree_dirty", lambda: False)
+
+    def git_stdout(args: list[str]) -> str:
+        return (base_sha if args[0] == "merge-base" else head_sha) + "\n"
+
+    def changed_files(base: str, *, head_ref: str) -> list[str]:
+        changed_file_inputs.append((base, head_ref))
+        return ["README.md"]
+
+    monkeypatch.setattr(local_fast_gate, "_git_stdout", git_stdout)
+    monkeypatch.setattr(local_fast_gate, "changed_files", changed_files)
+
+    def select_checks(**kwargs):
+        selected_inputs.update(kwargs)
+        return checks, []
+
+    monkeypatch.setattr(local_fast_gate, "select_checks", select_checks)
+
+    def run_lanes(_lanes, **kwargs):
+        captured.update(kwargs)
+        return local_fast_gate.GateResult(0, 0.5, 1, ())
+
+    monkeypatch.setattr(local_fast_gate, "run_lanes", run_lanes)
+
+    assert (
+        local_fast_gate.main(
+            [
+                "--base",
+                "origin/main",
+                "--profile",
+                "pr",
+                "--summary-json",
+                str(summary_path),
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert captured["revision"] == head_sha
+    assert changed_file_inputs == [(base_sha, head_sha)]
+    assert selected_inputs["base_ref"] == base_sha
+    assert payload["head_sha"] == head_sha
+    assert payload["base_ref"] == "origin/main"
+    assert payload["base_sha"] == base_sha
+    assert payload["changed_file_paths"] == ["README.md"]
+    assert payload["profile"] == "pr"
+    assert payload["committed_head_only"] is True
+    assert payload["source_worktree_dirty_at_selection"] is False
+    started_at = datetime.fromisoformat(payload["started_at"])
+    finished_at = datetime.fromisoformat(payload["finished_at"])
+    started_offset = started_at.utcoffset()
+    finished_offset = finished_at.utcoffset()
+    assert started_offset is not None
+    assert started_offset.total_seconds() == 0
+    assert finished_offset is not None
+    assert finished_offset.total_seconds() == 0
+    assert started_at <= finished_at
+
+
+def test_local_fast_main_rejects_head_change_during_selection(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    first_head = "a" * 40
+    second_head = "b" * 40
+    base_sha = "c" * 40
+    observed_heads = iter((first_head, second_head))
+    summary_path = tmp_path / "summary.json"
+    checks = [Check("whitespace", ("python", "-V"))]
+    monkeypatch.setattr(local_fast_gate.shutil, "which", lambda _name: "/usr/bin/git")
+    monkeypatch.setattr(local_fast_gate, "_is_worktree_dirty", lambda: False)
+
+    def git_stdout(args: list[str]) -> str:
+        return (base_sha if args[0] == "merge-base" else next(observed_heads)) + "\n"
+
+    monkeypatch.setattr(local_fast_gate, "_git_stdout", git_stdout)
+    monkeypatch.setattr(
+        local_fast_gate,
+        "changed_files",
+        lambda _base, *, head_ref: ["README.md"],
+    )
+    monkeypatch.setattr(local_fast_gate, "select_checks", lambda **_kwargs: (checks, []))
+    monkeypatch.setattr(
+        local_fast_gate,
+        "run_lanes",
+        lambda *_args, **_kwargs: pytest.fail("lanes must not run after HEAD changes"),
+    )
+
+    with pytest.raises(SystemExit, match="HEAD changed while local-fast selected checks"):
+        local_fast_gate.main(["--summary-json", str(summary_path)])
+
+    assert not summary_path.exists()
 
 
 def test_local_fast_omits_deleted_worktree_paths(monkeypatch, tmp_path: Path) -> None:
@@ -282,13 +412,20 @@ def test_local_fast_omits_deleted_worktree_paths(monkeypatch, tmp_path: Path) ->
         name="cheap",
         checks=(Check("whitespace", ("python", "-V")),),
     )
-    monkeypatch.setattr(local_fast_gate, "_create_worktree", lambda _name: worktree)
+    revisions: list[str] = []
+
+    def create_worktree(_name: str, *, revision: str) -> Path:
+        revisions.append(revision)
+        return worktree
+
+    monkeypatch.setattr(local_fast_gate, "_create_worktree", create_worktree)
     monkeypatch.setattr(local_fast_gate, "_remove_worktree", removed.append)
     monkeypatch.setattr(local_fast_gate, "_run_check", lambda *args, **_kwargs: 0)
 
-    result = local_fast_gate.run_lane(lane, keep_worktrees=False)
+    result = local_fast_gate.run_lane(lane, keep_worktrees=False, revision="a" * 40)
 
     assert result.worktree is None
+    assert revisions == ["a" * 40]
     assert removed == [worktree]
 
 
@@ -299,7 +436,11 @@ def test_local_fast_kept_worktree_paths_remain_in_summary(monkeypatch, tmp_path:
         name="cheap",
         checks=(Check("whitespace", ("python", "-V")),),
     )
-    monkeypatch.setattr(local_fast_gate, "_create_worktree", lambda _name: worktree)
+    monkeypatch.setattr(
+        local_fast_gate,
+        "_create_worktree",
+        lambda _name, *, revision: worktree,
+    )
     monkeypatch.setattr(local_fast_gate, "_remove_worktree", removed.append)
     monkeypatch.setattr(local_fast_gate, "_run_check", lambda *args, **_kwargs: 0)
 

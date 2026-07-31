@@ -77,9 +77,6 @@ def failed_required_jobs(
         event_name == "pull_request"
         and _job_output(needs, "classify", "telemetry_changed") == "true"
     )
-    ci_changed_pr = (
-        event_name == "pull_request" and _job_output(needs, "classify", "ci_changed") == "true"
-    )
     package_changed_output = _job_output(needs, "classify", "package_changed")
     windows_changed_output = _job_output(needs, "classify", "windows_changed")
     cheap_pr = docs_only_pr or graph_only_pr
@@ -89,7 +86,7 @@ def failed_required_jobs(
             continue
         if (
             event_name != "pull_request"
-            and name in {"docs-check", "graph-check", "no-test-no-merge"}
+            and name in {"docs-check", "graph-check", "no-test-no-merge", "windows-high-risk"}
             and result == "skipped"
         ):
             continue
@@ -142,12 +139,7 @@ def failed_required_jobs(
             and not telemetry_changed_pr
         ):
             continue
-        if (
-            event_name == "pull_request"
-            and name == "test"
-            and result == "skipped"
-            and not ci_changed_pr
-        ):
+        if event_name == "pull_request" and name == "test" and result == "skipped":
             continue
         if (
             event_name == "pull_request"
