@@ -1754,13 +1754,14 @@ the harness pages used by <code>ctx-harness-install</code>:</p>
 <p>The runtime install includes a small actionable fallback set that does not
 depend on an external catalog or API key:</p>
 <ul>
-<li>skills: <code>ctx-python-testing</code>, <code>ctx-javascript-testing</code>,
-  <code>ctx-rust-patterns</code>, and <code>ctx-typescript</code>;</li>
+<li>skills: <code>ctx-python-testing</code>, <code>ctx-python-state-protocols</code>,
+  <code>ctx-python-input-boundaries</code>, <code>ctx-python-api-compatibility</code>,
+  <code>ctx-javascript-testing</code>, <code>ctx-rust-patterns</code>, and <code>ctx-typescript</code>;</li>
 <li>agent: <code>ctx-python-reviewer</code>;</li>
 <li>MCP server: <code>ctx-core</code>, installed only as the exact bare
   <code>ctx-mcp-server</code> command.</li>
 </ul>
-<p>These six project-owned entities are MIT licensed and use reserved <code>ctx-*</code>
+<p>These nine project-owned entities are MIT licensed and use reserved <code>ctx-*</code>
 identities. Installation preserves unrelated skill, agent, MCP, and
 converted-skill content; runtime-managed harness pages are refreshed from the
 installed artifact. Installation fails closed on identity or overlay
