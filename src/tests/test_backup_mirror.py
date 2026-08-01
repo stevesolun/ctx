@@ -369,8 +369,6 @@ def test_resolve_restore_target_rejects_traversal():
 
 def test_prune_refuses_symlink_outside_backups(fake_home, tmp_path):
     """Prune must not follow a symlinked dir out of backups_dir."""
-    if sys.platform == "win32":
-        pytest.skip("symlink creation often requires admin on Windows")
     _seed_home(fake_home)
     bm.create_snapshot(now=1.0)
     outside = _plant_external_snapshot_symlink(tmp_path)
@@ -404,8 +402,6 @@ def test_prune_with_keep_zero_removes_all(fake_home):
 
 
 def test_prune_dry_run_excludes_symlink_outside_backups(fake_home, tmp_path):
-    if sys.platform == "win32":
-        pytest.skip("symlink creation often requires admin on Windows")
     _seed_home(fake_home)
     real = bm.create_snapshot(now=1.0)
     outside = _plant_external_snapshot_symlink(tmp_path)
@@ -418,8 +414,6 @@ def test_prune_dry_run_excludes_symlink_outside_backups(fake_home, tmp_path):
 
 
 def test_prune_policy_dry_run_excludes_symlink_outside_backups(fake_home, tmp_path):
-    if sys.platform == "win32":
-        pytest.skip("symlink creation often requires admin on Windows")
     _seed_home(fake_home)
     real = bm.create_snapshot(now=1.0)
     outside = _plant_external_snapshot_symlink(tmp_path)

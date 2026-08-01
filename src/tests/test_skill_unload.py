@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import importlib
 import json
-import os
 import sqlite3
 import stat
 import sys
@@ -206,8 +205,7 @@ def test_unload_from_session_writes_manifest_event_and_audit(
     assert events[0]["skill_hash"].startswith("sha256:")
     assert events[0]["session_hash"].startswith("sha256:")
     assert events[0]["meta"] == {"source": "skill_unload"}
-    if os.name != "nt":
-        assert stat.S_IMODE((home / ".claude" / "skill-events.jsonl").stat().st_mode) == 0o600
+    assert stat.S_IMODE((home / ".claude" / "skill-events.jsonl").stat().st_mode) == 0o600
     assert audit_calls == [
         (
             "skill.unloaded",

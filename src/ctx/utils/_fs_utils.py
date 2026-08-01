@@ -3,15 +3,12 @@ _fs_utils.py -- Shared atomic file-write helpers for the ctx project.
 
 Why this exists: 14 modules independently implemented nearly identical
 ``_atomic_write`` / ``_atomic_write_text`` private functions, leading to
-subtle divergences (missing Windows retry, missing parent-dir creation,
-predictable temp names).  This module provides a single hardened
+subtle divergences (missing parent-dir creation, predictable temp names).
+This module provides a single hardened
 implementation that all of them delegate to.
 
 The ``atomic_write_*`` family writes via a temp file in the same directory
-as the target, then calls ``os.replace()`` which is atomic on POSIX and
-best-effort atomic on Windows.  On Windows, ``os.replace()`` raises
-``PermissionError`` if the destination is held open; a bounded retry loop
-absorbs transient contention before re-raising.
+as the target, then calls the POSIX-atomic ``os.replace()``.
 """
 
 from __future__ import annotations
@@ -22,7 +19,6 @@ import secrets
 import stat
 import sys
 import tempfile
-import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -46,8 +42,7 @@ __all__ = [
 # ``tempfile.mkstemp`` defaults to 0o600 for the temp file, but
 # ``os.replace`` can inherit the destination's permissions if the
 # target already exists. An explicit chmod before the replace makes
-# the intent load-bearing across platforms (Windows ignores the mode
-# but doesn't error). Applied to all atomic writers so skill-quality
+# the intent load-bearing. Applied to all atomic writers so skill-quality
 # sidecars, pulsemcp cache JSONs, and backup manifests all land
 # owner-only on multi-user machines.
 _FILE_MODE_PRIVATE: int = 0o600
@@ -59,12 +54,6 @@ _DARWIN_SYSTEM_SYMLINKS: dict[Path, Path] = {
 _DIRECTORY_OPEN_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
 _READ_OPEN_FLAGS = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
 _TEMP_OPEN_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-_WINDOWS_FILE_READ_ATTRIBUTES = 0x80
-_WINDOWS_FILE_SHARE_READ = 0x1
-_WINDOWS_FILE_SHARE_WRITE = 0x2
-_WINDOWS_OPEN_EXISTING = 3
-_WINDOWS_FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
-_WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
 _WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 
 
@@ -88,7 +77,7 @@ def atomic_write_text(path: Path, text: str, encoding: str = "utf-8") -> None:
             fh.flush()
             os.fsync(fh.fileno())
         _chmod_private(tmp)
-        _replace_with_retry(tmp, path)
+        _replace_atomically(tmp, path)
         _fsync_parent_dir(path.parent)
     except Exception:
         _unlink_silent(tmp)
@@ -110,7 +99,7 @@ def atomic_write_bytes(path: Path, data: bytes) -> None:
             fh.flush()
             os.fsync(fh.fileno())
         _chmod_private(tmp)
-        _replace_with_retry(tmp, path)
+        _replace_atomically(tmp, path)
         _fsync_parent_dir(path.parent)
     except Exception:
         _unlink_silent(tmp)
@@ -124,6 +113,11 @@ def atomic_write_json(path: Path, obj: Any, indent: int | None = 2) -> None:
     Creates parent directories if missing.
     """
     atomic_write_text(path, json.dumps(obj, indent=indent) + "\n", encoding="utf-8")
+
+
+def _replace_atomically(src: str | Path, dst: str | Path) -> None:
+    """Replace *dst* with *src* using the supported POSIX atomic rename."""
+    os.replace(src, dst)
 
 
 def reject_symlink_path(path: Path) -> None:
@@ -171,19 +165,17 @@ def supports_secure_directory_fds() -> bool:
 
 
 class _SecureDirectory:
-    def __init__(self, path: Path, directory_fd: int | None) -> None:
+    def __init__(self, path: Path, directory_fd: int) -> None:
         self.path = path
         self._directory_fd = directory_fd
 
     def exists(self, name: str) -> bool:
         _validate_child_name(name)
-        if self._directory_fd is not None:
-            try:
-                os.stat(name, dir_fd=self._directory_fd, follow_symlinks=False)
-            except FileNotFoundError:
-                return False
-            return True
-        return _lstat_optional(self.path / name) is not None
+        try:
+            os.stat(name, dir_fd=self._directory_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return False
+        return True
 
     def read_text(
         self,
@@ -194,16 +186,11 @@ class _SecureDirectory:
     ) -> str:
         """Read one pinned regular child without following replacement links."""
         _validate_child_name(name)
-        if self._directory_fd is not None:
-            return _read_text_at(self, name, encoding=encoding, errors=errors)
-        return _read_text_guarded_path(self, name, encoding=encoding, errors=errors)
+        return _read_text_at(self, name, encoding=encoding, errors=errors)
 
     def atomic_write_text(self, name: str, text: str, encoding: str = "utf-8") -> None:
         _validate_child_name(name)
-        if self._directory_fd is not None:
-            _atomic_write_text_at(self, name, text, encoding)
-            return
-        _atomic_write_text_guarded_path(self, name, text, encoding)
+        _atomic_write_text_at(self, name, text, encoding)
 
 
 @contextmanager
@@ -252,30 +239,9 @@ def secure_directory(
             os.close(directory_fd)
         return
 
-    if os.name == "nt":
-        if exclusive:
-            if absolute == Path(absolute.anchor):
-                raise ValueError("cannot create a filesystem root exclusively")
-            with _guard_windows_directories(absolute.parent, create=create):
-                try:
-                    absolute.mkdir()
-                except FileExistsError as exc:
-                    raise SecureDirectoryExistsError(absolute) from exc
-                _validate_real_directory(absolute)
-                handle = _open_windows_directory_guard(absolute)
-                try:
-                    _validate_real_directory(absolute)
-                    yield _SecureDirectory(absolute, None)
-                finally:
-                    _close_windows_directory_guard(handle)
-            return
-        with _guard_windows_directories(absolute, create=create):
-            yield _SecureDirectory(absolute, None)
-        return
-
     raise RuntimeError(
-        "secure directory access unavailable: this platform must provide "
-        "directory-relative filesystem operations or Windows directory handles"
+        "secure directory access unavailable: this POSIX platform must provide "
+        "directory-relative filesystem operations"
     )
 
 
@@ -329,19 +295,6 @@ def _is_reparse_point(path: Path, metadata: os.stat_result) -> bool:
     ) or (callable(is_junction) and is_junction())
 
 
-def _validate_real_directory(path: Path) -> bool:
-    metadata = _lstat_optional(path)
-    if metadata is None:
-        return False
-    if (
-        not stat.S_ISDIR(metadata.st_mode)
-        or stat.S_ISLNK(metadata.st_mode)
-        or _is_reparse_point(path, metadata)
-    ):
-        raise ValueError(f"directory {path} must be a real directory")
-    return True
-
-
 def _validate_destination(path: Path, metadata: os.stat_result | None) -> None:
     if metadata is None:
         return
@@ -366,8 +319,6 @@ def _read_text_at(
     errors: str,
 ) -> str:
     directory_fd = directory._directory_fd
-    if directory_fd is None:
-        raise RuntimeError("directory descriptor unavailable")
     destination = directory.path / name
     before = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
     _validate_destination(destination, before)
@@ -386,31 +337,6 @@ def _read_text_at(
             os.close(file_fd)
 
 
-def _read_text_guarded_path(
-    directory: _SecureDirectory,
-    name: str,
-    *,
-    encoding: str,
-    errors: str,
-) -> str:
-    destination = directory.path / name
-    before = os.stat(destination, follow_symlinks=False)
-    _validate_destination(destination, before)
-    file_fd = os.open(destination, _READ_OPEN_FLAGS)
-    try:
-        opened = os.fstat(file_fd)
-        after = os.stat(destination, follow_symlinks=False)
-        _validate_destination(destination, after)
-        if not os.path.samestat(before, opened) or not os.path.samestat(opened, after):
-            raise ValueError(f"file {destination} changed while opening")
-        with os.fdopen(file_fd, "r", encoding=encoding, errors=errors) as handle:
-            file_fd = -1
-            return handle.read()
-    finally:
-        if file_fd != -1:
-            os.close(file_fd)
-
-
 def _atomic_write_text_at(
     directory: _SecureDirectory,
     name: str,
@@ -418,8 +344,6 @@ def _atomic_write_text_at(
     encoding: str,
 ) -> None:
     directory_fd = directory._directory_fd
-    if directory_fd is None:
-        raise RuntimeError("directory descriptor unavailable")
     destination = directory.path / name
     try:
         metadata = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
@@ -456,101 +380,6 @@ def _atomic_write_text_at(
                 pass
 
 
-def _atomic_write_text_guarded_path(
-    directory: _SecureDirectory,
-    name: str,
-    text: str,
-    encoding: str,
-) -> None:
-    destination = directory.path / name
-    _validate_destination(destination, _lstat_optional(destination))
-    temp_path = directory.path / f".{name}.{secrets.token_hex(8)}.tmp"
-    temp_pending = True
-    temp_fd = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, _FILE_MODE_PRIVATE)
-    try:
-        with os.fdopen(temp_fd, "w", encoding=encoding, newline="") as handle:
-            temp_fd = -1
-            handle.write(text)
-            handle.flush()
-            os.fsync(handle.fileno())
-        _chmod_private(str(temp_path))
-        _validate_destination(destination, _lstat_optional(destination))
-        _replace_with_retry(str(temp_path), destination)
-        temp_pending = False
-    finally:
-        if temp_fd != -1:
-            os.close(temp_fd)
-        if temp_pending:
-            _unlink_silent(str(temp_path))
-
-
-def _open_windows_directory_guard(path: Path) -> int:  # pragma: no cover - Windows only
-    import ctypes
-
-    kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
-    create_file = kernel32.CreateFileW
-    create_file.argtypes = (
-        ctypes.c_wchar_p,
-        ctypes.c_uint32,
-        ctypes.c_uint32,
-        ctypes.c_void_p,
-        ctypes.c_uint32,
-        ctypes.c_uint32,
-        ctypes.c_void_p,
-    )
-    create_file.restype = ctypes.c_void_p
-    handle = create_file(
-        str(path),
-        _WINDOWS_FILE_READ_ATTRIBUTES,
-        _WINDOWS_FILE_SHARE_READ | _WINDOWS_FILE_SHARE_WRITE,
-        None,
-        _WINDOWS_OPEN_EXISTING,
-        _WINDOWS_FILE_FLAG_BACKUP_SEMANTICS | _WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT,
-        None,
-    )
-    if handle in (None, ctypes.c_void_p(-1).value):
-        error = getattr(ctypes, "get_last_error")()
-        message = getattr(ctypes, "FormatError")(error)
-        raise OSError(error, f"cannot guard directory {path}: {message}")
-    return int(handle)
-
-
-def _close_windows_directory_guard(handle: int) -> None:  # pragma: no cover - Windows only
-    import ctypes
-
-    kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
-    close_handle = kernel32.CloseHandle
-    close_handle.argtypes = (ctypes.c_void_p,)
-    close_handle.restype = ctypes.c_int
-    close_handle(ctypes.c_void_p(handle))
-
-
-def _windows_guard_paths(path: Path) -> list[Path]:
-    absolute = Path(os.path.abspath(path))
-    paths = [Path(absolute.anchor)]
-    for component in absolute.parts[1:]:
-        paths.append(paths[-1] / component)
-    return paths
-
-
-@contextmanager
-def _guard_windows_directories(path: Path, *, create: bool) -> Iterator[None]:
-    handles: list[int] = []
-    try:
-        for directory in _windows_guard_paths(path):
-            if not _validate_real_directory(directory):
-                if not create:
-                    raise FileNotFoundError(directory)
-                directory.mkdir()
-                _validate_real_directory(directory)
-            handles.append(_open_windows_directory_guard(directory))
-            _validate_real_directory(directory)
-        yield
-    finally:
-        for handle in reversed(handles):
-            _close_windows_directory_guard(handle)
-
-
 def _is_allowed_system_symlink_ancestor(path: Path) -> bool:
     """Return true for macOS system symlink prefixes such as /var."""
     if sys.platform != "darwin":
@@ -567,31 +396,8 @@ def _is_allowed_system_symlink_ancestor(path: Path) -> bool:
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 
-def _replace_with_retry(src: str, dst: Path, *, attempts: int = 10, delay: float = 0.05) -> None:
-    """Call ``os.replace(src, dst)``, retrying on ``PermissionError``.
-
-    On POSIX, ``os.replace`` is a single atomic syscall.  On Windows it can
-    raise ``PermissionError`` when another process or thread holds the
-    destination open — or even just a transient AV/indexer read handle.
-    We retry *attempts* times, sleeping *delay* seconds between each try.
-
-    Defaults (10 * 50ms = 500ms max) were tuned after CI flakes under
-    8-thread concurrent writes on windows-latest; 3 * 50ms was not enough
-    under load. 500ms total is still fast for interactive work.
-    """
-    last_exc: Exception | None = None
-    for _ in range(attempts):
-        try:
-            os.replace(src, dst)
-            return
-        except PermissionError as exc:
-            last_exc = exc
-            time.sleep(delay)
-    raise last_exc  # type: ignore[misc]
-
-
 def _chmod_private(path: str) -> None:
-    """chmod ``path`` to owner-read/write only. Best-effort on Windows.
+    """Set and verify owner-read/write-only permissions on ``path``.
 
     ``tempfile.mkstemp`` already creates with 0o600 on POSIX, but
     ``os.replace`` onto an existing destination can inherit the
@@ -599,13 +405,12 @@ def _chmod_private(path: str) -> None:
     before the replace pins the mode to 0o600 on the temp file so the
     final renamed inode keeps it.
     """
-    try:
-        os.chmod(path, _FILE_MODE_PRIVATE)
-    except OSError:
-        # Windows ignores most of the unix bits; cross-filesystem
-        # temp placements may also return OSError. Non-fatal: the
-        # replace still succeeds, just without the hardened mode.
-        pass
+    os.chmod(path, _FILE_MODE_PRIVATE)
+    actual_mode = stat.S_IMODE(os.stat(path, follow_symlinks=False).st_mode)
+    if actual_mode != _FILE_MODE_PRIVATE:
+        raise PermissionError(
+            f"private mode not applied to {path}: expected 0o600, got {actual_mode:#o}"
+        )
 
 
 def _fsync_parent_dir(path: Path) -> None:

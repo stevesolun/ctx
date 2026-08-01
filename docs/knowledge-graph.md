@@ -87,14 +87,6 @@ mkdir -p ~/.claude/skill-wiki
 tar xzf graph/wiki-graph.tar.gz -C ~/.claude/skill-wiki/
 ```
 
-On Windows PowerShell, create the target and use the built-in `tar.exe`
-without `--force-local`:
-
-```powershell
-New-Item -ItemType Directory -Force "$env:USERPROFILE\.claude\skill-wiki" | Out-Null
-tar -xzf graph\wiki-graph.tar.gz -C "$env:USERPROFILE\.claude\skill-wiki"
-```
-
 The extracted tree also opens directly as an Obsidian vault — the
 `.obsidian/` config ships inside the tarball — so you can use
 Obsidian's native graph view if you prefer it to the web dashboard.

@@ -85,14 +85,14 @@ def test_atomic_json_kill_before_replace_preserves_previous_complete_file(
 
         target = Path(__import__("sys").argv[1])
         ready = Path(__import__("sys").argv[2])
-        real_replace = _fs_utils._replace_with_retry
+        real_replace = _fs_utils._replace_atomically
 
-        def pause_before_replace(src, dst, *, attempts=10, delay=0.05):
+        def pause_before_replace(src, dst):
             ready.write_text("ready", encoding="utf-8")
             time.sleep(30)
-            real_replace(src, dst, attempts=attempts, delay=delay)
+            real_replace(src, dst)
 
-        _fs_utils._replace_with_retry = pause_before_replace
+        _fs_utils._replace_atomically = pause_before_replace
         _fs_utils.atomic_write_json(target, {"version": "new", "payload": list(range(2000))})
         """,
         [str(target), str(ready)],
@@ -121,14 +121,14 @@ def test_atomic_json_kill_after_replace_leaves_complete_new_file(
 
         target = Path(__import__("sys").argv[1])
         ready = Path(__import__("sys").argv[2])
-        real_replace = _fs_utils._replace_with_retry
+        real_replace = _fs_utils._replace_atomically
 
-        def replace_then_pause(src, dst, *, attempts=10, delay=0.05):
-            real_replace(src, dst, attempts=attempts, delay=delay)
+        def replace_then_pause(src, dst):
+            real_replace(src, dst)
             ready.write_text("ready", encoding="utf-8")
             time.sleep(30)
 
-        _fs_utils._replace_with_retry = replace_then_pause
+        _fs_utils._replace_atomically = replace_then_pause
         _fs_utils.atomic_write_json(target, {"version": "new", "payload": list(range(2000))})
         """,
         [str(target), str(ready)],

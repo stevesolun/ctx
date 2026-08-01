@@ -4,7 +4,6 @@ from copy import deepcopy
 import hashlib
 import inspect
 import json
-import os
 from pathlib import Path
 import shutil
 import stat
@@ -511,28 +510,12 @@ def test_atomic_private_write_is_canonical_owner_only_and_no_overwrite(
     prepare._atomic_private_write(output, data)
 
     assert output.read_bytes() == b'{"a":1,"b":2}'
-    if os.name != "nt":
-        assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    assert stat.S_IMODE(output.stat().st_mode) == 0o600
     assert output.stat().st_nlink == 1
     with pytest.raises(prepare.PrepareError, match="exists"):
         prepare._atomic_private_write(output, data)
 
 
-def test_atomic_private_write_does_not_require_fchmod_on_windows(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    output = tmp_path / "private" / "artifact.json"
-    monkeypatch.setattr(prepare, "_IS_WINDOWS", True)
-    monkeypatch.delattr(prepare.os, "fchmod", raising=False)
-
-    prepare._atomic_private_write(output, b"{}")
-
-    assert output.read_bytes() == b"{}"
-    assert output.stat().st_nlink == 1
-
-
-@pytest.mark.skipif(os.name == "nt", reason="POSIX permission contract")
 def test_atomic_private_write_rejects_unsafe_parent(tmp_path: Path) -> None:
     parent = tmp_path / "unsafe"
     parent.mkdir(mode=0o755)
@@ -654,8 +637,7 @@ def test_create_protocol_writes_authenticated_canonical_output(
     assert document["product_inputs"]["origin_main_revision"] == REVISION
     assert document["product_inputs"]["codex_binary_sha256"] == codex.sha256
     assert document["exposure_ledger_sha256"] == _sha256(exposure_path.read_bytes())
-    if os.name != "nt":
-        assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    assert stat.S_IMODE(output.stat().st_mode) == 0o600
 
 
 def test_probe_verifier_rejects_runtime_drift(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -813,7 +795,7 @@ def test_execution_python_probe_accepts_real_copied_venv(tmp_path: Path) -> None
             capture_output=True,
             text=True,
         )
-        candidate = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        candidate = venv / "bin/python"
         if result.returncode == 0 and candidate.is_file() and not candidate.is_symlink():
             launcher = candidate
             break
@@ -1018,8 +1000,7 @@ def test_prepare_sources_bundles_in_bounded_parallel_and_writes_deterministic_ma
         for value in repositories.values()
     )
     assert digest == _sha256(output.read_bytes())
-    if os.name != "nt":
-        assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    assert stat.S_IMODE(output.stat().st_mode) == 0o600
 
 
 def test_prepare_sources_reconstructs_exposure_filtered_replacement(
@@ -1502,8 +1483,7 @@ def test_write_environment_matches_freezer_contract(
         "executable_sha256": python.sha256,
         "version": python.version,
     }
-    if os.name != "nt":
-        assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    assert stat.S_IMODE(output.stat().st_mode) == 0o600
 
 
 def test_write_environment_rejects_runtime_drift(

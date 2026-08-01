@@ -4,7 +4,6 @@ from dataclasses import asdict
 from email.message import Message
 from io import BytesIO
 import json
-import os
 import stat
 from pathlib import Path
 from typing import Any
@@ -340,8 +339,7 @@ def test_record_metrics_writes_local_redacted_spool(tmp_path: Path) -> None:
     assert "sess-private" not in raw
     assert "query_hash" in raw
     assert "path_hash" in raw
-    if os.name != "nt":
-        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
     metrics = list(read_metrics(path, trusted_root=tmp_path))
     assert [metric.name for metric in metrics] == [
@@ -839,8 +837,6 @@ def test_record_event_can_export_to_local_jsonl(tmp_path: Path) -> None:
 
 
 def test_record_event_creates_owner_only_local_files(tmp_path: Path) -> None:
-    if os.name == "nt":
-        pytest.skip("POSIX mode bits are not portable on Windows")
     path = tmp_path / "events.jsonl"
     export_path = tmp_path / "exported-events.jsonl"
 
@@ -3255,8 +3251,7 @@ def test_hash_identifier_generates_owner_only_local_salt(
     assert salt_path.is_file()
     assert salt_path.read_text(encoding="utf-8").strip()
     assert hash_identifier("repo") == first
-    if os.name != "nt":
-        assert stat.S_IMODE(salt_path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(salt_path.stat().st_mode) == 0o600
 
 
 def test_record_event_hashes_with_configured_salt(tmp_path: Path) -> None:
@@ -3568,8 +3563,7 @@ def test_enforce_telemetry_retention_prunes_events_and_preserves_malformed(
     assert status["schema_version"] == RETENTION_STATUS_SCHEMA_VERSION
     assert status["results"][0]["signal"] == "events"
     assert status["results"][0]["status"] == "pruned"
-    if os.name != "nt":
-        assert stat.S_IMODE(status_path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(status_path.stat().st_mode) == 0o600
 
 
 def test_enforce_telemetry_retention_prunes_metrics_and_can_drop_malformed(

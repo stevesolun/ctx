@@ -9,7 +9,6 @@ so regressions here would reopen both attack surfaces simultaneously.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -231,7 +230,6 @@ class TestIsSafeRelpath:
     def test_empty_string_rejected(self, root: Path):
         assert not is_safe_relpath(root, "")
 
-    @pytest.mark.skipif(os.name == "nt", reason="POSIX-only: symlink requires admin on Windows")
     def test_rejects_symlink_escape(self, tmp_path: Path):
         """A symlink INSIDE root that points OUTSIDE root must be caught.
 

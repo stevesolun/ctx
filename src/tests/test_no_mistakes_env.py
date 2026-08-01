@@ -14,13 +14,6 @@ def _write_executable(path: Path, content: str) -> None:
     path.chmod(0o755)
 
 
-posix_shell_only = pytest.mark.skipif(
-    os.name == "nt",
-    reason="POSIX shell wrapper tests require a POSIX bash, not WSL bash on Windows.",
-)
-
-
-@posix_shell_only
 def test_no_mistakes_wrapper_prefers_valid_worktree_venv_over_broken_override(
     tmp_path: Path,
 ) -> None:
@@ -70,7 +63,6 @@ def test_no_mistakes_wrapper_prefers_valid_worktree_venv_over_broken_override(
     assert result.stdout.splitlines()[2].startswith(f"path={worktree_bin}:")
 
 
-@posix_shell_only
 def test_no_mistakes_wrapper_uses_explicit_codex_resources(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     script_dir = repo / "scripts"
@@ -108,7 +100,6 @@ def test_no_mistakes_wrapper_uses_explicit_codex_resources(tmp_path: Path) -> No
     ]
 
 
-@posix_shell_only
 def test_no_mistakes_wrapper_rejects_bad_explicit_codex(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     script_dir = repo / "scripts"
@@ -136,7 +127,6 @@ def test_no_mistakes_wrapper_rejects_bad_explicit_codex(tmp_path: Path) -> None:
     assert f"Configured Codex executable is not runnable: {missing_codex}" in result.stderr
 
 
-@posix_shell_only
 @pytest.mark.parametrize("candidate_kind", ("directory", "self-symlink"))
 def test_no_mistakes_wrapper_rejects_nonfile_or_self_codex(
     tmp_path: Path,
@@ -172,7 +162,6 @@ def test_no_mistakes_wrapper_rejects_nonfile_or_self_codex(
     assert f"Configured Codex executable is not runnable: {candidate}" in result.stderr
 
 
-@posix_shell_only
 def test_no_mistakes_wrapper_rejects_bad_explicit_resources(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     script_dir = repo / "scripts"
@@ -204,7 +193,6 @@ def test_no_mistakes_wrapper_rejects_bad_explicit_resources(tmp_path: Path) -> N
     )
 
 
-@posix_shell_only
 def test_no_mistakes_wrapper_validates_resources_with_explicit_codex(
     tmp_path: Path,
 ) -> None:
@@ -239,7 +227,6 @@ def test_no_mistakes_wrapper_validates_resources_with_explicit_codex(
     )
 
 
-@posix_shell_only
 def test_no_mistakes_wrapper_discovers_known_app_candidate(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     script_dir = repo / "scripts"
@@ -273,7 +260,6 @@ def test_no_mistakes_wrapper_discovers_known_app_candidate(tmp_path: Path) -> No
     )
 
 
-@posix_shell_only
 def test_no_mistakes_wrapper_falls_back_to_path(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     script_dir = repo / "scripts"
@@ -305,7 +291,6 @@ def test_no_mistakes_wrapper_falls_back_to_path(tmp_path: Path) -> None:
     assert result.stdout.strip() == f"path={fake_codex}"
 
 
-@posix_shell_only
 def test_no_mistakes_wrapper_fails_when_no_codex_is_available(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     script_dir = repo / "scripts"
@@ -346,7 +331,6 @@ def test_no_mistakes_repo_config_defines_deterministic_commands() -> None:
     assert config["auto_fix"]["lint"] == 3
 
 
-@posix_shell_only
 def test_no_mistakes_run_script_uses_trusted_python_for_configured_commands(
     tmp_path: Path,
 ) -> None:
@@ -425,7 +409,6 @@ def test_no_mistakes_run_script_uses_trusted_python_for_configured_commands(
     ]
 
 
-@posix_shell_only
 def test_no_mistakes_gate_requires_explicit_intent(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     script_dir = repo / "scripts"
@@ -468,7 +451,6 @@ def test_no_mistakes_gate_requires_explicit_intent(tmp_path: Path) -> None:
     assert not log_path.exists()
 
 
-@posix_shell_only
 @pytest.mark.parametrize("intent_source", ("argument", "file"))
 def test_no_mistakes_gate_runs_local_fast_before_axi_run(
     tmp_path: Path,

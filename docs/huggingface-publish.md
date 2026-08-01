@@ -56,38 +56,34 @@ inputs, then replaces just those remote paths.
 Do not paste the token into a command line. Prompt for it, set it only for the
 current process, and clear it after the upload.
 
-```powershell
+```bash
 python -m pip install --upgrade huggingface_hub
 
-$secureToken = Read-Host "HF write token" -AsSecureString
-$tokenPtr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureToken)
-try {
-  $env:HF_TOKEN = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($tokenPtr)
-  python scripts/sync_huggingface.py --repo . --repo-id Stevesolun/ctx --repo-type dataset
-} finally {
-  if ($tokenPtr -ne [IntPtr]::Zero) {
-    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($tokenPtr)
-  }
-  Remove-Item Env:\HF_TOKEN -ErrorAction SilentlyContinue
-}
+read -rsp "HF write token: " HF_TOKEN
+printf '\n'
+export HF_TOKEN
+trap 'unset HF_TOKEN' EXIT
+python scripts/sync_huggingface.py --repo . --repo-id Stevesolun/ctx --repo-type dataset
+unset HF_TOKEN
+trap - EXIT
 ```
 
 For a README/changelog/docs-only refresh:
 
-```powershell
+```bash
 python scripts/sync_huggingface.py --repo . --repo-id Stevesolun/ctx --repo-type dataset --card-only
 ```
 
 ## Verify
 
-```powershell
-@'
+```bash
+python - <<'PY'
 from huggingface_hub import HfApi
 
 api = HfApi()
 info = api.repo_info(repo_id="Stevesolun/ctx", repo_type="dataset")
 print(info.id, info.sha)
-'@ | python -
+PY
 ```
 
 The dataset page should show the MIT license and the tags from the metadata

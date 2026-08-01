@@ -214,21 +214,11 @@ def live_claude_env(paths: ContractPaths) -> dict[str, str]:
 
 
 def venv_python(venv: Path) -> Path:
-    if os.name == "nt":
-        return venv / "Scripts" / "python.exe"
     return venv / "bin" / "python"
 
 
 def venv_script(venv: Path, name: str) -> Path:
-    candidates = (
-        [venv / "Scripts" / f"{name}.exe", venv / "Scripts" / name]
-        if os.name == "nt"
-        else [venv / "bin" / name]
-    )
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    return candidates[0]
+    return venv / "bin" / name
 
 
 def write_fake_litellm(fake_modules: Path) -> Path:
@@ -434,8 +424,6 @@ def _assert_fake_claude_hook_output(stdout: str) -> None:
 
 def _quote_command(parts: Sequence[str | Path]) -> str:
     values = [str(part) for part in parts]
-    if os.name == "nt":
-        return subprocess.list2cmdline(values)
     return " ".join(shlex.quote(part) for part in values)
 
 

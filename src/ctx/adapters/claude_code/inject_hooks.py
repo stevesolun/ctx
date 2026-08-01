@@ -15,7 +15,6 @@ import argparse
 import json
 import os
 import shlex
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -115,8 +114,6 @@ def make_hooks(ctx_dir: str) -> dict:
 def _module_cmd(module: str, *args: str) -> str:
     """Return a hook command that targets an installed Python module."""
     parts = [sys.executable, "-m", module, *args]
-    if os.name == "nt":
-        return subprocess.list2cmdline(parts)
     return " ".join(shlex.quote(part) for part in parts)
 
 
@@ -219,11 +216,8 @@ def merge_hooks(existing: dict, new_hooks: dict) -> dict:
 def write_settings_atomic(path: Path, data: dict) -> None:
     """Write settings.json atomically: tempfile + fsync + os.replace().
 
-    On POSIX, os.replace() is a single syscall and is guaranteed atomic even
-    under concurrent writes.  On Windows, os.replace() raises PermissionError
-    if the destination is held open by another process/thread.  We retry a
-    small number of times with a short back-off; after that we re-raise so
-    callers know something is genuinely wrong.
+    ``os.replace()`` is atomic on the supported POSIX hosts. A short retry also
+    tolerates transient permission races from concurrent local tooling.
     """
     import time
 
@@ -239,7 +233,7 @@ def write_settings_atomic(path: Path, data: dict) -> None:
             fh.write(content)
             fh.flush()
             os.fsync(fh.fileno())
-        # Retry loop handles transient Windows PermissionError on os.replace().
+        # Retry transient permission races without hiding persistent failures.
         _last_exc: Exception | None = None
         for attempt in range(10):
             try:

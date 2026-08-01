@@ -3,7 +3,6 @@ from __future__ import annotations
 from copy import deepcopy
 import hashlib
 import json
-import os
 from pathlib import Path
 import shutil
 import stat
@@ -500,9 +499,8 @@ def test_freeze_binds_all_inputs_and_emits_runner_ready_private_outputs(
 
     schedule_bytes = paths["schedule_path"].read_bytes()
     frozen = json.loads(paths["output_path"].read_bytes())
-    if os.name != "nt":
-        assert stat.S_IMODE(paths["schedule_path"].stat().st_mode) == 0o600
-        assert stat.S_IMODE(paths["output_path"].stat().st_mode) == 0o644
+    assert stat.S_IMODE(paths["schedule_path"].stat().st_mode) == 0o600
+    assert stat.S_IMODE(paths["output_path"].stat().st_mode) == 0o644
     assert frozen["stage"] == "execution-frozen"
     assert frozen["execution_frozen_at"] == "2026-07-30T09:34:56Z"
     assert frozen["exposure_ledger_sha256"] == documents["protocol"]["exposure_ledger_sha256"]
@@ -1140,8 +1138,6 @@ def test_freeze_rejects_non_private_symlink_hardlink_and_missing_inputs(
         _, paths = _fixture_paths(case)
         source = paths["environment_path"]
         if kind == "public":
-            if os.name == "nt":
-                continue
             source.chmod(0o644)
         elif kind == "symlink":
             target = source.with_suffix(".target")
@@ -1157,19 +1153,6 @@ def test_freeze_rejects_non_private_symlink_hardlink_and_missing_inputs(
 
         assert not paths["schedule_path"].exists()
         assert not paths["output_path"].exists()
-
-
-def test_stage_bytes_does_not_require_fchmod_on_windows(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    output = tmp_path / "schedule.json"
-    monkeypatch.setattr(freezer, "_IS_WINDOWS", True)
-    monkeypatch.delattr(freezer.os, "fchmod", raising=False)
-
-    staged = freezer._stage_bytes(output, b"{}\n", mode=0o600)
-
-    assert staged.read_bytes() == b"{}\n"
 
 
 def test_freeze_rejects_invalid_timestamp_and_aliasing_paths(tmp_path: Path) -> None:

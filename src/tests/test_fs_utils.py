@@ -86,21 +86,6 @@ def test_directory_relative_text_writer_disables_newline_translation(tmp_path: P
     assert (tmp_path / "out.txt").read_bytes() == b"first\nsecond\n"
 
 
-def test_guarded_path_text_writer_disables_newline_translation(tmp_path: Path) -> None:
-    directory = fs_utils._SecureDirectory(tmp_path, None)
-
-    with patch("ctx.utils._fs_utils.os.fdopen", wraps=os.fdopen) as fdopen:
-        fs_utils._atomic_write_text_guarded_path(
-            directory,
-            "out.txt",
-            "first\nsecond\n",
-            "utf-8",
-        )
-
-    assert fdopen.call_args.kwargs["newline"] == ""
-    assert (tmp_path / "out.txt").read_bytes() == b"first\nsecond\n"
-
-
 def test_write_text_no_temp_file_left_on_success(tmp_path: Path) -> None:
     target = tmp_path / "out.txt"
     atomic_write_text(target, "data")
@@ -111,7 +96,7 @@ def test_write_text_no_temp_file_left_on_success(tmp_path: Path) -> None:
 def test_write_text_no_temp_file_left_on_error(tmp_path: Path) -> None:
     """Temp file must be cleaned up even when os.replace raises."""
     target = tmp_path / "out.txt"
-    with patch("ctx.utils._fs_utils._replace_with_retry", side_effect=OSError("boom")):
+    with patch("ctx.utils._fs_utils._replace_atomically", side_effect=OSError("boom")):
         with pytest.raises(OSError, match="boom"):
             atomic_write_text(target, "data")
     leftover = list(tmp_path.glob("out.txt.*"))
@@ -128,14 +113,7 @@ def test_write_text_fsyncs_temp_before_replace_and_parent_after(
     def record_fsync(_fd: int) -> None:
         events.append("fsync")
 
-    def record_replace(
-        src: str,
-        dst: Path,
-        *,
-        attempts: int = 10,
-        delay: float = 0.05,
-    ) -> None:
-        del attempts, delay
+    def record_replace(src: str, dst: Path) -> None:
         events.append("replace")
         os.replace(src, dst)
 
@@ -144,7 +122,7 @@ def test_write_text_fsyncs_temp_before_replace_and_parent_after(
         events.append("parent-fsync")
 
     monkeypatch.setattr(fs_utils.os, "fsync", record_fsync)
-    monkeypatch.setattr(fs_utils, "_replace_with_retry", record_replace)
+    monkeypatch.setattr(fs_utils, "_replace_atomically", record_replace)
     monkeypatch.setattr(fs_utils, "_fsync_parent_dir", record_parent_fsync, raising=False)
 
     atomic_write_text(target, "durable")
@@ -253,38 +231,23 @@ def test_secure_directory_read_text_rejects_swap_before_open(
     assert swapped is True
 
 
-# ── Windows retry ─────────────────────────────────────────────────────────────
-
-
-def test_replace_retries_on_permission_error(tmp_path: Path) -> None:
-    """_replace_with_retry should succeed on the second attempt."""
+def test_atomic_replace_propagates_permission_error_without_retry(tmp_path: Path) -> None:
     target = tmp_path / "out.txt"
     call_count = 0
-    real_replace = os.replace
 
     def flaky_replace(src: str, dst: Path) -> None:
         nonlocal call_count
+        del src, dst
         call_count += 1
-        if call_count == 1:
-            raise PermissionError("locked")
-        real_replace(src, dst)
+        raise PermissionError("locked")
 
     with patch("ctx.utils._fs_utils.os.replace", side_effect=flaky_replace):
-        with patch("ctx.utils._fs_utils.time.sleep"):  # don't actually sleep
+        with pytest.raises(PermissionError, match="locked"):
             atomic_write_text(target, "retry-test")
 
-    assert call_count == 2
-    assert target.read_text(encoding="utf-8") == "retry-test"
-
-
-def test_replace_raises_after_max_attempts(tmp_path: Path) -> None:
-    """After exhausting retries, the PermissionError must propagate."""
-    target = tmp_path / "out.txt"
-
-    with patch("ctx.utils._fs_utils.os.replace", side_effect=PermissionError("always locked")):
-        with patch("ctx.utils._fs_utils.time.sleep"):
-            with pytest.raises(PermissionError, match="always locked"):
-                atomic_write_text(target, "data")
+    assert call_count == 1
+    assert not target.exists()
+    assert list(tmp_path.glob("out.txt.*")) == []
 
 
 # ── Concurrency smoke test ────────────────────────────────────────────────────

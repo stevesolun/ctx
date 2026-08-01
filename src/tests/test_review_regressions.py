@@ -237,7 +237,6 @@ def test_shared_scanner_does_not_deserialize_graph_before_recommending(
     assert calls
 
 
-@pytest.mark.skipif(os.name == "nt", reason="requires directory-fd filesystem support")
 def test_strix_preflight_rejects_destination_swap(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -292,7 +291,6 @@ def test_strix_preflight_rejects_destination_swap(
     assert outside.read_text(encoding="utf-8") == "sentinel\n"
 
 
-@pytest.mark.skipif(os.name == "nt", reason="requires directory-fd filesystem support")
 def test_skill_snapshot_rejects_file_swap(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -26,8 +26,8 @@ Run it by hand::
 
     python src/backup_mirror.py watchdog --interval 60
 
-Or register it as a background service using whatever init system fits
-(Task Scheduler on Windows, systemd on Linux, launchd on macOS). See
+Or register it as a background service using the supported host init system
+(systemd on Linux or launchd on macOS). See
 ``docs/backup-hook-install.md``.
 
 Exit codes:

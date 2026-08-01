@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import sys
-from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -239,54 +238,11 @@ def test_direct_deploy_creates_a_missing_target(strix_import: StrixImportFixture
     assert destination.read_text(encoding="utf-8").endswith("# Root agent\n")
 
 
-def test_checked_path_fallback_installs_and_updates_atomically(
-    strix_import: StrixImportFixture,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    guard_depth = 0
-
-    @contextmanager
-    def guarded_paths(_target: Path, guarded: Path, *, create_missing: bool = True) -> Any:
-        nonlocal guard_depth
-        if create_missing:
-            guarded.mkdir(parents=True, exist_ok=True)
-        guard_depth += 1
-        try:
-            yield
-        finally:
-            guard_depth -= 1
-
-    real_replace = os.replace
-
-    def guarded_replace(source: Path | str, destination: Path | str) -> None:
-        assert guard_depth > 0
-        real_replace(source, destination)
-
-    monkeypatch.setattr(importer, "_supports_directory_fds", lambda: False)
-    monkeypatch.setattr(importer, "_supports_windows_path_guards", lambda: True)
-    monkeypatch.setattr(importer, "_guard_windows_directories", guarded_paths)
-    monkeypatch.setattr(importer.os, "replace", guarded_replace)
-
-    _run_cli(monkeypatch, "--install", "--target", str(strix_import.target))
-    capsys.readouterr()
-    strix_import.source.write_text("# Updated through fallback\n", encoding="utf-8")
-    _run_cli(monkeypatch, "--install", "--target", str(strix_import.target))
-
-    output = capsys.readouterr().out
-    assert "[UPD]" in output
-    assert strix_import.destination.read_text(encoding="utf-8").endswith(
-        "# Updated through fallback\n"
-    )
-    assert not list(strix_import.destination.parent.glob(".SKILL.md.*"))
-
-
 def test_install_fails_closed_without_safe_filesystem_primitives(
     strix_import: StrixImportFixture,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(importer, "_supports_directory_fds", lambda: False)
-    monkeypatch.setattr(importer, "_supports_windows_path_guards", lambda: False)
 
     with pytest.raises(RuntimeError, match="secure source read unavailable"):
         importer.deploy_entry(
@@ -297,29 +253,6 @@ def test_install_fails_closed_without_safe_filesystem_primitives(
         )
 
     assert not strix_import.target.exists()
-
-
-def test_windows_guard_context_pins_parents_and_creates_skill_dir(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    target = tmp_path / "skills"
-    skill_dir = target / "strix-coordination-root-agent"
-    opened: list[Path] = []
-    closed: list[int] = []
-
-    def open_guard(path: Path) -> int:
-        opened.append(path)
-        return len(opened)
-
-    monkeypatch.setattr(importer, "_open_windows_directory_guard", open_guard)
-    monkeypatch.setattr(importer, "_close_windows_directory_guard", closed.append)
-
-    with importer._guard_windows_directories(target, skill_dir):
-        assert skill_dir.is_dir()
-
-    assert opened == importer._windows_guard_paths(target, skill_dir)
-    assert closed == list(reversed(range(1, len(opened) + 1)))
 
 
 @pytest.mark.parametrize("category", ["../escape", "Coordination", "coordination\n", "", None])

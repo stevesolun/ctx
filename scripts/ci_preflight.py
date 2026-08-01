@@ -295,8 +295,8 @@ def select_checks(
         Check("repo stats", (python, "src/update_repo_stats.py", "--check")),
     ]
     notes = [
-        "GitHub still runs Windows/macOS matrix jobs; local preflight covers the "
-        "same contracts on this host."
+        "GitHub runs Linux/macOS matrix jobs; local preflight covers the same "
+        "contracts on this host."
     ]
 
     smoke_profile = profile == "smoke"

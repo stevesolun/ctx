@@ -18,6 +18,7 @@ from scripts.ci_no_test_policy import evaluate_policy
 CODEQL_WORKFLOW = Path(".github/workflows/codeql.yml")
 CODEQL_CONFIG = Path(".github/codeql/codeql-config.yml")
 DEPENDENCY_WORKFLOW = Path(".github/workflows/dependency-audit.yml")
+XDIST_WORKFLOW = Path(".github/workflows/xdist-experiment.yml")
 HELPER_PATH = Path("scripts/ci_dependency_audit.py")
 TEST_PATH = "src/tests/test_enterprise_security_workflows.py"
 
@@ -195,7 +196,7 @@ def test_dependency_audit_matrix_covers_supported_os_python_surface() -> None:
     assert job["runs-on"] == "${{ matrix.os }}"
     assert job["strategy"]["fail-fast"] is False
     assert matrix == {
-        "os": ["ubuntu-latest", "windows-latest", "macos-latest"],
+        "os": ["ubuntu-latest", "macos-latest"],
         "python-version": ["3.11", "3.12"],
     }
     assert {
@@ -205,10 +206,18 @@ def test_dependency_audit_matrix_covers_supported_os_python_surface() -> None:
     } == {
         ("ubuntu-latest", "3.11"),
         ("ubuntu-latest", "3.12"),
-        ("windows-latest", "3.11"),
-        ("windows-latest", "3.12"),
         ("macos-latest", "3.11"),
         ("macos-latest", "3.12"),
+    }
+
+
+def test_xdist_experiment_matrix_covers_supported_posix_hosts() -> None:
+    workflow = _load_yaml(XDIST_WORKFLOW)
+    matrix = workflow["jobs"]["xdist"]["strategy"]["matrix"]
+
+    assert matrix == {
+        "os": ["ubuntu-latest", "macos-latest"],
+        "python-version": ["3.12"],
     }
 
 

@@ -911,13 +911,12 @@ def test_run_command_resolves_bare_executable(
     assert captured_cmd[0] == resolved
 
 
-def test_split_command_preserves_windows_backslashes() -> None:
+def test_split_command_uses_posix_shell_rules() -> None:
     parts = harness_install._split_command(
-        r'python "C:\Users\me\script.py"',
-        windows=True,
+        "python '/tmp/project path/script.py'",
     )
 
-    assert parts == ["python", r"C:\Users\me\script.py"]
+    assert parts == ["python", "/tmp/project path/script.py"]
 
 
 def test_failed_run_message_includes_redacted_output() -> None:
@@ -989,7 +988,7 @@ def test_recommend_mode_passes_structured_harness_requirements(
             "--api-key-env",
             "OPENAI_API_KEY",
             "--harness-runtime",
-            "windows python",
+            "linux python",
             "--harness-autonomy",
             "supervised",
             "--harness-tools",
@@ -1005,7 +1004,7 @@ def test_recommend_mode_passes_structured_harness_requirements(
 
     assert rc == 0
     assert calls[0]["harness_requirements"] == {
-        "runtime": "windows python",
+        "runtime": "linux python",
         "autonomy": "supervised",
         "tools": "filesystem shell browser",
         "verification": "pytest ruff",
@@ -1046,7 +1045,7 @@ def test_recommend_cli_query_includes_structured_harness_requirements(
         model="openai/gpt-5.5",
         top_k=5,
         harness_requirements={
-            "runtime": "windows python",
+            "runtime": "linux python",
             "tools": "filesystem shell browser",
             "verification": "pytest ruff",
             "privacy": "private repo no secrets",
@@ -1055,7 +1054,7 @@ def test_recommend_cli_query_includes_structured_harness_requirements(
     )
 
     query = str(calls[0]["goal"])
-    assert "windows python" in query
+    assert "linux python" in query
     assert "filesystem shell browser" in query
     assert "pytest ruff" in query
     assert "private repo no secrets" in query
@@ -1095,7 +1094,8 @@ def test_recommend_no_fit_prints_custom_harness_plan(
     assert "# Custom Harness PRD" in output
     assert "ctx-mcp-server" in output
     assert "ctx.recommend_bundle" in output
-    assert "Windows, macOS, and Linux" in output
+    assert "Linux and macOS" in output
+    assert "Windows" not in output
     assert "Runtime / OS: linux server" in output
     assert "Allowed tools/access: filesystem shell" in output
     assert "Verification: pytest" in output

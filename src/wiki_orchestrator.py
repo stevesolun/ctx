@@ -764,7 +764,7 @@ def main() -> None:
     if sum(modes) > 1:
         p.error("Specify exactly one of --check, --sync, --add, --status")
 
-    # Use UTF-8 stdout so emoji from lint issues render on Windows terminals.
+    # Use UTF-8 stdout so emoji from lint issues render consistently.
     utf8_out = open(sys.stdout.fileno(), mode="w", encoding="utf-8", closefd=False)
 
     if args.status:

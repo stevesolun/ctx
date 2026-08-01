@@ -246,21 +246,19 @@ class TestCtxDirQuoting:
                 # The raw unquoted path must not appear unless it's the quoted form
                 assert f" {ctx_dir}/" not in cmd, f"Unquoted $ path found in: {cmd!r}"
 
-    def test_windows_python_path_with_spaces_uses_windows_quoting(
+    def test_python_path_with_spaces_uses_posix_shell_quoting(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setattr(
             inject_hooks.sys,
             "executable",
-            r"C:\Program Files\Python311\python.exe",
+            "/opt/Python Runtime/bin/python",
         )
-        monkeypatch.setattr(inject_hooks.os, "name", "nt")
 
         cmd = inject_hooks._module_cmd("usage_tracker", "--sync")
 
-        assert cmd == r'"C:\Program Files\Python311\python.exe" -m usage_tracker --sync'
-        assert "'" not in cmd
+        assert cmd == "'/opt/Python Runtime/bin/python' -m usage_tracker --sync"
 
 
 class TestPackagedHookCommands:
@@ -311,8 +309,7 @@ class TestAtomicWrite:
 
         The fix being tested: write goes to a tempfile then os.replace(), so a
         reader never sees a partially-written JSON.  We call write_settings_atomic
-        directly (bypassing load_settings) to isolate the write path from the
-        Windows file-lock behaviour on the read side.
+        directly (bypassing load_settings) to isolate the write path.
         """
         from ctx.adapters.claude_code.inject_hooks import write_settings_atomic
 

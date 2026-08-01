@@ -27,9 +27,6 @@ import re
 import secrets
 import stat
 import sys
-import tempfile
-from collections.abc import Iterator
-from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -237,36 +234,9 @@ def _read_source_text(source_rel: str) -> tuple[Path, str]:
         finally:
             os.close(parent_fd)
 
-    if _supports_windows_path_guards():
-        with _guard_windows_directories(trusted_root, source.parent, create_missing=False):
-            source_metadata = _lstat_optional(source)
-            if source_metadata is None:
-                raise FileNotFoundError(f"Source skill missing: {source}")
-            if (
-                stat.S_ISLNK(source_metadata.st_mode)
-                or _is_reparse_point(source, source_metadata)
-                or not stat.S_ISREG(source_metadata.st_mode)
-            ):
-                raise ValueError(f"{source}: source is not a regular file")
-            fd = os.open(source, os.O_RDONLY)
-            try:
-                opened = os.fstat(fd)
-                if not stat.S_ISREG(opened.st_mode) or not os.path.samestat(
-                    source_metadata, opened
-                ):
-                    raise ValueError(f"{source}: source path changed while opening")
-                with os.fdopen(fd, "r", encoding="utf-8") as handle:
-                    fd = -1
-                    return source, handle.read()
-            except UnicodeError:
-                raise ValueError(f"{source}: source is not valid UTF-8") from None
-            finally:
-                if fd != -1:
-                    os.close(fd)
-
     raise RuntimeError(
-        "secure source read unavailable: this platform must provide directory-relative "
-        "filesystem operations or Windows directory handles"
+        "secure source read unavailable: this POSIX platform must provide "
+        "directory-relative filesystem operations"
     )
 
 
@@ -319,44 +289,9 @@ def _read_preflight_destination(
                 os.close(parent_fd)
             os.close(target_fd)
 
-    if _supports_windows_path_guards():
-        if not _validate_real_directory(target_root, label="target directory"):
-            return None, None, None
-        windows_parent_metadata = _lstat_optional(destination.parent)
-        if windows_parent_metadata is None:
-            return None, None, None
-        with _guard_windows_directories(
-            target_root,
-            destination.parent,
-            create_missing=False,
-        ):
-            guarded_parent = destination.parent.stat(follow_symlinks=False)
-            if not os.path.samestat(windows_parent_metadata, guarded_parent):
-                raise ValueError(f"skill dir {destination.parent} changed while opening")
-            metadata = _lstat_optional(destination)
-            if metadata is None:
-                return _identity(windows_parent_metadata), None, None
-            if (
-                stat.S_ISLNK(metadata.st_mode)
-                or _is_reparse_point(destination, metadata)
-                or not stat.S_ISREG(metadata.st_mode)
-            ):
-                raise ValueError(f"destination {destination} must be a regular file")
-            fd = os.open(destination, os.O_RDONLY)
-            try:
-                opened = os.fstat(fd)
-                if not stat.S_ISREG(opened.st_mode) or not os.path.samestat(metadata, opened):
-                    raise ValueError(f"destination {destination} changed while opening")
-                with os.fdopen(fd, "r", encoding="utf-8") as handle:
-                    fd = -1
-                    return _identity(windows_parent_metadata), metadata, handle.read()
-            finally:
-                if fd != -1:
-                    os.close(fd)
-
     raise RuntimeError(
-        "secure destination read unavailable: this platform must provide "
-        "directory-relative filesystem operations or Windows directory handles"
+        "secure destination read unavailable: this POSIX platform must provide "
+        "directory-relative filesystem operations"
     )
 
 
@@ -557,168 +492,14 @@ def _is_reparse_point(path: Path, metadata: os.stat_result) -> bool:
     )
 
 
-def _validate_real_directory(path: Path, *, label: str) -> bool:
-    try:
-        metadata = _lstat_optional(path)
-    except OSError as exc:
-        raise ValueError(f"{label} {path} must be a real directory: {exc}") from None
-    if metadata is None:
-        return False
-    if (
-        not stat.S_ISDIR(metadata.st_mode)
-        or stat.S_ISLNK(metadata.st_mode)
-        or _is_reparse_point(path, metadata)
-    ):
-        raise ValueError(f"{label} {path} must be a real directory")
-    return True
-
-
-def _supports_windows_path_guards() -> bool:
-    return os.name == "nt"
-
-
-def _open_windows_directory_guard(path: Path) -> int:  # pragma: no cover - Windows only
-    import ctypes
-
-    kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
-    create_file = kernel32.CreateFileW
-    create_file.argtypes = (
-        ctypes.c_wchar_p,
-        ctypes.c_uint32,
-        ctypes.c_uint32,
-        ctypes.c_void_p,
-        ctypes.c_uint32,
-        ctypes.c_uint32,
-        ctypes.c_void_p,
-    )
-    create_file.restype = ctypes.c_void_p
-    handle = create_file(
-        str(path),
-        0x80,
-        0x1 | 0x2,
-        None,
-        3,
-        0x02000000 | 0x00200000,
-        None,
-    )
-    if handle in (None, ctypes.c_void_p(-1).value):
-        error = getattr(ctypes, "get_last_error")()
-        message = getattr(ctypes, "FormatError")(error)
-        raise OSError(error, f"cannot guard directory {path}: {message}")
-    return int(handle)
-
-
-def _close_windows_directory_guard(handle: int) -> None:  # pragma: no cover - Windows only
-    import ctypes
-
-    kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
-    close_handle = kernel32.CloseHandle
-    close_handle.argtypes = (ctypes.c_void_p,)
-    close_handle.restype = ctypes.c_int
-    close_handle(ctypes.c_void_p(handle))
-
-
-def _windows_guard_paths(target_dir: Path, skill_dir: Path) -> list[Path]:
-    absolute_target = Path(os.path.abspath(target_dir))
-    paths = [Path(absolute_target.anchor)]
-    for component in absolute_target.parts[1:]:
-        paths.append(paths[-1] / component)
-    try:
-        relative_skill = skill_dir.relative_to(absolute_target)
-    except ValueError as exc:
-        raise ValueError(f"guarded directory {skill_dir} is outside {absolute_target}") from exc
-    for component in relative_skill.parts:
-        paths.append(paths[-1] / component)
-    return paths
-
-
-@contextmanager
-def _guard_windows_directories(
-    target_dir: Path,
-    skill_dir: Path,
-    *,
-    create_missing: bool = True,
-) -> Iterator[None]:
-    handles: list[int] = []
-    try:
-        for path in _windows_guard_paths(target_dir, skill_dir):
-            if not _validate_real_directory(path, label="target directory"):
-                if not create_missing:
-                    raise ValueError(f"target directory {path} must be a real directory")
-                path.mkdir()
-                _validate_real_directory(path, label="target directory")
-            handles.append(_open_windows_directory_guard(path))
-            _validate_real_directory(path, label="target directory")
-        yield
-    finally:
-        for handle in reversed(handles):
-            _close_windows_directory_guard(handle)
-
-
-def _read_destination_path(prepared: PreparedEntry) -> str | None:
-    destination = prepared.canonical_destination
-    metadata = _lstat_optional(destination)
-    _validate_write_state(prepared, metadata)
-    if metadata is None:
-        return None
-    fd = os.open(destination, os.O_RDONLY)
-    try:
-        opened = os.fstat(fd)
-        if not stat.S_ISREG(opened.st_mode) or not os.path.samestat(metadata, opened):
-            raise ValueError(f"destination {prepared.destination} changed while opening")
-        with os.fdopen(fd, "r", encoding="utf-8") as handle:
-            fd = -1
-            return handle.read()
-    finally:
-        if fd != -1:
-            os.close(fd)
-
-
-def _write_via_checked_paths(prepared: PreparedEntry) -> tuple[bool, bool]:
-    destination = prepared.canonical_destination
-    parent = destination.parent
-    with _guard_windows_directories(prepared.target_root, parent):
-        current_parent_identity = _identity(parent.stat(follow_symlinks=False))
-        if (
-            prepared.parent_identity is not None
-            and current_parent_identity != prepared.parent_identity
-        ):
-            raise ValueError(f"skill dir {prepared.destination.parent} changed after preflight")
-
-        existing = _read_destination_path(prepared)
-        existed = existing is not None
-        if existing == prepared.content:
-            _validate_write_state(prepared, _lstat_optional(destination))
-            return False, existed
-
-        fd, temp_path = tempfile.mkstemp(prefix=f".{destination.name}.", dir=parent)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                handle.write(prepared.content)
-                handle.flush()
-                os.fsync(handle.fileno())
-            _validate_write_state(prepared, _lstat_optional(destination))
-            os.replace(temp_path, destination)
-            temp_path = ""
-            return True, existed
-        finally:
-            if temp_path:
-                try:
-                    os.unlink(temp_path)
-                except OSError:
-                    pass
-
-
 def _write_prepared_entry(prepared: PreparedEntry) -> tuple[bool, bool]:
     if prepared.parent_is_symlink or prepared.destination.parent.is_symlink():
         raise ValueError(f"skill dir {prepared.destination.parent} is a symlink")
     if _supports_directory_fds():
         return _write_via_directory_fd(prepared)
-    if _supports_windows_path_guards():
-        return _write_via_checked_paths(prepared)
     raise RuntimeError(
-        "secure install unavailable: this platform must provide directory-relative "
-        "filesystem operations or Windows directory handles"
+        "secure install unavailable: this POSIX platform must provide "
+        "directory-relative filesystem operations"
     )
 
 

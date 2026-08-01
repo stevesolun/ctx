@@ -121,20 +121,6 @@ mkdir -p ~/.claude/skill-wiki
 tar xzf graph/wiki-graph.tar.gz -C ~/.claude/skill-wiki/
 ```
 
-On Windows PowerShell, use the built-in `tar.exe` without `--force-local`:
-
-```powershell
-New-Item -ItemType Directory -Force "$env:USERPROFILE\.claude\skill-wiki"
-tar -xzf graph\wiki-graph.tar.gz -C "$env:USERPROFILE\.claude\skill-wiki"
-```
-
-With Git Bash or MSYS tar, use `--force-local` only when the `-C` target is a
-drive-letter path:
-
-```bash
-tar --force-local xzf graph/wiki-graph.tar.gz -C C:/Users/<you>/.claude/skill-wiki/
-```
-
 ## Validate
 
 ```bash
@@ -173,16 +159,6 @@ tar -tzf graph/wiki-graph.tar.gz | grep 'SKILL.md.original' && exit 1 || true
 tar -tzf graph/wiki-graph.tar.gz | grep '\.lock$' && exit 1 || true
 tar -tzf graph/wiki-graph.tar.gz | grep '^\./\.ctx/' && exit 1 || true
 ```
-
-Windows PowerShell equivalent for the exclusion checks:
-
-```powershell
-tar -tzf graph/wiki-graph.tar.gz | Select-String 'SKILL.md.original'
-tar -tzf graph/wiki-graph.tar.gz | Select-String '\.lock$'
-tar -tzf graph/wiki-graph.tar.gz | Select-String '^\./\.ctx/'
-```
-
-The PowerShell commands should print nothing.
 
 ## Rebuild
 
@@ -326,7 +302,7 @@ validation:
 
 ```bash
 cd ~/.claude/skill-wiki
-tar --force-local -czf /path/to/ctx/graph/wiki-graph.tar.gz.staged \
+tar -czf /path/to/ctx/graph/wiki-graph.tar.gz.staged \
     --exclude='.trash' \
     --exclude='__pycache__' \
     --exclude='./raw' \
@@ -341,9 +317,6 @@ tar --force-local -czf /path/to/ctx/graph/wiki-graph.tar.gz.staged \
 cd /path/to/ctx
 python -c "from pathlib import Path; from ctx.core.wiki.artifact_promotion import promote_staged_artifact; from import_skills_sh_catalog import _validate_wiki_tarball_candidate; promote_staged_artifact(Path('graph/wiki-graph.tar.gz.staged'), Path('graph/wiki-graph.tar.gz'), validate=_validate_wiki_tarball_candidate)"
 ```
-
-The repack command above is for Git Bash/MSYS. In Linux/macOS shells omit
-`--force-local`; in PowerShell use `tar -czf` without `--force-local`.
 
 Both flows validate candidates before atomic promotion. Queue-driven artifact
 promotion accepts only `graph.json`, `graph-delta.json`, `communities.json`,

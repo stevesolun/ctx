@@ -26,8 +26,8 @@ the backup layer cannot stall a Claude session.
 
 Edit `~/.claude/settings.json` and add the following under `hooks` (keep
 any existing entries alongside it). Replace `<REPO>` with the absolute
-path to this checkout — on Windows this is a path like
-`C:/Steves_Files/Work/Research_and_Papers/ctx`.
+path to this checkout, such as `/home/you/src/ctx` on Linux or
+`/Users/you/src/ctx` on macOS.
 
 ```json
 {
@@ -52,10 +52,8 @@ Notes:
 - The `matcher` is a regex against the tool name. The three names above are the
   supported direct file-edit events; use the watchdog below to catch changes
   made by Bash commands, external editors, or other processes.
-- Use forward slashes in the path even on Windows.
 - If `python` on your PATH is not the interpreter you want, give the
-  absolute path instead (e.g.
-  `C:/Users/you/.pyenv/pyenv-win/versions/3.13.2/python.exe`).
+  absolute path instead (for example, `/Users/you/.pyenv/shims/python`).
 
 ## Verify it works
 
@@ -146,7 +144,7 @@ Flags:
 | --- | --- |
 | `--interval N` | Seconds between polls. Clamped to `[5, 3600]`. Default 60. |
 | `--reason-prefix LBL` | Prefix used for each snapshot's `--reason` label. Default `watchdog`. |
-| `--once` | Run exactly one tick and exit. Useful for cron / Task Scheduler. |
+| `--once` | Run exactly one tick and exit. Useful for cron. |
 | `--json` | Emit run stats as JSON on exit. |
 
 Because change detection is SHA-gated, polling is cheap — a tick with
@@ -168,14 +166,7 @@ that guesses where you keep the checkout.
   Edit the `ProgramArguments` paths, drop into
   `~/Library/LaunchAgents/`, then
   `launchctl load -w ~/Library/LaunchAgents/com.claude.backup.watchdog.plist`.
-- **Windows (Task Scheduler installer)** —
-  [`docs/services/windows/install-backup-watchdog.ps1`](https://github.com/stevesolun/ctx/blob/main/docs/services/windows/install-backup-watchdog.ps1).
-  Run `pwsh -File docs/services/windows/install-backup-watchdog.ps1`
-  from the repo root; it detects Python on PATH, registers a
-  `ClaudeBackupWatchdog` scheduled task that runs at logon, and kicks
-  off the first tick. `-Uninstall` removes it.
-
-All three manifests assume the watchdog runs as an **unprivileged
+Both manifests assume the watchdog runs as an **unprivileged
 user** — no admin/root — because it only reads `~/.claude/` and writes
 `~/.claude/backups/`.
 

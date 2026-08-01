@@ -340,16 +340,9 @@ class TestMcpAddIntegration:
         assert result is not None
 
 
-# ── Sidecar permissions (POSIX only) ─────────────────────────────────────────
+# ── Sidecar permissions ──────────────────────────────────────────────────────
 
 
-_POSIX_ONLY = pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="Windows filesystems don't honour unix permission bits",
-)
-
-
-@_POSIX_ONLY
 def test_sidecar_file_is_0o600(tmp_path: Path) -> None:
     import os
     import stat

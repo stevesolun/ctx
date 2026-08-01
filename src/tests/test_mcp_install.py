@@ -513,7 +513,6 @@ class TestInstallMcp:
         [
             "ctx-mcp-server --unexpected",
             "/tmp/ctx-mcp-server",
-            "ctx-mcp-server.exe",
         ],
     )
     def test_project_owned_ctx_mcp_command_must_be_bare_and_argument_free(
@@ -548,23 +547,20 @@ class TestInstallMcp:
         )
         assert r.status == "invalid-cmd"
 
-    def test_windows_command_split_preserves_drive_path_backslashes(
-        self,
-    ) -> None:
+    def test_install_command_split_uses_posix_shell_rules(self) -> None:
         tokens = mcp_install._split_install_command(
-            r'python C:\Users\me\server.py --flag "two words"',
-            windows=True,
+            r"python '/tmp/server path.py' --flag 'two words'",
         )
 
         assert tokens == [
             "python",
-            r"C:\Users\me\server.py",
+            "/tmp/server path.py",
             "--flag",
             "two words",
         ]
 
     @pytest.mark.parametrize("cmd", ["npx.cmd -y pkg", "python.exe server.py"])
-    def test_windows_wrapper_executables_are_allowlisted(
+    def test_unsupported_wrapper_suffixes_are_rejected(
         self,
         wiki_dir: Path,
         fake_claude: dict[str, Any],
@@ -575,9 +571,10 @@ class TestInstallMcp:
 
         r = mcp_install.install_mcp("srv", wiki_dir=wiki_dir, command=cmd, auto=True)
 
-        assert r.status == "installed"
+        assert r.status == "invalid-cmd"
+        assert fake_claude["calls"] == []
 
-    def test_windows_wrapper_still_rejects_code_execution_args(
+    def test_wrapper_suffix_still_rejects_code_execution_args(
         self,
         wiki_dir: Path,
         fake_claude: dict[str, Any],
