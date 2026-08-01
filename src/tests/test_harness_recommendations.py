@@ -244,7 +244,7 @@ def test_ctx_init_keeps_domain_goal_strong_with_install_requirements(
 
     results = ctx_init.recommend_harnesses(
         "build CAD and robotics tools from local files with validation "
-        "windows python node local filesystem filesystem shell browser "
+        "linux macos python node local filesystem filesystem shell browser "
         "pytest npm build geometry export checks local files only no secrets "
         "mcp openai openai/gpt-5.5 harness",
         top_k=5,
@@ -265,7 +265,8 @@ def test_ctx_init_keeps_domain_goal_strong_with_install_requirements(
         "robotics",
         "validation",
     }
-    assert "windows" not in results[0]["missing_signals"]
+    assert "linux" not in results[0]["missing_signals"]
+    assert "macos" not in results[0]["missing_signals"]
     assert "mcp" not in results[0]["missing_signals"]
     assert "gpt" not in results[0]["missing_signals"]
     assert "gpt-5" not in results[0]["fit_signals"]
