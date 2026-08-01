@@ -55,6 +55,138 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _literal_tree_bundle(
+    tmp_path: Path,
+    *,
+    directory: str,
+    mode: bytes,
+    name: bytes,
+) -> tuple[Path, str, str, Path]:
+    source = tmp_path / directory
+    source.mkdir()
+    subprocess.run(["git", "init", "-q", "--initial-branch=main"], cwd=source, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "ctx@example.test"],
+        cwd=source,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "ctx benchmark"],
+        cwd=source,
+        check=True,
+    )
+    blob = (
+        subprocess.run(
+            ["git", "hash-object", "-w", "--stdin"],
+            cwd=source,
+            input=b"literal tree fixture\n",
+            check=True,
+            capture_output=True,
+        )
+        .stdout.decode()
+        .strip()
+    )
+    tree = (
+        subprocess.run(
+            ["git", "hash-object", "-t", "tree", "--literally", "-w", "--stdin"],
+            cwd=source,
+            input=mode + b" " + name + b"\0" + bytes.fromhex(blob),
+            check=True,
+            capture_output=True,
+        )
+        .stdout.decode()
+        .strip()
+    )
+    commit = (
+        subprocess.run(
+            ["git", "commit-tree", tree],
+            cwd=source,
+            input=b"literal tree fixture\n",
+            check=True,
+            capture_output=True,
+        )
+        .stdout.decode()
+        .strip()
+    )
+    subprocess.run(
+        ["git", "update-ref", "refs/heads/base", commit],
+        cwd=source,
+        check=True,
+    )
+    bundle = tmp_path / f"{directory}.bundle"
+    subprocess.run(
+        ["git", "bundle", "create", str(bundle), "refs/heads/base"],
+        cwd=source,
+        check=True,
+    )
+    bundle.chmod(0o600)
+    return source, commit, tree, bundle
+
+
+def test_source_bundle_closure_accepts_legacy_zero_padded_tree_mode(tmp_path: Path) -> None:
+    source, commit, tree, bundle = _literal_tree_bundle(
+        tmp_path,
+        directory="legacy-source",
+        mode=b"0100644",
+        name=b"source.py",
+    )
+    strict = subprocess.run(
+        ["git", "fsck", "--full", "--strict", "--unreachable", "--no-reflogs"],
+        cwd=source,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert strict.returncode != 0
+    assert "zeroPaddedFilemode" in strict.stderr
+
+    freezer._validate_source_bundle_closure(
+        freezer.SourceBundle(
+            base_commit=commit,
+            bundle_path=bundle,
+            bundle_sha256=_sha256(bundle.read_bytes()),
+            tree_sha1=tree,
+        )
+    )
+
+
+def test_source_bundle_closure_rejects_unrelated_strict_fsck_error(tmp_path: Path) -> None:
+    source, commit, tree, bundle = _literal_tree_bundle(
+        tmp_path,
+        directory="invalid-source",
+        mode=b"120000",
+        name=b".gitmodules",
+    )
+    scoped = subprocess.run(
+        [
+            "git",
+            "-c",
+            "fsck.zeroPaddedFilemode=ignore",
+            "fsck",
+            "--full",
+            "--strict",
+            "--unreachable",
+            "--no-reflogs",
+        ],
+        cwd=source,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert scoped.returncode != 0
+    assert "gitmodulesSymlink" in scoped.stderr
+
+    with pytest.raises(freezer.FreezeError, match="closure validation failed"):
+        freezer._validate_source_bundle_closure(
+            freezer.SourceBundle(
+                base_commit=commit,
+                bundle_path=bundle,
+                bundle_sha256=_sha256(bundle.read_bytes()),
+                tree_sha1=tree,
+            )
+        )
+
+
 def test_committed_v1_protocol_checkout_preserves_authenticated_bytes() -> None:
     relative_path = freezer.V1_PROTOCOL_PATH.relative_to(freezer.ROOT).as_posix()
     attributes = (freezer.ROOT / ".gitattributes").read_text(encoding="utf-8").splitlines()

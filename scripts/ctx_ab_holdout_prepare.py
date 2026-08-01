@@ -46,6 +46,7 @@ PAIR_COUNT = 30
 TRIALS_PER_SCENARIO = freezer.TRIALS_PER_SCENARIO
 PRIVATE_FILE_MODE = 0o600
 PRIVATE_DIRECTORY_MODE = 0o700
+PRIVATE_COMMAND_TEXT_LIMIT = 64 * 1024
 
 
 class PrepareError(RuntimeError):
@@ -117,6 +118,17 @@ def _json_object(data: bytes, *, label: str) -> dict[str, Any]:
     return value
 
 
+def _bounded_private_command_text(value: str) -> dict[str, Any]:
+    raw = value.encode("utf-8", errors="replace")
+    excerpt = raw[:PRIVATE_COMMAND_TEXT_LIMIT]
+    return {
+        "bytes": len(raw),
+        "sha256": _sha256(raw),
+        "text": excerpt.decode("utf-8", errors="replace"),
+        "truncated": len(excerpt) != len(raw),
+    }
+
+
 def _command_bytes(
     argv: Sequence[str],
     *,
@@ -135,7 +147,19 @@ def _command_bytes(
     except (OSError, subprocess.SubprocessError, swebench.SWEbenchVerificationError) as exc:
         raise PrepareError("authenticated preparation command failed") from exc
     if result.returncode or result.timed_out or result.residual_descendants:
-        raise PrepareError("authenticated preparation command failed")
+        private_result = {
+            "elapsed_seconds": result.elapsed,
+            "reaped_descendants": result.reaped_descendants,
+            "residual_descendants": list(result.residual_descendants),
+            "returncode": result.returncode,
+            "stderr": _bounded_private_command_text(result.stderr),
+            "stdout": _bounded_private_command_text(result.stdout),
+            "timed_out": result.timed_out,
+        }
+        raise PrepareError(
+            "authenticated preparation command failed; private_result="
+            + _canonical_bytes(private_result).decode("utf-8")
+        )
     return result.stdout.encode("utf-8")
 
 
@@ -1147,6 +1171,8 @@ def _create_authenticated_bundle(
                 "git",
                 "-C",
                 str(repository),
+                "-c",
+                "fsck.zeroPaddedFilemode=ignore",
                 "fsck",
                 "--full",
                 "--strict",
@@ -1255,6 +1281,8 @@ def _create_authenticated_bundle(
                 "git",
                 "-C",
                 str(validation),
+                "-c",
+                "fsck.zeroPaddedFilemode=ignore",
                 "fsck",
                 "--full",
                 "--strict",
