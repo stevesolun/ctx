@@ -748,7 +748,7 @@ def test_cli_preserves_early_failure_without_printing_private_details(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     def fail(**_kwargs: Any) -> dict[str, str]:
-        raise materializer.MaterializationError("private-task-id and private detail")
+        raise RuntimeError("private-task-id and private detail")
 
     monkeypatch.setattr(materializer, "materialize", fail)
     failure_root = tmp_path / "materialization-failure"
@@ -790,8 +790,7 @@ def test_cli_preserves_early_failure_without_printing_private_details(
     assert raised.value.code == 2
     assert captured.out == ""
     assert captured.err == (
-        "materialization failed; private details suppressed "
-        "(MaterializationError); evidence=preserved\n"
+        "materialization failed; private details suppressed (RuntimeError); evidence=preserved\n"
     )
     assert "private-task" not in captured.err
     failure = json.loads((failure_root / "failure.json").read_text(encoding="utf-8"))
@@ -799,9 +798,39 @@ def test_cli_preserves_early_failure_without_printing_private_details(
     assert failure["exception_chain"] == [
         {
             "message": "private-task-id and private detail",
-            "type": "MaterializationError",
+            "type": "RuntimeError",
         }
     ]
+
+
+def test_final_output_publication_failure_preserves_all_control_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _fixture(tmp_path, monkeypatch)
+    double = _install_verifier(fixture, monkeypatch)
+    real_rename = Path.rename
+
+    def fail_final_output_publication(source: Path, target: Path) -> Path:
+        if source.name.startswith(".materialize-") and target == fixture.output:
+            raise OSError("synthetic final output publication failure")
+        return real_rename(source, target)
+
+    monkeypatch.setattr(Path, "rename", fail_final_output_publication)
+
+    with pytest.raises(OSError, match="synthetic final output publication failure"):
+        _run(fixture)
+
+    assert len(double.calls) == 20
+    assert not fixture.output.exists()
+    failure_root = fixture.output.parent / "materialization-failure-evidence"
+    assert (failure_root / "failure.json").is_file()
+    retained = [
+        path for path in failure_root.glob("scenario-*") if path.is_dir() and not path.is_symlink()
+    ]
+    assert len(retained) == 10
+    assert not list(fixture.output.parent.glob(".materialize-*"))
+    assert not list(fixture.output.parent.glob(".official-verification-*"))
 
 
 def test_inexact_selector_evidence_fails_closed(

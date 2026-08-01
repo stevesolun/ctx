@@ -1254,7 +1254,7 @@ def test_cli_preserves_private_failure_details_without_printing_them(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     def fail(**_kwargs: Any) -> dict[str, Any]:
-        raise freezer.FreezeError("private-task-id and private freeze detail")
+        raise RuntimeError("private-task-id and private freeze detail")
 
     monkeypatch.setattr(freezer, "freeze_protocol", fail)
     failure_root = tmp_path / "freeze-failure-evidence"
@@ -1293,14 +1293,14 @@ def test_cli_preserves_private_failure_details_without_printing_them(
     captured = capsys.readouterr()
     assert raised.value.code == 2
     assert captured.out == ""
-    assert captured.err == "execution freeze failed (FreezeError); evidence=preserved\n"
+    assert captured.err == "execution freeze failed (RuntimeError); evidence=preserved\n"
     assert "private-task" not in captured.err
     failure = json.loads((failure_root / "failure.json").read_text(encoding="utf-8"))
     assert failure["operation"] == "holdout-execution-freeze"
     assert failure["exception_chain"] == [
         {
             "message": "private-task-id and private freeze detail",
-            "type": "FreezeError",
+            "type": "RuntimeError",
         }
     ]
     assert (failure_root / "artifact-manifest.json").is_file()

@@ -777,8 +777,26 @@ def _write_artifacts(
                 raise MaterializationError("private artifact permissions are unsafe")
         retained_evidence.rename(temp / VERIFICATION_DIR)
         temp.rename(output)
-    except Exception:
-        shutil.rmtree(temp, ignore_errors=True)
+    except BaseException as exc:
+        cleanup_temp = True
+        published_verification = temp / VERIFICATION_DIR
+        if published_verification.exists() and not retained_evidence.exists():
+            try:
+                published_verification.rename(retained_evidence)
+            except BaseException as rollback_exc:
+                try:
+                    temp.rename(retained_evidence)
+                except BaseException as fallback_exc:
+                    cleanup_temp = False
+                    exc.add_note(
+                        "materialization rollback failed; staged evidence retained at "
+                        f"{temp} ({type(rollback_exc).__name__}, "
+                        f"{type(fallback_exc).__name__})"
+                    )
+                else:
+                    temp = retained_evidence / ".published-output-staging"
+        if cleanup_temp and temp.exists():
+            shutil.rmtree(temp, ignore_errors=True)
         raise
 
 
@@ -1051,7 +1069,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         controls = _load_json(args.output / OUTPUT_FILES["controls"])
         scenario_count = controls["scenario_count"]
-    except (MaterializationError, ValueError, OSError, KeyError) as exc:
+    except BaseException as exc:
         evidence_status = "preserved"
         if not failure_evidence.already_preserved(args.failure_evidence_output):
             try:

@@ -1665,7 +1665,7 @@ def test_cli_suppresses_private_failure_details(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     def fail(**_kwargs: Any) -> str:
-        raise prepare.PrepareError("private-task-id and private task text")
+        raise KeyboardInterrupt("private-task-id and private task text")
 
     monkeypatch.setattr(prepare, "prepare_sources", fail)
     failure_root = tmp_path / "prepare-failure-evidence"
@@ -1696,12 +1696,12 @@ def test_cli_suppresses_private_failure_details(
     captured = capsys.readouterr()
     assert raised.value.code == 2
     assert captured.out == ""
-    assert captured.err == "benchmark preparation failed (PrepareError); evidence=preserved\n"
+    assert captured.err == "benchmark preparation failed (KeyboardInterrupt); evidence=preserved\n"
     assert "private-task" not in captured.err
     failure = json.loads((failure_root / "failure.json").read_text(encoding="utf-8"))
     assert failure["operation"] == "holdout-prepare-sources"
     assert failure["exception_chain"] == [
-        {"message": "private-task-id and private task text", "type": "PrepareError"}
+        {"message": "private-task-id and private task text", "type": "KeyboardInterrupt"}
     ]
     assert (failure_root / "artifact-manifest.json").is_file()
 

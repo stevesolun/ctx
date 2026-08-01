@@ -1554,7 +1554,7 @@ def main(argv: list[str] | None = None) -> int:
             frozen_at=args.frozen_at,
             expected_acquisition_protocol_sha256=args.expected_acquisition_protocol_sha256,
         )
-    except (FreezeError, ValueError, OSError, KeyError, TypeError) as exc:
+    except BaseException as exc:
         try:
             failure_evidence.publish_failure(
                 destination=args.failure_evidence_output,

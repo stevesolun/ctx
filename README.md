@@ -1,7 +1,7 @@
 # ctx
 
 [![CI](https://github.com/stevesolun/ctx/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
-[![Tests](https://img.shields.io/badge/Tests-6212_inventory-blue.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
+[![Tests](https://img.shields.io/badge/Tests-6219_inventory-blue.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
 
 ctx is a Python CLI and library that recommends a small, relevant set of

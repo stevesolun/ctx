@@ -1779,7 +1779,7 @@ def main(argv: list[str] | None = None) -> int:
                 docker_host=args.docker_host,
             )
             print(f"prepared execution environment sha256={digest}")
-    except Exception as exc:
+    except BaseException as exc:
         try:
             failure_evidence.publish_failure(
                 destination=args.failure_evidence_output,
