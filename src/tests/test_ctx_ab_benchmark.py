@@ -511,12 +511,18 @@ def test_trace_efficiency_counts_tool_output_and_failures() -> None:
                     "item": {"type": "agent_message", "text": "done"},
                 }
             ),
+            json.dumps({"type": "turn.completed", "usage": {}}),
         ]
     )
 
     assert benchmark.extract_trace_efficiency(output) == {
+        "descriptive_record_schema_version": 1,
+        "descriptive_trace_complete": True,
         "completed_item_count": 3,
         "tool_command_count": 2,
+        "tool_command_exit_code_known_count": 2,
+        "tool_command_output_known_count": 2,
+        "tool_command_text_known_count": 2,
         "tool_failure_count": 1,
         "tool_output_bytes": 10,
         "max_tool_output_bytes": 7,
@@ -539,11 +545,102 @@ def test_trace_efficiency_flags_oversized_tool_output() -> None:
             },
         }
     )
+    output += "\n" + json.dumps({"type": "turn.completed", "usage": {}})
 
     metrics = benchmark.extract_trace_efficiency(output)
 
     assert metrics["max_tool_output_bytes"] == benchmark.PRODUCTION_TOOL_OUTPUT_LIMIT_BYTES + 1
     assert metrics["oversized_tool_output_count"] == 1
+
+
+def test_trace_efficiency_keeps_unknown_command_evidence_missing() -> None:
+    output = "\n".join(
+        [
+            json.dumps(
+                {
+                    "type": "item.completed",
+                    "item": {"type": "command_execution"},
+                }
+            ),
+            json.dumps({"type": "turn.completed", "usage": {}}),
+        ]
+    )
+
+    metrics = benchmark.extract_trace_efficiency(output)
+
+    assert metrics["descriptive_trace_complete"] is True
+    assert metrics["tool_command_count"] == 1
+    assert metrics["tool_command_exit_code_known_count"] == 0
+    assert metrics["tool_command_output_known_count"] == 0
+    assert metrics["tool_command_text_known_count"] == 0
+    assert metrics["tool_failure_count"] is None
+    assert metrics["tool_output_bytes"] is None
+    assert metrics["repeated_tool_command_count"] is None
+
+
+def test_trace_efficiency_marks_malformed_or_unclosed_jsonl_incomplete() -> None:
+    malformed = benchmark.extract_trace_efficiency('{"type":"turn.completed","usage":{}}\nnot-json')
+    unclosed = benchmark.extract_trace_efficiency(
+        json.dumps(
+            {
+                "type": "item.completed",
+                "item": {
+                    "type": "command_execution",
+                    "command": "pytest",
+                    "exit_code": 0,
+                    "aggregated_output": "ok",
+                },
+            }
+        )
+    )
+    corrupt_item = benchmark.extract_trace_efficiency(
+        "\n".join(
+            [
+                json.dumps({"type": "item.completed", "item": "corrupt"}),
+                json.dumps({"type": "turn.completed", "usage": {}}),
+            ]
+        )
+    )
+    corrupt_item_types = [
+        benchmark.extract_trace_efficiency(
+            "\n".join(
+                [
+                    json.dumps({"type": "item.completed", "item": item}),
+                    json.dumps({"type": "turn.completed", "usage": {}}),
+                ]
+            )
+        )
+        for item in ({}, {"type": ""}, {"type": 7})
+    ]
+    post_terminal = benchmark.extract_trace_efficiency(
+        "\n".join(
+            [
+                json.dumps({"type": "turn.completed", "usage": {}}),
+                json.dumps(
+                    {
+                        "type": "item.completed",
+                        "item": {
+                            "type": "command_execution",
+                            "command": "late command",
+                            "exit_code": 0,
+                            "aggregated_output": "late output",
+                        },
+                    }
+                ),
+            ]
+        )
+    )
+
+    assert malformed["descriptive_trace_complete"] is False
+    assert malformed["tool_command_count"] is None
+    assert unclosed["descriptive_trace_complete"] is False
+    assert unclosed["tool_command_count"] is None
+    assert corrupt_item["descriptive_trace_complete"] is False
+    assert corrupt_item["tool_command_count"] is None
+    assert all(result["descriptive_trace_complete"] is False for result in corrupt_item_types)
+    assert all(result["tool_command_count"] is None for result in corrupt_item_types)
+    assert post_terminal["descriptive_trace_complete"] is False
+    assert post_terminal["tool_command_count"] is None
 
 
 def test_mcp_use_requires_an_mcp_typed_json_event() -> None:
@@ -7952,6 +8049,292 @@ def _updated_official_rows(
         sealed.seal()
         updated.append(sealed)
     return updated
+
+
+def _descriptive_official_rows(holdout: Any) -> list[dict[str, Any]]:
+    rows = _official_result_rows(holdout, status="passed", failure_class=None)
+    common = {
+        "agent_returncode": 0,
+        "agent_timed_out": False,
+        "descriptive_record_schema_version": 1,
+        "descriptive_trace_complete": True,
+        "verification_returncode": 0,
+    }
+    rows = _updated_official_rows(rows, predicate=lambda _row: True, updates=common)
+    rows = _updated_official_rows(
+        rows,
+        predicate=lambda row: row["arm"] == "baseline",
+        updates={
+            "tool_command_count": 10,
+            "tool_command_exit_code_known_count": 10,
+            "tool_command_output_known_count": 10,
+            "tool_command_text_known_count": 10,
+            "tool_failure_count": 1,
+            "tool_output_bytes": 100,
+            "repeated_tool_command_count": 2,
+        },
+    )
+    return _updated_official_rows(
+        rows,
+        predicate=lambda row: row["arm"] == "ctx-light",
+        updates={
+            "candidate_ids": ["skill:private-candidate"],
+            "selected_ids": ["skill:private-candidate"],
+            "delivered_ids": ["skill:private-candidate"],
+            "used_ids": [],
+            "recommendation_invocation_verified": True,
+            "semantic_context_use_verified": None,
+            "skill_use_evidence_unavailable_reason": (
+                "provider_does_not_expose_semantic_context_attribution"
+            ),
+            "lifecycle_actions": [
+                "load_requested",
+                "load_applied",
+                "unload_requested",
+                "unload_applied",
+                "session_end",
+            ],
+            "lifecycle_sha256": "e" * 64,
+            "lifecycle_session_status": "passed",
+            "final_loaded": [],
+            "tool_command_count": 8,
+            "tool_command_exit_code_known_count": 8,
+            "tool_command_output_known_count": 8,
+            "tool_command_text_known_count": 8,
+            "tool_failure_count": 0,
+            "tool_output_bytes": 80,
+            "repeated_tool_command_count": 1,
+        },
+    )
+
+
+def _official_performance(holdout: Any, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    return benchmark.build_performance_report(
+        rows,
+        scenario_ids=[scenario.id for scenario in holdout.scenarios],
+        trials=3,
+        arms=("baseline", "ctx-light"),
+        expected_repositories={scenario.id: scenario.repo_url for scenario in holdout.scenarios},
+        frozen_schedule=holdout.schedule,
+        official_holdout=holdout,
+    )
+
+
+def test_public_summary_freezes_descriptive_arm_pair_and_ctx_funnel_metrics(
+    tmp_path: Path,
+) -> None:
+    holdout, _ = _official_holdout_fixture(tmp_path)
+    rows = _descriptive_official_rows(holdout)
+
+    summary = benchmark.build_public_holdout_summary(
+        rows,
+        _official_performance(holdout, rows),
+        holdout,
+    )
+
+    assert summary["schema_version"] == 2
+    assert summary["descriptive_metrics_published"] is True
+    descriptive = summary["descriptive_metrics"]
+    assert descriptive["schema_version"] == 1
+    assert descriptive["analysis_role"] == "descriptive_non_confirmatory"
+    assert descriptive["causal_interpretation"] == "unsupported"
+    assert descriptive["used_by_primary_verdict"] is False
+    assert descriptive["thresholds"] is None
+    assert descriptive["population"] == {
+        "assigned_arm_n": 60,
+        "assigned_pair_n": 30,
+        "outcome_filtering": "none",
+    }
+    command_metrics = descriptive["completed_shell_command_executions"]
+    assert command_metrics["calls"]["arms"]["baseline"] == {
+        "assigned_n": 30,
+        "known_n": 30,
+        "missing_n": 0,
+        "total": 300,
+        "median": 10.0,
+    }
+    assert command_metrics["calls"]["pairs"] == {
+        "assigned_pair_n": 30,
+        "complete_pair_n": 30,
+        "missing_pair_n": 0,
+        "median_ctx_minus_baseline": -2.0,
+        "ctx_lower_pair_n": 30,
+        "equal_pair_n": 0,
+        "ctx_higher_pair_n": 0,
+    }
+    assert command_metrics["failed_calls"]["arms"]["baseline"]["total"] == 30
+    assert command_metrics["failed_calls"]["arms"]["ctx-light"]["total"] == 0
+    assert command_metrics["exit_code_known_calls"]["arms"]["baseline"]["total"] == 300
+    assert command_metrics["exit_code_known_calls"]["arms"]["ctx-light"]["total"] == 240
+    assert descriptive["ctx_funnel"]["candidate_count"] == {
+        "assigned_n": 30,
+        "known_n": 30,
+        "missing_n": 0,
+        "total": 30,
+        "median": 1.0,
+    }
+    assert descriptive["ctx_funnel"]["semantic_use_count"]["known_n"] == 0
+    assert descriptive["ctx_funnel"]["semantic_use_count"]["missing_n"] == 30
+    assert descriptive["lifecycle_events"]["load_applied_count"]["total"] == 30
+    assert descriptive["lifecycle_events"]["used_count"]["total"] == 0
+    assert descriptive["errors"]["agent_timeout"]["arms"]["baseline"]["total"] == 0
+
+
+def test_descriptive_contract_asset_matches_public_schema(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = ROOT / "benchmarks" / "ctx_ab" / "descriptive-metrics-v1.json"
+    content = path.read_bytes()
+    contract = json.loads(content)
+
+    assert hashlib.sha256(content).hexdigest() == (benchmark.DESCRIPTIVE_METRICS_CONTRACT_SHA256)
+    assert contract["schema_version"] == benchmark.DESCRIPTIVE_PUBLIC_SCHEMA_VERSION
+    assert contract["raw_arm_record"]["schema_version_value"] == (
+        benchmark.DESCRIPTIVE_RECORD_SCHEMA_VERSION
+    )
+    assert contract["analysis_role"] == "descriptive_non_confirmatory"
+    assert contract["used_by_primary_verdict"] is False
+    assert contract["thresholds"] is None
+
+    changed = tmp_path / "changed-descriptive-contract.json"
+    changed.write_bytes(content + b"\n")
+    monkeypatch.setattr(benchmark, "DESCRIPTIVE_METRICS_CONTRACT", changed)
+    with pytest.raises(ValueError, match="changed after preregistration"):
+        benchmark._descriptive_metrics_contract()
+
+
+def test_descriptive_summary_withholds_partial_campaign_and_rejects_duplicates(
+    tmp_path: Path,
+) -> None:
+    holdout, _ = _official_holdout_fixture(tmp_path)
+    rows = _descriptive_official_rows(holdout)
+    performance = _official_performance(holdout, rows)
+
+    partial = benchmark.build_public_holdout_summary(rows[:-1], performance, holdout)
+
+    assert partial["descriptive_metrics_published"] is False
+    assert "descriptive_metrics" not in partial
+    with pytest.raises(ValueError, match="duplicate descriptive arm record"):
+        benchmark.build_public_holdout_summary([*rows, rows[0]], performance, holdout)
+
+
+def test_descriptive_summary_retains_unknowns_and_never_copies_private_values(
+    tmp_path: Path,
+) -> None:
+    holdout, _ = _official_holdout_fixture(tmp_path)
+    rows = _descriptive_official_rows(holdout)
+    sentinel = "PRIVATE-DESCRIPTIVE-SENTINEL"
+    first_ctx = next(row for row in rows if row["arm"] == "ctx-light")
+    first_ctx_key = (first_ctx["scenario"], first_ctx["trial"], first_ctx["arm"])
+    rows = _updated_official_rows(
+        rows,
+        predicate=lambda row: (row["scenario"], row["trial"], row["arm"]) == first_ctx_key,
+        updates={
+            "recommendation_invocation_verified": False,
+            "candidate_ids": [],
+            "tool_command_exit_code_known_count": 7,
+            "error": sentinel,
+            "raw_command": f"pytest {sentinel}",
+            "aggregated_output": sentinel,
+        },
+    )
+
+    performance = _official_performance(holdout, rows)
+    performance["benefit_verdict"] = sentinel
+    performance["official_repository_claim"] = {
+        **performance["official_repository_claim"],
+        "private_detail": sentinel,
+    }
+    summary = benchmark.build_public_holdout_summary(rows, performance, holdout)
+
+    failed = summary["descriptive_metrics"]["completed_shell_command_executions"]["failed_calls"][
+        "arms"
+    ]["ctx-light"]
+    assert failed["known_n"] == 29
+    assert failed["missing_n"] == 1
+    exit_code_denominator = summary["descriptive_metrics"]["completed_shell_command_executions"][
+        "exit_code_known_calls"
+    ]["arms"]["ctx-light"]
+    assert exit_code_denominator["known_n"] == 30
+    assert exit_code_denominator["total"] == 239
+    funnel = summary["descriptive_metrics"]["ctx_funnel"]
+    assert funnel["recommendation_invocation_count"]["known_n"] == 29
+    assert funnel["candidate_count"]["missing_n"] == 1
+    assert summary["benefit_verdict"] is None
+    assert "protocol_id" not in summary
+    assert "protocol_sha256" not in summary
+    assert "schedule_sha256" not in summary
+    assert sentinel not in json.dumps(summary)
+
+
+def test_descriptive_population_retains_a_sealed_harness_failure_as_missing(
+    tmp_path: Path,
+) -> None:
+    holdout, _ = _official_holdout_fixture(tmp_path)
+    rows = _descriptive_official_rows(holdout)
+    target = next(row for row in rows if row["arm"] == "baseline")
+    target_key = (target["scenario"], target["trial"], target["arm"])
+    sparse_rows: list[dict[str, Any]] = []
+    for row in rows:
+        values = dict(row)
+        if (values["scenario"], values["trial"], values["arm"]) == target_key:
+            for field in (
+                "agent_returncode",
+                "agent_timed_out",
+                "descriptive_record_schema_version",
+                "descriptive_trace_complete",
+                "tool_command_count",
+                "tool_command_exit_code_known_count",
+                "tool_command_output_known_count",
+                "tool_command_text_known_count",
+                "tool_failure_count",
+                "tool_output_bytes",
+                "repeated_tool_command_count",
+                "verification_returncode",
+            ):
+                values.pop(field, None)
+            values["status"] = "harness_error"
+            values["production_efficiency_eligible"] = False
+        sealed = benchmark._VerifiedProductionResult(values)
+        sealed.seal()
+        sparse_rows.append(sealed)
+
+    summary = benchmark.build_public_holdout_summary(
+        sparse_rows,
+        _official_performance(holdout, sparse_rows),
+        holdout,
+    )
+
+    calls = summary["descriptive_metrics"]["completed_shell_command_executions"]["calls"]["arms"][
+        "baseline"
+    ]
+    assert summary["descriptive_metrics"]["population"]["assigned_arm_n"] == 60
+    assert calls["known_n"] == 29
+    assert calls["missing_n"] == 1
+    assert (
+        summary["descriptive_metrics"]["errors"]["harness_error"]["arms"]["baseline"]["total"] == 1
+    )
+
+
+def test_descriptive_fields_do_not_change_primary_performance_verdict(tmp_path: Path) -> None:
+    holdout, _ = _official_holdout_fixture(tmp_path)
+    rows = _descriptive_official_rows(holdout)
+    changed = _updated_official_rows(
+        rows,
+        predicate=lambda _row: True,
+        updates={
+            "tool_command_count": 999,
+            "tool_command_exit_code_known_count": 999,
+            "tool_command_output_known_count": 999,
+            "tool_command_text_known_count": 999,
+            "tool_failure_count": 998,
+            "tool_output_bytes": 123456789,
+            "repeated_tool_command_count": 997,
+        },
+    )
+
+    assert _official_performance(holdout, changed) == _official_performance(holdout, rows)
 
 
 def test_official_claim_rejects_time_only_improvement(tmp_path: Path) -> None:

@@ -26,7 +26,7 @@ import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from math import comb
+from math import comb, isfinite
 from pathlib import Path, PurePosixPath
 from statistics import median
 from typing import Any
@@ -35,6 +35,10 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SCENARIOS = ROOT / "benchmarks" / "ctx_ab" / "scenarios.yaml"
+DESCRIPTIVE_METRICS_CONTRACT = ROOT / "benchmarks" / "ctx_ab" / "descriptive-metrics-v1.json"
+DESCRIPTIVE_METRICS_CONTRACT_SHA256 = (
+    "e230e1d6667d36e0890fff94603c156fd918652ad83aab6e7df5542b71b8c3e4"
+)
 ORIGINAL_CODEX_HOME = os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))
 SAFE_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,127}$")
 GITHUB_REPO_URL = re.compile(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\.git")
@@ -94,6 +98,9 @@ OFFICIAL_CONFIRMATORY_TRIALS = 3
 OFFICIAL_CONFIRMATORY_PAIRS = 30
 OFFICIAL_CONFIRMATORY_FIRST_ARM_COUNT = 15
 OFFICIAL_SANDBOX_CONTRACT = "codex-managed-workspace-write-network-denied-v1"
+DESCRIPTIVE_RECORD_SCHEMA_VERSION = 1
+DESCRIPTIVE_PUBLIC_SCHEMA_VERSION = 1
+PUBLIC_HOLDOUT_SUMMARY_SCHEMA_VERSION = 2
 PRODUCT_CLAIM_MIN_SCENARIOS = 6
 PRODUCT_CLAIM_MIN_REPOSITORIES = 5
 PRODUCT_CLAIM_MIN_TRIALS = 6
@@ -3731,6 +3738,37 @@ def _jsonl_events(stdout: str) -> list[dict[str, Any]]:
     return events
 
 
+def _complete_jsonl_trace(stdout: str) -> tuple[list[dict[str, Any]], bool]:
+    """Parse a complete Codex JSONL trace without hiding malformed records."""
+    events: list[dict[str, Any]] = []
+    malformed = False
+    for line in stdout.splitlines():
+        if not line.strip():
+            continue
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError:
+            malformed = True
+            continue
+        if not isinstance(value, dict):
+            malformed = True
+            continue
+        event_type = value.get("type")
+        if not isinstance(event_type, str) or not event_type:
+            malformed = True
+        if event_type == "item.completed":
+            item = value.get("item")
+            if (
+                not isinstance(item, dict)
+                or not isinstance(item.get("type"), str)
+                or not item.get("type")
+            ):
+                malformed = True
+        events.append(value)
+    terminal = bool(events and events[-1].get("type") == "turn.completed")
+    return events, bool(events and terminal and not malformed)
+
+
 def extract_token_usage(stdout: str) -> dict[str, Any]:
     terminal: list[tuple[int, dict[str, Any]]] = []
     for index, event in enumerate(_jsonl_events(stdout)):
@@ -3767,31 +3805,61 @@ def extract_token_usage(stdout: str) -> dict[str, Any]:
     }
 
 
-def extract_trace_efficiency(stdout: str) -> dict[str, int]:
+def extract_trace_efficiency(stdout: str) -> dict[str, int | bool | None]:
+    events, trace_complete = _complete_jsonl_trace(stdout)
     completed_items = [
         event["item"]
-        for event in _jsonl_events(stdout)
+        for event in events
         if event.get("type") == "item.completed" and isinstance(event.get("item"), dict)
     ]
     commands = [item for item in completed_items if item.get("type") == "command_execution"]
     messages = [item for item in completed_items if item.get("type") == "agent_message"]
-    command_outputs = [
-        len(str(item.get("aggregated_output") or "").encode("utf-8")) for item in commands
+    exit_codes = [
+        item["exit_code"]
+        for item in commands
+        if isinstance(item.get("exit_code"), int) and not isinstance(item.get("exit_code"), bool)
     ]
-    normalized_commands = [" ".join(str(item.get("command") or "").split()) for item in commands]
+    command_outputs = [
+        len(item["aggregated_output"].encode("utf-8"))
+        for item in commands
+        if isinstance(item.get("aggregated_output"), str)
+    ]
+    normalized_commands = [
+        " ".join(item["command"].split())
+        for item in commands
+        if isinstance(item.get("command"), str)
+    ]
+    exit_codes_complete = trace_complete and len(exit_codes) == len(commands)
+    outputs_complete = trace_complete and len(command_outputs) == len(commands)
+    command_text_complete = trace_complete and len(normalized_commands) == len(commands)
     return {
-        "completed_item_count": len(completed_items),
-        "tool_command_count": len(commands),
-        "tool_failure_count": sum(item.get("exit_code") not in {0, None} for item in commands),
-        "tool_output_bytes": sum(command_outputs),
-        "max_tool_output_bytes": max(command_outputs, default=0),
-        "oversized_tool_output_count": sum(
-            size > PRODUCTION_TOOL_OUTPUT_LIMIT_BYTES for size in command_outputs
+        "descriptive_record_schema_version": DESCRIPTIVE_RECORD_SCHEMA_VERSION,
+        "descriptive_trace_complete": trace_complete,
+        "completed_item_count": len(completed_items) if trace_complete else None,
+        "tool_command_count": len(commands) if trace_complete else None,
+        "tool_command_exit_code_known_count": len(exit_codes),
+        "tool_command_output_known_count": len(command_outputs),
+        "tool_command_text_known_count": len(normalized_commands),
+        "tool_failure_count": (
+            sum(exit_code != 0 for exit_code in exit_codes) if exit_codes_complete else None
         ),
-        "repeated_tool_command_count": len(normalized_commands) - len(set(normalized_commands)),
-        "agent_message_count": len(messages),
-        "agent_message_bytes": sum(
-            len(str(item.get("text") or "").encode("utf-8")) for item in messages
+        "tool_output_bytes": sum(command_outputs) if outputs_complete else None,
+        "max_tool_output_bytes": max(command_outputs, default=0) if outputs_complete else None,
+        "oversized_tool_output_count": (
+            sum(size > PRODUCTION_TOOL_OUTPUT_LIMIT_BYTES for size in command_outputs)
+            if outputs_complete
+            else None
+        ),
+        "repeated_tool_command_count": (
+            len(normalized_commands) - len(set(normalized_commands))
+            if command_text_complete
+            else None
+        ),
+        "agent_message_count": len(messages) if trace_complete else None,
+        "agent_message_bytes": (
+            sum(len(str(item.get("text") or "").encode("utf-8")) for item in messages)
+            if trace_complete
+            else None
         ),
     }
 
@@ -7256,6 +7324,10 @@ def run_trial(
             "delivered_ids": delivered_ids,
             "adopted_ids": used_ids,
             "used_ids": used_ids,
+            "recommendation_invocation_verified": (
+                bool(catalog is not None) if production_catalog and ctx_enabled else None
+            ),
+            "semantic_context_use_verified": None,
             "context_delivery_verified": (context_delivery_verified if ctx_enabled else None),
             "policy_abstention_applied": (policy_abstention_applied if ctx_enabled else None),
             "policy_abstention_verified": (policy_abstention_verified if ctx_enabled else None),
@@ -8429,6 +8501,342 @@ def write_performance_report(
     return report
 
 
+def _nonnegative_int(value: object) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return value
+    return None
+
+
+def _descriptive_metrics_contract() -> Mapping[str, Any]:
+    try:
+        content = DESCRIPTIVE_METRICS_CONTRACT.read_bytes()
+    except OSError as exc:
+        raise ValueError("descriptive metrics contract is unavailable") from exc
+    if not secrets.compare_digest(
+        hashlib.sha256(content).hexdigest(),
+        DESCRIPTIVE_METRICS_CONTRACT_SHA256,
+    ):
+        raise ValueError("descriptive metrics contract changed after preregistration")
+    try:
+        contract = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise ValueError("descriptive metrics contract is invalid JSON") from exc
+    if not isinstance(contract, dict):
+        raise ValueError("descriptive metrics contract must be an object")
+    return contract
+
+
+def _valid_string_list(value: object) -> list[str] | None:
+    if (
+        isinstance(value, list)
+        and all(isinstance(item, str) and item for item in value)
+        and len(set(value)) == len(value)
+    ):
+        return value
+    return None
+
+
+def _descriptive_arm_rows(
+    results: Sequence[Mapping[str, Any]],
+    holdout: ExecutionFrozenHoldout,
+) -> dict[tuple[str, int, str], Mapping[str, Any]] | None:
+    expected = {
+        (str(assignment["scenario"]), int(assignment["trial"]), str(arm))
+        for assignment in holdout.schedule.assignments
+        for arm in assignment["arms"]
+    }
+    observed: dict[tuple[str, int, str], Mapping[str, Any]] = {}
+    for row in results:
+        scenario = row.get("scenario")
+        trial = row.get("trial")
+        arm = row.get("arm")
+        if (
+            not isinstance(scenario, str)
+            or not isinstance(trial, int)
+            or isinstance(trial, bool)
+            or arm not in OFFICIAL_TREATMENT_ARMS
+        ):
+            continue
+        key = (scenario, trial, str(arm))
+        if key in observed:
+            raise ValueError("duplicate descriptive arm record")
+        observed[key] = row
+    if set(observed) != expected or len(results) != len(expected):
+        return None
+    if any(
+        not isinstance(row, _VerifiedProductionResult) or not row.is_sealed()
+        for row in observed.values()
+    ):
+        return None
+    return observed
+
+
+def _command_metric(row: Mapping[str, Any], field: str) -> int | None:
+    if (
+        row.get("descriptive_record_schema_version") != DESCRIPTIVE_RECORD_SCHEMA_VERSION
+        or row.get("descriptive_trace_complete") is not True
+    ):
+        return None
+    command_count = _nonnegative_int(row.get("tool_command_count"))
+    if command_count is None:
+        return None
+    if field == "tool_command_count":
+        return command_count
+    if field == "tool_command_exit_code_known_count":
+        known_count = _nonnegative_int(row.get(field))
+        return known_count if known_count is not None and known_count <= command_count else None
+    required_known_field = {
+        "tool_failure_count": "tool_command_exit_code_known_count",
+        "tool_output_bytes": "tool_command_output_known_count",
+        "repeated_tool_command_count": "tool_command_text_known_count",
+    }[field]
+    if _nonnegative_int(row.get(required_known_field)) != command_count:
+        return None
+    value = _nonnegative_int(row.get(field))
+    if value is None:
+        return None
+    if field in {"tool_failure_count", "repeated_tool_command_count"} and value > command_count:
+        return None
+    return value
+
+
+def _arm_count_summary(
+    rows: Sequence[Mapping[str, Any]],
+    getter: Any,
+) -> dict[str, int | float | None]:
+    values = [value for row in rows if (value := getter(row)) is not None]
+    return {
+        "assigned_n": len(rows),
+        "known_n": len(values),
+        "missing_n": len(rows) - len(values),
+        "total": sum(values) if values else None,
+        "median": round(float(median(values)), 6) if values else None,
+    }
+
+
+def _paired_difference_summary(
+    rows: Mapping[tuple[str, int, str], Mapping[str, Any]],
+    getter: Any,
+) -> dict[str, int | float | None]:
+    pair_keys = sorted({(scenario, trial) for scenario, trial, _arm in rows})
+    differences: list[int] = []
+    for scenario, trial in pair_keys:
+        baseline = getter(rows[(scenario, trial, "baseline")])
+        ctx_light = getter(rows[(scenario, trial, "ctx-light")])
+        if baseline is not None and ctx_light is not None:
+            differences.append(ctx_light - baseline)
+    return {
+        "assigned_pair_n": len(pair_keys),
+        "complete_pair_n": len(differences),
+        "missing_pair_n": len(pair_keys) - len(differences),
+        "median_ctx_minus_baseline": (
+            round(float(median(differences)), 6) if differences else None
+        ),
+        "ctx_lower_pair_n": sum(value < 0 for value in differences),
+        "equal_pair_n": sum(value == 0 for value in differences),
+        "ctx_higher_pair_n": sum(value > 0 for value in differences),
+    }
+
+
+def _both_arm_metric(
+    rows: Mapping[tuple[str, int, str], Mapping[str, Any]],
+    getter: Any,
+) -> dict[str, Any]:
+    return {
+        "arms": {
+            arm: _arm_count_summary(
+                [row for (_scenario, _trial, row_arm), row in rows.items() if row_arm == arm],
+                getter,
+            )
+            for arm in OFFICIAL_TREATMENT_ARMS
+        },
+        "pairs": _paired_difference_summary(rows, getter),
+    }
+
+
+def _binary_pair_summary(
+    rows: Mapping[tuple[str, int, str], Mapping[str, Any]],
+    getter: Any,
+) -> dict[str, int]:
+    pair_keys = sorted({(scenario, trial) for scenario, trial, _arm in rows})
+    pairs: list[tuple[int, int]] = []
+    for scenario, trial in pair_keys:
+        baseline = getter(rows[(scenario, trial, "baseline")])
+        ctx_light = getter(rows[(scenario, trial, "ctx-light")])
+        if baseline is not None and ctx_light is not None:
+            pairs.append((baseline, ctx_light))
+    return {
+        "assigned_pair_n": len(pair_keys),
+        "complete_pair_n": len(pairs),
+        "missing_pair_n": len(pair_keys) - len(pairs),
+        "baseline_false_ctx_false_n": pairs.count((0, 0)),
+        "baseline_true_ctx_false_n": pairs.count((1, 0)),
+        "baseline_false_ctx_true_n": pairs.count((0, 1)),
+        "baseline_true_ctx_true_n": pairs.count((1, 1)),
+    }
+
+
+def _ctx_recommendation_invocation(row: Mapping[str, Any]) -> int | None:
+    return 1 if row.get("recommendation_invocation_verified") is True else None
+
+
+def _ctx_candidate_count(row: Mapping[str, Any]) -> int | None:
+    if row.get("recommendation_invocation_verified") is not True:
+        return None
+    values = _valid_string_list(row.get("candidate_ids"))
+    return len(values) if values is not None else None
+
+
+def _ctx_selected_count(row: Mapping[str, Any]) -> int | None:
+    if row.get("policy_abstention_verified") is True:
+        values = _valid_string_list(row.get("selected_ids"))
+        return 0 if values == [] else None
+    if row.get("context_delivery_verified") is not True:
+        return None
+    values = _valid_string_list(row.get("selected_ids"))
+    return len(values) if values is not None else None
+
+
+def _ctx_delivered_count(row: Mapping[str, Any]) -> int | None:
+    if row.get("policy_abstention_verified") is True:
+        values = _valid_string_list(row.get("delivered_ids"))
+        return 0 if values == [] else None
+    if row.get("context_delivery_verified") is not True:
+        return None
+    values = _valid_string_list(row.get("delivered_ids"))
+    return len(values) if values is not None else None
+
+
+def _ctx_semantic_use_count(row: Mapping[str, Any]) -> int | None:
+    if row.get("policy_abstention_verified") is True:
+        values = _valid_string_list(row.get("used_ids"))
+        return 0 if values == [] else None
+    if (
+        row.get("context_delivery_verified") is not True
+        or row.get("semantic_context_use_verified") is not True
+    ):
+        return None
+    values = _valid_string_list(row.get("used_ids"))
+    return len(values) if values is not None else None
+
+
+def _closed_lifecycle_actions(row: Mapping[str, Any]) -> list[str] | None:
+    actions = row.get("lifecycle_actions")
+    digest = row.get("lifecycle_sha256")
+    if (
+        not isinstance(actions, list)
+        or not actions
+        or not all(isinstance(action, str) for action in actions)
+        or actions[-1] != "session_end"
+        or not isinstance(digest, str)
+        or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+        or not isinstance(row.get("lifecycle_session_status"), str)
+        or not row.get("lifecycle_session_status")
+        or row.get("final_loaded") != []
+    ):
+        return None
+    return actions
+
+
+def _lifecycle_action_count(row: Mapping[str, Any], action: str) -> int | None:
+    actions = _closed_lifecycle_actions(row)
+    return actions.count(action) if actions is not None else None
+
+
+def _boolean_event(row: Mapping[str, Any], field: str) -> int | None:
+    value = row.get(field)
+    return int(value) if isinstance(value, bool) else None
+
+
+def _nonzero_returncode(row: Mapping[str, Any], field: str) -> int | None:
+    value = row.get(field)
+    if not isinstance(value, int) or isinstance(value, bool):
+        return None
+    return int(value != 0)
+
+
+def _harness_error(row: Mapping[str, Any]) -> int | None:
+    status = row.get("status")
+    if status not in {"passed", "failed", "harness_error"}:
+        return None
+    return int(status == "harness_error")
+
+
+def _descriptive_holdout_metrics(
+    rows: Mapping[tuple[str, int, str], Mapping[str, Any]],
+    contract: Mapping[str, Any],
+) -> dict[str, Any]:
+    ctx_rows = [row for (_scenario, _trial, arm), row in rows.items() if arm == "ctx-light"]
+    raw_contract = contract["raw_arm_record"]
+    command_contract = raw_contract["completed_shell_command_executions"]
+    command_fields = {
+        "calls": command_contract["calls_field"],
+        "exit_code_known_calls": command_contract["exit_code_known_calls_field"],
+        "failed_calls": command_contract["failed_calls_field"],
+        "output_bytes": command_contract["output_bytes_field"],
+        "repeated_calls": command_contract["repeated_calls_field"],
+    }
+    error_getters = {
+        "harness_error": _harness_error,
+        "agent_timeout": lambda row: _boolean_event(row, "agent_timed_out"),
+        "agent_nonzero_returncode": lambda row: _nonzero_returncode(row, "agent_returncode"),
+        "verifier_nonzero_returncode": lambda row: _nonzero_returncode(
+            row, "verification_returncode"
+        ),
+    }
+    return {
+        "schema_version": contract["schema_version"],
+        "analysis_role": contract["analysis_role"],
+        "causal_interpretation": contract["causal_interpretation"],
+        "used_by_primary_verdict": contract["used_by_primary_verdict"],
+        "thresholds": contract["thresholds"],
+        "population": {
+            "assigned_arm_n": len(rows),
+            "assigned_pair_n": len(rows) // 2,
+            "outcome_filtering": "none",
+        },
+        "completed_shell_command_executions": {
+            "definition": command_contract["definition"],
+            **{
+                public_name: _both_arm_metric(
+                    rows,
+                    lambda row, field=raw_field: _command_metric(row, field),
+                )
+                for public_name, raw_field in command_fields.items()
+            },
+        },
+        "ctx_funnel": {
+            "scope": "ctx-light assigned arms",
+            "recommendation_invocation_count": _arm_count_summary(
+                ctx_rows, _ctx_recommendation_invocation
+            ),
+            "candidate_count": _arm_count_summary(ctx_rows, _ctx_candidate_count),
+            "selected_count": _arm_count_summary(ctx_rows, _ctx_selected_count),
+            "delivered_count": _arm_count_summary(ctx_rows, _ctx_delivered_count),
+            "semantic_use_count": _arm_count_summary(ctx_rows, _ctx_semantic_use_count),
+        },
+        "lifecycle_events": {
+            "scope": "ctx-light arms with a closed authenticated lifecycle",
+            **{
+                f"{action}_count": _arm_count_summary(
+                    ctx_rows,
+                    lambda row, lifecycle_action=action: _lifecycle_action_count(
+                        row, lifecycle_action
+                    ),
+                )
+                for action in ("load_applied", "used", "unload_applied")
+            },
+        },
+        "errors": {
+            name: {
+                "arms": _both_arm_metric(rows, getter)["arms"],
+                "pairs": _binary_pair_summary(rows, getter),
+            }
+            for name, getter in error_getters.items()
+        },
+    }
+
+
 def build_public_holdout_summary(
     results: Sequence[Mapping[str, Any]],
     performance: Mapping[str, Any],
@@ -8436,6 +8844,8 @@ def build_public_holdout_summary(
 ) -> dict[str, Any]:
     """Build an aggregate summary with no task, repository, identifier, patch, or path data."""
     _require_authenticated_holdout_snapshot(holdout)
+    descriptive_contract = _descriptive_metrics_contract()
+    descriptive_rows = _descriptive_arm_rows(results, holdout)
 
     def numeric_values(arm: str, field: str) -> list[float]:
         return [
@@ -8444,6 +8854,7 @@ def build_public_holdout_summary(
             if row.get("arm") == arm
             and isinstance(row.get(field), int | float)
             and not isinstance(row.get(field), bool)
+            and isfinite(float(row[field]))
         ]
 
     arm_summary: dict[str, Any] = {}
@@ -8484,36 +8895,67 @@ def build_public_holdout_summary(
         )
         for field in activity_fields
     }
-    official_repository_claim = performance.get("official_repository_claim")
-    if isinstance(official_repository_claim, Mapping):
-        official_repository_claim = dict(official_repository_claim)
-        if "quality_preserved" in official_repository_claim:
-            official_repository_claim["observed_quality_preservation"] = (
-                official_repository_claim.pop("quality_preserved")
-            )
-    return {
-        "schema_version": 1,
-        "protocol_id": holdout.protocol_id,
-        "protocol_sha256": holdout.protocol_sha256,
-        "schedule_sha256": holdout.schedule.sha256,
+
+    def public_bool(field: str) -> bool | None:
+        value = performance.get(field)
+        return value if isinstance(value, bool) else None
+
+    def safe_public_number(value: object) -> int | float | None:
+        if (
+            isinstance(value, int | float)
+            and not isinstance(value, bool)
+            and isfinite(float(value))
+        ):
+            return value
+        return None
+
+    def public_number(field: str) -> int | float | None:
+        return safe_public_number(performance.get(field))
+
+    def public_verdict(field: str) -> str | None:
+        value = performance.get(field)
+        return value if value in {"beneficial", "not_beneficial"} else None
+
+    raw_claim = performance.get("official_repository_claim")
+    official_repository_claim: dict[str, Any] | None = None
+    if isinstance(raw_claim, Mapping):
+        official_repository_claim = {}
+        for field in (
+            "benefiting_repositories",
+            "exact_one_sided_sign_p",
+            "overall_time_ratio",
+            "overall_token_ratio",
+            "verified_delivery_repositories",
+        ):
+            official_repository_claim[field] = safe_public_number(raw_claim.get(field))
+        for field in ("evidence_complete", "incident_free", "passed"):
+            value = raw_claim.get(field)
+            official_repository_claim[field] = value if isinstance(value, bool) else None
+        quality = raw_claim.get("quality_preserved")
+        official_repository_claim["observed_quality_preservation"] = (
+            quality if isinstance(quality, bool) else None
+        )
+    summary = {
+        "schema_version": PUBLIC_HOLDOUT_SUMMARY_SCHEMA_VERSION,
         "verification_backend": OFFICIAL_HOLDOUT_BACKEND,
         "assigned_arm_count": len(results),
         "expected_pair_count": OFFICIAL_CONFIRMATORY_PAIRS,
-        "execution_complete_pair_count": performance.get("execution_complete_pair_count"),
-        "quality_complete_pair_count": performance.get("quality_complete_pair_count"),
-        "experiment_valid": performance.get("experiment_valid"),
+        "execution_complete_pair_count": public_number("execution_complete_pair_count"),
+        "quality_complete_pair_count": public_number("quality_complete_pair_count"),
+        "experiment_valid": public_bool("experiment_valid"),
         "quality_gate": {
             "label": "observed quality preservation",
             "criterion": "all assigned arm outcomes observed and passed",
-            "passed": performance.get("quality_preserved"),
+            "passed": public_bool("quality_preserved"),
         },
-        "benefit_verdict": performance.get("benefit_verdict"),
-        "product_benefit_verdict": performance.get("product_benefit_verdict"),
+        "benefit_verdict": public_verdict("benefit_verdict"),
+        "product_benefit_verdict": public_verdict("product_benefit_verdict"),
         "official_repository_claim": official_repository_claim,
-        "median_development_time_ratio": performance.get("median_time_ratio"),
-        "median_uncached_token_ratio": performance.get("median_uncached_token_ratio"),
+        "median_development_time_ratio": public_number("median_time_ratio"),
+        "median_uncached_token_ratio": public_number("median_uncached_token_ratio"),
         "arms": arm_summary,
         "entity_type_activity": activity,
+        "descriptive_metrics_published": descriptive_rows is not None,
         "privacy": {
             "contains_scenario_identifiers": False,
             "contains_repository_identifiers": False,
@@ -8521,8 +8963,15 @@ def build_public_holdout_summary(
             "contains_hidden_tests": False,
             "contains_reference_or_model_patches": False,
             "contains_private_paths": False,
+            "contains_protocol_identifiers_or_per_run_hashes": False,
         },
     }
+    if descriptive_rows is not None:
+        summary["descriptive_metrics"] = _descriptive_holdout_metrics(
+            descriptive_rows,
+            descriptive_contract,
+        )
+    return summary
 
 
 def write_public_holdout_summary(
@@ -9230,12 +9679,16 @@ def _run_main(
                         )
                         result = {
                             "scenario": scenario.id,
+                            "engine": args.engine,
                             "arm": arm,
                             "trial": trial,
                             "retry": retry,
                             "attempt": attempt,
                             "status": "harness_error",
                             "error": f"{type(exc).__name__}: {exc}",
+                            "verification_backend": (
+                                OFFICIAL_HOLDOUT_BACKEND if official_holdout is not None else None
+                            ),
                             "endpoint_class": "not_evaluated",
                             "evidence_level": "harness_error",
                             "production_efficiency_eligible": False,
@@ -9247,10 +9700,7 @@ def _run_main(
                             "provider_authentication_verified": False,
                             "provider_response_success": False,
                         }
-                    if (
-                        args.engine == PRODUCTION_CATALOG_ENGINE
-                        and result.get("status") != "harness_error"
-                    ):
+                    if args.engine == PRODUCTION_CATALOG_ENGINE:
                         result = _VerifiedProductionResult(result)
                     results.append(result)
                     write_summary(output, results)
