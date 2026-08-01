@@ -116,7 +116,8 @@ TELEMETRY_PATTERNS = (
 )
 WINDOWS_PATTERNS = (
     ".github/workflows/test.yml",
-    "scripts/ctx_ab_*.py",
+    "scripts/ctx_ab_benchmark.py",
+    "scripts/ctx_ab_swebench.py",
     "scripts/ci_classifier.py",
     "scripts/ci_required.py",
     "src/import_designdotmd_skills.py",
@@ -125,7 +126,8 @@ WINDOWS_PATTERNS = (
     "src/tests/test_import_designdotmd_skills.py",
     "src/tests/test_import_mattpocock_skills.py",
     "src/tests/test_import_strix_skills.py",
-    "src/tests/test_ctx_ab_*.py",
+    "src/tests/test_ctx_ab_benchmark.py",
+    "src/tests/test_ctx_ab_swebench.py",
 )
 
 
