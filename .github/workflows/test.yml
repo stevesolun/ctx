@@ -256,6 +256,13 @@ jobs:
           src/tests/test_import_mattpocock_skills.py
           src/tests/test_import_strix_skills.py
           src/tests/test_ctx_ab_benchmark.py
+          src/tests/test_ctx_ab_exposure_ledger.py
+          src/tests/test_ctx_ab_failure_evidence.py
+          src/tests/test_ctx_ab_holdout_freeze.py
+          src/tests/test_ctx_ab_holdout_materialize.py
+          src/tests/test_ctx_ab_holdout_prepare.py
+          src/tests/test_ctx_ab_holdout_protocol.py
+          src/tests/test_ctx_ab_holdout_selection.py
           src/tests/test_ctx_ab_swebench.py
 
   contract-compat:

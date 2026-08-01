@@ -1342,8 +1342,16 @@ def test_windows_high_risk_paths_are_classified_selectively() -> None:
         "src/tests/test_import_mattpocock_skills.py",
         "src/tests/test_import_strix_skills.py",
         "scripts/ctx_ab_benchmark.py",
+        "scripts/ctx_ab_failure_evidence.py",
+        "scripts/ctx_ab_holdout_freeze.py",
+        "scripts/ctx_ab_holdout_materialize.py",
+        "scripts/ctx_ab_holdout_prepare.py",
         "scripts/ctx_ab_swebench.py",
         "src/tests/test_ctx_ab_benchmark.py",
+        "src/tests/test_ctx_ab_failure_evidence.py",
+        "src/tests/test_ctx_ab_holdout_freeze.py",
+        "src/tests/test_ctx_ab_holdout_materialize.py",
+        "src/tests/test_ctx_ab_holdout_prepare.py",
         "src/tests/test_ctx_ab_swebench.py",
         "scripts/ci_classifier.py",
         "scripts/ci_required.py",
@@ -1854,5 +1862,12 @@ def test_workflow_runs_targeted_windows_high_risk_gate() -> None:
     assert "src/tests/test_import_mattpocock_skills.py" in windows_job
     assert "src/tests/test_import_strix_skills.py" in windows_job
     assert "src/tests/test_ctx_ab_benchmark.py" in windows_job
+    assert "src/tests/test_ctx_ab_exposure_ledger.py" in windows_job
+    assert "src/tests/test_ctx_ab_failure_evidence.py" in windows_job
+    assert "src/tests/test_ctx_ab_holdout_freeze.py" in windows_job
+    assert "src/tests/test_ctx_ab_holdout_materialize.py" in windows_job
+    assert "src/tests/test_ctx_ab_holdout_prepare.py" in windows_job
+    assert "src/tests/test_ctx_ab_holdout_protocol.py" in windows_job
+    assert "src/tests/test_ctx_ab_holdout_selection.py" in windows_job
     assert "src/tests/test_ctx_ab_swebench.py" in windows_job
     assert "matrix:" not in windows_job
