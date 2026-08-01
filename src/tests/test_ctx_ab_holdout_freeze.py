@@ -1246,3 +1246,61 @@ def test_output_install_failure_rolls_back_private_schedule(
 
     assert not paths["schedule_path"].exists()
     assert not paths["output_path"].exists()
+
+
+def test_cli_preserves_private_failure_details_without_printing_them(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def fail(**_kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("private-task-id and private freeze detail")
+
+    monkeypatch.setattr(freezer, "freeze_protocol", fail)
+    failure_root = tmp_path / "freeze-failure-evidence"
+    argv = [
+        "--protocol",
+        str(tmp_path / "protocol"),
+        "--exposure-ledger",
+        str(tmp_path / "exposure"),
+        "--selection",
+        str(tmp_path / "selection"),
+        "--scenario-pack",
+        str(tmp_path / "scenario-pack"),
+        "--source-map",
+        str(tmp_path / "source-map"),
+        "--collision",
+        str(tmp_path / "collision"),
+        "--reconstructed",
+        str(tmp_path / "reconstructed"),
+        "--controls",
+        str(tmp_path / "controls"),
+        "--environment",
+        str(tmp_path / "environment"),
+        "--schedule",
+        str(tmp_path / "schedule"),
+        "--output",
+        str(tmp_path / "execution-protocol"),
+        "--expected-acquisition-protocol-sha256",
+        "0" * 64,
+        "--failure-evidence-output",
+        str(failure_root),
+    ]
+
+    with pytest.raises(SystemExit) as raised:
+        freezer.main(argv)
+
+    captured = capsys.readouterr()
+    assert raised.value.code == 2
+    assert captured.out == ""
+    assert captured.err == "execution freeze failed (RuntimeError); evidence=preserved\n"
+    assert "private-task" not in captured.err
+    failure = json.loads((failure_root / "failure.json").read_text(encoding="utf-8"))
+    assert failure["operation"] == "holdout-execution-freeze"
+    assert failure["exception_chain"] == [
+        {
+            "message": "private-task-id and private freeze detail",
+            "type": "RuntimeError",
+        }
+    ]
+    assert (failure_root / "artifact-manifest.json").is_file()

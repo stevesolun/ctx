@@ -92,14 +92,19 @@ HISTORY_SELECTION=/absolute/private/path/to/prior-selection.json
 HISTORY_EVIDENCE=/absolute/private/path/to/prior-results.csv
 
 PRIVATE="$RUN/.gate/ctx-ab-private/production-graph-holdout-v2"
+FAILURES="$PRIVATE/failures"
 MAT="$PRIVATE/materialized"
 CACHE="$PRIVATE/runner-cache"
 OUT="$RUN/.gate/ctx-ab-runs/production-graph-holdout-v2"
-mkdir -p "$PRIVATE" "$RUN/.gate/ctx-ab-runs"
-chmod 700 "$RUN/.gate" "$RUN/.gate/ctx-ab-private" "$PRIVATE" \
+mkdir -p "$FAILURES" "$RUN/.gate/ctx-ab-runs"
+chmod 700 "$RUN/.gate" "$RUN/.gate/ctx-ab-private" "$PRIVATE" "$FAILURES" \
   "$RUN/.gate/ctx-ab-runs"
 test ! -e "$MAT"
 test ! -e "$OUT"
+
+# Every failure destination is single-use and remains absent on success. If a
+# command fails, stop, preserve/classify its owner-only bundle, and use a fresh
+# numbered destination only for an authorized identical-input reproduction.
 
 "$PY" -m scripts.ctx_ab_exposure_ledger \
   --selection "$HISTORY_SELECTION" \
@@ -113,7 +118,8 @@ test ! -e "$OUT"
   --swebench-checkout "$SWEBENCH_CHECKOUT" \
   --swebench-python "$SWEBENCH_PYTHON" \
   --docker-cli "$DOCKER_CLI" \
-  --docker-host "$DOCKER_HOST"
+  --docker-host "$DOCKER_HOST" \
+  --failure-evidence-output "$FAILURES/protocol-001"
 ACQ_SHA="$("$PY" -c \
   'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' \
   "$PRIVATE/acquisition-protocol.json")"
@@ -141,7 +147,8 @@ ACQ_SHA="$("$PY" -c \
   --selection "$PRIVATE/selection.json" \
   --cache-root "$PRIVATE/source-cache" \
   --output "$PRIVATE/source-map.json" \
-  --workers 4
+  --workers 4 \
+  --failure-evidence-output "$FAILURES/sources-001"
 
 # Materialization runs one red/reference verifier control for each of 10 tasks.
 "$PY" -m scripts.ctx_ab_holdout_materialize \
@@ -154,6 +161,7 @@ ACQ_SHA="$("$PY" -c \
   --runtime-availability "$RUN/src/ctx/assets/runtime-availability.json" \
   --catalog-archive "$RUN/graph/wiki-graph-runtime.tar.gz" \
   --output "$MAT" \
+  --failure-evidence-output "$FAILURES/materialize-001" \
   --swebench-checkout "$SWEBENCH_CHECKOUT" \
   --swebench-python "$SWEBENCH_PYTHON" \
   --docker-cli "$DOCKER_CLI" \
@@ -172,7 +180,8 @@ ACQ_SHA="$("$PY" -c \
   --swebench-checkout "$SWEBENCH_CHECKOUT" \
   --swebench-python "$SWEBENCH_PYTHON" \
   --docker-cli "$DOCKER_CLI" \
-  --docker-host "$DOCKER_HOST"
+  --docker-host "$DOCKER_HOST" \
+  --failure-evidence-output "$FAILURES/environment-001"
 
 "$PY" -m scripts.ctx_ab_holdout_freeze \
   --protocol "$PRIVATE/acquisition-protocol.json" \
@@ -186,7 +195,8 @@ ACQ_SHA="$("$PY" -c \
   --controls "$MAT/control-results.json" \
   --environment "$PRIVATE/execution-environment.json" \
   --schedule "$PRIVATE/execution-schedule.json" \
-  --output "$PRIVATE/execution-protocol.json"
+  --output "$PRIVATE/execution-protocol.json" \
+  --failure-evidence-output "$FAILURES/freeze-001"
 EXEC_SHA="$("$PY" -c \
   'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' \
   "$PRIVATE/execution-protocol.json")"
@@ -232,6 +242,13 @@ pinned V1-derived design, and compares its canonical digest with the
 authenticated predecessor digest. Verdict generation uses the authenticated
 snapshots of every frozen input and fails closed if any on-disk input changes
 after attestation.
+
+Preparation, materialization, and freeze require an explicit owner-only failure
+destination. A failure atomically publishes `failure.json` plus a SHA-256 file
+manifest without printing private details. Materialization additionally moves
+the exact in-progress control worktree and every already-retained verifier
+artifact into that bundle before temporary-directory cleanup. Existing failure
+destinations are never overwritten; a successful command creates no bundle.
 
 A completed campaign has exactly 60 arms and 30 complete pairs,
 `experiment_valid=true`, no unresolved incidents, and an honest
