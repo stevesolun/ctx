@@ -685,7 +685,15 @@ def _validate_source_bundle_closure(source: SourceBundle) -> None:
                 label="private source bundle future-history audit",
             )
             unreachable = benchmark._checked_git(
-                ["fsck", "--full", "--strict", "--unreachable", "--no-reflogs"],
+                [
+                    "-c",
+                    "fsck.zeroPaddedFilemode=ignore",
+                    "fsck",
+                    "--full",
+                    "--strict",
+                    "--unreachable",
+                    "--no-reflogs",
+                ],
                 cwd=workspace,
                 label="private source bundle object audit",
                 timeout=1800,
