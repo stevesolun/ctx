@@ -4,9 +4,7 @@ import hashlib
 import json
 import os
 import stat
-import subprocess
 import sys
-from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -1153,7 +1151,6 @@ def test_install_fails_closed_without_safe_filesystem_primitives(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(importer, "_supports_directory_fds", lambda: False)
-    monkeypatch.setattr(importer, "_supports_windows_path_guards", lambda: False)
 
     with pytest.raises(RuntimeError, match="secure source read unavailable"):
         importer.deploy_entry(
@@ -1164,79 +1161,6 @@ def test_install_fails_closed_without_safe_filesystem_primitives(
         )
 
     assert not design_import.target.exists()
-
-
-def test_checked_path_reader_handles_missing_and_regular_destinations(tmp_path: Path) -> None:
-    target = tmp_path / "skills"
-    skill_dir = target / "designdotmd-example"
-    destination = skill_dir / "SKILL.md"
-
-    assert importer._read_destination_text_path(skill_dir, target, destination) == (None, 0)
-
-    skill_dir.mkdir(parents=True)
-    destination.write_text("checked-path content\n", encoding="utf-8")
-
-    content, link_count = importer._read_destination_text_path(skill_dir, target, destination)
-    assert content == "checked-path content\n"
-    assert link_count == 1
-
-
-def test_windows_atomic_writer_replaces_content_and_preserves_mode(tmp_path: Path) -> None:
-    destination = tmp_path / "SKILL.md"
-    destination.write_text("old content\n", encoding="utf-8")
-    destination.chmod(0o640)
-    expected_mode = stat.S_IMODE(destination.stat().st_mode)
-
-    importer._atomic_write_text_windows(destination, "new content\n")
-
-    assert destination.read_text(encoding="utf-8") == "new content\n"
-    assert stat.S_IMODE(destination.stat().st_mode) == expected_mode
-    assert not list(tmp_path.glob(".SKILL.md.*"))
-
-
-def test_windows_guard_context_pins_parents_and_creates_skill_dir(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    target = tmp_path / "skills"
-    target.mkdir()
-    skill_dir = target / "designdotmd-example"
-    opened: list[Path] = []
-    closed: list[int] = []
-
-    def open_guard(path: Path) -> int:
-        opened.append(path)
-        return len(opened)
-
-    monkeypatch.setattr(importer, "_open_windows_directory_guard", open_guard)
-    monkeypatch.setattr(importer, "_close_windows_directory_guard", closed.append)
-
-    with importer._guard_windows_directories(target, skill_dir):
-        assert skill_dir.is_dir()
-
-    assert opened == importer._windows_guard_paths(target, skill_dir)
-    assert closed == list(reversed(range(1, len(opened) + 1)))
-
-
-def test_checked_path_source_reader_uses_the_opened_regular_file(
-    design_import: DesignImportFixture,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(importer, "_supports_directory_fds", lambda: False)
-    monkeypatch.setattr(importer, "_supports_windows_path_guards", lambda: True)
-    monkeypatch.setattr(
-        importer,
-        "_guard_windows_directories",
-        lambda *_args, **_kwargs: nullcontext(),
-    )
-
-    source, content = importer._read_source_text(
-        design_import.entry["source_path"],
-        expected_sha256=design_import.entry["sha256"],
-    )
-
-    assert source == design_import.source
-    assert content == SOURCE_TEXT
 
 
 def test_source_directory_is_rejected_as_non_regular(
@@ -1252,97 +1176,6 @@ def test_source_directory_is_rejected_as_non_regular(
             design_import.target,
             dry_run=False,
         )
-
-
-def test_checked_path_reader_rejects_destination_swapped_during_open(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    target = tmp_path / "skills"
-    skill_dir = target / "designdotmd-example"
-    skill_dir.mkdir(parents=True)
-    destination = skill_dir / "SKILL.md"
-    destination.write_text("expected\n", encoding="utf-8")
-    replacement = skill_dir / "replacement.md"
-    replacement.write_text("replacement\n", encoding="utf-8")
-    original_open = os.open
-
-    def swap_open(path: Any, flags: int, mode: int = 0o777) -> int:
-        selected = replacement if path == destination else path
-        return original_open(selected, flags, mode)
-
-    monkeypatch.setattr(importer.os, "open", swap_open)
-
-    with pytest.raises(ValueError, match="changed while opening"):
-        importer._read_destination_text_path(skill_dir, target, destination)
-
-
-def test_windows_guard_paths_reject_directory_outside_target(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="guarded directory .* is outside"):
-        importer._windows_guard_paths(tmp_path / "target", tmp_path / "outside")
-
-
-def test_windows_guard_fails_closed_for_missing_source_parent(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    target = tmp_path / "target"
-    target.mkdir()
-    missing = target / "missing"
-    monkeypatch.setattr(importer, "_open_windows_directory_guard", lambda _path: 1)
-    monkeypatch.setattr(importer, "_close_windows_directory_guard", lambda _handle: None)
-
-    with pytest.raises(ValueError, match="must be a real directory"):
-        with importer._guard_windows_directories(target, missing, create_missing=False):
-            pass
-
-    assert not missing.exists()
-
-
-@pytest.mark.skipif(os.name != "nt", reason="requires real Windows handles and junctions")
-def test_windows_install_update_and_junction_rejection(
-    design_import: DesignImportFixture,
-) -> None:
-    skill, changed = importer.deploy_entry(
-        design_import.entry,
-        design_import.manifest,
-        design_import.target,
-        dry_run=False,
-    )
-    assert changed is True
-    _write_source(
-        design_import,
-        SOURCE_TEXT.replace("Keep this body unchanged.", "Updated on Windows."),
-    )
-    _, changed = importer.deploy_entry(
-        design_import.entry,
-        design_import.manifest,
-        design_import.target,
-        dry_run=False,
-    )
-    assert changed is True
-    assert "Updated on Windows." in skill.read_text(encoding="utf-8")
-
-    junction_target = design_import.root / "junction-target"
-    junction_target.mkdir()
-    outside = design_import.root / "junction-outside"
-    outside.mkdir()
-    junction = junction_target / "designdotmd-fixture-design"
-    subprocess.run(
-        ["cmd", "/c", "mklink", "/J", str(junction), str(outside)],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-
-    with pytest.raises(ValueError, match="reparse point beneath target_dir"):
-        importer.deploy_entry(
-            design_import.entry,
-            design_import.manifest,
-            junction_target,
-            dry_run=False,
-        )
-    assert not (outside / "SKILL.md").exists()
 
 
 @pytest.mark.parametrize("alias_kind", ["ancestor", "target-root"])
@@ -1394,7 +1227,6 @@ def test_symlink_beneath_resolved_target_is_rejected(
     assert not (real_skill_dir / "SKILL.md").exists()
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits are required")
 def test_atomic_replacement_preserves_existing_destination_mode(
     design_import: DesignImportFixture,
 ) -> None:
@@ -1420,7 +1252,6 @@ def test_atomic_replacement_preserves_existing_destination_mode(
     assert stat.S_IMODE(skill.stat().st_mode) == 0o751
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX umask semantics are required")
 def test_new_destination_mode_respects_process_umask(
     design_import: DesignImportFixture,
 ) -> None:

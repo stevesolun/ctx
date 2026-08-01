@@ -642,7 +642,7 @@ def _authenticated_artifact(
         raise ValueError(f"{label} is unavailable") from exc
     if not stat.S_ISREG(mode):
         raise ValueError(f"{label} must be a regular file")
-    if private and os.name != "nt" and stat.S_IMODE(mode) & (stat.S_IRWXG | stat.S_IRWXO):
+    if private and stat.S_IMODE(mode) & (stat.S_IRWXG | stat.S_IRWXO):
         raise ValueError(f"{label} must be owner-only")
     observed = _sha256_bytes(data)
     if not secrets.compare_digest(observed, expected):
@@ -1807,8 +1807,6 @@ def verify_scenario_independence_attestation(
 
 
 def _descendant_pids(root_pid: int) -> list[int]:
-    if os.name == "nt":
-        return []
     try:
         result = subprocess.run(
             ["/bin/ps", "-axo", "pid=,ppid="],
@@ -1837,17 +1835,6 @@ def _descendant_pids(root_pid: int) -> list[int]:
 
 
 def _signal_process_tree(process: subprocess.Popen[str], sig: signal.Signals) -> None:
-    if os.name == "nt":
-        try:
-            subprocess.run(
-                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-                check=False,
-                capture_output=True,
-                timeout=5,
-            )
-        except (OSError, subprocess.SubprocessError):
-            process.kill()
-        return
     descendants = _descendant_pids(process.pid)
     try:
         os.killpg(process.pid, sig)
@@ -1882,8 +1869,6 @@ def _terminate_process_tree(process: subprocess.Popen[str]) -> tuple[str, str]:
 
 
 def _marked_process_pids(token: str) -> tuple[set[int], str | None]:
-    if os.name == "nt":
-        return set(), None
     try:
         result = subprocess.run(
             ["/bin/ps", "eww", "-A", "-o", "pid=", "-o", "args="],
@@ -1971,8 +1956,8 @@ def run_process(
         stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        start_new_session=(os.name != "nt"),
-        preexec_fn=_verification_limits if resource_limits and os.name != "nt" else None,
+        start_new_session=True,
+        preexec_fn=_verification_limits if resource_limits else None,
     )
     timed_out = False
     reaped = 0
@@ -2201,7 +2186,7 @@ def _open_relative_parent(
     parts = Path(safe_relative).parts
     if not parts:
         raise RuntimeError("benchmark-owned test path has no filename")
-    if os.name != "nt" and (not hasattr(os, "O_DIRECTORY") or not hasattr(os, "O_NOFOLLOW")):
+    if not hasattr(os, "O_DIRECTORY") or not hasattr(os, "O_NOFOLLOW"):
         raise RuntimeError("secure evaluator path operations are unavailable")
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | os.O_DIRECTORY | os.O_NOFOLLOW
     descriptor = os.open(workspace, flags)
@@ -2222,25 +2207,6 @@ def _open_relative_parent(
 
 
 def _relative_regular_bytes(workspace: Path, relative: str) -> bytes | None:
-    if os.name == "nt":
-        path = workspace / _safe_relative_path(relative, field="benchmark-owned test path")
-        workspace_root = workspace.resolve()
-        try:
-            resolved_parent = path.parent.resolve(strict=True)
-        except FileNotFoundError:
-            return None
-        if resolved_parent != workspace_root and workspace_root not in resolved_parent.parents:
-            raise RuntimeError("benchmark-owned test path escapes the workspace")
-        if path.is_symlink():
-            raise RuntimeError("benchmark-owned test path is a symlink")
-        try:
-            file_stat = path.stat()
-        except FileNotFoundError:
-            return None
-        if not stat.S_ISREG(file_stat.st_mode):
-            raise RuntimeError("benchmark-owned test path is not a regular file")
-        return path.read_bytes()
-
     try:
         parent_fd, leaf = _open_relative_parent(workspace, relative, create=False)
     except FileNotFoundError:
@@ -2264,59 +2230,38 @@ def _relative_regular_bytes(workspace: Path, relative: str) -> bytes | None:
 
 
 def _write_evaluator_atomically(workspace: Path, relative: str, body: bytes) -> None:
-    if os.name == "nt":
-        path = workspace / _safe_relative_path(relative, field="benchmark-owned test path")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        workspace_root = workspace.resolve()
-        resolved_parent = path.parent.resolve()
-        if resolved_parent != workspace_root and workspace_root not in resolved_parent.parents:
-            raise RuntimeError("benchmark-owned test path escapes the workspace")
-        if path.is_symlink() or (path.exists() and not path.is_file()):
+    try:
+        parent_fd, leaf = _open_relative_parent(workspace, relative, create=True)
+    except OSError as exc:
+        raise RuntimeError("benchmark-owned test path contains an unsafe component") from exc
+    temporary_entry = f".{leaf}.ctx-{secrets.token_hex(8)}"
+    try:
+        try:
+            existing = os.stat(leaf, dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            existing = None
+        if existing is not None and not stat.S_ISREG(existing.st_mode):
             raise RuntimeError("benchmark-owned test path is a symlink or unsafe file")
-        temporary_path = path.with_name(f".{path.name}.ctx-{secrets.token_hex(8)}")
-        try:
-            with temporary_path.open("xb") as fh:
-                fh.write(body)
-                fh.flush()
-                os.fsync(fh.fileno())
-            os.replace(temporary_path, path)
-        finally:
-            temporary_path.unlink(missing_ok=True)
-    else:
-        try:
-            parent_fd, leaf = _open_relative_parent(workspace, relative, create=True)
-        except OSError as exc:
-            raise RuntimeError("benchmark-owned test path contains an unsafe component") from exc
-        temporary_entry = f".{leaf}.ctx-{secrets.token_hex(8)}"
-        try:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0) | os.O_NOFOLLOW
+        descriptor = os.open(temporary_entry, flags, 0o600, dir_fd=parent_fd)
+        with os.fdopen(descriptor, "wb") as fh:
+            fh.write(body)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(
+            temporary_entry,
+            leaf,
+            src_dir_fd=parent_fd,
+            dst_dir_fd=parent_fd,
+        )
+        temporary_entry = ""
+    finally:
+        if temporary_entry:
             try:
-                existing = os.stat(leaf, dir_fd=parent_fd, follow_symlinks=False)
+                os.unlink(temporary_entry, dir_fd=parent_fd)
             except FileNotFoundError:
-                existing = None
-            if existing is not None and not stat.S_ISREG(existing.st_mode):
-                raise RuntimeError("benchmark-owned test path is a symlink or unsafe file")
-            flags = (
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0) | os.O_NOFOLLOW
-            )
-            descriptor = os.open(temporary_entry, flags, 0o600, dir_fd=parent_fd)
-            with os.fdopen(descriptor, "wb") as fh:
-                fh.write(body)
-                fh.flush()
-                os.fsync(fh.fileno())
-            os.replace(
-                temporary_entry,
-                leaf,
-                src_dir_fd=parent_fd,
-                dst_dir_fd=parent_fd,
-            )
-            temporary_entry = ""
-        finally:
-            if temporary_entry:
-                try:
-                    os.unlink(temporary_entry, dir_fd=parent_fd)
-                except FileNotFoundError:
-                    pass
-            os.close(parent_fd)
+                pass
+        os.close(parent_fd)
 
     materialized = _relative_regular_bytes(workspace, relative)
     if materialized != body:
@@ -2800,23 +2745,18 @@ def _ctx_env(home: Path, lifecycle_root: Path) -> dict[str, str]:
     env = {
         key: os.environ[key]
         for key in (
-            "COMSPEC",
             "LANG",
             "LC_ALL",
             "LC_CTYPE",
             "PATH",
-            "PATHEXT",
             "SSL_CERT_DIR",
             "SSL_CERT_FILE",
-            "SYSTEMROOT",
-            "WINDIR",
         )
         if os.environ.get(key)
     }
     env.update(
         {
             "HOME": str(home),
-            "USERPROFILE": str(home),
             "TEMP": str(tmp),
             "TMP": str(tmp),
             "TMPDIR": str(tmp),
@@ -4139,7 +4079,6 @@ def production_agent_env(
         {
             "CODEX_HOME": str(home),
             "HOME": str(home),
-            "USERPROFILE": str(home),
             "TEMP": str(temp),
             "TMP": str(temp),
             "TMPDIR": str(temp),
@@ -5733,8 +5672,6 @@ def python_dependencies_sha256(python_executable: str | Path) -> str:
 
 
 def _fsync_directory(path: Path) -> None:
-    if os.name == "nt":
-        return
     if not hasattr(os, "O_DIRECTORY") or not hasattr(os, "O_NOFOLLOW"):
         raise RuntimeError("durable official campaign state is unavailable")
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
@@ -5777,9 +5714,7 @@ def _ensure_owner_only_directory(path: Path, *, label: str) -> Path:
             raise RuntimeError(f"{label} must be a directory")
         if created:
             directory.chmod(stat.S_IRWXU)
-        if os.name != "nt" and stat.S_IMODE(directory.stat().st_mode) & (
-            stat.S_IRWXG | stat.S_IRWXO
-        ):
+        if stat.S_IMODE(directory.stat().st_mode) & (stat.S_IRWXG | stat.S_IRWXO):
             raise RuntimeError(f"{label} must be owner-only")
         resolved_directory = directory.resolve(strict=True)
         _fsync_directory(resolved_directory)
@@ -5787,7 +5722,7 @@ def _ensure_owner_only_directory(path: Path, *, label: str) -> Path:
 
     if path.is_symlink() or not path.is_dir():
         raise RuntimeError(f"{label} must be a directory")
-    if os.name != "nt" and stat.S_IMODE(path.stat().st_mode) & (stat.S_IRWXG | stat.S_IRWXO):
+    if stat.S_IMODE(path.stat().st_mode) & (stat.S_IRWXG | stat.S_IRWXO):
         raise RuntimeError(f"{label} must be owner-only")
     resolved = path.resolve(strict=True)
     _fsync_directory(resolved)

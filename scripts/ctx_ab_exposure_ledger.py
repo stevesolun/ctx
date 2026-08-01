@@ -18,7 +18,6 @@ from typing import Any, Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
 PRIVATE_ROOT = ROOT / ".gate" / "ctx-ab-private"
-_IS_WINDOWS = os.name == "nt"
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 SCHEMA_KEYS = {
     "schema_version",
@@ -101,7 +100,7 @@ def _validate_private_path(path: Path, *, must_exist: bool) -> None:
             raise ValueError("private input must be a single-link regular file")
         if metadata.st_size > MAX_PRIVATE_INPUT_BYTES:
             raise ValueError("private input exceeds the size limit")
-        if not _IS_WINDOWS and (
+        if (
             stat.S_IMODE(metadata.st_mode) & 0o077
             or stat.S_IMODE(path.parent.stat().st_mode) & 0o077
         ):
@@ -282,12 +281,12 @@ def _require_distinct_paths(paths: Iterable[Path]) -> None:
 def _write_private_ledger(path: Path, payload: bytes) -> None:
     _validate_private_path(path, must_exist=False)
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if not _IS_WINDOWS and stat.S_IMODE(path.parent.stat().st_mode) & 0o077:
+    if stat.S_IMODE(path.parent.stat().st_mode) & 0o077:
         raise ValueError("exposure ledger parent must be owner-only")
     if path.exists() or path.is_symlink():
         if path.is_symlink() or not path.is_file() or path.stat().st_nlink != 1:
             raise ValueError("exposure ledger output must be a single-link regular file")
-        if not _IS_WINDOWS and stat.S_IMODE(path.stat().st_mode) & 0o077:
+        if stat.S_IMODE(path.stat().st_mode) & 0o077:
             raise ValueError("exposure ledger output must be owner-only")
     temporary = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(8)}.tmp")
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
@@ -295,8 +294,7 @@ def _write_private_ledger(path: Path, payload: bytes) -> None:
         flags |= os.O_NOFOLLOW
     descriptor = os.open(temporary, flags, 0o600)
     try:
-        if not _IS_WINDOWS:
-            os.fchmod(descriptor, 0o600)
+        os.fchmod(descriptor, 0o600)
         with os.fdopen(descriptor, "wb", closefd=True) as handle:
             descriptor = -1
             handle.write(payload)

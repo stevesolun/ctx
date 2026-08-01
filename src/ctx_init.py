@@ -378,7 +378,7 @@ def _print_graph_install_mode_notice(install_mode: str) -> None:
     if install_mode == "full":
         print(
             "  [info] full graph install expands the markdown LLM-wiki and "
-            "can take several minutes on Windows; runtime mode is enough for "
+            "can take several minutes; runtime mode is enough for "
             "recommendations and harness setup"
         )
 
@@ -1467,8 +1467,6 @@ _HARNESS_SOFT_REQUIREMENT_SIGNALS = frozenset(
         "secret",
         "secrets",
         "shell",
-        "win32",
-        "windows",
     }
 )
 

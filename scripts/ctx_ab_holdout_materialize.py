@@ -132,11 +132,6 @@ def _run(
     input_text: str | None = None,
     env: dict[str, str] | None = None,
 ) -> ProcessResult:
-    kwargs: dict[str, Any] = {}
-    if os.name == "nt":
-        kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-    else:
-        kwargs["start_new_session"] = True
     process = subprocess.Popen(
         argv,
         cwd=cwd,
@@ -145,16 +140,13 @@ def _run(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        **kwargs,
+        start_new_session=True,
     )
     try:
         stdout, stderr = process.communicate(input_text, timeout=_remaining(deadline))
         return ProcessResult(process.returncode, stdout, stderr, False)
     except subprocess.TimeoutExpired:
-        if os.name == "nt":
-            process.kill()
-        else:
-            os.killpg(process.pid, signal.SIGKILL)
+        os.killpg(process.pid, signal.SIGKILL)
         stdout, stderr = process.communicate()
         return ProcessResult(process.returncode, stdout, stderr, True)
 
@@ -773,7 +765,7 @@ def _write_artifacts(
         for key, data in artifacts.items():
             path = temp / OUTPUT_FILES[key]
             _private_write(path, data)
-            if os.name != "nt" and stat.S_IMODE(path.stat().st_mode) != 0o600:
+            if stat.S_IMODE(path.stat().st_mode) != 0o600:
                 raise MaterializationError("private artifact permissions are unsafe")
         retained_evidence.rename(temp / VERIFICATION_DIR)
         temp.rename(output)

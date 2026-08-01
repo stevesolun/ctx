@@ -37,8 +37,6 @@ _SKILL_MD = (
 
 
 def _benchmark_budget_seconds() -> float:
-    if sys.platform == "win32":
-        return 5.0
     return 2.0
 
 

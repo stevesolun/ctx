@@ -42,11 +42,6 @@ CONTAINER_PIDS_LIMIT = 2048
 CONTAINER_SECURITY_OPT = "no-new-privileges:true"
 RUN_LABEL = "ctx.benchmark.run_id"
 PROCESS_MARKER = "CTX_SWEBENCH_PROCESS_TOKEN"
-WINDOWS_CREATE_SUSPENDED = 0x00000004
-WINDOWS_JOB_OBJECT_BASIC_PROCESS_ID_LIST = 3
-WINDOWS_JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
-WINDOWS_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
-WINDOWS_MAX_JOB_PROCESSES = 65536
 REQUIRED_ARTIFACTS = (
     "report.json",
     "raw-status.json",
@@ -112,19 +107,6 @@ def _descendant_pids(root_pid: int) -> list[int]:
 
 
 def _signal_process_tree(process: subprocess.Popen[str], sig: signal.Signals) -> None:
-    if os.name == "nt":
-        try:
-            result = subprocess.run(
-                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-                check=False,
-                capture_output=True,
-                timeout=5,
-            )
-            if result.returncode:
-                _kill_windows_root_if_running(process)
-        except (OSError, subprocess.SubprocessError):
-            _kill_windows_root_if_running(process)
-        return
     descendants = _descendant_pids(process.pid)
     try:
         os.killpg(process.pid, sig)
@@ -135,18 +117,6 @@ def _signal_process_tree(process: subprocess.Popen[str], sig: signal.Signals) ->
             os.kill(pid, sig)
         except (ProcessLookupError, PermissionError):
             pass
-
-
-def _kill_windows_root_if_running(
-    process: subprocess.Popen[str],
-) -> None:  # pragma: no cover - Windows only
-    if process.poll() is not None:
-        return
-    try:
-        process.kill()
-    except OSError:
-        if process.poll() is None:
-            raise
 
 
 def _terminate_process_tree(process: subprocess.Popen[str]) -> tuple[str, str]:
@@ -226,315 +196,6 @@ def _cleanup_marked_processes(token: str) -> tuple[int, tuple[int, ...], str | N
     return len(signaled), tuple(sorted(residual)), error
 
 
-def _windows_api_error(action: str) -> OSError:  # pragma: no cover - Windows only
-    import ctypes
-
-    error = getattr(ctypes, "get_last_error")()
-    message = getattr(ctypes, "FormatError")(error)
-    return OSError(error, f"{action} failed: {message}")
-
-
-def _close_windows_handle(handle: int) -> None:  # pragma: no cover - Windows only
-    import ctypes
-
-    kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
-    close_handle = kernel32.CloseHandle
-    close_handle.argtypes = (ctypes.c_void_p,)
-    close_handle.restype = ctypes.c_int
-    if not close_handle(ctypes.c_void_p(handle)):
-        raise _windows_api_error("CloseHandle")
-
-
-def _create_windows_kill_job() -> int:  # pragma: no cover - Windows only
-    import ctypes
-
-    class BasicLimitInformation(ctypes.Structure):
-        _fields_ = (
-            ("PerProcessUserTimeLimit", ctypes.c_int64),
-            ("PerJobUserTimeLimit", ctypes.c_int64),
-            ("LimitFlags", ctypes.c_uint32),
-            ("MinimumWorkingSetSize", ctypes.c_size_t),
-            ("MaximumWorkingSetSize", ctypes.c_size_t),
-            ("ActiveProcessLimit", ctypes.c_uint32),
-            ("Affinity", ctypes.c_size_t),
-            ("PriorityClass", ctypes.c_uint32),
-            ("SchedulingClass", ctypes.c_uint32),
-        )
-
-    class IoCounters(ctypes.Structure):
-        _fields_ = (
-            ("ReadOperationCount", ctypes.c_uint64),
-            ("WriteOperationCount", ctypes.c_uint64),
-            ("OtherOperationCount", ctypes.c_uint64),
-            ("ReadTransferCount", ctypes.c_uint64),
-            ("WriteTransferCount", ctypes.c_uint64),
-            ("OtherTransferCount", ctypes.c_uint64),
-        )
-
-    class ExtendedLimitInformation(ctypes.Structure):
-        _fields_ = (
-            ("BasicLimitInformation", BasicLimitInformation),
-            ("IoInfo", IoCounters),
-            ("ProcessMemoryLimit", ctypes.c_size_t),
-            ("JobMemoryLimit", ctypes.c_size_t),
-            ("PeakProcessMemoryUsed", ctypes.c_size_t),
-            ("PeakJobMemoryUsed", ctypes.c_size_t),
-        )
-
-    kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
-    create_job = kernel32.CreateJobObjectW
-    create_job.argtypes = (ctypes.c_void_p, ctypes.c_wchar_p)
-    create_job.restype = ctypes.c_void_p
-    set_information = kernel32.SetInformationJobObject
-    set_information.argtypes = (
-        ctypes.c_void_p,
-        ctypes.c_int,
-        ctypes.c_void_p,
-        ctypes.c_uint32,
-    )
-    set_information.restype = ctypes.c_int
-
-    handle = create_job(None, None)
-    if not handle:
-        raise _windows_api_error("CreateJobObjectW")
-    job_handle = int(handle)
-    limits = ExtendedLimitInformation()
-    limits.BasicLimitInformation.LimitFlags = WINDOWS_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-    if not set_information(
-        ctypes.c_void_p(job_handle),
-        WINDOWS_JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
-        ctypes.byref(limits),
-        ctypes.sizeof(limits),
-    ):
-        error = _windows_api_error("SetInformationJobObject")
-        try:
-            _close_windows_handle(job_handle)
-        except OSError:
-            pass
-        raise error
-    return job_handle
-
-
-def _assign_windows_kill_job(
-    job_handle: int,
-    process_id: int,
-) -> None:  # pragma: no cover - Windows only
-    import ctypes
-
-    kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
-    open_process = kernel32.OpenProcess
-    open_process.argtypes = (ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32)
-    open_process.restype = ctypes.c_void_p
-    assign_process = kernel32.AssignProcessToJobObject
-    assign_process.argtypes = (ctypes.c_void_p, ctypes.c_void_p)
-    assign_process.restype = ctypes.c_int
-    process_handle = open_process(0x0101, 0, process_id)
-    if not process_handle:
-        raise _windows_api_error("OpenProcess")
-    try:
-        if not assign_process(
-            ctypes.c_void_p(job_handle),
-            ctypes.c_void_p(int(process_handle)),
-        ):
-            raise _windows_api_error("AssignProcessToJobObject")
-    finally:
-        _close_windows_handle(int(process_handle))
-
-
-def _resume_windows_process(process_id: int) -> None:  # pragma: no cover - Windows only
-    import ctypes
-
-    class ThreadEntry(ctypes.Structure):
-        _fields_ = (
-            ("dwSize", ctypes.c_uint32),
-            ("cntUsage", ctypes.c_uint32),
-            ("th32ThreadID", ctypes.c_uint32),
-            ("th32OwnerProcessID", ctypes.c_uint32),
-            ("tpBasePri", ctypes.c_int32),
-            ("tpDeltaPri", ctypes.c_int32),
-            ("dwFlags", ctypes.c_uint32),
-        )
-
-    kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
-    create_snapshot = kernel32.CreateToolhelp32Snapshot
-    create_snapshot.argtypes = (ctypes.c_uint32, ctypes.c_uint32)
-    create_snapshot.restype = ctypes.c_void_p
-    thread_first = kernel32.Thread32First
-    thread_first.argtypes = (ctypes.c_void_p, ctypes.c_void_p)
-    thread_first.restype = ctypes.c_int
-    thread_next = kernel32.Thread32Next
-    thread_next.argtypes = (ctypes.c_void_p, ctypes.c_void_p)
-    thread_next.restype = ctypes.c_int
-    snapshot = create_snapshot(0x00000004, 0)
-    invalid_handle = ctypes.c_void_p(-1).value
-    if snapshot in (None, invalid_handle):
-        raise _windows_api_error("CreateToolhelp32Snapshot")
-    snapshot_handle = int(snapshot)
-    thread_ids: list[int] = []
-    try:
-        entry = ThreadEntry()
-        entry.dwSize = ctypes.sizeof(entry)
-        available = bool(thread_first(ctypes.c_void_p(snapshot_handle), ctypes.byref(entry)))
-        if not available and getattr(ctypes, "get_last_error")() != 18:
-            raise _windows_api_error("Thread32First")
-        while available:
-            if entry.th32OwnerProcessID == process_id:
-                thread_ids.append(int(entry.th32ThreadID))
-            entry.dwSize = ctypes.sizeof(entry)
-            available = bool(thread_next(ctypes.c_void_p(snapshot_handle), ctypes.byref(entry)))
-            if not available and getattr(ctypes, "get_last_error")() != 18:
-                raise _windows_api_error("Thread32Next")
-    finally:
-        _close_windows_handle(snapshot_handle)
-    if len(thread_ids) != 1:
-        raise OSError(
-            f"expected one suspended thread for Windows process {process_id}; "
-            f"found {len(thread_ids)}"
-        )
-
-    open_thread = kernel32.OpenThread
-    open_thread.argtypes = (ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32)
-    open_thread.restype = ctypes.c_void_p
-    resume_thread = kernel32.ResumeThread
-    resume_thread.argtypes = (ctypes.c_void_p,)
-    resume_thread.restype = ctypes.c_uint32
-    thread_handle = open_thread(0x0002, 0, thread_ids[0])
-    if not thread_handle:
-        raise _windows_api_error("OpenThread")
-    try:
-        previous_suspend_count = resume_thread(ctypes.c_void_p(int(thread_handle)))
-        if previous_suspend_count != 1:
-            if previous_suspend_count == 0xFFFFFFFF:
-                raise _windows_api_error("ResumeThread")
-            raise OSError(f"unexpected Windows thread suspend count {previous_suspend_count}")
-    finally:
-        _close_windows_handle(int(thread_handle))
-
-
-def _windows_job_process_ids(job_handle: int) -> tuple[int, ...]:  # pragma: no cover
-    import ctypes
-
-    kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
-    query_information = kernel32.QueryInformationJobObject
-    query_information.argtypes = (
-        ctypes.c_void_p,
-        ctypes.c_int,
-        ctypes.c_void_p,
-        ctypes.c_uint32,
-        ctypes.c_void_p,
-    )
-    query_information.restype = ctypes.c_int
-    capacity = 64
-    while capacity <= WINDOWS_MAX_JOB_PROCESSES:
-
-        class ProcessIdList(ctypes.Structure):
-            _fields_ = (
-                ("NumberOfAssignedProcesses", ctypes.c_uint32),
-                ("NumberOfProcessIdsInList", ctypes.c_uint32),
-                ("ProcessIdList", ctypes.c_size_t * capacity),
-            )
-
-        process_ids = ProcessIdList()
-        returned = ctypes.c_uint32()
-        success = query_information(
-            ctypes.c_void_p(job_handle),
-            WINDOWS_JOB_OBJECT_BASIC_PROCESS_ID_LIST,
-            ctypes.byref(process_ids),
-            ctypes.sizeof(process_ids),
-            ctypes.byref(returned),
-        )
-        if success:
-            assigned = int(process_ids.NumberOfAssignedProcesses)
-            listed = int(process_ids.NumberOfProcessIdsInList)
-            if assigned <= listed:
-                return tuple(int(process_ids.ProcessIdList[index]) for index in range(listed))
-            capacity = max(capacity * 2, assigned)
-            continue
-        error = getattr(ctypes, "get_last_error")()
-        if error not in {122, 234}:
-            raise _windows_api_error("QueryInformationJobObject")
-        capacity *= 2
-    raise OSError("Windows job process list exceeded its containment limit")
-
-
-def _terminate_windows_job(
-    job_handle: int,
-    *,
-    exit_code: int = 1,
-) -> None:  # pragma: no cover - Windows only
-    import ctypes
-
-    kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
-    terminate_job = kernel32.TerminateJobObject
-    terminate_job.argtypes = (ctypes.c_void_p, ctypes.c_uint32)
-    terminate_job.restype = ctypes.c_int
-    if not terminate_job(ctypes.c_void_p(job_handle), exit_code):
-        raise _windows_api_error("TerminateJobObject")
-
-
-def _cleanup_windows_job(
-    job_handle: int,
-    root_pid: int,
-) -> tuple[int, tuple[int, ...], str | None]:  # pragma: no cover - Windows only
-    seen: set[int] = set()
-    residual: set[int] = set()
-    active: set[int] = set()
-    error: str | None = None
-    try:
-        try:
-            active = set(_windows_job_process_ids(job_handle))
-            residual = set(active)
-            residual.discard(root_pid)
-            seen.update(residual)
-            if active:
-                _terminate_windows_job(job_handle, exit_code=124)
-                deadline = time.monotonic() + 5
-                while active and time.monotonic() < deadline:
-                    time.sleep(0.05)
-                    active = set(_windows_job_process_ids(job_handle))
-                    residual = set(active)
-                    residual.discard(root_pid)
-                    seen.update(residual)
-                if active:
-                    error = f"Windows job retained processes: {sorted(active)}"
-        except OSError as exc:
-            error = str(exc)
-    finally:
-        try:
-            _close_windows_handle(job_handle)
-        except OSError as exc:
-            error = error or str(exc)
-    return len(seen), tuple(sorted(residual)), error
-
-
-def _terminate_uncontained_windows_process(
-    process: subprocess.Popen[str],
-) -> None:  # pragma: no cover - Windows only
-    try:
-        _kill_windows_root_if_running(process)
-    except OSError as first_error:
-        try:
-            result = subprocess.run(
-                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-                check=False,
-                capture_output=True,
-                timeout=5,
-            )
-        except (OSError, subprocess.SubprocessError) as fallback_error:
-            raise OSError("suspended Windows process could not be terminated") from (fallback_error)
-        if result.returncode:
-            raise OSError(
-                f"taskkill failed for suspended Windows process {process.pid}"
-            ) from first_error
-    try:
-        process.communicate(timeout=5)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        process.communicate(timeout=5)
-    if process.returncode is None:
-        raise OSError(f"suspended Windows process {process.pid} did not terminate")
-
-
 def _run_process(
     argv: list[str],
     *,
@@ -550,118 +211,32 @@ def _run_process(
     if process_token is not None:
         child_env = dict(os.environ if env is None else env)
         child_env[PROCESS_MARKER] = process_token
-    process_kwargs: dict[str, Any] = {}
-    windows_job: int | None = None
-    if os.name == "nt":
-        creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-        if contain_descendants:
-            windows_job = _create_windows_kill_job()
-            creationflags |= getattr(
-                subprocess,
-                "CREATE_SUSPENDED",
-                WINDOWS_CREATE_SUSPENDED,
-            )
-        process_kwargs["creationflags"] = creationflags
-    else:
-        process_kwargs["start_new_session"] = True
-    try:
-        process = subprocess.Popen(
-            argv,
-            cwd=cwd,
-            env=child_env,
-            text=True,
-            stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            **process_kwargs,
-        )
-    except BaseException:
-        if windows_job is not None:
-            _close_windows_handle(windows_job)
-        raise
-    if windows_job is not None:
-        job_assigned = False
-        try:
-            _assign_windows_kill_job(windows_job, process.pid)
-            job_assigned = True
-            _resume_windows_process(process.pid)
-        except BaseException:
-            setup_cleanup_error: BaseException | None = None
-            try:
-                if job_assigned:
-                    _, remaining, error = _cleanup_windows_job(
-                        windows_job,
-                        process.pid,
-                    )
-                    if error or remaining:
-                        detail = error or f"residual descendants: {list(remaining)}"
-                        setup_cleanup_error = OSError(detail)
-                else:
-                    _terminate_uncontained_windows_process(process)
-            except BaseException as exc:
-                setup_cleanup_error = exc
-            finally:
-                if not job_assigned:
-                    try:
-                        _close_windows_handle(windows_job)
-                    except BaseException as exc:
-                        setup_cleanup_error = setup_cleanup_error or exc
-            if setup_cleanup_error is not None:
-                raise RuntimeError(
-                    "Windows process containment setup cleanup failed"
-                ) from setup_cleanup_error
-            raise
+    process = subprocess.Popen(
+        argv,
+        cwd=cwd,
+        env=child_env,
+        text=True,
+        stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
     timed_out = False
     reaped = 0
     residual: tuple[int, ...] = ()
     cleanup_error: str | None = None
-    windows_job_cleaned = False
 
     def cleanup_marked_processes() -> None:
-        nonlocal reaped, residual, cleanup_error, windows_job_cleaned
+        nonlocal reaped, residual, cleanup_error
         if process_token is None:
-            return
-        if windows_job is not None:
-            if windows_job_cleaned:
-                return
-            windows_job_cleaned = True
-            count, remaining, error = _cleanup_windows_job(windows_job, process.pid)
-            reaped += count
-            residual = remaining
-            cleanup_error = cleanup_error or error
             return
         count, remaining, error = _cleanup_marked_processes(process_token)
         reaped += count
         residual = remaining
         cleanup_error = cleanup_error or error
 
-    def communicate_process() -> tuple[str, str]:
-        if windows_job is None:
-            return process.communicate(input=input_text, timeout=timeout)
-        deadline = time.monotonic() + timeout
-        pending_input = input_text
-        while True:
-            if process.poll() is not None:
-                cleanup_marked_processes()
-                return process.communicate(timeout=5)
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise subprocess.TimeoutExpired(argv, timeout)
-            try:
-                return process.communicate(
-                    input=pending_input,
-                    timeout=min(remaining, 0.1),
-                )
-            except subprocess.TimeoutExpired:
-                pending_input = None
-                if process.poll() is not None:
-                    cleanup_marked_processes()
-                    return process.communicate(timeout=5)
-                if time.monotonic() >= deadline:
-                    raise
-
     try:
-        stdout, stderr = communicate_process()
+        stdout, stderr = process.communicate(input=input_text, timeout=timeout)
     except subprocess.TimeoutExpired:
         timed_out = True
         cleanup_marked_processes()

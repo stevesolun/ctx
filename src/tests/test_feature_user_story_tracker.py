@@ -483,9 +483,7 @@ def test_retired_windows_gate_is_not_an_active_tracker_contract() -> None:
 
     supporting_ids = {"DIST-002", "MAINT-016"}
     supporting_rows = {
-        row["feature_id"]: row
-        for row in _tracker_rows()
-        if row["feature_id"] in supporting_ids
+        row["feature_id"]: row for row in _tracker_rows() if row["feature_id"] in supporting_ids
     }
     assert supporting_rows.keys() == supporting_ids
     for feature_id, row in supporting_rows.items():
@@ -493,6 +491,43 @@ def test_retired_windows_gate_is_not_an_active_tracker_contract() -> None:
         assert not any(marker in active_contract for marker in retired_gate_markers), (
             f"{feature_id} supporting row still advertises the retired Windows gate"
         )
+
+    benchmark_ids = {"BENCH-010", "BENCH-034", "BENCH-039", "BENCH-040", "BENCH-042"}
+    benchmark_rows = {
+        row["id"]: row
+        for row in _supporting_tracker_rows(BENCHMARK_TRACKER)
+        if row["id"] in benchmark_ids
+    }
+    assert benchmark_rows.keys() == benchmark_ids
+    audit_rows = {
+        row["finding_id"]: row
+        for row in _supporting_tracker_rows(BUG_SMOKE_TRACKER)
+        if row["finding_id"] == "AUDIT-079"
+    }
+    assert audit_rows.keys() == {"AUDIT-079"}
+    active_obligations = " ".join(
+        [
+            *(
+                row[field]
+                for row in benchmark_rows.values()
+                for field in ("expected_behavior", "repro", "fix")
+            ),
+            *(
+                row[field]
+                for row in audit_rows.values()
+                for field in (
+                    "expected_behavior",
+                    "repro_or_detection",
+                    "fix_strategy",
+                    "review_status",
+                    "next_action",
+                )
+            ),
+        ]
+    ).lower()
+    assert "native windows" not in active_obligations
+    assert "windows job" not in active_obligations
+    assert "posix and windows" not in active_obligations
 
 
 def test_canonical_tracker_attributes_every_substantive_python_module() -> None:

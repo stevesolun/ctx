@@ -76,7 +76,7 @@ from typing import TYPE_CHECKING, Iterable
 # paying a per-call config read.
 from ctx.utils._fs_utils import (
     _fsync_parent_dir,
-    _replace_with_retry,
+    _replace_atomically,
     atomic_write_text as _atomic_write_text,
 )
 from backup_config import BackupConfig, from_ctx_config
@@ -236,8 +236,7 @@ def _atomic_copy(src: Path, dest: Path) -> None:
     try:
         os.close(fd)
         # copy2 calls open(); after the symlink check above, opening the
-        # regular file is safe on POSIX. On Windows, symlinks require
-        # privilege so this is additionally defended by ACL.
+        # regular file is safe on the supported POSIX hosts.
         shutil.copy2(str(src), tmp, follow_symlinks=False)
         os.replace(tmp, dest)
     except Exception:
@@ -278,8 +277,8 @@ def _validate_manifest_dest(dest_rel: str) -> Path:
 # ── Create ──────────────────────────────────────────────────────────────────
 
 
-# Filesystem-safe reason slug: reasons flow into directory names, so we
-# strip anything that could break Windows paths or create traversal.
+# Filesystem-safe reason slug: reasons flow into directory names, so strip
+# separators and punctuation that could create traversal or ambiguous names.
 _REASON_SAFE_CHARS = "-_."
 
 
@@ -318,7 +317,7 @@ def _new_snapshot_id(now: float | None = None, reason: str | None = None) -> str
 def _publish_snapshot_dir(tmp_path: Path, snap_path: Path) -> None:
     if snap_path.exists():
         raise FileExistsError(snap_path)
-    _replace_with_retry(str(tmp_path), snap_path)
+    _replace_atomically(tmp_path, snap_path)
     _fsync_parent_dir(snap_path.parent)
 
 

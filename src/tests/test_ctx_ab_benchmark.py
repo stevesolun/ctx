@@ -40,14 +40,6 @@ CODEX_RUNTIME_CONTRACT = {
 
 
 def _pid_is_running(pid: int) -> bool:
-    if os.name == "nt":
-        listed = subprocess.run(
-            ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        return str(pid) in listed.stdout
     proc_stat = Path(f"/proc/{pid}/stat")
     if proc_stat.is_file():
         try:
@@ -61,23 +53,6 @@ def _pid_is_running(pid: int) -> bool:
     except ProcessLookupError:
         return False
     return True
-
-
-def test_ctx_env_preserves_windows_process_plumbing(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    for name in ("COMSPEC", "PATHEXT", "SYSTEMROOT", "WINDIR"):
-        monkeypatch.setenv(name, f"sentinel-{name.lower()}")
-
-    home = tmp_path / "home"
-    env = benchmark._ctx_env(home, tmp_path / "lifecycle")
-
-    assert {name: env[name] for name in ("COMSPEC", "PATHEXT", "SYSTEMROOT", "WINDIR")} == {
-        name: f"sentinel-{name.lower()}" for name in ("COMSPEC", "PATHEXT", "SYSTEMROOT", "WINDIR")
-    }
-    assert env["USERPROFILE"] == str(home)
-    assert {env[name] for name in ("TEMP", "TMP", "TMPDIR")} == {str(home / "tmp")}
 
 
 def test_scenarios_are_pinned_and_have_all_ctx_entity_types() -> None:
@@ -3573,10 +3548,9 @@ def test_isolated_codex_home_denies_credentials_oracles_and_network(
     assert f'{benchmark._toml_key(home / "auth.json")} = "deny"' in config
     assert f'{benchmark._toml_key(home / "config.toml")} = "deny"' in config
     assert "[permissions.ctx_benchmark.network]\nenabled = false" in config
-    if os.name != "nt":
-        assert home.stat().st_mode & 0o777 == 0o700
-        assert (home / "auth.json").stat().st_mode & 0o777 == 0o600
-        assert (home / "config.toml").stat().st_mode & 0o777 == 0o600
+    assert home.stat().st_mode & 0o777 == 0o700
+    assert (home / "auth.json").stat().st_mode & 0o777 == 0o600
+    assert (home / "config.toml").stat().st_mode & 0o777 == 0o600
 
 
 def test_production_agent_env_prefers_checkout_and_neutralizes_color_flags(
@@ -3731,11 +3705,6 @@ def test_live_production_scenarios_are_private_and_owner_only(
     source.chmod(0o600)
     monkeypatch.setattr(benchmark, "PRODUCTION_PRIVATE_SCENARIO_ROOT", private_root)
     monkeypatch.setattr(benchmark, "_is_system_temp_path", lambda _path: False)
-
-    if os.name == "nt":
-        with pytest.raises(ValueError, match="root must be an owner-only directory"):
-            benchmark._validate_production_scenarios_path(source, live=True)
-        return
 
     assert benchmark._validate_production_scenarios_path(source, live=True) == source.resolve()
     source.chmod(0o644)
@@ -4232,7 +4201,6 @@ def test_focused_verification_rejects_evaluator_symlink(tmp_path: Path) -> None:
     assert "symlink" in result.stderr
 
 
-@pytest.mark.skipif(os.name == "nt", reason="dir-fd atomic replacement is POSIX-only")
 def test_evaluator_materialization_detects_parent_swap_without_external_write(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -6311,28 +6279,27 @@ def test_official_workspace_cannot_access_future_gold_commit(
     feature.write_text("VALUE = 2  # gold\n", encoding="utf-8")
     git("commit", "-am", "future gold")
     future_commit = git("rev-parse", "HEAD").stdout.strip()
-    if os.name != "nt":
-        hooks = tmp_path / "malicious-hooks"
-        hooks.mkdir()
-        post_checkout = hooks / "post-checkout"
-        post_checkout.write_text(
-            "#!/bin/sh\nprintf 'leaked\\n' > \"$PWD/GOLD_LEAK.txt\"\n",
-            encoding="utf-8",
-        )
-        post_checkout.chmod(0o700)
-        global_config = tmp_path / "malicious-gitconfig"
-        subprocess.run(
-            [
-                "git",
-                "config",
-                "--file",
-                str(global_config),
-                "core.hooksPath",
-                str(hooks),
-            ],
-            check=True,
-        )
-        monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_config))
+    hooks = tmp_path / "malicious-hooks"
+    hooks.mkdir()
+    post_checkout = hooks / "post-checkout"
+    post_checkout.write_text(
+        "#!/bin/sh\nprintf 'leaked\\n' > \"$PWD/GOLD_LEAK.txt\"\n",
+        encoding="utf-8",
+    )
+    post_checkout.chmod(0o700)
+    global_config = tmp_path / "malicious-gitconfig"
+    subprocess.run(
+        [
+            "git",
+            "config",
+            "--file",
+            str(global_config),
+            "core.hooksPath",
+            str(hooks),
+        ],
+        check=True,
+    )
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_config))
     template = benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0]
     scenario = replace(
         template,
@@ -6491,7 +6458,6 @@ def test_official_assignment_claim_rejects_reordered_selection_replay(
         )
 
 
-@pytest.mark.skipif(os.name == "nt", reason="official measured execution is POSIX-only")
 def test_official_claim_durably_syncs_regular_files_and_directories(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -6520,7 +6486,6 @@ def test_official_claim_durably_syncs_regular_files_and_directories(
     assert fsynced_types[first_file:] == ["file", "directory"] * 3
 
 
-@pytest.mark.skipif(os.name == "nt", reason="official measured execution is POSIX-only")
 def test_official_claim_syncs_every_new_state_ancestor(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -6557,7 +6522,6 @@ def test_official_claim_syncs_every_new_state_ancestor(
         assert directory.parent.resolve(strict=True) in synced_directories
 
 
-@pytest.mark.skipif(os.name == "nt", reason="official measured execution is POSIX-only")
 def test_official_state_observer_syncs_concurrently_created_root(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -6605,7 +6569,6 @@ def test_official_state_observer_syncs_concurrently_created_root(
     assert state_root.parent.resolve(strict=True) in observer_syncs
 
 
-@pytest.mark.skipif(os.name == "nt", reason="official measured execution is POSIX-only")
 def test_official_state_observer_syncs_contested_intermediate_parent(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -6805,8 +6768,7 @@ def test_official_selection_claim_is_private_single_link_and_contains_no_task_id
         metadata = claim.stat()
         document = json.loads(claim.read_bytes())
         assert metadata.st_nlink == 1
-        if os.name != "nt":
-            assert stat.S_IMODE(metadata.st_mode) == 0o600
+        assert stat.S_IMODE(metadata.st_mode) == 0o600
         assert set(document) == {
             "assignment_sha256",
             "claimed_at",
@@ -6858,7 +6820,6 @@ def test_official_assignment_claim_rejects_legacy_two_index_state(tmp_path: Path
     assert not (state_root / "assignment-consumption").exists()
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX link-state regression")
 @pytest.mark.parametrize("link_kind", ["symlink", "hardlink"])
 def test_official_selection_claim_rejects_existing_link_state(
     tmp_path: Path,

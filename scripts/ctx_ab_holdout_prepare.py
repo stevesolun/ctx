@@ -46,7 +46,6 @@ PAIR_COUNT = 30
 TRIALS_PER_SCENARIO = freezer.TRIALS_PER_SCENARIO
 PRIVATE_FILE_MODE = 0o600
 PRIVATE_DIRECTORY_MODE = 0o700
-_IS_WINDOWS = os.name == "nt"
 
 
 class PrepareError(RuntimeError):
@@ -270,11 +269,7 @@ def _read_regular_bytes(
             raise PrepareError(f"{label} must be a single-link regular file")
         if executable and not os.access(resolved, os.X_OK):
             raise PrepareError(f"{label} must be executable")
-        if (
-            private
-            and os.name != "nt"
-            and stat.S_IMODE(metadata.st_mode) & (stat.S_IRWXG | stat.S_IRWXO)
-        ):
+        if private and stat.S_IMODE(metadata.st_mode) & (stat.S_IRWXG | stat.S_IRWXO):
             raise PrepareError(f"{label} must be owner-only")
         with os.fdopen(descriptor, "rb") as handle:
             descriptor = -1
@@ -301,9 +296,7 @@ def _private_parent(path: Path) -> Path:
     if parent != candidate.parent or not parent.is_dir():
         raise PrepareError("preparation output parent must not use symlinks")
     metadata = parent.stat()
-    if os.name != "nt" and (
-        stat.S_IMODE(metadata.st_mode) != PRIVATE_DIRECTORY_MODE or metadata.st_uid != os.getuid()
-    ):
+    if stat.S_IMODE(metadata.st_mode) != PRIVATE_DIRECTORY_MODE or metadata.st_uid != os.getuid():
         raise PrepareError("preparation output parent must be owner-only")
     return candidate
 
@@ -325,8 +318,7 @@ def _atomic_private_write(path: Path, data: bytes) -> Path:
     temporary = Path(temporary_name)
     installed = False
     try:
-        if not _IS_WINDOWS:
-            os.fchmod(descriptor, PRIVATE_FILE_MODE)
+        os.fchmod(descriptor, PRIVATE_FILE_MODE)
         with os.fdopen(descriptor, "wb") as handle:
             descriptor = -1
             handle.write(data)
@@ -342,7 +334,7 @@ def _atomic_private_write(path: Path, data: bytes) -> Path:
         if (
             not stat.S_ISREG(metadata.st_mode)
             or metadata.st_nlink != 1
-            or (os.name != "nt" and stat.S_IMODE(metadata.st_mode) != PRIVATE_FILE_MODE)
+            or stat.S_IMODE(metadata.st_mode) != PRIVATE_FILE_MODE
         ):
             raise PrepareError("preparation output permissions are unsafe")
         return destination
@@ -996,9 +988,7 @@ def _ensure_private_directory_parent(path: Path) -> Path:
     if parent != candidate.parent:
         raise PrepareError("source cache parent must not use symlinks")
     metadata = parent.stat()
-    if os.name != "nt" and (
-        stat.S_IMODE(metadata.st_mode) != PRIVATE_DIRECTORY_MODE or metadata.st_uid != os.getuid()
-    ):
+    if stat.S_IMODE(metadata.st_mode) != PRIVATE_DIRECTORY_MODE or metadata.st_uid != os.getuid():
         raise PrepareError("source cache parent must be owner-only")
     return candidate
 

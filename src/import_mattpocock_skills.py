@@ -24,12 +24,9 @@ import re
 import secrets
 import stat
 import sys
-import tempfile
 import unicodedata
-from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator
 
 from ctx_config import cfg
 
@@ -94,7 +91,7 @@ class _OpenedDirectory:
 class _StagedWrite:
     write: _PreparedWrite
     temporary_name: str
-    parent_fd: int | None
+    parent_fd: int
     state: _DestinationState
 
     @property
@@ -550,18 +547,19 @@ def _write_staged_payload(fd: int, write: _PreparedWrite) -> _DestinationState:
     with os.fdopen(fd, "wb") as handle:
         handle.write(write.content)
         handle.flush()
-        fchmod = getattr(os, "fchmod", None)
-        if fchmod is not None:
-            fchmod(handle.fileno(), write.mode)
-        # Windows has no descriptor chmod and only limited path chmod semantics.
-        # Keep mkstemp's private mode there instead of reopening a mutable path.
+        os.fchmod(handle.fileno(), write.mode)
         os.fsync(handle.fileno())
         metadata = os.fstat(handle.fileno())
         if not stat.S_ISREG(metadata.st_mode):
             raise OSError("staged payload is not a regular file")
+        actual_mode = stat.S_IMODE(metadata.st_mode)
+        if actual_mode != write.mode:
+            raise PermissionError(
+                f"staged payload mode mismatch: expected {write.mode:#o}, got {actual_mode:#o}"
+            )
         return _DestinationState(
             identity=_identity(metadata),
-            mode=stat.S_IMODE(metadata.st_mode),
+            mode=actual_mode,
             link_count=metadata.st_nlink,
             digest=hashlib.sha256(write.content).digest(),
             content=write.content,
@@ -595,8 +593,6 @@ def _stage_writes(
 
 
 def _metadata_for_name(staged: _StagedWrite, name: str) -> os.stat_result | None:
-    if staged.parent_fd is None:
-        return _lstat_optional(staged.write.destination.parent / name)
     return _metadata_at(staged.parent_fd, name)
 
 
@@ -606,12 +602,9 @@ def _read_named_payload(staged: _StagedWrite, name: str) -> tuple[os.stat_result
     if metadata is None or not stat.S_ISREG(metadata.st_mode):
         raise ValueError(f"staged payload {path} changed after staging")
 
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
-        if staged.parent_fd is None:
-            fd = os.open(path, flags)
-        else:
-            fd = os.open(name, flags, dir_fd=staged.parent_fd)
+        fd = os.open(name, flags, dir_fd=staged.parent_fd)
     except OSError as exc:
         raise ValueError(f"staged payload {path} changed after staging") from exc
 
@@ -682,10 +675,6 @@ def _revalidate_staged_writes(
 
 
 def _replace_name(staged: _StagedWrite, source_name: str, destination_name: str) -> None:
-    if staged.parent_fd is None:
-        parent = staged.write.destination.parent
-        os.replace(parent / source_name, parent / destination_name)
-        return
     os.rename(
         source_name,
         destination_name,
@@ -695,33 +684,12 @@ def _replace_name(staged: _StagedWrite, source_name: str, destination_name: str)
 
 
 def _unlink_name(staged: _StagedWrite, name: str) -> None:
-    if staged.parent_fd is None:
-        (staged.write.destination.parent / name).unlink()
-        return
     os.unlink(name, dir_fd=staged.parent_fd)
 
 
 def _open_exclusive_name(staged: _StagedWrite, name: str) -> int:
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-    if staged.parent_fd is None:
-        return os.open(staged.write.destination.parent / name, flags, 0o600)
     return os.open(name, flags, 0o600, dir_fd=staged.parent_fd)
-
-
-def _chmod_name(staged: _StagedWrite, name: str, mode: int) -> None:
-    if staged.parent_fd is not None and os.chmod in os.supports_dir_fd:
-        os.chmod(
-            name,
-            mode,
-            dir_fd=staged.parent_fd,
-            follow_symlinks=False,
-        )
-        return
-    os.chmod(
-        staged.write.destination.parent / name,
-        mode,
-        follow_symlinks=False,
-    )
 
 
 def _snapshot_state(staged: _StagedWrite, name: str) -> _DestinationState:
@@ -757,9 +725,6 @@ def _create_recovery_snapshot(staged: _StagedWrite) -> _RecoverySnapshot | None:
             state=None,
         )
         state = _write_staged_payload(recovery_fd, recovery_write)
-        if state.mode != expected.mode:
-            _chmod_name(staged, recovery_name, expected.mode)
-            state = _snapshot_state(staged, recovery_name)
         if state.mode != expected.mode or state.digest != expected.digest:
             raise ValueError(f"recovery snapshot {recovery_name} changed while creating")
         snapshot = _RecoverySnapshot(recovery_name, state)
@@ -779,10 +744,7 @@ def _remove_name_if_present(staged: _StagedWrite, name: str) -> bool:
         return True
     try:
         if stat.S_ISDIR(metadata.st_mode) and not stat.S_ISLNK(metadata.st_mode):
-            if staged.parent_fd is None:
-                (staged.write.destination.parent / name).rmdir()
-            else:
-                os.rmdir(name, dir_fd=staged.parent_fd)
+            os.rmdir(name, dir_fd=staged.parent_fd)
         else:
             _unlink_name(staged, name)
     except OSError:
@@ -879,10 +841,7 @@ def _commit_staged_writes(staged_writes: list[_StagedWrite]) -> None:
 def _cleanup_staged_writes(staged_writes: list[_StagedWrite]) -> None:
     for staged in staged_writes:
         try:
-            if staged.parent_fd is None:
-                staged.temporary_path.unlink()
-            else:
-                os.unlink(staged.temporary_name, dir_fd=staged.parent_fd)
+            os.unlink(staged.temporary_name, dir_fd=staged.parent_fd)
         except OSError:
             pass
 
@@ -903,51 +862,6 @@ def _write_via_directory_fds(prepared: _PreparedEntry) -> None:
         _cleanup_staged_writes(staged_writes)
         for directory in reversed(directories.values()):
             os.close(directory.fd)
-
-
-def _supports_windows_path_guards() -> bool:
-    return os.name == "nt"
-
-
-def _open_windows_directory_guard(path: Path) -> int:  # pragma: no cover - Windows only
-    import ctypes
-
-    kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
-    create_file = kernel32.CreateFileW
-    create_file.argtypes = (
-        ctypes.c_wchar_p,
-        ctypes.c_uint32,
-        ctypes.c_uint32,
-        ctypes.c_void_p,
-        ctypes.c_uint32,
-        ctypes.c_uint32,
-        ctypes.c_void_p,
-    )
-    create_file.restype = ctypes.c_void_p
-    handle = create_file(
-        str(path),
-        0x80,  # FILE_READ_ATTRIBUTES
-        0x1 | 0x2,  # FILE_SHARE_READ | FILE_SHARE_WRITE; deliberately no DELETE share
-        None,
-        3,  # OPEN_EXISTING
-        0x02000000 | 0x00200000,  # BACKUP_SEMANTICS | OPEN_REPARSE_POINT
-        None,
-    )
-    if handle in (None, ctypes.c_void_p(-1).value):
-        error = getattr(ctypes, "get_last_error")()
-        message = getattr(ctypes, "FormatError")(error)
-        raise OSError(error, f"cannot guard directory {path}: {message}")
-    return int(handle)
-
-
-def _close_windows_directory_guard(handle: int) -> None:  # pragma: no cover - Windows only
-    import ctypes
-
-    kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
-    close_handle = kernel32.CloseHandle
-    close_handle.argtypes = (ctypes.c_void_p,)
-    close_handle.restype = ctypes.c_int
-    close_handle(ctypes.c_void_p(handle))
 
 
 def _read_source_fd(
@@ -978,9 +892,7 @@ def _read_source_via_directory_fds(
     field: str,
 ) -> tuple[bytes, int]:
     directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-    file_flags = (
-        os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
-    )
+    file_flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0)
     current_fd = os.open(root.anchor, directory_flags)
     try:
         for component in (*root.parts[1:], *relative.parts[:-1]):
@@ -997,62 +909,6 @@ def _read_source_via_directory_fds(
     return _read_source_fd(fd, source, field=field)
 
 
-def _source_parent_paths(root: Path, source: Path) -> list[Path]:
-    try:
-        relative_parent = source.parent.relative_to(root)
-    except ValueError as exc:
-        raise ValueError(f"source {source} is outside import root {root}") from exc
-    paths = [*reversed(root.parents), root]
-    current = root
-    for component in relative_parent.parts:
-        current /= component
-        paths.append(current)
-    return paths
-
-
-@contextmanager
-def _guard_source_parents(root: Path, source: Path) -> Iterator[None]:
-    handles: list[int] = []
-    try:
-        for path in _source_parent_paths(root, source):
-            metadata = _lstat_optional(path)
-            if metadata is None:
-                raise FileNotFoundError(source)
-            _validate_parent_metadata(path, metadata, label="source parent")
-            identity = _identity(metadata)
-            handles.append(_open_windows_directory_guard(path))
-            guarded_metadata = _lstat_optional(path)
-            if guarded_metadata is None or _identity(guarded_metadata) != identity:
-                raise ValueError(f"source parent: {path} changed while acquiring guard")
-        yield
-    finally:
-        for handle in reversed(handles):
-            _close_windows_directory_guard(handle)
-
-
-def _read_source_via_checked_paths(
-    root: Path,
-    source: Path,
-    *,
-    field: str,
-) -> tuple[bytes, int]:
-    with _guard_source_parents(root, source):
-        metadata = _lstat_optional(source)
-        if metadata is None:
-            raise FileNotFoundError(source)
-        if (
-            stat.S_ISLNK(metadata.st_mode)
-            or _is_name_surrogate_reparse_point(metadata)
-            or not stat.S_ISREG(metadata.st_mode)
-        ):
-            raise ValueError(f"{field}: {source} is not a regular file")
-        try:
-            fd = os.open(source, os.O_RDONLY | getattr(os, "O_BINARY", 0))
-        except OSError as exc:
-            raise ValueError(f"{field}: {source} changed while opening: {exc}") from None
-        return _read_source_fd(fd, source, field=field, expected_identity=_identity(metadata))
-
-
 def _read_source_payload(source: Path, *, field: str) -> tuple[bytes, int]:
     root = IMPORT_ROOT.resolve()
     try:
@@ -1061,108 +917,10 @@ def _read_source_payload(source: Path, *, field: str) -> tuple[bytes, int]:
         raise ValueError(f"{field}: {source} is outside import root {root}") from exc
     if _supports_directory_fds():
         return _read_source_via_directory_fds(root, relative, source, field=field)
-    if _supports_windows_path_guards():
-        return _read_source_via_checked_paths(root, source, field=field)
     raise RuntimeError(
-        "secure source read unavailable: this platform must provide directory-relative "
-        "filesystem operations or Windows directory handles"
+        "secure source read unavailable: this POSIX platform must provide "
+        "directory-relative filesystem operations"
     )
-
-
-@contextmanager
-def _guard_checked_parents(
-    prepared: _PreparedEntry,
-) -> Iterator[dict[Path, tuple[int, int]]]:
-    """Pin fallback paths; platforms without native pinning fail closed."""
-    if not _supports_windows_path_guards():
-        raise RuntimeError(
-            "secure checked-path fallback requires Windows directory handles; "
-            "this platform must provide directory-relative filesystem operations"
-        )
-
-    target_dir = prepared.parent_states[0].path
-    expected_states = {state.path: state.identity for state in prepared.target_chain}
-    expected_states.update({state.path: state.identity for state in prepared.parent_states})
-    guard_paths = [
-        *reversed(target_dir.parents),
-        *(state.path for state in prepared.parent_states),
-    ]
-    identities: dict[Path, tuple[int, int]] = {}
-    handles: list[int] = []
-    seen: set[Path] = set()
-    try:
-        for path in guard_paths:
-            if path in seen:
-                continue
-            seen.add(path)
-            metadata = _lstat_optional(path)
-            expected = expected_states.get(path)
-            if path in expected_states and expected is None:
-                if metadata is not None:
-                    raise ValueError(f"destination parent {path} changed after preflight")
-                try:
-                    path.mkdir(mode=0o755)
-                except FileExistsError:
-                    raise ValueError(f"destination parent {path} changed after preflight") from None
-                metadata = _lstat_optional(path)
-            if metadata is None:
-                raise ValueError(f"destination parent {path} changed after preflight")
-            _validate_parent_metadata(path, metadata)
-            identity = _identity(metadata)
-            if expected is not None and identity != expected:
-                raise ValueError(f"destination parent {path} changed after preflight")
-
-            handles.append(_open_windows_directory_guard(path))
-            guarded_metadata = _lstat_optional(path)
-            if guarded_metadata is None or _identity(guarded_metadata) != identity:
-                raise ValueError(f"destination parent {path} changed while acquiring guard")
-            if path in expected_states:
-                identities[path] = identity
-        yield identities
-    finally:
-        for handle in reversed(handles):
-            _close_windows_directory_guard(handle)
-
-
-def _write_via_checked_paths(prepared: _PreparedEntry) -> None:
-    with _guard_checked_parents(prepared) as parent_identities:
-        staged_writes: list[_StagedWrite] = []
-        try:
-            for write in prepared.writes:
-                fd, temporary_path = tempfile.mkstemp(
-                    prefix=f".{write.destination.name}.",
-                    suffix=".tmp",
-                    dir=write.destination.parent,
-                )
-                temporary_name = Path(temporary_path).name
-                try:
-                    state = _write_staged_payload(fd, write)
-                except BaseException:
-                    try:
-                        Path(temporary_path).unlink()
-                    except OSError:
-                        pass
-                    raise
-                staged_writes.append(_StagedWrite(write, temporary_name, None, state))
-
-            for parent_state in prepared.parent_states:
-                metadata = _lstat_optional(parent_state.path)
-                if metadata is None:
-                    raise ValueError(
-                        f"destination parent {parent_state.path} changed after preflight"
-                    )
-                _validate_parent_metadata(parent_state.path, metadata)
-                if _identity(metadata) != parent_identities[parent_state.path]:
-                    raise ValueError(
-                        f"destination parent {parent_state.path} changed after preflight"
-                    )
-            for write in prepared.writes:
-                _validate_expected_destination(write, _lstat_optional(write.destination))
-            for staged in staged_writes:
-                _validate_staged_payload(staged, staged.temporary_name)
-            _commit_staged_writes(staged_writes)
-        finally:
-            _cleanup_staged_writes(staged_writes)
 
 
 def _supports_directory_fds() -> bool:
@@ -1184,7 +942,10 @@ def _write_prepared_entry(prepared: _PreparedEntry) -> None:
     if _supports_directory_fds():
         _write_via_directory_fds(prepared)
     else:
-        _write_via_checked_paths(prepared)
+        raise RuntimeError(
+            "secure install unavailable: this POSIX platform must provide "
+            "directory-relative filesystem operations"
+        )
 
 
 def _deploy_entry_with_status(

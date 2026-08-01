@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
-import os
 from pathlib import Path
 import stat
 import subprocess
@@ -469,17 +468,16 @@ def test_materializes_ten_official_controls_and_evaluator_bound_attestations(
     assert len(double.calls) == 20
     assert not (output.parent / "materialization-failure-evidence").exists()
     retained = output / materializer.VERIFICATION_DIR
-    if os.name != "nt":
-        assert stat.S_IMODE(output.stat().st_mode) == 0o700
-        assert all(
-            stat.S_IMODE((output / name).stat().st_mode) == 0o600
-            for name in materializer.OUTPUT_FILES.values()
-        )
-        assert stat.S_IMODE(retained.stat().st_mode) == 0o700
-        assert all(
-            stat.S_IMODE(path.stat().st_mode) == (0o700 if path.is_dir() else 0o600)
-            for path in retained.rglob("*")
-        )
+    assert stat.S_IMODE(output.stat().st_mode) == 0o700
+    assert all(
+        stat.S_IMODE((output / name).stat().st_mode) == 0o600
+        for name in materializer.OUTPUT_FILES.values()
+    )
+    assert stat.S_IMODE(retained.stat().st_mode) == 0o700
+    assert all(
+        stat.S_IMODE(path.stat().st_mode) == (0o700 if path.is_dir() else 0o600)
+        for path in retained.rglob("*")
+    )
     assert len(list(retained.glob("scenario-*"))) == 10
 
     scenario_bytes = (output / "scenario-pack.json").read_bytes()
@@ -733,13 +731,11 @@ def test_failed_official_control_is_no_go_without_fallback(
     assert (
         manifest["manifest_sha256"] == hashlib.sha256(_canonical(manifest["entries"])).hexdigest()
     )
-    if os.name != "nt":
-        assert stat.S_IMODE(failure_root.stat().st_mode) == 0o700
-        assert stat.S_IMODE((failure_root / "failure.json").stat().st_mode) == 0o600
-        assert all(
-            path.is_symlink() or path.lstat().st_mode & 0o077 == 0
-            for path in failure_root.rglob("*")
-        )
+    assert stat.S_IMODE(failure_root.stat().st_mode) == 0o700
+    assert stat.S_IMODE((failure_root / "failure.json").stat().st_mode) == 0o600
+    assert all(
+        path.is_symlink() or path.lstat().st_mode & 0o077 == 0 for path in failure_root.rglob("*")
+    )
 
 
 def test_cli_preserves_early_failure_without_printing_private_details(

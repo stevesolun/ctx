@@ -7378,6 +7378,9 @@ def test_harness_page_module_renders_catalog_cards_and_commands() -> None:
     assert "ctx-harness-install langgraph --dry-run" in html_out
     assert "ctx-harness-install --recommend" in html_out
     assert "--plan-on-no-fit" in html_out
+    assert "<option>windows</option>" not in html_out
+    assert "<option>macos</option>" in html_out
+    assert "<option>linux</option>" in html_out
     assert "X-CTX-Monitor-Token" not in html_out
 
 

@@ -17,7 +17,6 @@ Covers the Phase 1 telemetry contract:
 from __future__ import annotations
 
 import json
-import os
 import stat
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -214,8 +213,6 @@ def test_log_event_and_read_events_round_trip(tmp_path: Path) -> None:
 
 
 def test_log_event_creates_owner_only_file(tmp_path: Path) -> None:
-    if os.name == "nt":
-        pytest.skip("POSIX mode bits are not portable on Windows")
     events_path = tmp_path / "nested" / "skill-events.jsonl"
 
     st.log_event(

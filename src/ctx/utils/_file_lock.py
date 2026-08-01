@@ -1,5 +1,5 @@
 """
-_file_lock.py -- Cross-platform advisory file lock.
+_file_lock.py -- POSIX advisory file lock.
 
 Used by the toolbox and skill-health modules to serialize read-modify-write
 cycles on shared config/manifest files (e.g. ~/.claude/skill-manifest.json,
@@ -16,23 +16,17 @@ Usage:
 The lock is advisory -- it only blocks other callers that also use ``file_lock``.
 It does not protect against processes that ignore locking.
 
-On POSIX we use fcntl.flock (whole-file exclusive). On Windows we use
-msvcrt.locking on the companion .lock file so we don't hold a handle to the
-file the caller is about to replace.
+Uses ``fcntl.flock`` (whole-file exclusive) on the companion lock file so the
+target itself remains replaceable by callers.
 """
 
 from __future__ import annotations
 
 import os
-import sys
+import fcntl
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
-
-if sys.platform == "win32":
-    import msvcrt  # type: ignore[import-not-found]
-else:
-    import fcntl  # type: ignore[import-not-found]
 
 
 @contextmanager
@@ -69,11 +63,7 @@ def _acquire(fd: int, timeout: float) -> None:
     deadline = time.monotonic() + max(0.0, timeout)
     while True:
         try:
-            if sys.platform == "win32":
-                # Lock 1 byte at offset 0 non-blockingly.
-                msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
-            else:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             return
         except (OSError, BlockingIOError):
             if time.monotonic() >= deadline:
@@ -83,13 +73,6 @@ def _acquire(fd: int, timeout: float) -> None:
 
 def _release(fd: int) -> None:
     try:
-        if sys.platform == "win32":
-            try:
-                os.lseek(fd, 0, os.SEEK_SET)
-                msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
-            except OSError:
-                pass
-        else:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+        fcntl.flock(fd, fcntl.LOCK_UN)
     except OSError:
         pass

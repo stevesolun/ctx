@@ -194,7 +194,7 @@ def test_main_auto_wizard_in_terminal_configures_custom_model(
             "",  # api key env default: OPENAI_API_KEY
             "",  # base URL
             "build CAD artifacts",
-            "windows python",  # runtime / OS
+            "linux python",  # runtime / OS
             "supervised",  # autonomy
             "filesystem shell",  # allowed tools
             "pytest ruff",  # verification
@@ -230,7 +230,7 @@ def test_main_auto_wizard_in_terminal_configures_custom_model(
     assert profile["goal"] == "build CAD artifacts"
     assert profile["knowledge_mode"] == "enriched"
     assert profile["harness_requirements"] == {
-        "runtime": "windows python",
+        "runtime": "linux python",
         "autonomy": "supervised",
         "tools": "filesystem shell",
         "verification": "pytest ruff",
@@ -1459,6 +1459,7 @@ def test_graph_install_force_prunes_stale_generated_files(
     out = capsys.readouterr().out
     assert "full graph install expands the markdown LLM-wiki" in out
     assert "runtime mode is enough for recommendations" in out
+    assert "Windows" not in out
     assert not stale.exists()
     assert (claude / "skill-wiki" / "entities" / "skills" / "current.md").is_file()
 
@@ -1595,7 +1596,7 @@ def test_main_custom_model_records_structured_harness_requirements(
             "--goal",
             "build a code agent",
             "--harness-runtime",
-            "windows python",
+            "linux python",
             "--harness-autonomy",
             "supervised",
             "--harness-tools",
@@ -1612,7 +1613,7 @@ def test_main_custom_model_records_structured_harness_requirements(
     assert rc == 0
     profile = json.loads((tmp_path / "ctx-model-profile.json").read_text())
     assert profile["harness_requirements"] == {
-        "runtime": "windows python",
+        "runtime": "linux python",
         "autonomy": "supervised",
         "tools": "filesystem shell browser",
         "verification": "pytest ruff",
@@ -1620,7 +1621,7 @@ def test_main_custom_model_records_structured_harness_requirements(
         "attach_mode": "mcp",
     }
     query = str(recommendation_calls[0]["goal"])
-    assert "windows python" in query
+    assert "linux python" in query
     assert "filesystem shell browser" in query
     assert "pytest ruff" in query
     assert "private repo no secrets" in query

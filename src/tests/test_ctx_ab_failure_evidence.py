@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from pathlib import Path
 import stat
 
@@ -56,10 +55,9 @@ def test_publishes_chained_private_failure_and_authenticated_staging(
     assert (destination / "raw" / "detail.txt").read_text(encoding="utf-8") == (
         "private task detail"
     )
-    if os.name != "nt":
-        assert stat.S_IMODE(destination.stat().st_mode) == 0o700
-        assert stat.S_IMODE((destination / "raw").stat().st_mode) == 0o700
-        assert stat.S_IMODE((destination / "raw" / "detail.txt").stat().st_mode) == 0o600
+    assert stat.S_IMODE(destination.stat().st_mode) == 0o700
+    assert stat.S_IMODE((destination / "raw").stat().st_mode) == 0o700
+    assert stat.S_IMODE((destination / "raw" / "detail.txt").stat().st_mode) == 0o600
 
 
 def test_refuses_overwrite_and_nonprivate_repository_destination(tmp_path: Path) -> None:
