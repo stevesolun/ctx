@@ -1633,8 +1633,8 @@ the backup layer cannot stall a Claude session.</p>
 <h2 id="register-the-hook">Register the hook<a class="headerlink" href="#register-the-hook" title="Permanent link">&para;</a></h2>
 <p>Edit <code>~/.claude/settings.json</code> and add the following under <code>hooks</code> (keep
 any existing entries alongside it). Replace <code>&lt;REPO&gt;</code> with the absolute
-path to this checkout — on Windows this is a path like
-<code>C:/Steves_Files/Work/Research_and_Papers/ctx</code>.</p>
+path to this checkout, such as <code>/home/you/src/ctx</code> on Linux or
+<code>/Users/you/src/ctx</code> on macOS.</p>
 <div class="language-json highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="p">{</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">&quot;hooks&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="nt">&quot;PostToolUse&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
@@ -1656,10 +1656,8 @@ path to this checkout — on Windows this is a path like
 <li>The <code>matcher</code> is a regex against the tool name. The three names above are the
   supported direct file-edit events; use the watchdog below to catch changes
   made by Bash commands, external editors, or other processes.</li>
-<li>Use forward slashes in the path even on Windows.</li>
 <li>If <code>python</code> on your PATH is not the interpreter you want, give the
-  absolute path instead (e.g.
-  <code>C:/Users/you/.pyenv/pyenv-win/versions/3.13.2/python.exe</code>).</li>
+  absolute path instead (for example, <code>/Users/you/.pyenv/shims/python</code>).</li>
 </ul>
 <h2 id="verify-it-works">Verify it works<a class="headerlink" href="#verify-it-works" title="Permanent link">&para;</a></h2>
 <ol>
@@ -1745,7 +1743,7 @@ or another process updates a tracked file, the hook never sees it.</p>
 </tr>
 <tr>
 <td><code>--once</code></td>
-<td>Run exactly one tick and exit. Useful for cron / Task Scheduler.</td>
+<td>Run exactly one tick and exit. Useful for cron.</td>
 </tr>
 <tr>
 <td><code>--json</code></td>
@@ -1769,17 +1767,11 @@ that guesses where you keep the checkout.</p>
   <a href="https://github.com/stevesolun/ctx/blob/main/docs/services/macos/com.claude.backup.watchdog.plist"><code>docs/services/macos/com.claude.backup.watchdog.plist</code></a>.
   Edit the <code>ProgramArguments</code> paths, drop into
   <code>~/Library/LaunchAgents/</code>, then
-  <code>launchctl load -w ~/Library/LaunchAgents/com.claude.backup.watchdog.plist</code>.</li>
-<li><strong>Windows (Task Scheduler installer)</strong> —
-  <a href="https://github.com/stevesolun/ctx/blob/main/docs/services/windows/install-backup-watchdog.ps1"><code>docs/services/windows/install-backup-watchdog.ps1</code></a>.
-  Run <code>pwsh -File docs/services/windows/install-backup-watchdog.ps1</code>
-  from the repo root; it detects Python on PATH, registers a
-  <code>ClaudeBackupWatchdog</code> scheduled task that runs at logon, and kicks
-  off the first tick. <code>-Uninstall</code> removes it.</li>
-</ul>
-<p>All three manifests assume the watchdog runs as an <strong>unprivileged
+  <code>launchctl load -w ~/Library/LaunchAgents/com.claude.backup.watchdog.plist</code>.
+Both manifests assume the watchdog runs as an <strong>unprivileged
 user</strong> — no admin/root — because it only reads <code>~/.claude/</code> and writes
-<code>~/.claude/backups/</code>.</p>
+<code>~/.claude/backups/</code>.</li>
+</ul>
 <p>The watchdog stops cleanly on SIGINT/SIGTERM, flushes its stats line
 to stderr, and exits 0. Pair it with the hook: the hook handles
 in-session edits in real time; the watchdog catches everything else.</p>
