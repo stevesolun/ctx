@@ -252,7 +252,7 @@ ones are flagged. New ones self-ingest.
     ---
 
     Current main is **v1.0.21** — MIT, tested on CPython 3.11+ for Linux and macOS,
-    6,219 test inventory. Adds enterprise OpenTelemetry-ready telemetry and
+    6,195 test inventory. Adds enterprise OpenTelemetry-ready telemetry and
     ships console scripts including `ctx-init`,
     `ctx-monitor` (local dashboard with graph + wiki + load/unload for
     skills, agents, and MCP servers, plus Harness Setup for user-owned LLMs),
