@@ -7,7 +7,7 @@ Thank you for your interest in contributing.
 ```bash
 git clone https://github.com/stevesolun/ctx && cd ctx
 python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
+source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
@@ -62,15 +62,13 @@ new package path exists: shim removal requires an explicit migration phase plus
 clean-install and packaging evidence. Run the package-scaffold tests and the
 affected module tests before the repository gates.
 
-GitHub PRs skip the broad OS/Python `test` matrix. The full
-Ubuntu/Windows/macOS pytest matrix runs after merge on `main`; PRs use focused
-required jobs selected from the changed surface.
+Development and CI support CPython 3.11+ on Linux and macOS. Other POSIX
+systems are best-effort. Native Windows and PowerShell are unsupported; use a
+Linux installation under WSL2 when developing on a Windows machine.
 
-PRs matching `WINDOWS_PATTERNS` in `scripts/ci_classifier.py` also run the
-required `windows-high-risk` job on native Windows 3.12, focused on Windows
-sensitive importers and benchmark process/filesystem behavior. Local-fast and
-preflight remain the first pass, but they do not replace that native Windows
-evidence. After merge, the full Windows matrix supersedes the focused job.
+GitHub PRs skip the broad OS/Python `test` matrix. The full Linux/macOS pytest
+matrix runs after merge on `main`; PRs use focused required jobs selected from
+the changed surface. Local-fast and preflight remain the first pass.
 
 ## Documentation changes
 

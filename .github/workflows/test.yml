@@ -32,7 +32,6 @@ jobs:
       similarity_changed: ${{ steps.classify.outputs.similarity_changed }}
       source_changed: ${{ steps.classify.outputs.source_changed }}
       telemetry_changed: ${{ steps.classify.outputs.telemetry_changed }}
-      windows_changed: ${{ steps.classify.outputs.windows_changed }}
     steps:
       - name: Checkout with full history
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -196,10 +195,6 @@ jobs:
         include:
           - os: ubuntu-latest
             python-version: "3.12"
-          - os: windows-latest
-            python-version: "3.11"
-          - os: windows-latest
-            python-version: "3.12"
           - os: macos-latest
             python-version: "3.11"
           - os: macos-latest
@@ -226,38 +221,6 @@ jobs:
       - name: Run tests without coverage
         run: pytest -q -m "not browser and not integration" --no-cov
 
-  windows-high-risk:
-    name: "Windows high-risk"
-    needs: classify
-    if: ${{ github.event_name == 'pull_request' && needs.classify.outputs.windows_changed == 'true' }}
-    runs-on: windows-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-        with:
-          lfs: false
-
-      - name: Set up Python 3.12
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: pyproject.toml
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install ".[dev]"
-
-      - name: Run focused Windows tests
-        run: >-
-          python -m pytest -q --no-cov
-          src/tests/test_import_designdotmd_skills.py
-          src/tests/test_import_mattpocock_skills.py
-          src/tests/test_import_strix_skills.py
-          src/tests/test_ctx_ab_benchmark.py
-          src/tests/test_ctx_ab_swebench.py
-
   contract-compat:
     name: "Contract compatibility (${{ matrix.os }})"
     needs: classify
@@ -266,7 +229,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        os: [macos-latest]
 
     steps:
       - name: Checkout
@@ -725,7 +688,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest]
     defaults:
       run:
         shell: bash
@@ -751,11 +714,7 @@ jobs:
       - name: Install wheel in clean venv
         run: |
           python -m venv .venv-smoke
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            . .venv-smoke/Scripts/activate
-          else
-            . .venv-smoke/bin/activate
-          fi
+          . .venv-smoke/bin/activate
           python -m pip install --upgrade pip
           python -m pip install dist/*.whl
           python -m pip check
@@ -905,7 +864,6 @@ jobs:
       - clean-host-contract
       - no-test-no-merge
       - telemetry-enterprise
-      - windows-high-risk
     if: ${{ always() }}
     steps:
       - name: Checkout

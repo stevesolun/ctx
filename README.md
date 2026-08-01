@@ -16,7 +16,9 @@ this source tree declares `1.0.21` for unreleased work.
 
 ## Install
 
-Requires Python 3.11 or newer.
+Requires CPython 3.11 or newer. Linux and macOS are the tested host platforms;
+other POSIX systems are best-effort. Native Windows and PowerShell are not
+supported. On a Windows machine, run ctx inside WSL2 as a Linux installation.
 
 ```bash
 pip install claude-ctx

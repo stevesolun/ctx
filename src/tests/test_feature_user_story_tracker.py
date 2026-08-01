@@ -427,6 +427,74 @@ def test_canonical_trackers_have_no_retired_stale_completion_prose() -> None:
         assert stale == []
 
 
+def test_retired_windows_gate_is_not_an_active_tracker_contract() -> None:
+    tracked_ids = {
+        "DIST-002",
+        "MAINT-015",
+        "MAINT-003",
+        "MAINT-005",
+        "LANE-D-014",
+        "LANE-D-015",
+        "LANE-D-018",
+        "MAINT-016",
+        "B-MCP-003",
+    }
+    canonical_active_fields = (
+        "user_story",
+        "expected_behavior",
+        "setup_preconditions",
+        "test_command_or_steps",
+        "fix_status",
+        "notes",
+        "review_status",
+        "review_notes",
+        "fix_strategy",
+        "validation_status",
+    )
+    supporting_active_fields = (
+        "user_story",
+        "expected_behavior",
+        "setup_preconditions",
+        "test_command_or_steps",
+        "error_summary",
+        "fix_status",
+        "notes",
+    )
+    retired_gate_markers = (
+        "windows-high-risk",
+        "windows_changed",
+        "native windows",
+        "windows 3.12",
+        "windows importer",
+        "windows skip",
+    )
+
+    canonical_rows = {
+        row["feature_id"]: row
+        for row in _canonical_tracker_rows()
+        if row["feature_id"] in tracked_ids
+    }
+    assert canonical_rows.keys() == tracked_ids
+    for feature_id, row in canonical_rows.items():
+        active_contract = " ".join(row[field] for field in canonical_active_fields).lower()
+        assert not any(marker in active_contract for marker in retired_gate_markers), (
+            f"{feature_id} still advertises the retired Windows gate in active fields"
+        )
+
+    supporting_ids = {"DIST-002", "MAINT-016"}
+    supporting_rows = {
+        row["feature_id"]: row
+        for row in _tracker_rows()
+        if row["feature_id"] in supporting_ids
+    }
+    assert supporting_rows.keys() == supporting_ids
+    for feature_id, row in supporting_rows.items():
+        active_contract = " ".join(row[field] for field in supporting_active_fields).lower()
+        assert not any(marker in active_contract for marker in retired_gate_markers), (
+            f"{feature_id} supporting row still advertises the retired Windows gate"
+        )
+
+
 def test_canonical_tracker_attributes_every_substantive_python_module() -> None:
     exact_source_paths = {
         match

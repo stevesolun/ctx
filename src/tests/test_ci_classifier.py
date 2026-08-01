@@ -105,7 +105,6 @@ def test_docs_only_classification() -> None:
         "similarity_changed": False,
         "source_changed": False,
         "telemetry_changed": False,
-        "windows_changed": False,
     }
 
 
@@ -281,7 +280,6 @@ def test_workflow_change_fails_open_for_future_gates() -> None:
     assert flags["similarity_changed"] is True
     assert flags["source_changed"] is True
     assert flags["telemetry_changed"] is True
-    assert flags["windows_changed"] is True
     assert flags["docs_changed"] is False
     assert flags["docs_only"] is False
 
@@ -1333,25 +1331,9 @@ def test_browser_security_paths_are_classified() -> None:
     assert flags["source_changed"] is True
 
 
-def test_windows_high_risk_paths_are_classified_selectively() -> None:
-    for path in (
-        "src/import_designdotmd_skills.py",
-        "src/import_mattpocock_skills.py",
-        "src/import_strix_skills.py",
-        "src/tests/test_import_designdotmd_skills.py",
-        "src/tests/test_import_mattpocock_skills.py",
-        "src/tests/test_import_strix_skills.py",
-        "scripts/ctx_ab_benchmark.py",
-        "scripts/ctx_ab_swebench.py",
-        "src/tests/test_ctx_ab_benchmark.py",
-        "src/tests/test_ctx_ab_swebench.py",
-        "scripts/ci_classifier.py",
-        "scripts/ci_required.py",
-        ".github/workflows/test.yml",
-    ):
-        assert classify_paths([path])["windows_changed"] is True
-
-    assert classify_paths(["src/ctx/api.py"])["windows_changed"] is False
+def test_classifier_has_no_platform_specific_windows_lane() -> None:
+    for path in ("scripts/ctx_ab_benchmark.py", ".github/workflows/test.yml"):
+        assert "windows_changed" not in classify_paths([path])
 
 
 def test_similarity_paths_are_classified() -> None:
@@ -1456,45 +1438,6 @@ def test_ci_required_allows_full_matrix_skip_on_ci_changed_pr() -> None:
     )
 
     assert failed_required_jobs(needs, event_name="pull_request") == {}
-
-
-def test_ci_required_allows_targeted_windows_skip_when_not_selected() -> None:
-    needs = _required_needs(
-        classify={
-            "result": "success",
-            "outputs": {"windows_changed": "false"},
-        },
-        **{"windows-high-risk": {"result": "skipped"}},
-    )
-
-    assert failed_required_jobs(needs, event_name="pull_request") == {}
-    assert failed_required_jobs(needs, event_name="push") == {}
-
-
-def test_ci_required_rejects_targeted_windows_skip_on_high_risk_pr() -> None:
-    needs = _required_needs(
-        classify={
-            "result": "success",
-            "outputs": {"windows_changed": "true"},
-        },
-        **{"windows-high-risk": {"result": "skipped"}},
-    )
-
-    assert failed_required_jobs(needs, event_name="pull_request") == {
-        "windows-high-risk": "skipped",
-    }
-
-
-def test_ci_required_rejects_windows_skip_for_missing_or_malformed_output() -> None:
-    for outputs in ({}, {"windows_changed": "unknown"}):
-        needs = _required_needs(
-            classify={"result": "success", "outputs": outputs},
-            **{"windows-high-risk": {"result": "skipped"}},
-        )
-
-        assert failed_required_jobs(needs, event_name="pull_request") == {
-            "windows-high-risk": "skipped",
-        }
 
 
 def test_ci_required_allows_package_skips_when_classifier_says_unchanged() -> None:
@@ -1839,20 +1782,12 @@ def test_workflow_runs_full_pytest_matrix_after_merge_not_on_prs() -> None:
     assert "needs.classify.outputs.ci_changed == 'true'" not in pytest_job
 
 
-def test_workflow_runs_targeted_windows_high_risk_gate() -> None:
+def test_primary_workflow_runs_only_on_supported_posix_hosts() -> None:
     workflow = Path(".github/workflows/test.yml").read_text(encoding="utf-8")
-    windows_job = workflow.split("\n  windows-high-risk:\n", maxsplit=1)[1].split(
-        "\n  contract-compat:", maxsplit=1
-    )[0]
 
-    assert "windows_changed: ${{ steps.classify.outputs.windows_changed }}" in workflow
-    assert "github.event_name == 'pull_request'" in windows_job
-    assert "needs.classify.outputs.windows_changed == 'true'" in windows_job
-    assert "runs-on: windows-latest" in windows_job
-    assert 'python-version: "3.12"' in windows_job
-    assert "src/tests/test_import_designdotmd_skills.py" in windows_job
-    assert "src/tests/test_import_mattpocock_skills.py" in windows_job
-    assert "src/tests/test_import_strix_skills.py" in windows_job
-    assert "src/tests/test_ctx_ab_benchmark.py" in windows_job
-    assert "src/tests/test_ctx_ab_swebench.py" in windows_job
-    assert "matrix:" not in windows_job
+    assert "ubuntu-latest" in workflow
+    assert "macos-latest" in workflow
+    assert "windows-latest" not in workflow
+    assert "windows-high-risk" not in workflow
+    assert "windows_changed" not in workflow
+    assert '$RUNNER_OS" == "Windows' not in workflow

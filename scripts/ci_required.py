@@ -32,7 +32,6 @@ REQUIRED_JOBS = {
     "telemetry-enterprise",
     "test",
     "unit-linux",
-    "windows-high-risk",
 }
 
 
@@ -78,7 +77,6 @@ def failed_required_jobs(
         and _job_output(needs, "classify", "telemetry_changed") == "true"
     )
     package_changed_output = _job_output(needs, "classify", "package_changed")
-    windows_changed_output = _job_output(needs, "classify", "windows_changed")
     cheap_pr = docs_only_pr or graph_only_pr
     for name, details in sorted(needs.items()):
         result = details.get("result")
@@ -86,7 +84,7 @@ def failed_required_jobs(
             continue
         if (
             event_name != "pull_request"
-            and name in {"docs-check", "graph-check", "no-test-no-merge", "windows-high-risk"}
+            and name in {"docs-check", "graph-check", "no-test-no-merge"}
             and result == "skipped"
         ):
             continue
@@ -140,13 +138,6 @@ def failed_required_jobs(
         ):
             continue
         if event_name == "pull_request" and name == "test" and result == "skipped":
-            continue
-        if (
-            event_name == "pull_request"
-            and name == "windows-high-risk"
-            and result == "skipped"
-            and windows_changed_output == "false"
-        ):
             continue
         failures[name] = result
     return failures
