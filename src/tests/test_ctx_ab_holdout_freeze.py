@@ -35,6 +35,11 @@ PINS = {
     "run_evaluation_sha256": "7" * 64,
     "schema_version": 1,
 }
+CODEX_RUNTIME_CONTRACT = {
+    "arms": ["baseline", "ctx-light"],
+    "model_auto_compact_token_limit": 200_000,
+    "model_reasoning_effort": "high",
+}
 
 
 def _canonical(value: object, *, newline: bool = False) -> bytes:
@@ -252,7 +257,10 @@ def _fixture_documents(
             "timeout_seconds": 900,
         }
     environment = {
-        "codex": {"version": "1.2.3"},
+        "codex": {
+            "runtime_contract": deepcopy(CODEX_RUNTIME_CONTRACT),
+            "version": "1.2.3",
+        },
         "evaluator": {
             "backend": benchmark.OFFICIAL_HOLDOUT_BACKEND,
             "pins_sha256": _sha256(_canonical(PINS)),
@@ -260,6 +268,7 @@ def _fixture_documents(
         "limits": {
             "agent_timeout_seconds": 420,
             "arms": ["baseline", "ctx-light"],
+            "catalog_cache_hit": False,
             "measured_concurrency": 1,
             "pair_count": 30,
             "retries": 0,
@@ -778,6 +787,28 @@ def _set(document: str, *path: str, value: object) -> Mutation:
         (
             "environment-concurrency",
             lambda docs: docs["environment"]["limits"].update(measured_concurrency=2),
+        ),
+        (
+            "environment-warm-catalog",
+            lambda docs: docs["environment"]["limits"].update(catalog_cache_hit=True),
+        ),
+        (
+            "environment-runtime-arm-mismatch",
+            lambda docs: docs["environment"]["codex"]["runtime_contract"].update(
+                arms=["ctx-light", "baseline"]
+            ),
+        ),
+        (
+            "environment-runtime-effort",
+            lambda docs: docs["environment"]["codex"]["runtime_contract"].update(
+                model_reasoning_effort="HIGH"
+            ),
+        ),
+        (
+            "environment-runtime-limit-missing",
+            lambda docs: docs["environment"]["codex"]["runtime_contract"].pop(
+                "model_auto_compact_token_limit"
+            ),
         ),
         (
             "environment-non-openai-provider",

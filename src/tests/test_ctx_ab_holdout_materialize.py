@@ -523,7 +523,14 @@ def test_materializes_ten_official_controls_and_evaluator_bound_attestations(
     environment_path.write_bytes(
         _canonical(
             {
-                "codex": {"version": "test"},
+                "codex": {
+                    "runtime_contract": {
+                        "arms": ["baseline", "ctx-light"],
+                        "model_auto_compact_token_limit": 200_000,
+                        "model_reasoning_effort": "high",
+                    },
+                    "version": "test",
+                },
                 "evaluator": {
                     "backend": materializer.benchmark.OFFICIAL_HOLDOUT_BACKEND,
                     "pins_sha256": hashlib.sha256(
@@ -533,6 +540,7 @@ def test_materializes_ten_official_controls_and_evaluator_bound_attestations(
                 "limits": {
                     "agent_timeout_seconds": 900,
                     "arms": ["baseline", "ctx-light"],
+                    "catalog_cache_hit": False,
                     "measured_concurrency": 1,
                     "pair_count": 30,
                     "retries": 0,

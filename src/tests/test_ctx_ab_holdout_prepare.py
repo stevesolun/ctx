@@ -6,6 +6,7 @@ import inspect
 import json
 import os
 from pathlib import Path
+import shutil
 import stat
 import subprocess
 import threading
@@ -35,6 +36,27 @@ PINS = {
     "run_evaluation_sha256": "7" * 64,
     "schema_version": 1,
 }
+MODEL_REASONING_EFFORT = "high"
+MODEL_AUTO_COMPACT_TOKEN_LIMIT = 200_000
+CODEX_RUNTIME_CONTRACT = {
+    "arms": ["baseline", "ctx-light"],
+    "model_auto_compact_token_limit": MODEL_AUTO_COMPACT_TOKEN_LIMIT,
+    "model_reasoning_effort": MODEL_REASONING_EFFORT,
+}
+
+
+def test_documented_official_environment_command_covers_runtime_contract() -> None:
+    readme = (prepare.ROOT / "benchmarks" / "ctx_ab" / "README.md").read_text(encoding="utf-8")
+    command = readme.split(
+        '"$PY" -m scripts.ctx_ab_holdout_prepare environment',
+        maxsplit=1,
+    )[1].split(
+        '"$PY" -m scripts.ctx_ab_holdout_freeze',
+        maxsplit=1,
+    )[0]
+
+    assert '--model-reasoning-effort "$MODEL_REASONING_EFFORT"' in command
+    assert '--model-auto-compact-token-limit "$MODEL_AUTO_COMPACT_TOKEN_LIMIT"' in command
 
 
 def _canonical(value: object, *, newline: bool = False) -> bytes:
@@ -647,6 +669,163 @@ def test_probe_verifier_rejects_runtime_drift(monkeypatch: pytest.MonkeyPatch) -
             docker_cli=Path("/docker"),
             docker_host="unix:///tmp/docker.sock",
         )
+
+
+def test_verifier_snapshot_executes_authenticated_python_launcher(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    python_launcher = tmp_path / "venv-python"
+    python_launcher.write_bytes(b"python-runtime")
+    python_launcher.chmod(0o700)
+    docker = tmp_path / "docker"
+    docker.write_bytes(b"docker-runtime")
+    docker.chmod(0o700)
+    observed: list[Path] = []
+
+    monkeypatch.setattr(prepare, "_checkout_snapshot", lambda _path: (REVISION, "1" * 64))
+    monkeypatch.setattr(prepare, "_stable_digest", lambda *_args, **_kwargs: "2" * 64)
+
+    def python_environment(path: Path) -> str:
+        observed.append(path)
+        return "3" * 64
+
+    def docker_package(path: Path) -> str:
+        observed.append(path)
+        return "4" * 64
+
+    monkeypatch.setattr(prepare, "_python_environment_sha256", python_environment)
+    monkeypatch.setattr(prepare, "_docker_package_sha256", docker_package)
+    monkeypatch.setattr(prepare, "_docker_identity", lambda *_args: ("daemon", "29.5.2"))
+
+    snapshot = prepare._verifier_snapshot(
+        swebench_checkout=tmp_path,
+        swebench_python=python_launcher,
+        docker_cli=docker,
+        docker_host="unix:///tmp/docker.sock",
+    )
+
+    assert observed == [python_launcher, python_launcher]
+    assert snapshot["python_sha256"] == _sha256(python_launcher.read_bytes())
+
+
+def test_verifier_snapshot_rejects_python_target_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    python_launcher = tmp_path / "venv-python"
+    python_launcher.write_bytes(b"python-runtime")
+    python_launcher.chmod(0o700)
+    docker = tmp_path / "docker"
+    docker.write_bytes(b"docker-runtime")
+    docker.chmod(0o700)
+
+    monkeypatch.setattr(prepare, "_checkout_snapshot", lambda _path: (REVISION, "1" * 64))
+    monkeypatch.setattr(prepare, "_stable_digest", lambda *_args, **_kwargs: "2" * 64)
+    monkeypatch.setattr(prepare, "_python_environment_sha256", lambda _path: "3" * 64)
+
+    def change_python(_path: Path) -> str:
+        python_launcher.write_bytes(b"changed-runtime")
+        return "4" * 64
+
+    monkeypatch.setattr(prepare, "_docker_package_sha256", change_python)
+    monkeypatch.setattr(prepare, "_docker_identity", lambda *_args: ("daemon", "29.5.2"))
+
+    with pytest.raises(prepare.PrepareError, match="Python changed"):
+        prepare._verifier_snapshot(
+            swebench_checkout=tmp_path,
+            swebench_python=python_launcher,
+            docker_cli=docker,
+            docker_host="unix:///tmp/docker.sock",
+        )
+
+
+def test_execution_python_probe_uses_authenticated_launcher(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    python_launcher = tmp_path / "venv-python"
+    python_launcher.write_bytes(b"python-runtime")
+    python_launcher.chmod(0o700)
+    observed: dict[str, Path] = {}
+
+    def command(argv: list[str], **_kwargs: Any) -> bytes:
+        observed["command"] = Path(argv[0])
+        return b"3.12.13\n"
+
+    def dependencies(path: Path) -> str:
+        observed["dependencies"] = path
+        return "5" * 64
+
+    monkeypatch.setattr(prepare, "_command_bytes", command)
+    monkeypatch.setattr(prepare.benchmark, "python_dependencies_sha256", dependencies)
+
+    identity = prepare._probe_execution_python(python_launcher)
+
+    assert observed == {
+        "command": python_launcher,
+        "dependencies": python_launcher,
+    }
+    assert identity.path == python_launcher
+    assert identity.sha256 == _sha256(python_launcher.read_bytes())
+
+
+def test_python_probes_reject_symlink_launchers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "python-target"
+    target.write_bytes(b"python-runtime")
+    target.chmod(0o700)
+    launcher = tmp_path / "venv-python"
+    launcher.symlink_to(target)
+
+    monkeypatch.setattr(prepare, "_checkout_snapshot", lambda _path: (REVISION, "1" * 64))
+
+    with pytest.raises(prepare.PrepareError, match="must be a regular file"):
+        prepare._verifier_snapshot(
+            swebench_checkout=tmp_path,
+            swebench_python=launcher,
+            docker_cli=target,
+            docker_host="unix:///tmp/docker.sock",
+        )
+    with pytest.raises(prepare.PrepareError, match="must be a regular file"):
+        prepare._probe_execution_python(launcher)
+
+
+def test_execution_python_probe_accepts_real_copied_venv(tmp_path: Path) -> None:
+    discovered = shutil.which("python3.12")
+    candidates = [
+        Path("/opt/homebrew/bin/python3.12"),
+        Path("/usr/local/bin/python3.12"),
+        *((Path(discovered),) if discovered is not None else ()),
+    ]
+    unique_candidates = list(dict.fromkeys(path for path in candidates if path.is_file()))
+    if not unique_candidates:
+        pytest.skip("official benchmark Python 3.12 is unavailable")
+
+    launcher: Path | None = None
+    for index, python in enumerate(unique_candidates):
+        venv = tmp_path / f"copied-venv-{index}"
+        result = subprocess.run(
+            [str(python), "-m", "venv", "--copies", str(venv)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        candidate = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        if result.returncode == 0 and candidate.is_file() and not candidate.is_symlink():
+            launcher = candidate
+            break
+    if launcher is None:
+        pytest.skip("no available Python 3.12 runtime can create a copied virtual environment")
+
+    identity = prepare._probe_execution_python(launcher)
+
+    assert not launcher.is_symlink()
+    assert identity.path == launcher
+    assert identity.version.startswith("3.12.")
+    assert len(identity.dependencies_sha256) == 64
 
 
 def test_command_runner_requires_descendant_containment(
@@ -1287,6 +1466,8 @@ def test_write_environment_matches_freezer_contract(
         expected_acquisition_protocol_sha256=_sha256(protocol_path.read_bytes()),
         output_path=output,
         model="gpt-5.5",
+        model_reasoning_effort=MODEL_REASONING_EFFORT,
+        model_auto_compact_token_limit=MODEL_AUTO_COMPACT_TOKEN_LIMIT,
         provider="openai",
         agent_timeout_seconds=900,
         codex_path=tmp_path / "codex",
@@ -1304,6 +1485,7 @@ def test_write_environment_matches_freezer_contract(
     assert document["limits"] == {
         "agent_timeout_seconds": 900,
         "arms": ["baseline", "ctx-light"],
+        "catalog_cache_hit": False,
         "measured_concurrency": 1,
         "pair_count": 30,
         "retries": 0,
@@ -1311,7 +1493,10 @@ def test_write_environment_matches_freezer_contract(
         "task_count": 10,
         "trials_per_scenario": 3,
     }
-    assert document["codex"] == {"version": "codex 1.2.3"}
+    assert document["codex"] == {
+        "runtime_contract": CODEX_RUNTIME_CONTRACT,
+        "version": "codex 1.2.3",
+    }
     assert document["python"] == {
         "dependencies_sha256": python.dependencies_sha256,
         "executable_sha256": python.sha256,
@@ -1362,6 +1547,8 @@ def test_write_environment_rejects_runtime_drift(
             expected_acquisition_protocol_sha256=_sha256(protocol_path.read_bytes()),
             output_path=output,
             model="gpt-5.5",
+            model_reasoning_effort=MODEL_REASONING_EFFORT,
+            model_auto_compact_token_limit=MODEL_AUTO_COMPACT_TOKEN_LIMIT,
             provider="openai",
             agent_timeout_seconds=900,
             codex_path=tmp_path / "codex",
@@ -1382,6 +1569,35 @@ def test_write_environment_rejects_noncanonical_model() -> None:
             expected_acquisition_protocol_sha256="0" * 64,
             output_path=Path("/environment"),
             model=" gpt-5.5 ",
+            model_reasoning_effort=MODEL_REASONING_EFFORT,
+            model_auto_compact_token_limit=MODEL_AUTO_COMPACT_TOKEN_LIMIT,
+            provider="openai",
+            agent_timeout_seconds=900,
+            codex_path=Path("/codex"),
+            execution_python=Path("/python"),
+            swebench_checkout=Path("/swebench"),
+            swebench_python=Path("/swebench-python"),
+            docker_cli=Path("/docker"),
+            docker_host="unix:///tmp/docker.sock",
+        )
+
+
+@pytest.mark.parametrize(
+    ("reasoning_effort", "auto_compact_token_limit"),
+    [("HIGH", MODEL_AUTO_COMPACT_TOKEN_LIMIT), (MODEL_REASONING_EFFORT, 0)],
+)
+def test_write_environment_rejects_noncanonical_codex_runtime_contract(
+    reasoning_effort: str,
+    auto_compact_token_limit: int,
+) -> None:
+    with pytest.raises(prepare.PrepareError, match="runtime contract"):
+        prepare.write_environment(
+            protocol_path=Path("/protocol"),
+            expected_acquisition_protocol_sha256="0" * 64,
+            output_path=Path("/environment"),
+            model="gpt-5.5",
+            model_reasoning_effort=reasoning_effort,
+            model_auto_compact_token_limit=auto_compact_token_limit,
             provider="openai",
             agent_timeout_seconds=900,
             codex_path=Path("/codex"),

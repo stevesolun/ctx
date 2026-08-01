@@ -6,6 +6,7 @@ import importlib.util
 import io
 import json
 import os
+import stat
 import subprocess
 import sys
 import tarfile
@@ -31,6 +32,11 @@ assert SPEC is not None and SPEC.loader is not None
 benchmark = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = benchmark
 SPEC.loader.exec_module(benchmark)
+CODEX_RUNTIME_CONTRACT = {
+    "arms": ["baseline", "ctx-light"],
+    "model_auto_compact_token_limit": 200_000,
+    "model_reasoning_effort": "high",
+}
 
 
 def _pid_is_running(pid: int) -> bool:
@@ -2086,6 +2092,8 @@ def test_production_catalog_cache_uses_shipped_installer_once(
     second = benchmark.prepare_production_catalog(cache_root, archive=archive)
 
     assert len(install_calls) == 1
+    assert first.cache_hit is False
+    assert second.cache_hit is True
     assert first.wiki_dir == second.wiki_dir
     assert first.provenance["installer"] == "ctx_init.build_graph"
     assert first.provenance["install_mode"] == "runtime"
@@ -2112,6 +2120,7 @@ def test_production_catalog_cache_uses_shipped_installer_once(
     _write_runtime_availability(availability, content=runtime_content, version=2)
     third = benchmark.prepare_production_catalog(cache_root, archive=archive)
     assert len(install_calls) == 2
+    assert third.cache_hit is False
     assert third.wiki_dir != first.wiki_dir
     benchmark._remove_catalog_staging(cache_root / "production-catalog")
 
@@ -3300,6 +3309,51 @@ def test_invalid_treatment_fails_before_workspace_or_codex(
     assert not (tmp_path / "output").exists()
 
 
+def test_official_arm_mismatch_fails_before_workspace_or_codex(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    holdout_root = tmp_path / "holdout"
+    holdout_root.mkdir()
+    holdout, _ = _official_holdout_fixture(holdout_root)
+    scenario = holdout.scenarios[0]
+
+    def side_effect_forbidden(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("arm mismatch must fail before external work")
+
+    monkeypatch.setattr(benchmark, "prepare_official_workspace", side_effect_forbidden)
+    monkeypatch.setattr(benchmark, "run_process", side_effect_forbidden)
+
+    with pytest.raises(ValueError, match="arm does not match"):
+        benchmark.run_trial(
+            scenario,
+            arm="baseline",
+            treatment_level="ctx-light",
+            attempt=1,
+            trial=1,
+            retry=0,
+            cache=tmp_path / "cache",
+            output=tmp_path / "output",
+            codex="codex",
+            model="gpt-5.5",
+            timeout=900,
+            dry_run=False,
+            incidents=benchmark.IncidentLog(tmp_path / "incidents.csv"),
+            catalog_snapshot=benchmark.CatalogSnapshot(tmp_path / "catalog", {}),
+            official_holdout=holdout,
+            official_runtime=benchmark.OfficialVerifierRuntime(
+                dataset_path=tmp_path / "dataset.jsonl",
+                swebench_checkout=tmp_path / "swebench",
+                swebench_python=tmp_path / "swebench-python",
+                docker_cli=tmp_path / "docker",
+                docker_host="unix:///tmp/docker.sock",
+            ),
+            official_source=holdout.source_bundles[scenario.repo_url],
+        )
+
+    assert not (tmp_path / "output").exists()
+
+
 def test_codex_controlled_dry_run_is_accepted_as_complete() -> None:
     result = {
         "scenario": "scenario-a",
@@ -3408,10 +3462,20 @@ def test_aggregation_excludes_missing_and_error_eligibility(tmp_path: Path) -> N
 
 def test_codex_command_keeps_control_flags_equal(tmp_path: Path) -> None:
     baseline = benchmark.codex_command(
-        codex="codex", model="model", workspace=tmp_path, prompt="task", with_ctx=False
+        codex="codex",
+        model="model",
+        workspace=tmp_path,
+        prompt="task",
+        with_ctx=False,
+        runtime_contract=CODEX_RUNTIME_CONTRACT,
     )
     treated = benchmark.codex_command(
-        codex="codex", model="model", workspace=tmp_path, prompt="task", with_ctx=True
+        codex="codex",
+        model="model",
+        workspace=tmp_path,
+        prompt="task",
+        with_ctx=True,
+        runtime_contract=CODEX_RUNTIME_CONTRACT,
     )
 
     assert treated[treated.index("exec") :] == baseline[baseline.index("exec") :]
@@ -3419,6 +3483,9 @@ def test_codex_command_keeps_control_flags_equal(tmp_path: Path) -> None:
     assert treated[:5] == ["codex", "-a", "never", "--enable", "multi_agent"]
     assert baseline[5:7] == ["-c", 'web_search="disabled"']
     assert 'model_provider="openai"' in baseline
+    for command in (baseline, treated):
+        assert command.count('model_reasoning_effort="high"') == 1
+        assert command.count("model_auto_compact_token_limit=200000") == 1
     assert "--ephemeral" in baseline
     assert "--ignore-user-config" in baseline
     assert "ctx-wiki" not in " ".join(baseline)
@@ -3436,6 +3503,17 @@ def test_codex_command_keeps_control_flags_equal(tmp_path: Path) -> None:
             prompt="task",
             with_ctx=False,
             provider="other",
+        )
+
+    mismatched = {**CODEX_RUNTIME_CONTRACT, "arms": ["ctx-light", "baseline"]}
+    with pytest.raises(ValueError, match="arm mismatch"):
+        benchmark.codex_command(
+            codex="codex",
+            model="model",
+            workspace=tmp_path,
+            prompt="task",
+            with_ctx=False,
+            runtime_contract=mismatched,
         )
 
 
@@ -6097,7 +6175,10 @@ def _official_holdout_fixture(
         "verifier_pins_sha256": verifier_sha256,
     }
     environment = {
-        "codex": {"version": "test"},
+        "codex": {
+            "runtime_contract": dict(CODEX_RUNTIME_CONTRACT),
+            "version": "test",
+        },
         "evaluator": {
             "backend": benchmark.OFFICIAL_HOLDOUT_BACKEND,
             "pins_sha256": verifier_sha256,
@@ -6105,6 +6186,7 @@ def _official_holdout_fixture(
         "limits": {
             "agent_timeout_seconds": 900.0,
             "arms": ["baseline", "ctx-light"],
+            "catalog_cache_hit": False,
             "measured_concurrency": 1,
             "pair_count": 30,
             "retries": 0,
@@ -6320,6 +6402,7 @@ def test_official_protocol_claim_is_one_shot(tmp_path: Path) -> None:
     protocol_sha256 = "1" * 64
     first = benchmark.claim_official_protocol(
         state_root=state_root,
+        assignment_sha256="3" * 64,
         protocol_sha256=protocol_sha256,
         selection_sha256="2" * 64,
         output=tmp_path / "first",
@@ -6329,12 +6412,481 @@ def test_official_protocol_claim_is_one_shot(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="already consumed"):
         benchmark.claim_official_protocol(
             state_root=state_root,
+            assignment_sha256="3" * 64,
             protocol_sha256=protocol_sha256,
             selection_sha256="2" * 64,
             output=tmp_path / "second",
         )
 
     assert first.read_bytes() == original
+
+
+def test_official_assignment_identity_is_order_independent_and_canary_sensitive() -> None:
+    first = {
+        "analysis_instance_ids": ["task-b", "task-a"],
+        "analysis_repository_map": {
+            "task-a": "https://github.com/owner/a.git",
+            "task-b": "https://github.com/owner/b.git",
+        },
+        "canary_instance_id": "task-c",
+        "canary_repository": "https://github.com/owner/c.git",
+        "protocol_id": "protocol-a",
+    }
+    reordered = {
+        **first,
+        "analysis_instance_ids": ["task-a", "task-b"],
+        "protocol_id": "protocol-b",
+    }
+    changed_canary = {**reordered, "canary_instance_id": "task-d"}
+
+    assert benchmark.official_assignment_sha256(first) == benchmark.official_assignment_sha256(
+        reordered
+    )
+    assert benchmark.official_assignment_sha256(first) != benchmark.official_assignment_sha256(
+        changed_canary
+    )
+
+
+def test_official_assignment_claim_rejects_reordered_selection_replay(
+    tmp_path: Path,
+) -> None:
+    first_selection = {
+        "analysis_instance_ids": ["task-b", "task-a"],
+        "analysis_repository_map": {
+            "task-a": "https://github.com/owner/a.git",
+            "task-b": "https://github.com/owner/b.git",
+        },
+        "canary_instance_id": "task-c",
+        "canary_repository": "https://github.com/owner/c.git",
+    }
+    reordered_selection = {
+        **first_selection,
+        "analysis_instance_ids": ["task-a", "task-b"],
+    }
+    first_selection_sha256 = benchmark._sha256_bytes(
+        benchmark._canonical_json_bytes(first_selection)
+    )
+    reordered_selection_sha256 = benchmark._sha256_bytes(
+        benchmark._canonical_json_bytes(reordered_selection)
+    )
+    assignment_sha256 = benchmark.official_assignment_sha256(first_selection)
+
+    assert first_selection_sha256 != reordered_selection_sha256
+    assert assignment_sha256 == benchmark.official_assignment_sha256(reordered_selection)
+    benchmark.claim_official_protocol(
+        state_root=tmp_path / "private",
+        assignment_sha256=assignment_sha256,
+        protocol_sha256="1" * 64,
+        selection_sha256=first_selection_sha256,
+        output=tmp_path / "first",
+    )
+
+    with pytest.raises(RuntimeError, match="assignments were already consumed"):
+        benchmark.claim_official_protocol(
+            state_root=tmp_path / "private",
+            assignment_sha256=assignment_sha256,
+            protocol_sha256="2" * 64,
+            selection_sha256=reordered_selection_sha256,
+            output=tmp_path / "second",
+        )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="official measured execution is POSIX-only")
+def test_official_claim_durably_syncs_regular_files_and_directories(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fsynced_types: list[str] = []
+    real_fsync = os.fsync
+
+    def observed_fsync(descriptor: int) -> None:
+        mode = os.fstat(descriptor).st_mode
+        fsynced_types.append("directory" if stat.S_ISDIR(mode) else "file")
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(benchmark.os, "fsync", observed_fsync)
+
+    benchmark.claim_official_protocol(
+        state_root=tmp_path / "private",
+        assignment_sha256="3" * 64,
+        protocol_sha256="1" * 64,
+        selection_sha256="2" * 64,
+        output=tmp_path / "output",
+    )
+
+    assert fsynced_types.count("file") == 3
+    assert fsynced_types.count("directory") >= 3
+    first_file = fsynced_types.index("file")
+    assert fsynced_types[first_file:] == ["file", "directory"] * 3
+
+
+@pytest.mark.skipif(os.name == "nt", reason="official measured execution is POSIX-only")
+def test_official_claim_syncs_every_new_state_ancestor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_root = tmp_path / "new-home" / ".ctx" / "benchmark-state" / "repository-key"
+    synced_directories: list[Path] = []
+    real_sync = benchmark._fsync_directory
+
+    def observed_sync(path: Path) -> None:
+        synced_directories.append(path.resolve(strict=True))
+        real_sync(path)
+
+    monkeypatch.setattr(benchmark, "_fsync_directory", observed_sync)
+
+    benchmark.claim_official_protocol(
+        state_root=state_root,
+        assignment_sha256="3" * 64,
+        protocol_sha256="1" * 64,
+        selection_sha256="2" * 64,
+        output=tmp_path / "output",
+    )
+
+    created_directories = [
+        state_root.parents[2],
+        state_root.parents[1],
+        state_root.parent,
+        state_root,
+        state_root / "assignment-consumption",
+        state_root / "selection-consumption",
+        state_root / "protocol-consumption",
+    ]
+    for directory in created_directories:
+        assert directory.resolve(strict=True) in synced_directories
+        assert directory.parent.resolve(strict=True) in synced_directories
+
+
+@pytest.mark.skipif(os.name == "nt", reason="official measured execution is POSIX-only")
+def test_official_state_observer_syncs_concurrently_created_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_root = tmp_path / "private-state"
+    resolved_state_root = state_root.resolve(strict=False)
+    creator_blocked = threading.Event()
+    release_creator = threading.Event()
+    creator_ident: list[int] = []
+    creator_errors: list[BaseException] = []
+    observer_syncs: list[Path] = []
+    real_sync = benchmark._fsync_directory
+
+    def controlled_sync(path: Path) -> None:
+        resolved = path.resolve(strict=True)
+        if threading.get_ident() in creator_ident and resolved == resolved_state_root:
+            creator_blocked.set()
+            if not release_creator.wait(timeout=5):
+                raise RuntimeError("creator sync was not released")
+        else:
+            observer_syncs.append(resolved)
+        real_sync(path)
+
+    def create_state_root() -> None:
+        creator_ident.append(threading.get_ident())
+        try:
+            benchmark._ensure_owner_only_directory(state_root, label="test state root")
+        except BaseException as exc:  # pragma: no cover - reported in the parent thread
+            creator_errors.append(exc)
+
+    monkeypatch.setattr(benchmark, "_fsync_directory", controlled_sync)
+    creator = threading.Thread(target=create_state_root)
+    creator.start()
+    assert creator_blocked.wait(timeout=5)
+    try:
+        observed = benchmark._ensure_owner_only_directory(state_root, label="test state root")
+    finally:
+        release_creator.set()
+        creator.join(timeout=5)
+
+    assert not creator.is_alive()
+    assert creator_errors == []
+    assert observed == state_root.resolve(strict=True)
+    assert resolved_state_root in observer_syncs
+    assert state_root.parent.resolve(strict=True) in observer_syncs
+
+
+@pytest.mark.skipif(os.name == "nt", reason="official measured execution is POSIX-only")
+def test_official_state_observer_syncs_contested_intermediate_parent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_base = tmp_path / "state-base"
+    state_base.mkdir()
+    intermediate = state_base / "intermediate"
+    state_root = intermediate / "repository-key"
+    initial_anchor_barrier = threading.Barrier(2)
+    anchored_threads: set[int] = set()
+    publisher_ident: list[int] = []
+    publisher_blocked = threading.Event()
+    release_publisher = threading.Event()
+    observer_done = threading.Event()
+    observer_syncs: list[Path] = []
+    worker_errors: list[BaseException] = []
+    synchronization_lock = threading.Lock()
+    real_sync = benchmark._fsync_directory
+
+    def controlled_sync(path: Path) -> None:
+        resolved = path.resolve(strict=True)
+        ident = threading.get_ident()
+        initial_anchor = False
+        block_publisher = False
+        with synchronization_lock:
+            if resolved == state_base and ident not in anchored_threads:
+                anchored_threads.add(ident)
+                initial_anchor = True
+        if initial_anchor:
+            initial_anchor_barrier.wait(timeout=5)
+        with synchronization_lock:
+            if resolved == intermediate and not publisher_ident:
+                publisher_ident.append(ident)
+                publisher_blocked.set()
+                block_publisher = True
+            elif publisher_ident and ident != publisher_ident[0]:
+                observer_syncs.append(resolved)
+        if block_publisher and not release_publisher.wait(timeout=5):
+            raise RuntimeError("intermediate publisher sync was not released")
+        real_sync(path)
+
+    def ensure_state_root() -> None:
+        ident = threading.get_ident()
+        try:
+            benchmark._ensure_owner_only_directory(state_root, label="test state root")
+            with synchronization_lock:
+                is_observer = bool(publisher_ident) and ident != publisher_ident[0]
+            if is_observer:
+                observer_done.set()
+        except BaseException as exc:  # pragma: no cover - reported in the parent thread
+            worker_errors.append(exc)
+
+    monkeypatch.setattr(benchmark, "_fsync_directory", controlled_sync)
+    workers = [threading.Thread(target=ensure_state_root) for _ in range(2)]
+    for worker in workers:
+        worker.start()
+    assert publisher_blocked.wait(timeout=5)
+    try:
+        assert observer_done.wait(timeout=5)
+    finally:
+        release_publisher.set()
+        for worker in workers:
+            worker.join(timeout=5)
+
+    assert all(not worker.is_alive() for worker in workers)
+    assert worker_errors == []
+    assert state_base.resolve(strict=True) in observer_syncs
+
+
+def test_official_selection_claim_is_one_shot_across_protocol_refreezes(
+    tmp_path: Path,
+) -> None:
+    state_root = tmp_path / "private"
+    assignment_sha256 = "b" * 64
+    selection_sha256 = "a" * 64
+    first = benchmark.claim_official_protocol(
+        state_root=state_root,
+        assignment_sha256=assignment_sha256,
+        protocol_sha256="1" * 64,
+        selection_sha256=selection_sha256,
+        output=tmp_path / "first",
+    )
+    original = first.read_bytes()
+
+    with pytest.raises(RuntimeError, match="assignments were already consumed"):
+        benchmark.claim_official_protocol(
+            state_root=state_root,
+            assignment_sha256=assignment_sha256,
+            protocol_sha256="2" * 64,
+            selection_sha256=selection_sha256,
+            output=tmp_path / "second",
+        )
+
+    assert first == state_root / "assignment-consumption" / f"{assignment_sha256}.json"
+    assert first.read_bytes() == original
+    assert len(list((state_root / "protocol-consumption").glob("*.json"))) == 1
+
+
+def test_official_selection_claim_fails_closed_between_dual_index_writes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_root = tmp_path / "private"
+    assignment_sha256 = "b" * 64
+    selection_sha256 = "a" * 64
+    real_write = benchmark._write_exclusive_owner_file
+    writes = 0
+
+    def interrupt_second_write(path: Path, payload: dict[str, Any]) -> None:
+        nonlocal writes
+        writes += 1
+        if writes == 2:
+            raise OSError("injected interruption")
+        real_write(path, payload)
+
+    monkeypatch.setattr(benchmark, "_write_exclusive_owner_file", interrupt_second_write)
+
+    with pytest.raises(OSError, match="injected interruption"):
+        benchmark.claim_official_protocol(
+            state_root=state_root,
+            assignment_sha256=assignment_sha256,
+            protocol_sha256="1" * 64,
+            selection_sha256=selection_sha256,
+            output=tmp_path / "interrupted",
+        )
+
+    assert (state_root / "assignment-consumption" / f"{assignment_sha256}.json").is_file()
+    with pytest.raises(RuntimeError, match="assignments were already consumed"):
+        benchmark.claim_official_protocol(
+            state_root=state_root,
+            assignment_sha256=assignment_sha256,
+            protocol_sha256="2" * 64,
+            selection_sha256=selection_sha256,
+            output=tmp_path / "retry",
+        )
+
+
+def test_official_selection_claim_is_atomic_across_concurrent_protocols(
+    tmp_path: Path,
+) -> None:
+    state_root = tmp_path / "private"
+    assignment_sha256 = "b" * 64
+    selection_sha256 = "a" * 64
+    barrier = threading.Barrier(2)
+    outcomes: list[str] = []
+
+    def claim(protocol_sha256: str) -> None:
+        barrier.wait()
+        try:
+            benchmark.claim_official_protocol(
+                state_root=state_root,
+                assignment_sha256=assignment_sha256,
+                protocol_sha256=protocol_sha256,
+                selection_sha256=selection_sha256,
+                output=tmp_path / protocol_sha256,
+            )
+        except RuntimeError as exc:
+            outcomes.append(str(exc))
+        else:
+            outcomes.append("claimed")
+
+    threads = [
+        threading.Thread(target=claim, args=("1" * 64,)),
+        threading.Thread(target=claim, args=("2" * 64,)),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert outcomes.count("claimed") == 1
+    assert sum("assignments were already consumed" in outcome for outcome in outcomes) == 1
+    assert len(list((state_root / "assignment-consumption").glob("*.json"))) == 1
+    assert len(list((state_root / "selection-consumption").glob("*.json"))) == 1
+    assert len(list((state_root / "protocol-consumption").glob("*.json"))) == 1
+
+
+def test_official_selection_claim_is_private_single_link_and_contains_no_task_id(
+    tmp_path: Path,
+) -> None:
+    state_root = tmp_path / "private"
+    assignment_sha256 = "3" * 64
+    protocol_sha256 = "1" * 64
+    selection_sha256 = "2" * 64
+
+    assignment_claim = benchmark.claim_official_protocol(
+        state_root=state_root,
+        assignment_sha256=assignment_sha256,
+        protocol_sha256=protocol_sha256,
+        selection_sha256=selection_sha256,
+        output=tmp_path / "output",
+    )
+    selection_claim = state_root / "selection-consumption" / f"{selection_sha256}.json"
+    protocol_claim = state_root / "protocol-consumption" / f"{protocol_sha256}.json"
+
+    for claim in (assignment_claim, selection_claim, protocol_claim):
+        metadata = claim.stat()
+        document = json.loads(claim.read_bytes())
+        assert metadata.st_nlink == 1
+        if os.name != "nt":
+            assert stat.S_IMODE(metadata.st_mode) == 0o600
+        assert set(document) == {
+            "assignment_sha256",
+            "claimed_at",
+            "hostname",
+            "output",
+            "pid",
+            "protocol_sha256",
+            "schema_version",
+            "selection_sha256",
+        }
+        assert "task" not in json.dumps(document).lower()
+
+
+def test_official_selection_claim_rejects_existing_malformed_state(tmp_path: Path) -> None:
+    state_root = tmp_path / "private"
+    state_root.mkdir(mode=0o700)
+    ledger = state_root / "assignment-consumption"
+    ledger.mkdir(mode=0o700)
+    assignment_sha256 = "3" * 64
+    selection_sha256 = "2" * 64
+    claim = ledger / f"{assignment_sha256}.json"
+    claim.write_text("not-json\n", encoding="utf-8")
+    claim.chmod(0o600)
+
+    with pytest.raises(RuntimeError, match="assignments were already consumed"):
+        benchmark.claim_official_protocol(
+            state_root=state_root,
+            assignment_sha256=assignment_sha256,
+            protocol_sha256="1" * 64,
+            selection_sha256=selection_sha256,
+            output=tmp_path / "output",
+        )
+
+
+def test_official_assignment_claim_rejects_legacy_two_index_state(tmp_path: Path) -> None:
+    state_root = tmp_path / "private"
+    state_root.mkdir(mode=0o700)
+    (state_root / "protocol-consumption").mkdir(mode=0o700)
+
+    with pytest.raises(RuntimeError, match="legacy official consumption state"):
+        benchmark.claim_official_protocol(
+            state_root=state_root,
+            assignment_sha256="3" * 64,
+            protocol_sha256="1" * 64,
+            selection_sha256="2" * 64,
+            output=tmp_path / "output",
+        )
+
+    assert not (state_root / "assignment-consumption").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX link-state regression")
+@pytest.mark.parametrize("link_kind", ["symlink", "hardlink"])
+def test_official_selection_claim_rejects_existing_link_state(
+    tmp_path: Path,
+    link_kind: str,
+) -> None:
+    state_root = tmp_path / "private"
+    state_root.mkdir(mode=0o700)
+    ledger = state_root / "assignment-consumption"
+    ledger.mkdir(mode=0o700)
+    assignment_sha256 = "3" * 64
+    selection_sha256 = "2" * 64
+    target = tmp_path / "existing-claim"
+    target.write_text("existing\n", encoding="utf-8")
+    target.chmod(0o600)
+    claim = ledger / f"{assignment_sha256}.json"
+    if link_kind == "symlink":
+        claim.symlink_to(target)
+    else:
+        os.link(target, claim)
+
+    with pytest.raises(RuntimeError, match="assignments were already consumed"):
+        benchmark.claim_official_protocol(
+            state_root=state_root,
+            assignment_sha256=assignment_sha256,
+            protocol_sha256="1" * 64,
+            selection_sha256=selection_sha256,
+            output=tmp_path / "output",
+        )
 
 
 def test_official_campaign_lock_rejects_concurrency_and_releases(
@@ -6365,6 +6917,7 @@ def test_official_campaign_state_is_shared_by_independent_clones(
 
     benchmark.claim_official_protocol(
         state_root=first_root,
+        assignment_sha256="3" * 64,
         protocol_sha256="1" * 64,
         selection_sha256="2" * 64,
         output=tmp_path / "first-clone-output",
@@ -6374,6 +6927,7 @@ def test_official_campaign_state_is_shared_by_independent_clones(
     with pytest.raises(RuntimeError, match="already consumed"):
         benchmark.claim_official_protocol(
             state_root=second_root,
+            assignment_sha256="3" * 64,
             protocol_sha256="1" * 64,
             selection_sha256="2" * 64,
             output=tmp_path / "second-clone-output",
@@ -6488,7 +7042,7 @@ def test_execution_frozen_holdout_authenticates_all_inputs_and_balanced_schedule
     assert len(holdout.schedule.assignments) == 30
     assert sum(row["arms"][0] == "baseline" for row in holdout.schedule.assignments) == 15
     assert sum(row["arms"][0] == "ctx-light" for row in holdout.schedule.assignments) == 15
-    benchmark.validate_holdout_execution_conditions(
+    runtime_identity = benchmark.validate_holdout_execution_conditions(
         holdout,
         model="gpt-5.5",
         timeout=900.0,
@@ -6497,6 +7051,9 @@ def test_execution_frozen_holdout_authenticates_all_inputs_and_balanced_schedule
         retries=0,
         scenario_filters=[],
         codex=sys.executable,
+    )
+    assert runtime_identity["codex_runtime_contract_sha256"] == (
+        benchmark.codex_runtime_contract_sha256(CODEX_RUNTIME_CONTRACT)
     )
     assert (
         holdout.codex_binary_sha256 == hashlib.sha256(Path(sys.executable).read_bytes()).hexdigest()
@@ -6524,6 +7081,80 @@ def test_execution_frozen_holdout_authenticates_all_inputs_and_balanced_schedule
     } | {source.bundle_path for source in holdout.source_bundles.values()}
     assert holdout.origin_url == "https://github.com/stevesolun/ctx.git"
     assert holdout.origin_main_revision == "a" * 40
+
+
+def test_execution_frozen_holdout_rejects_selection_repository_map_replay(
+    tmp_path: Path,
+) -> None:
+    holdout_root = tmp_path / "holdout"
+    holdout_root.mkdir()
+    holdout, paths = _official_holdout_fixture(holdout_root)
+    state_root = tmp_path / "private-state"
+    benchmark.claim_official_protocol(
+        state_root=state_root,
+        assignment_sha256=holdout.assignment_sha256,
+        protocol_sha256=holdout.protocol_sha256,
+        selection_sha256=holdout.selection_sha256,
+        output=tmp_path / "first-output",
+    )
+
+    selection = json.loads(paths["selection"].read_text())
+    first_id = selection["analysis_instance_ids"][0]
+    selection["analysis_repository_map"][first_id] = "https://github.com/owner/forged.git"
+    paths["selection"].write_text(
+        json.dumps(selection, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    forged_selection_sha256 = hashlib.sha256(paths["selection"].read_bytes()).hexdigest()
+    forged_assignment_sha256 = benchmark.official_assignment_sha256(selection)
+    assert forged_assignment_sha256 != holdout.assignment_sha256
+
+    linked_inputs = (
+        ("reconstructed", "reconstructed_test_attestation_sha256"),
+        ("controls", "control_results_sha256"),
+    )
+    for name, _field in linked_inputs:
+        document = json.loads(paths[name].read_text())
+        document["selection_sha256"] = forged_selection_sha256
+        paths[name].write_text(
+            json.dumps(document, sort_keys=True, separators=(",", ":")),
+            encoding="utf-8",
+        )
+    protocol = json.loads(paths["protocol"].read_text())
+    protocol["execution_inputs"]["selection_output_sha256"] = forged_selection_sha256
+    for name, field in linked_inputs:
+        protocol["execution_inputs"][field] = hashlib.sha256(paths[name].read_bytes()).hexdigest()
+    paths["protocol"].write_text(
+        json.dumps(protocol, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="selection does not match the scenario pack"):
+        benchmark.load_execution_frozen_holdout(
+            protocol_path=paths["protocol"],
+            expected_protocol_sha256=hashlib.sha256(paths["protocol"].read_bytes()).hexdigest(),
+            selection_path=paths["selection"],
+            scenario_pack_path=paths["scenario_pack"],
+            collision_path=paths["collision"],
+            reconstructed_path=paths["reconstructed"],
+            control_results_path=paths["controls"],
+            environment_path=paths["environment"],
+            schedule_path=paths["schedule"],
+            source_map_path=paths["source_map"],
+        )
+
+    assert len(list((state_root / "assignment-consumption").glob("*.json"))) == 1
+    assert not (state_root / "assignment-consumption" / f"{forged_assignment_sha256}.json").exists()
+
+
+def test_official_catalog_requires_the_frozen_cold_cache_contract(tmp_path: Path) -> None:
+    holdout, _ = _official_holdout_fixture(tmp_path)
+    cold = benchmark.CatalogSnapshot(tmp_path / "cold", {}, cache_hit=False)
+    warm = benchmark.CatalogSnapshot(tmp_path / "warm", {}, cache_hit=True)
+
+    benchmark.validate_official_catalog_cache_contract(holdout, cold)
+    with pytest.raises(ValueError, match="cold catalog cache"):
+        benchmark.validate_official_catalog_cache_contract(holdout, warm)
 
 
 def test_execution_frozen_holdout_loads_from_documented_module_mode(
@@ -6657,6 +7288,40 @@ def test_execution_frozen_holdout_requires_python_dependency_identity(
             source_map_path=paths["source_map"],
         )
     assert holdout.execution_conditions["python"]["dependencies_sha256"]
+
+
+def test_execution_frozen_holdout_rejects_authenticated_runtime_arm_mismatch(
+    tmp_path: Path,
+) -> None:
+    _, paths = _official_holdout_fixture(tmp_path)
+    environment = json.loads(paths["environment"].read_text())
+    environment["codex"]["runtime_contract"]["arms"] = ["ctx-light", "baseline"]
+    paths["environment"].write_text(
+        json.dumps(environment, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    protocol = json.loads(paths["protocol"].read_text())
+    protocol["execution_inputs"]["execution_environment_sha256"] = hashlib.sha256(
+        paths["environment"].read_bytes()
+    ).hexdigest()
+    paths["protocol"].write_text(
+        json.dumps(protocol, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="runtime contract is invalid"):
+        benchmark.load_execution_frozen_holdout(
+            protocol_path=paths["protocol"],
+            expected_protocol_sha256=hashlib.sha256(paths["protocol"].read_bytes()).hexdigest(),
+            selection_path=paths["selection"],
+            scenario_pack_path=paths["scenario_pack"],
+            collision_path=paths["collision"],
+            reconstructed_path=paths["reconstructed"],
+            control_results_path=paths["controls"],
+            environment_path=paths["environment"],
+            schedule_path=paths["schedule"],
+            source_map_path=paths["source_map"],
+        )
 
 
 def test_python_dependency_identity_is_canonical_and_fail_closed(
@@ -6862,6 +7527,9 @@ def _official_result_rows(
     rows: list[dict[str, Any]] = []
     runtime_identity = {
         "codex_binary_sha256": holdout.codex_binary_sha256,
+        "codex_runtime_contract_sha256": benchmark.codex_runtime_contract_sha256(
+            CODEX_RUNTIME_CONTRACT
+        ),
         "codex_version": "test",
         "provider": "openai",
         "provider_config_sha256": holdout.provider_config_sha256,
@@ -6877,6 +7545,7 @@ def _official_result_rows(
                         "agent_timeout_seconds": 900.0,
                         "arm": arm,
                         "cached_input_tokens": 20,
+                        "catalog_cache_hit": False,
                         "context_delivery_verified": arm == "ctx-light",
                         "delivered_prompt_sha256": "b" * 64,
                         "development_seconds": 10.0,
@@ -6892,6 +7561,9 @@ def _official_result_rows(
                         "frozen_scenario_sha256": holdout.scenario_sha256[scenario.id],
                         "frozen_schedule_sha256": holdout.schedule.sha256,
                         "frozen_codex_binary_sha256": holdout.codex_binary_sha256,
+                        "codex_runtime_contract_sha256": (
+                            benchmark.codex_runtime_contract_sha256(CODEX_RUNTIME_CONTRACT)
+                        ),
                         "frozen_provider": "openai",
                         "frozen_provider_config_sha256": holdout.provider_config_sha256,
                         "harness_total_seconds": 12.0,
@@ -7153,6 +7825,9 @@ def test_authenticated_freeze_drives_all_thirty_pairs_and_sixty_arms(
         assert official_runtime.docker_cli == tmp_path / "docker"
         assert official_runtime.docker_host == "unix:///private/docker.sock"
         assert runtime_identity_before_arm["codex_binary_sha256"] == holdout.codex_binary_sha256
+        assert runtime_identity_before_arm["codex_runtime_contract_sha256"] == (
+            benchmark.codex_runtime_contract_sha256(CODEX_RUNTIME_CONTRACT)
+        )
         assert runtime_identity_before_arm["provider_config_sha256"] == (
             holdout.provider_config_sha256
         )
@@ -7242,9 +7917,20 @@ def test_authenticated_freeze_drives_all_thirty_pairs_and_sixty_arms(
     assert report["product_benefit_verdict"] == "not_beneficial"
     public_summary = json.loads((output / "public-summary.json").read_text())
     assert public_summary["benefit_verdict"] == "not_beneficial"
-    assert public_summary["official_repository_claim"] == report["official_repository_claim"]
+    assert public_summary["quality_gate"] == {
+        "criterion": "all assigned arm outcomes observed and passed",
+        "label": "observed quality preservation",
+        "passed": True,
+    }
+    expected_public_claim = dict(report["official_repository_claim"])
+    expected_public_claim["observed_quality_preservation"] = expected_public_claim.pop(
+        "quality_preserved"
+    )
+    assert public_summary["official_repository_claim"] == expected_public_claim
     assert list(csv.DictReader((output / "incidents.csv").open())) == []
     assert not (state_root / "runtime-guard" / "campaign.lock").exists()
+    assert (state_root / "assignment-consumption" / f"{holdout.assignment_sha256}.json").is_file()
+    assert (state_root / "selection-consumption" / f"{holdout.selection_sha256}.json").is_file()
     assert (state_root / "protocol-consumption" / f"{holdout.protocol_sha256}.json").is_file()
 
 
@@ -7271,6 +7957,11 @@ def test_confirmatory_dual_model_failure_is_valid_honest_negative(
     assert report["product_benefit_verdict"] == "not_beneficial"
     assert report["official_repository_claim"]["quality_preserved"] is False
     assert report["official_repository_claim"]["passed"] is False
+    public_summary = benchmark.build_public_holdout_summary(rows, report, holdout)
+    assert public_summary["quality_gate"]["passed"] is False
+    assert public_summary["quality_gate"]["label"] == "observed quality preservation"
+    assert public_summary["official_repository_claim"]["observed_quality_preservation"] is False
+    assert "non-inferiority" not in json.dumps(public_summary).lower()
     expected = {
         (scenario.id, arm, trial)
         for scenario in holdout.scenarios

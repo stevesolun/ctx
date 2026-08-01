@@ -64,6 +64,15 @@ INCIDENT_FIELDS = (
 INCIDENT_FAILURE_CLASSES = frozenset({"harness", "evaluator", "model", "baseline", "ctx"})
 PROCESS_MARKER = "CTX_BENCHMARK_PROCESS_TOKEN"
 TREATMENT_ARMS = ("baseline", "ctx-light", "ctx-full")
+OFFICIAL_TREATMENT_ARMS = ("baseline", "ctx-light")
+CODEX_REASONING_EFFORTS = frozenset({"minimal", "low", "medium", "high", "xhigh"})
+CODEX_RUNTIME_CONTRACT_KEYS = frozenset(
+    {
+        "arms",
+        "model_auto_compact_token_limit",
+        "model_reasoning_effort",
+    }
+)
 PRODUCTION_CATALOG_ENGINE = "codex-production-catalog"
 BENCHMARK_ENGINES = ("codex-controlled", "production-ctx-run", PRODUCTION_CATALOG_ENGINE)
 PRODUCTION_CATALOG_ARCHIVE = ROOT / "graph" / "wiki-graph-runtime.tar.gz"
@@ -266,6 +275,7 @@ class ExecutionFrozenHoldout:
     selection_path: Path
     selection_bytes: bytes
     selection_sha256: str
+    assignment_sha256: str
     collision_path: Path
     collision_bytes: bytes
     collision_sha256: str
@@ -566,6 +576,35 @@ def _require_sha256(value: object, *, field: str) -> str:
     return digest
 
 
+def normalize_codex_runtime_contract(value: object) -> dict[str, Any]:
+    """Return the one canonical Codex contract shared by both official arms."""
+    if not isinstance(value, Mapping) or set(value) != CODEX_RUNTIME_CONTRACT_KEYS:
+        raise ValueError("Codex runtime contract has an unsupported shape")
+    arms = value.get("arms")
+    reasoning_effort = value.get("model_reasoning_effort")
+    auto_compact_token_limit = value.get("model_auto_compact_token_limit")
+    if arms != list(OFFICIAL_TREATMENT_ARMS):
+        raise ValueError("Codex runtime contract arm mismatch")
+    if reasoning_effort not in CODEX_REASONING_EFFORTS:
+        raise ValueError("Codex runtime contract reasoning effort is unsupported")
+    if (
+        not isinstance(auto_compact_token_limit, int)
+        or isinstance(auto_compact_token_limit, bool)
+        or not 0 < auto_compact_token_limit <= 2**63 - 1
+    ):
+        raise ValueError("Codex runtime contract auto-compaction limit is invalid")
+    return {
+        "arms": list(OFFICIAL_TREATMENT_ARMS),
+        "model_auto_compact_token_limit": auto_compact_token_limit,
+        "model_reasoning_effort": reasoning_effort,
+    }
+
+
+def codex_runtime_contract_sha256(value: object) -> str:
+    normalized = normalize_codex_runtime_contract(value)
+    return _sha256_bytes(_canonical_json_bytes(normalized))
+
+
 def codex_provider_config_sha256(provider: str) -> str:
     auth_path = Path(ORIGINAL_CODEX_HOME) / "auth.json"
     auth_sha256 = (
@@ -780,6 +819,41 @@ def _scenario_rows_and_hashes(
         scenario.id: _sha256_bytes(_canonical_json_bytes(row_by_id[scenario.id]))
         for scenario in scenarios
     }
+
+
+def official_assignment_sha256(selection: Mapping[str, Any]) -> str:
+    """Return a privacy-safe, order-independent identity for frozen assignments."""
+    analysis_ids = selection.get("analysis_instance_ids")
+    repository_map = selection.get("analysis_repository_map")
+    canary_id = selection.get("canary_instance_id")
+    canary_repository = selection.get("canary_repository")
+    if (
+        not isinstance(analysis_ids, list)
+        or not analysis_ids
+        or not all(isinstance(value, str) and value for value in analysis_ids)
+        or len(set(analysis_ids)) != len(analysis_ids)
+        or not isinstance(repository_map, Mapping)
+        or set(repository_map) != set(analysis_ids)
+        or not all(
+            isinstance(key, str) and isinstance(value, str) and value
+            for key, value in repository_map.items()
+        )
+        or ((canary_id is None) != (canary_repository is None))
+        or (canary_id is not None and (not isinstance(canary_id, str) or not canary_id))
+        or (
+            canary_repository is not None
+            and (not isinstance(canary_repository, str) or not canary_repository)
+        )
+    ):
+        raise ValueError("official assignment identity is invalid")
+    payload = {
+        "analysis_assignments": sorted(
+            [[instance_id, str(repository_map[instance_id])] for instance_id in analysis_ids]
+        ),
+        "canary_assignment": ([canary_id, canary_repository] if canary_id is not None else None),
+        "schema": "official-assignment-identity-v1",
+    }
+    return _sha256_bytes(_canonical_json_bytes(payload))
 
 
 def _validated_official_controls(
@@ -1198,16 +1272,23 @@ def load_execution_frozen_holdout(
     selection_document = _strict_json_object(selection_bytes, label="private selection")
     scenario_document = _strict_json_object(scenario_bytes, label="private scenario pack")
     scenarios, scenario_sha256 = _scenario_rows_and_hashes(scenario_document)
+    try:
+        selected_ids, repository_map = freezer._validated_selection(
+            selection_document,
+            acquisition_protocol,
+        )
+    except freezer.FreezeError as exc:
+        raise ValueError("private selection does not match the scenario pack") from exc
     source_bundles = _validated_official_source_map(
         source_map_bytes,
         source_map_path=source_map_path,
         scenarios=scenarios,
     )
-    selected_ids = selection_document.get("analysis_instance_ids")
-    if not isinstance(selected_ids, list) or selected_ids != [
-        scenario.id for scenario in scenarios
-    ]:
+    if selected_ids != [scenario.id for scenario in scenarios]:
         raise ValueError("private selection does not match the scenario pack order")
+    if repository_map != {scenario.id: scenario.repo_url for scenario in scenarios}:
+        raise ValueError("private selection does not match the scenario pack repositories")
+    assignment_sha256 = official_assignment_sha256(selection_document)
     collision_document = _strict_json_object(
         collision_bytes,
         label="private collision attestation",
@@ -1283,6 +1364,12 @@ def load_execution_frozen_holdout(
     limits = environment.get("limits")
     codex_identity = environment.get("codex")
     python_identity = environment.get("python")
+    try:
+        codex_runtime_contract = normalize_codex_runtime_contract(
+            codex_identity.get("runtime_contract") if isinstance(codex_identity, Mapping) else None
+        )
+    except ValueError as exc:
+        raise ValueError("private Codex runtime contract is invalid") from exc
     if (
         environment.get("schema_version") != 1
         or environment.get("protocol_id") != protocol_id
@@ -1300,6 +1387,7 @@ def load_execution_frozen_holdout(
         != {
             "agent_timeout_seconds",
             "arms",
+            "catalog_cache_hit",
             "measured_concurrency",
             "pair_count",
             "retries",
@@ -1308,8 +1396,9 @@ def load_execution_frozen_holdout(
             "trials_per_scenario",
         }
         or not isinstance(codex_identity, dict)
-        or set(codex_identity) != {"version"}
+        or set(codex_identity) != {"runtime_contract", "version"}
         or not isinstance(codex_identity.get("version"), str)
+        or codex_identity.get("runtime_contract") != codex_runtime_contract
         or not isinstance(python_identity, dict)
         or set(python_identity) != {"dependencies_sha256", "executable_sha256", "version"}
     ):
@@ -1334,6 +1423,7 @@ def load_execution_frozen_holdout(
         selection_path=selection_path,
         selection_bytes=selection_bytes,
         selection_sha256=selection_sha256,
+        assignment_sha256=assignment_sha256,
         scenario_pack_path=scenario_pack_path,
         scenario_pack_bytes=scenario_bytes,
         scenario_pack_sha256=scenario_pack_sha256,
@@ -1391,6 +1481,7 @@ def validate_holdout_execution_conditions(
     expected_limits = {
         "agent_timeout_seconds": timeout,
         "arms": list(arms),
+        "catalog_cache_hit": False,
         "trials_per_scenario": trials,
         "retries": retries,
         "task_count": len(holdout.scenarios),
@@ -1418,6 +1509,10 @@ def validate_holdout_execution_conditions(
     provider = environment.get("provider")
     provider_config_sha256 = codex_provider_config_sha256(str(provider))
     codex_version = _command_version([str(codex_path), "--version"])
+    codex_runtime_contract = normalize_codex_runtime_contract(
+        codex_identity.get("runtime_contract") if isinstance(codex_identity, Mapping) else None
+    )
+    runtime_contract_sha256 = codex_runtime_contract_sha256(codex_runtime_contract)
     if (
         environment.get("schema_version") != 1
         or environment.get("protocol_id") != holdout.protocol_id
@@ -1444,6 +1539,7 @@ def validate_holdout_execution_conditions(
         raise ValueError("official confirmatory execution requires all 30 frozen pairs, no retries")
     return {
         "codex_binary_sha256": codex_sha256,
+        "codex_runtime_contract_sha256": runtime_contract_sha256,
         "codex_version": codex_version,
         "provider": str(provider),
         "provider_config_sha256": provider_config_sha256,
@@ -2567,6 +2663,7 @@ def prepare_production_catalog(
     catalog_root.mkdir(parents=True, exist_ok=True)
     staging = catalog_root / f".{cache_key}.{os.getpid()}.{secrets.token_hex(4)}"
     staging.mkdir()
+    cache_hit = False
     try:
         claude_dir = staging / ".claude"
         if _install_shipped_catalog(claude_dir, archive=archive):
@@ -2585,6 +2682,7 @@ def prepare_production_catalog(
         try:
             staging.rename(snapshot_root)
         except FileExistsError:
+            cache_hit = True
             _remove_catalog_staging(staging)
         snapshot = _load_catalog_snapshot(
             snapshot_root,
@@ -2594,13 +2692,26 @@ def prepare_production_catalog(
         return CatalogSnapshot(
             wiki_dir=snapshot.wiki_dir,
             provenance=snapshot.provenance,
-            cache_hit=False,
+            cache_hit=cache_hit,
             prepare_seconds=time.perf_counter() - started,
         )
     except BaseException:
         if staging.exists():
             _remove_catalog_staging(staging)
         raise
+
+
+def validate_official_catalog_cache_contract(
+    holdout: ExecutionFrozenHoldout,
+    snapshot: CatalogSnapshot,
+) -> None:
+    limits = holdout.execution_conditions.get("limits")
+    if (
+        not isinstance(limits, Mapping)
+        or limits.get("catalog_cache_hit") is not False
+        or snapshot.cache_hit is not False
+    ):
+        raise ValueError("official execution requires the frozen cold catalog cache contract")
 
 
 def bind_catalog_snapshot(home: Path, snapshot: CatalogSnapshot) -> Path:
@@ -4242,6 +4353,7 @@ def codex_command(
     agent_home: Path | None = None,
     isolate_evaluator: bool = False,
     provider: str = "openai",
+    runtime_contract: Mapping[str, Any] | None = None,
 ) -> list[str]:
     if provider != "openai":
         raise ValueError("production Codex benchmark supports only the frozen OpenAI provider")
@@ -4256,6 +4368,18 @@ def codex_command(
         "-c",
         f"model_provider={json.dumps(provider)}",
     ]
+    if runtime_contract is not None:
+        normalized_contract = normalize_codex_runtime_contract(runtime_contract)
+        command.extend(
+            [
+                "-c",
+                "model_reasoning_effort="
+                f"{json.dumps(normalized_contract['model_reasoning_effort'])}",
+                "-c",
+                "model_auto_compact_token_limit="
+                f"{normalized_contract['model_auto_compact_token_limit']}",
+            ]
+        )
     if with_ctx:
         command.extend(mcp_config(sys.executable))
     command.extend(
@@ -5608,22 +5732,67 @@ def python_dependencies_sha256(python_executable: str | Path) -> str:
     return _sha256_bytes(canonical_python_dependencies_bytes(result.stdout))
 
 
-def _ensure_owner_only_directory(path: Path, *, label: str) -> Path:
-    if path.is_symlink():
-        raise RuntimeError(f"{label} must not be a symlink")
-    created = False
+def _fsync_directory(path: Path) -> None:
+    if os.name == "nt":
+        return
+    if not hasattr(os, "O_DIRECTORY") or not hasattr(os, "O_NOFOLLOW"):
+        raise RuntimeError("durable official campaign state is unavailable")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+    descriptor = os.open(path, flags)
     try:
-        path.mkdir(mode=stat.S_IRWXU, parents=True, exist_ok=False)
-        created = True
-    except FileExistsError:
-        pass
+        if not stat.S_ISDIR(os.fstat(descriptor).st_mode):
+            raise RuntimeError("official campaign state path is not a directory")
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _ensure_owner_only_directory(path: Path, *, label: str) -> Path:
+    missing: list[Path] = []
+    cursor = path
+    while not cursor.exists():
+        if cursor.is_symlink():
+            raise RuntimeError(f"{label} must not traverse a symlink")
+        missing.append(cursor)
+        parent = cursor.parent
+        if parent == cursor:
+            raise RuntimeError(f"{label} has no existing parent directory")
+        cursor = parent
+    if cursor.is_symlink():
+        raise RuntimeError(f"{label} must not traverse a symlink")
+    if not cursor.is_dir():
+        raise RuntimeError(f"{label} must have an existing directory ancestor")
+    resolved_anchor = cursor.resolve(strict=True)
+    _fsync_directory(resolved_anchor)
+    _fsync_directory(resolved_anchor.parent)
+
+    for directory in reversed(missing):
+        created = False
+        try:
+            directory.mkdir(mode=stat.S_IRWXU, exist_ok=False)
+            created = True
+        except FileExistsError:
+            pass
+        if directory.is_symlink() or not directory.is_dir():
+            raise RuntimeError(f"{label} must be a directory")
+        if created:
+            directory.chmod(stat.S_IRWXU)
+        if os.name != "nt" and stat.S_IMODE(directory.stat().st_mode) & (
+            stat.S_IRWXG | stat.S_IRWXO
+        ):
+            raise RuntimeError(f"{label} must be owner-only")
+        resolved_directory = directory.resolve(strict=True)
+        _fsync_directory(resolved_directory)
+        _fsync_directory(resolved_directory.parent)
+
     if path.is_symlink() or not path.is_dir():
         raise RuntimeError(f"{label} must be a directory")
-    if created:
-        path.chmod(stat.S_IRWXU)
     if os.name != "nt" and stat.S_IMODE(path.stat().st_mode) & (stat.S_IRWXG | stat.S_IRWXO):
         raise RuntimeError(f"{label} must be owner-only")
-    return path.resolve(strict=True)
+    resolved = path.resolve(strict=True)
+    _fsync_directory(resolved)
+    _fsync_directory(resolved.parent)
+    return resolved
 
 
 def _official_campaign_state_root(*, repository_url: str | None = None) -> Path:
@@ -5664,6 +5833,7 @@ def _write_exclusive_owner_file(path: Path, payload: Mapping[str, Any]) -> None:
     finally:
         if descriptor >= 0:
             os.close(descriptor)
+    _fsync_directory(path.parent)
 
 
 @dataclass
@@ -5728,10 +5898,15 @@ class OfficialCampaignLock:
 def claim_official_protocol(
     *,
     state_root: Path,
+    assignment_sha256: str,
     protocol_sha256: str,
     selection_sha256: str,
     output: Path,
 ) -> Path:
+    assignment_sha256 = _require_sha256(
+        assignment_sha256,
+        field="official assignment SHA-256",
+    )
     protocol_sha256 = _require_sha256(
         protocol_sha256,
         field="official execution protocol SHA-256",
@@ -5744,30 +5919,63 @@ def claim_official_protocol(
         state_root,
         label="official campaign private state root",
     )
-    ledger_root = _ensure_owner_only_directory(
-        private_root / "protocol-consumption",
+    assignment_ledger_path = private_root / "assignment-consumption"
+    selection_ledger_path = private_root / "selection-consumption"
+    protocol_ledger_path = private_root / "protocol-consumption"
+    if not assignment_ledger_path.exists() and (
+        selection_ledger_path.exists() or protocol_ledger_path.exists()
+    ):
+        raise RuntimeError(
+            "legacy official consumption state lacks assignment identities and requires "
+            "manual audit"
+        )
+    assignment_ledger_root = _ensure_owner_only_directory(
+        assignment_ledger_path,
+        label="official assignment-consumption ledger",
+    )
+    selection_ledger_root = _ensure_owner_only_directory(
+        selection_ledger_path,
+        label="official selection-consumption ledger",
+    )
+    protocol_ledger_root = _ensure_owner_only_directory(
+        protocol_ledger_path,
         label="official protocol-consumption ledger",
     )
-    claim_path = ledger_root / f"{protocol_sha256}.json"
+    payload = {
+        "assignment_sha256": assignment_sha256,
+        "claimed_at": datetime.now(UTC).isoformat(),
+        "hostname": socket.gethostname(),
+        "output": str(output.resolve()),
+        "pid": os.getpid(),
+        "protocol_sha256": protocol_sha256,
+        "schema_version": 1,
+        "selection_sha256": selection_sha256,
+    }
+    assignment_claim_path = assignment_ledger_root / f"{assignment_sha256}.json"
     try:
-        _write_exclusive_owner_file(
-            claim_path,
-            {
-                "claimed_at": datetime.now(UTC).isoformat(),
-                "hostname": socket.gethostname(),
-                "output": str(output.resolve()),
-                "pid": os.getpid(),
-                "protocol_sha256": protocol_sha256,
-                "schema_version": 1,
-                "selection_sha256": selection_sha256,
-            },
-        )
+        _write_exclusive_owner_file(assignment_claim_path, payload)
     except FileExistsError as exc:
         raise RuntimeError(
-            "official execution protocol was already consumed; a different output path "
-            "cannot reuse a measured selection"
+            "official assignments were already consumed; reordered selection bytes, a "
+            "different execution protocol, or a different output path cannot reuse them"
         ) from exc
-    return claim_path
+    selection_claim_path = selection_ledger_root / f"{selection_sha256}.json"
+    try:
+        _write_exclusive_owner_file(selection_claim_path, payload)
+    except FileExistsError as exc:
+        raise RuntimeError(
+            "official selection was already consumed; a different execution protocol or "
+            "output path cannot reuse measured assignments"
+        ) from exc
+    protocol_claim_path = protocol_ledger_root / f"{protocol_sha256}.json"
+    try:
+        _write_exclusive_owner_file(protocol_claim_path, payload)
+    except FileExistsError as exc:
+        raise RuntimeError(
+            "official execution protocol was already consumed; the newly claimed selection "
+            "remains consumed so the campaign fails closed"
+        ) from exc
+    return assignment_claim_path
 
 
 def collect_official_repository_identity() -> dict[str, str]:
@@ -6260,6 +6468,8 @@ def run_trial(
         raise ValueError("official execution requires one authenticated source bundle")
     if official_evaluator and not production_catalog:
         raise ValueError("official holdout verification requires the production catalog treatment")
+    if official_evaluator and arm != treatment_level:
+        raise ValueError("official benchmark arm does not match its treatment level")
     engine_name = PRODUCTION_CATALOG_ENGINE if production_catalog else "codex-controlled"
     ctx_enabled = treatment_level != "baseline"
     full_treatment = treatment_level == "ctx-full"
@@ -6273,6 +6483,19 @@ def run_trial(
         raise ValueError("catalog setup may be charged only to a CTX treatment arm")
     if official_evaluator and runtime_identity_before_arm is None:
         raise ValueError("official execution requires a pre-arm runtime identity")
+    codex_runtime_contract: dict[str, Any] | None = None
+    codex_runtime_contract_digest: str | None = None
+    if official_holdout is not None:
+        codex_runtime_contract = normalize_codex_runtime_contract(
+            official_holdout.execution_conditions["codex"]["runtime_contract"]
+        )
+        codex_runtime_contract_digest = codex_runtime_contract_sha256(codex_runtime_contract)
+        if (
+            runtime_identity_before_arm is None
+            or runtime_identity_before_arm.get("codex_runtime_contract_sha256")
+            != codex_runtime_contract_digest
+        ):
+            raise ValueError("pre-arm Codex runtime contract authentication failed")
     controlled_context_types = {
         str(item.get("type")) for item in scenario.context if isinstance(item, dict)
     }
@@ -6598,6 +6821,7 @@ def run_trial(
                 if official_holdout is not None
                 else "openai"
             ),
+            runtime_contract=codex_runtime_contract,
         )
         (run_dir / "command.json").write_text(
             json.dumps(
@@ -7192,6 +7416,7 @@ def run_trial(
             "frozen_codex_binary_sha256": (
                 official_holdout.codex_binary_sha256 if official_holdout is not None else None
             ),
+            "codex_runtime_contract_sha256": codex_runtime_contract_digest,
             "frozen_provider_config_sha256": (
                 official_holdout.provider_config_sha256 if official_holdout is not None else None
             ),
@@ -7499,6 +7724,7 @@ def build_performance_report(
             "holdout_control_results_sha256",
             "holdout_environment_sha256",
             "frozen_codex_binary_sha256",
+            "codex_runtime_contract_sha256",
             "frozen_provider_config_sha256",
             "frozen_provider",
             "runtime_identity_before_arm",
@@ -7506,9 +7732,14 @@ def build_performance_report(
             "runtime_identity_verified_before_arm",
             "holdout_inputs_match_start_at_end",
         )
-        return all(
-            baseline_row.get(field) is not None and baseline_row.get(field) == ctx_row.get(field)
-            for field in fields
+        return (
+            baseline_row.get("catalog_cache_hit") is False
+            and ctx_row.get("catalog_cache_hit") is False
+            and all(
+                baseline_row.get(field) is not None
+                and baseline_row.get(field) == ctx_row.get(field)
+                for field in fields
+            )
         )
 
     pairs: list[dict[str, Any]] = []
@@ -8318,6 +8549,13 @@ def build_public_holdout_summary(
         )
         for field in activity_fields
     }
+    official_repository_claim = performance.get("official_repository_claim")
+    if isinstance(official_repository_claim, Mapping):
+        official_repository_claim = dict(official_repository_claim)
+        if "quality_preserved" in official_repository_claim:
+            official_repository_claim["observed_quality_preservation"] = (
+                official_repository_claim.pop("quality_preserved")
+            )
     return {
         "schema_version": 1,
         "protocol_id": holdout.protocol_id,
@@ -8329,10 +8567,14 @@ def build_public_holdout_summary(
         "execution_complete_pair_count": performance.get("execution_complete_pair_count"),
         "quality_complete_pair_count": performance.get("quality_complete_pair_count"),
         "experiment_valid": performance.get("experiment_valid"),
-        "quality_preserved": performance.get("quality_preserved"),
+        "quality_gate": {
+            "label": "observed quality preservation",
+            "criterion": "all assigned arm outcomes observed and passed",
+            "passed": performance.get("quality_preserved"),
+        },
         "benefit_verdict": performance.get("benefit_verdict"),
         "product_benefit_verdict": performance.get("product_benefit_verdict"),
-        "official_repository_claim": performance.get("official_repository_claim"),
+        "official_repository_claim": official_repository_claim,
         "median_development_time_ratio": performance.get("median_time_ratio"),
         "median_uncached_token_ratio": performance.get("median_uncached_token_ratio"),
         "arms": arm_summary,
@@ -8717,6 +8959,8 @@ def _run_main(
     if args.engine == PRODUCTION_CATALOG_ENGINE:
         try:
             catalog_snapshot = prepare_production_catalog(args.cache_root)
+            if official_holdout is not None:
+                validate_official_catalog_cache_contract(official_holdout, catalog_snapshot)
             assert independence_attestation is not None
             verify_scenario_independence_attestation(
                 independence_attestation,
@@ -8952,6 +9196,7 @@ def _run_main(
                                 try:
                                     claim_official_protocol(
                                         state_root=official_state_root,
+                                        assignment_sha256=official_holdout.assignment_sha256,
                                         protocol_sha256=official_holdout.protocol_sha256,
                                         selection_sha256=official_holdout.selection_sha256,
                                         output=output,

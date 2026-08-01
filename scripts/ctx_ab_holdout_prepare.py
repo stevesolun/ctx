@@ -589,7 +589,6 @@ def _verifier_snapshot(
         swebench_python,
         label="SWE-bench Python",
         executable=True,
-        allow_symlink_to_file=True,
     )
     docker_path, docker_bytes = _read_regular_bytes(
         docker_cli,
@@ -601,6 +600,13 @@ def _verifier_snapshot(
     environment_sha256 = _python_environment_sha256(python_path)
     package_sha256 = _docker_package_sha256(python_path)
     daemon_id, server_version = _docker_identity(docker_path, docker_host)
+    python_path_after, python_bytes_after = _read_regular_bytes(
+        swebench_python,
+        label="SWE-bench Python",
+        executable=True,
+    )
+    if python_path_after != python_path or python_bytes_after != python_bytes:
+        raise PrepareError("SWE-bench Python changed during authentication")
     return {
         "bridge_sha256": bridge_sha256,
         "docker_cli_sha256": _sha256(docker_bytes),
@@ -645,7 +651,6 @@ def _probe_execution_python(path: Path) -> PythonIdentity:
         path,
         label="execution Python",
         executable=True,
-        allow_symlink_to_file=True,
     )
     version = _single_line(
         _command_bytes(
@@ -666,7 +671,6 @@ def _probe_execution_python(path: Path) -> PythonIdentity:
         path,
         label="execution Python",
         executable=True,
-        allow_symlink_to_file=True,
     )
     if resolved_after != resolved or before != after:
         raise PrepareError("execution Python identity changed during authentication")
@@ -1526,6 +1530,8 @@ def write_environment(
     expected_acquisition_protocol_sha256: str,
     output_path: Path,
     model: str,
+    model_reasoning_effort: str,
+    model_auto_compact_token_limit: int,
     provider: str,
     agent_timeout_seconds: float,
     codex_path: Path,
@@ -1548,6 +1554,16 @@ def write_environment(
         or not 0 < agent_timeout_seconds <= 3600
     ):
         raise PrepareError("execution environment arguments are invalid")
+    try:
+        codex_runtime_contract = benchmark.normalize_codex_runtime_contract(
+            {
+                "arms": list(benchmark.OFFICIAL_TREATMENT_ARMS),
+                "model_auto_compact_token_limit": model_auto_compact_token_limit,
+                "model_reasoning_effort": model_reasoning_effort,
+            }
+        )
+    except ValueError as exc:
+        raise PrepareError("Codex runtime contract arguments are invalid") from exc
     state = _repository_state(root)
     protocol_file = _resolved_path(protocol_path)
     _require_private_repository_location(output_path, root=state.root)
@@ -1590,7 +1606,10 @@ def write_environment(
         else agent_timeout_seconds
     )
     environment = {
-        "codex": {"version": codex.version},
+        "codex": {
+            "runtime_contract": codex_runtime_contract,
+            "version": codex.version,
+        },
         "evaluator": {
             "backend": benchmark.OFFICIAL_HOLDOUT_BACKEND,
             "pins_sha256": _sha256(_canonical_bytes(verifier)),
@@ -1598,6 +1617,7 @@ def write_environment(
         "limits": {
             "agent_timeout_seconds": timeout,
             "arms": ["baseline", "ctx-light"],
+            "catalog_cache_hit": False,
             "measured_concurrency": 1,
             "pair_count": PAIR_COUNT,
             "retries": 0,
@@ -1680,6 +1700,16 @@ def main(argv: list[str] | None = None) -> int:
     environment_parser.add_argument("--expected-acquisition-protocol-sha256", required=True)
     environment_parser.add_argument("--output", type=Path, required=True)
     environment_parser.add_argument("--model", required=True)
+    environment_parser.add_argument(
+        "--model-reasoning-effort",
+        choices=sorted(benchmark.CODEX_REASONING_EFFORTS),
+        required=True,
+    )
+    environment_parser.add_argument(
+        "--model-auto-compact-token-limit",
+        type=int,
+        required=True,
+    )
     environment_parser.add_argument("--provider", choices=[PROVIDER], default=PROVIDER)
     environment_parser.add_argument("--agent-timeout-seconds", type=float, default=900)
     environment_parser.add_argument("--codex", type=Path, required=True)
@@ -1722,6 +1752,8 @@ def main(argv: list[str] | None = None) -> int:
                 expected_acquisition_protocol_sha256=(args.expected_acquisition_protocol_sha256),
                 output_path=args.output,
                 model=args.model,
+                model_reasoning_effort=args.model_reasoning_effort,
+                model_auto_compact_token_limit=args.model_auto_compact_token_limit,
                 provider=args.provider,
                 agent_timeout_seconds=args.agent_timeout_seconds,
                 codex_path=args.codex,
