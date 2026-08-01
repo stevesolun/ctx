@@ -27,6 +27,7 @@ if str(ROOT) not in sys.path:
 
 from scripts import ctx_ab_benchmark as benchmark  # noqa: E402
 from scripts import ctx_ab_exposure_ledger as exposure_ledger  # noqa: E402
+from scripts import ctx_ab_failure_evidence as failure_evidence  # noqa: E402
 from scripts import ctx_ab_holdout as holdout  # noqa: E402
 from scripts import ctx_ab_holdout_freeze as freezer  # noqa: E402
 from scripts import ctx_ab_swebench as swebench  # noqa: E402
@@ -792,6 +793,7 @@ def materialize(
     runtime_availability_path: Path,
     catalog_archive_path: Path,
     output: Path,
+    failure_evidence_output: Path,
     swebench_checkout: Path,
     swebench_python: Path,
     docker_cli: Path,
@@ -812,6 +814,7 @@ def materialize(
                 "runtime availability": runtime_availability_path,
                 "catalog archive": catalog_archive_path,
                 "output": output,
+                "failure evidence output": failure_evidence_output,
             }
         )
     except freezer.FreezeError as exc:
@@ -890,6 +893,13 @@ def materialize(
     )
     _validate_runtime(runtime)
     _validate_output_destination(output)
+    try:
+        failure_evidence.validate_destination(
+            failure_evidence_output,
+            repository_root=ROOT,
+        )
+    except failure_evidence.FailureEvidenceError as exc:
+        raise MaterializationError("private failure evidence destination is invalid") from exc
 
     scenario_rows: list[dict[str, Any]] = []
     scenarios: list[benchmark.Scenario] = []
@@ -897,9 +907,11 @@ def materialize(
     reconstructed: dict[str, str] = {}
     retained_evidence = Path(tempfile.mkdtemp(prefix=".official-verification-", dir=output.parent))
     os.chmod(retained_evidence, 0o700)
+    preserve_retained_evidence = False
     try:
-        with tempfile.TemporaryDirectory(prefix="ctx-holdout-materialize-") as raw_work:
-            work_root = Path(raw_work)
+        work_root = Path(tempfile.mkdtemp(prefix=".ctx-holdout-materialize-", dir=output.parent))
+        os.chmod(work_root, 0o700)
+        try:
             source_preflight_deadline = time.monotonic() + float(timeout)
             for source_bundle in sources.values():
                 _validate_source_bundle_heads(
@@ -925,6 +937,17 @@ def materialize(
                 scenarios.append(scenario)
                 controls[scenario_id] = control
                 reconstructed[scenario_id] = reconstructed_source
+        except BaseException as exc:
+            try:
+                work_root.rename(retained_evidence / "raw-control-work")
+            except BaseException as capture_exc:
+                exc.add_note(
+                    "raw control worktree publication failed; "
+                    f"staging retained at {work_root} ({type(capture_exc).__name__})"
+                )
+            raise
+        else:
+            shutil.rmtree(work_root)
 
         scenario_pack_bytes = _canonical_bytes({"scenarios": scenario_rows, "version": 1})
         scenario_pack_sha256 = _sha256(scenario_pack_bytes)
@@ -970,8 +993,18 @@ def materialize(
             retained_evidence=retained_evidence,
         )
         return {key: _sha256(value) for key, value in artifacts.items()}
+    except BaseException as exc:
+        preserve_retained_evidence = True
+        failure_evidence.publish_failure(
+            staging=retained_evidence,
+            destination=failure_evidence_output,
+            operation="holdout-materialization",
+            exc=exc,
+            repository_root=ROOT,
+        )
+        raise
     finally:
-        if retained_evidence.exists():
+        if retained_evidence.exists() and not preserve_retained_evidence:
             shutil.rmtree(retained_evidence, ignore_errors=True)
 
 
@@ -986,11 +1019,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--runtime-availability", type=Path, required=True)
     parser.add_argument("--catalog-archive", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--failure-evidence-output", type=Path, required=True)
     parser.add_argument("--swebench-checkout", type=Path, required=True)
     parser.add_argument("--swebench-python", type=Path, required=True)
     parser.add_argument("--docker-cli", type=Path, required=True)
     parser.add_argument("--docker-host", required=True)
     args = parser.parse_args(argv)
+    try:
+        failure_evidence.validate_destination(
+            args.failure_evidence_output,
+            repository_root=ROOT,
+        )
+    except failure_evidence.FailureEvidenceError:
+        parser.exit(2, "materialization precondition failed; evidence=unavailable\n")
     try:
         hashes = materialize(
             protocol_path=args.protocol,
@@ -1002,6 +1043,7 @@ def main(argv: list[str] | None = None) -> int:
             runtime_availability_path=args.runtime_availability,
             catalog_archive_path=args.catalog_archive,
             output=args.output,
+            failure_evidence_output=args.failure_evidence_output,
             swebench_checkout=args.swebench_checkout,
             swebench_python=args.swebench_python,
             docker_cli=args.docker_cli,
@@ -1010,8 +1052,21 @@ def main(argv: list[str] | None = None) -> int:
         controls = _load_json(args.output / OUTPUT_FILES["controls"])
         scenario_count = controls["scenario_count"]
     except (MaterializationError, ValueError, OSError, KeyError) as exc:
+        evidence_status = "preserved"
+        if not failure_evidence.already_preserved(args.failure_evidence_output):
+            try:
+                failure_evidence.publish_failure(
+                    destination=args.failure_evidence_output,
+                    operation="holdout-materialization",
+                    exc=exc,
+                    repository_root=ROOT,
+                )
+            except BaseException:
+                evidence_status = "unavailable"
         parser.exit(
-            2, f"materialization failed; private details suppressed ({type(exc).__name__})\n"
+            2,
+            "materialization failed; private details suppressed "
+            f"({type(exc).__name__}); evidence={evidence_status}\n",
         )
     print(
         f"materialized {scenario_count} private scenarios; "

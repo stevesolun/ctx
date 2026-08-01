@@ -29,6 +29,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts import ctx_ab_benchmark as benchmark  # noqa: E402
+from scripts import ctx_ab_failure_evidence as failure_evidence  # noqa: E402
 from scripts import ctx_ab_holdout as holdout  # noqa: E402
 from scripts import ctx_ab_holdout_freeze as freezer  # noqa: E402
 from scripts import ctx_ab_swebench as swebench  # noqa: E402
@@ -1673,6 +1674,10 @@ def _add_verifier_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--docker-host", required=True)
 
 
+def _add_failure_evidence_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--failure-evidence-output", type=Path, required=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -1684,6 +1689,7 @@ def main(argv: list[str] | None = None) -> int:
     protocol_parser.add_argument("--exposure-ledger", type=Path, required=True)
     protocol_parser.add_argument("--frozen-at", default=_default_timestamp())
     _add_verifier_arguments(protocol_parser)
+    _add_failure_evidence_argument(protocol_parser)
 
     sources_parser = subparsers.add_parser("sources")
     sources_parser.add_argument("--protocol", type=Path, required=True)
@@ -1694,6 +1700,7 @@ def main(argv: list[str] | None = None) -> int:
     sources_parser.add_argument("--cache-root", type=Path, required=True)
     sources_parser.add_argument("--output", type=Path, required=True)
     sources_parser.add_argument("--workers", type=int, choices=range(1, 9), default=4)
+    _add_failure_evidence_argument(sources_parser)
 
     environment_parser = subparsers.add_parser("environment")
     environment_parser.add_argument("--protocol", type=Path, required=True)
@@ -1715,8 +1722,16 @@ def main(argv: list[str] | None = None) -> int:
     environment_parser.add_argument("--codex", type=Path, required=True)
     environment_parser.add_argument("--python", type=Path, default=Path(sys.executable))
     _add_verifier_arguments(environment_parser)
+    _add_failure_evidence_argument(environment_parser)
 
     args = parser.parse_args(argv)
+    try:
+        failure_evidence.validate_destination(
+            args.failure_evidence_output,
+            repository_root=ROOT,
+        )
+    except failure_evidence.FailureEvidenceError:
+        parser.exit(2, "benchmark preparation precondition failed; evidence=unavailable\n")
     try:
         if args.command == "protocol":
             digest = create_protocol(
@@ -1765,7 +1780,20 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(f"prepared execution environment sha256={digest}")
     except Exception as exc:
-        parser.exit(2, f"benchmark preparation failed ({type(exc).__name__})\n")
+        try:
+            failure_evidence.publish_failure(
+                destination=args.failure_evidence_output,
+                operation=f"holdout-prepare-{args.command}",
+                exc=exc,
+                repository_root=ROOT,
+            )
+            evidence_status = "preserved"
+        except BaseException:
+            evidence_status = "unavailable"
+        parser.exit(
+            2,
+            f"benchmark preparation failed ({type(exc).__name__}); evidence={evidence_status}\n",
+        )
     return 0
 
 

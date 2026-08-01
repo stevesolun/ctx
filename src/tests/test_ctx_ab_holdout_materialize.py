@@ -295,6 +295,7 @@ def _run(fixture: Fixture) -> dict[str, str]:
         runtime_availability_path=fixture.runtime,
         catalog_archive_path=fixture.archive,
         output=fixture.output,
+        failure_evidence_output=fixture.output.parent / "materialization-failure-evidence",
         swebench_checkout=fixture.swebench_checkout,
         swebench_python=fixture.swebench_python,
         docker_cli=fixture.docker_cli,
@@ -466,6 +467,7 @@ def test_materializes_ten_official_controls_and_evaluator_bound_attestations(
         "controls",
     }
     assert len(double.calls) == 20
+    assert not (output.parent / "materialization-failure-evidence").exists()
     retained = output / materializer.VERIFICATION_DIR
     if os.name != "nt":
         assert stat.S_IMODE(output.stat().st_mode) == 0o700
@@ -714,6 +716,92 @@ def test_failed_official_control_is_no_go_without_fallback(
     assert not fixture.output.exists()
     assert len(double.calls) == (1 if phase == "red" else 2)
     assert not list(fixture.output.parent.glob(".official-verification-*"))
+    failure_root = fixture.output.parent / "materialization-failure-evidence"
+    failure = json.loads((failure_root / "failure.json").read_text(encoding="utf-8"))
+    assert failure["guard"] == "ctx-ab-private-failure-v1"
+    assert failure["operation"] == "holdout-materialization"
+    assert [item["type"] for item in failure["exception_chain"]] == [
+        "MaterializationError",
+        "SWEbenchVerificationError",
+    ]
+    assert (failure_root / "raw-control-work" / "scenario-0").is_dir()
+    if phase == "green":
+        assert (failure_root / "scenario-000" / "red" / "test_output.txt").is_file()
+    manifest = json.loads((failure_root / "artifact-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["guard"] == "ctx-ab-private-failure-v1"
+    assert manifest["entry_count"] == len(manifest["entries"])
+    assert (
+        manifest["manifest_sha256"] == hashlib.sha256(_canonical(manifest["entries"])).hexdigest()
+    )
+    if os.name != "nt":
+        assert stat.S_IMODE(failure_root.stat().st_mode) == 0o700
+        assert stat.S_IMODE((failure_root / "failure.json").stat().st_mode) == 0o600
+        assert all(
+            path.is_symlink() or path.lstat().st_mode & 0o077 == 0
+            for path in failure_root.rglob("*")
+        )
+
+
+def test_cli_preserves_early_failure_without_printing_private_details(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def fail(**_kwargs: Any) -> dict[str, str]:
+        raise materializer.MaterializationError("private-task-id and private detail")
+
+    monkeypatch.setattr(materializer, "materialize", fail)
+    failure_root = tmp_path / "materialization-failure"
+    argv = [
+        "--protocol",
+        str(tmp_path / "protocol"),
+        "--expected-acquisition-protocol-sha256",
+        "0" * 64,
+        "--exposure-ledger",
+        str(tmp_path / "exposure"),
+        "--rows",
+        str(tmp_path / "rows"),
+        "--selection",
+        str(tmp_path / "selection"),
+        "--source-map",
+        str(tmp_path / "source-map"),
+        "--runtime-availability",
+        str(tmp_path / "runtime"),
+        "--catalog-archive",
+        str(tmp_path / "catalog"),
+        "--output",
+        str(tmp_path / "output"),
+        "--failure-evidence-output",
+        str(failure_root),
+        "--swebench-checkout",
+        str(tmp_path / "swebench"),
+        "--swebench-python",
+        str(tmp_path / "python"),
+        "--docker-cli",
+        str(tmp_path / "docker"),
+        "--docker-host",
+        "unix:///tmp/test-docker.sock",
+    ]
+
+    with pytest.raises(SystemExit) as raised:
+        materializer.main(argv)
+
+    captured = capsys.readouterr()
+    assert raised.value.code == 2
+    assert captured.out == ""
+    assert captured.err == (
+        "materialization failed; private details suppressed "
+        "(MaterializationError); evidence=preserved\n"
+    )
+    assert "private-task" not in captured.err
+    failure = json.loads((failure_root / "failure.json").read_text(encoding="utf-8"))
+    assert failure["operation"] == "holdout-materialization"
+    assert failure["exception_chain"] == [
+        {
+            "message": "private-task-id and private detail",
+            "type": "MaterializationError",
+        }
+    ]
 
 
 def test_inexact_selector_evidence_fails_closed(
@@ -1091,6 +1179,7 @@ def test_acquisition_protocol_authentication_fails_before_private_work(
             runtime_availability_path=tmp_path / "must-not-read-runtime.json",
             catalog_archive_path=tmp_path / "must-not-read-catalog.tar.gz",
             output=fixture.output,
+            failure_evidence_output=tmp_path / "failure-evidence",
             swebench_checkout=tmp_path / "must-not-use-swebench",
             swebench_python=tmp_path / "must-not-use-python",
             docker_cli=tmp_path / "must-not-use-docker",
@@ -1125,6 +1214,7 @@ def test_acquisition_protocol_byte_drift_is_rejected_before_private_work(
             runtime_availability_path=fixture.runtime,
             catalog_archive_path=fixture.archive,
             output=fixture.output,
+            failure_evidence_output=tmp_path / "failure-evidence",
             swebench_checkout=fixture.swebench_checkout,
             swebench_python=fixture.swebench_python,
             docker_cli=fixture.docker_cli,

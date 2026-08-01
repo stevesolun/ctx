@@ -1642,6 +1642,8 @@ def test_cli_forwards_source_workers_and_prints_no_private_identifiers(
                 str(tmp_path / "map"),
                 "--workers",
                 "7",
+                "--failure-evidence-output",
+                str(tmp_path / "unused-failure-evidence"),
             ]
         )
         == 0
@@ -1666,6 +1668,7 @@ def test_cli_suppresses_private_failure_details(
         raise prepare.PrepareError("private-task-id and private task text")
 
     monkeypatch.setattr(prepare, "prepare_sources", fail)
+    failure_root = tmp_path / "prepare-failure-evidence"
 
     with pytest.raises(SystemExit) as raised:
         prepare.main(
@@ -1685,11 +1688,63 @@ def test_cli_suppresses_private_failure_details(
                 str(tmp_path / "cache"),
                 "--output",
                 str(tmp_path / "map"),
+                "--failure-evidence-output",
+                str(failure_root),
             ]
         )
 
     captured = capsys.readouterr()
     assert raised.value.code == 2
     assert captured.out == ""
-    assert captured.err == "benchmark preparation failed (PrepareError)\n"
+    assert captured.err == "benchmark preparation failed (PrepareError); evidence=preserved\n"
     assert "private-task" not in captured.err
+    failure = json.loads((failure_root / "failure.json").read_text(encoding="utf-8"))
+    assert failure["operation"] == "holdout-prepare-sources"
+    assert failure["exception_chain"] == [
+        {"message": "private-task-id and private task text", "type": "PrepareError"}
+    ]
+    assert (failure_root / "artifact-manifest.json").is_file()
+
+
+def test_cli_rejects_used_failure_destination_before_private_work(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    calls: list[str] = []
+
+    def sources(**_kwargs: Any) -> str:
+        calls.append("called")
+        return "f" * 64
+
+    monkeypatch.setattr(prepare, "prepare_sources", sources)
+    failure_root = tmp_path / "used-failure-evidence"
+    failure_root.mkdir()
+    argv = [
+        "sources",
+        "--protocol",
+        str(tmp_path / "protocol"),
+        "--expected-acquisition-protocol-sha256",
+        "0" * 64,
+        "--exposure-ledger",
+        str(tmp_path / "exposure"),
+        "--rows",
+        str(tmp_path / "rows"),
+        "--selection",
+        str(tmp_path / "selection"),
+        "--cache-root",
+        str(tmp_path / "cache"),
+        "--output",
+        str(tmp_path / "map"),
+        "--failure-evidence-output",
+        str(failure_root),
+    ]
+
+    with pytest.raises(SystemExit) as raised:
+        prepare.main(argv)
+
+    captured = capsys.readouterr()
+    assert raised.value.code == 2
+    assert calls == []
+    assert captured.out == ""
+    assert captured.err == ("benchmark preparation precondition failed; evidence=unavailable\n")

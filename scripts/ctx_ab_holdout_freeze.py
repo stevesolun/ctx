@@ -21,6 +21,7 @@ from typing import Any
 
 from scripts import ctx_ab_benchmark as benchmark
 from scripts import ctx_ab_exposure_ledger as exposure_ledger
+from scripts import ctx_ab_failure_evidence as failure_evidence
 from scripts import ctx_ab_holdout as holdout
 
 
@@ -1520,6 +1521,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--environment", type=Path, required=True)
     parser.add_argument("--schedule", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--failure-evidence-output", type=Path, required=True)
     parser.add_argument(
         "--expected-acquisition-protocol-sha256",
         required=True,
@@ -1529,6 +1531,13 @@ def main(argv: list[str] | None = None) -> int:
         default=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
     )
     args = parser.parse_args(argv)
+    try:
+        failure_evidence.validate_destination(
+            args.failure_evidence_output,
+            repository_root=ROOT,
+        )
+    except failure_evidence.FailureEvidenceError:
+        parser.exit(2, "execution freeze precondition failed; evidence=unavailable\n")
     try:
         hashes = freeze_protocol(
             protocol_path=args.protocol,
@@ -1546,7 +1555,20 @@ def main(argv: list[str] | None = None) -> int:
             expected_acquisition_protocol_sha256=args.expected_acquisition_protocol_sha256,
         )
     except (FreezeError, ValueError, OSError, KeyError, TypeError) as exc:
-        parser.exit(2, f"execution freeze failed ({type(exc).__name__})\n")
+        try:
+            failure_evidence.publish_failure(
+                destination=args.failure_evidence_output,
+                operation="holdout-execution-freeze",
+                exc=exc,
+                repository_root=ROOT,
+            )
+            evidence_status = "preserved"
+        except BaseException:
+            evidence_status = "unavailable"
+        parser.exit(
+            2,
+            f"execution freeze failed ({type(exc).__name__}); evidence={evidence_status}\n",
+        )
     print(
         "execution-frozen "
         + " ".join(
