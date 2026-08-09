@@ -92,6 +92,12 @@ def test_concurrent_cross_host_manage_prompts_apply_one_workspace_install(
             mode="manage",
             state_root=state_root,
             environment={"CTX_INSTALL_POLICY_ROOT": str(policy_root)},
+            # These two hosts contend for one lock by design. The production
+            # default (2s) fails closed rather than stalling a prompt hook,
+            # which is correct for a user but makes this assertion a race
+            # against machine load. The subject here is that both hosts
+            # converge on one install, not how fast a lock is acquired.
+            lock_timeout_seconds=10.0,
         ).issue(
             SensitiveQueryInput(
                 native_session_id=native_session_id,

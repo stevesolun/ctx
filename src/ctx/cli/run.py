@@ -1829,6 +1829,12 @@ def main(argv: list[str] | None = None) -> int:
         from ctx.cli.fit import cmd_fit, default_namespace
 
         return cmd_fit(default_namespace())
+    if args.command == "advanced":
+        rest = [item for item in (args.rest or []) if item != "--"]
+        if not rest:
+            parser.parse_args(["advanced", "--help"])
+            return 2
+        return main(rest)
     try:
         if args.command == "doctor":
             from ctx.cli.doctor import cmd_doctor
@@ -1863,15 +1869,18 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="ctx",
         description=(
             "ctx — find the cheapest AI coding setup that actually works on "
-            "your repo. Run `ctx fit` in a repository to see how ready it is "
-            "for AI coding agents and what to improve. The remaining "
-            "subcommands are the lower-level harness."
+            "your repo. Run `ctx` in a repository to see how ready it is for "
+            "AI coding agents and what to improve, then `ctx fit --test "
+            "--budget N` to evaluate alternatives. Lower-level harness "
+            "commands live under `ctx advanced`."
         ),
     )
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     # Not required: a bare `ctx` runs the product rather than printing an error.
     # The product promise is one command, so typing it must do something useful.
-    sub = p.add_subparsers(dest="command", required=False)
+    # The metavar lists only the advertised surface; the harness commands remain
+    # valid but hidden, so `ctx --help` shows a product rather than a toolbox.
+    sub = p.add_subparsers(dest="command", required=False, metavar="{fit,doctor,advanced}")
 
     # fit — repository-specific AI coding stack analysis. Registered from its
     # own module so the Fit product layer stays out of the harness CLI.
@@ -1882,9 +1891,26 @@ def _build_parser() -> argparse.ArgumentParser:
     _register_doctor(sub)
 
     # run
+    # The harness commands remain fully supported but are no longer part of the
+    # advertised surface: the product is one command. They are reachable as
+    # `ctx advanced run|resume|sessions`, and the original spellings keep
+    # working so existing scripts and CI do not break.
+    advanced = sub.add_parser(
+        "advanced",
+        help="Lower-level harness commands (run, resume, sessions).",
+        description=(
+            "Expert commands beneath the product surface. `ctx advanced run ...` "
+            "is equivalent to the historical `ctx run ...`."
+        ),
+    )
+    advanced.add_argument(
+        "rest",
+        nargs=argparse.REMAINDER,
+        help="The harness command and its arguments.",
+    )
+
     r = sub.add_parser(
         "run",
-        help="Start a new agent session.",
         description="Run the harness against a fresh task.",
     )
     r.add_argument(
@@ -2090,7 +2116,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # resume
     rz = sub.add_parser(
         "resume",
-        help="Continue a previously-run session by id.",
+        description="Continue a previously-run session by id.",
     )
     rz.add_argument("session_id", help="The session id to resume.")
     rz.add_argument(
@@ -2157,7 +2183,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # sessions
     ls = sub.add_parser(
         "sessions",
-        help="List saved sessions or inspect one by id.",
+        description="List saved sessions or inspect one by id.",
     )
     ls.add_argument(
         "--sessions-dir",

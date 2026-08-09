@@ -52,7 +52,7 @@ anything new. Example output:
 ```
 
 Suggestions are never applied automatically. The digest is advisory; apply
-changes through the normal `ctx-toolbox` commands after review.
+changes through the normal `python -m toolbox` commands after review.
 
 ## CLI
 

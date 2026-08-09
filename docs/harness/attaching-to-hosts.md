@@ -303,7 +303,7 @@ The adapter emits a JSON contract with:
 - explicit permission grants for `skills`, `agents`, `mcps`, and `harnesses`;
 - the `ctx-mcp-server` command and ctx tool names when the permission contract
   allows ctx-core tools;
-- ranked skill, agent, and MCP recommendations from the `ctx-recommend`
+- ranked skill, agent, and MCP recommendations from the `python -m ctx.cli.recommend`
   engine;
 - `related_recommendations` after the loop passes selected and rejected
   recommendation IDs;
@@ -419,7 +419,7 @@ granted.
 
 ## Installed harness attachment
 
-`ctx-harness-install <slug>` creates `.ctx/attach/` inside the installed
+`python -m harness_install <slug>` creates `.ctx/attach/` inside the installed
 harness target. The directory contains the attach files for the modes that
 catalog entry supports:
 

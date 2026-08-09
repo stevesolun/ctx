@@ -51,7 +51,7 @@ The `2` exit from `pre-commit` is what actually blocks `git commit`.
 
 ## Installation
 
-`pip install claude-ctx` exposes `ctx-toolbox` on PATH; wire it into
+`pip install claude-ctx` exposes `python -m toolbox` on PATH; wire it into
 `.githooks/pre-commit` directly:
 
 ```bash

@@ -448,7 +448,7 @@ current internals:
 - top-level `ctx` and `ctx.api` exports and error behavior;
 - `CtxCoreToolbox` constructor, tool names, schemas, dispatch shape, rejection
   memory, restrictions, and JSON results;
-- `ctx-recommend`, `ctx-scan-repo`, dashboard, and monitor routes;
+- `python -m ctx.cli.recommend`, `ctx-scan-repo`, dashboard, and monitor routes;
 - MCP JSON-RPC framing and existing tool catalogue;
 - `ctx run` commands, session JSONL, resume semantics, tool surfaces, output,
   and exit codes;

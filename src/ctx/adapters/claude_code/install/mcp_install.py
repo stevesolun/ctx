@@ -861,5 +861,25 @@ def uninstall_main() -> None:
 main = install_main
 
 
+def module_main(argv: list[str] | None = None) -> None:
+    """Dispatch ``python -m`` between installing and uninstalling.
+
+    The ``ctx-mcp-install`` and ``ctx-mcp-uninstall`` console scripts bound
+    the two entry points by name. With those scripts gone, ``python -m`` is
+    the only route left, and a module has just one. Uninstall is therefore
+    reached with a leading ``uninstall`` word; everything else installs, so
+    every previously valid invocation still means exactly what it meant.
+    """
+
+    arguments = sys.argv[1:] if argv is None else list(argv)
+    if arguments and arguments[0] == "uninstall":
+        sys.argv = [sys.argv[0], *arguments[1:]]
+        uninstall_main()
+        return
+    if argv is not None:
+        sys.argv = [sys.argv[0], *arguments]
+    install_main()
+
+
 if __name__ == "__main__":
-    main()
+    module_main()

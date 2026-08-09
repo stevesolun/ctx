@@ -1390,3 +1390,48 @@ class TestForceUtf8Stdio:
         monkeypatch.setattr(mcp_install.sys, "stdout", _ThrowsOnReconfig())
         monkeypatch.setattr(mcp_install.sys, "stderr", _ThrowsOnReconfig())
         mcp_install._force_utf8_stdio()  # must not raise
+
+
+# ── module_main dispatch ─────────────────────────────────────────────────────
+
+
+class TestModuleMainDispatch:
+    """``python -m`` is the only route left after the console scripts went away.
+
+    A module has one entry point but this one had two commands, so uninstall
+    must be reachable without silently installing instead.
+    """
+
+    def test_leading_uninstall_word_reaches_uninstall(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen: list[list[str]] = []
+        monkeypatch.setattr(mcp_install, "uninstall_main", lambda: seen.append(["uninstall"]))
+        monkeypatch.setattr(mcp_install, "install_main", lambda: pytest.fail("must not install"))
+
+        mcp_install.module_main(["uninstall", "some-slug"])
+
+        assert seen == [["uninstall"]]
+
+    def test_uninstall_word_is_stripped_from_argv(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        captured: list[list[str]] = []
+        monkeypatch.setattr(
+            mcp_install, "uninstall_main", lambda: captured.append(list(mcp_install.sys.argv[1:]))
+        )
+
+        mcp_install.module_main(["uninstall", "some-slug", "--force"])
+
+        assert captured == [["some-slug", "--force"]]
+
+    def test_anything_else_still_installs(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        captured: list[list[str]] = []
+        monkeypatch.setattr(
+            mcp_install, "install_main", lambda: captured.append(list(mcp_install.sys.argv[1:]))
+        )
+        monkeypatch.setattr(
+            mcp_install, "uninstall_main", lambda: pytest.fail("must not uninstall")
+        )
+
+        mcp_install.module_main(["some-slug", "--auto"])
+
+        assert captured == [["some-slug", "--auto"]]

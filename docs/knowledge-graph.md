@@ -3,9 +3,9 @@
 A pre-built weighted graph of skills, agents, MCP servers, and
 harnesses in the ctx ecosystem, shipped as `graph/wiki-graph.tar.gz`.
 The on-disk JSON and `resolve_graph` Python API are harness-aware, including
-plain-slug graph walks from `harness:<slug>` nodes. `ctx-monitor`
+plain-slug graph walks from `harness:<slug>` nodes. `python -m ctx_monitor`
 exposes skill/agent/MCP/harness wiki and graph views. Harness installation,
-update, and uninstall are handled by `ctx-harness-install`; dashboard
+update, and uninstall are handled by `python -m harness_install`; dashboard
 load/unload POSTs deliberately reject harnesses and return the dry-run CLI
 command to use instead. Quality scoring is exposed for sidecar-backed skills,
 agents, and MCP servers.
@@ -46,7 +46,7 @@ Use `ctx-init --graph` to install the fast runtime graph. Source checkouts use
 `graph/wiki-graph-runtime.tar.gz`; pip installs download the matching GitHub
 release asset for the installed package version. This installs
 `graphify-out/*`, the skill index used by recommendations, and
-the harness pages used by `ctx-harness-install`:
+the harness pages used by `python -m harness_install`:
 
 ```bash
 ctx-init --graph
@@ -101,7 +101,7 @@ Obsidian's native graph view if you prefer it to the web dashboard.
 
 ## How edges are built
 
-Edges are built and explained by the `ctx-wiki-graphify` console script
+Edges are built and explained by the `python -m ctx.core.wiki.wiki_graphify` console script
 (`ctx.core.wiki.wiki_graphify`). A pair must first have at least one base
 signal:
 
@@ -236,7 +236,7 @@ The graph backs these recommendation paths:
   those records, the same recommender falls back to the index file.
 - Harness recommendations are a separate path for custom/API/local
   model onboarding (`ctx-init --model-mode custom ...`),
-  `ctx-harness-install`, and LoopFlow/agent-loop adapter calls that pass
+  `python -m harness_install`, and LoopFlow/agent-loop adapter calls that pass
   explicit user-owned/API/local model consent. Model/provider fields can
   improve ranking, but the LoopFlow adapter does not treat them as consent by
   themselves. Harness paths use the same graph filtered to `harness` nodes and
@@ -424,7 +424,7 @@ ctx-wiki-graphify \
   --semantic-vector-index numpy-flat
 ```
 
-Then drain pending entity-upsert work with `ctx-wiki-worker --wiki
+Then drain pending entity-upsert work with `python -m ctx.core.wiki.wiki_queue_worker --wiki
 ~/.claude/skill-wiki`. This is the current repair path for "build index" and
 "attach pending" without adding another command surface.
 
@@ -438,7 +438,7 @@ The pre-commit hook (`.githooks/pre-commit`) does **not** rebuild or
 repack graph artifacts from `~/.claude/skill-wiki/`; that local wiki can
 contain private entities. It refreshes cheap README stats when relevant
 checked-in files are staged and warns when entity sources changed. Run
-`ctx-wiki-graphify`, validate, repack, and stage the artifacts explicitly
+`python -m ctx.core.wiki.wiki_graphify`, validate, repack, and stage the artifacts explicitly
 for skill, agent, MCP server, or harness releases.
 
 Graphify exports stage and validate each generated artifact before atomic
@@ -481,7 +481,7 @@ the wiki content and the checked-in graph build configuration.
 Three advisory gates run before the tarball is repackaged. All three produce
 review reports and never auto-modify the inventory.
 
-- **`ctx-dedup-check`** — flags entity pairs (skill ↔ skill, skill ↔
+- **`python -m ctx.core.quality.dedup_check`** — flags entity pairs (skill ↔ skill, skill ↔
   agent, skill ↔ MCP, agent ↔ agent, agent ↔ MCP, MCP ↔ MCP) at or
   above 0.85 cosine similarity. Incremental: keeps a `dedup-state.json`
   next to the embedding cache, so follow-up runs only re-check pairs
@@ -489,11 +489,11 @@ review reports and never auto-modify the inventory.
   `.dedup-allowlist.txt`. The current snapshot has 15,976 findings,
   most of which are within-MCP near-duplicates (multiple wrappers
   around the same upstream service).
-- **`ctx-tag-backfill`** — finds installed skills/agents with empty `tags:`
+- **`python -m ctx.core.quality.tag_backfill`** — finds installed skills/agents with empty `tags:`
   frontmatter and proposes a backfill from slug tokens and an allowlist of
   body keywords. Existing tag frequency breaks keyword ties. Report-only by
   default; pass `--apply` to write. Backfills are additive only.
-- **`ctx-skillspector-audit`** — runs a static `--no-llm` check over
+- **`python -m ctx.core.quality.skillspector_audit`** — runs a static `--no-llm` check over
   shipped skill bodies with
   [NVIDIA SkillSpector](https://github.com/NVIDIA/SkillSpector), writes
   `graph/skillspector-audit.jsonl.gz`, and stamps skill entity pages in the

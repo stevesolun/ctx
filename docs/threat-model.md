@@ -11,7 +11,7 @@ The model covers:
 
 - graph, wiki, and external catalog metadata used for recommendations;
 - remote and local harness acquisition, installation, and cataloged commands;
-- the `ctx-monitor` HTTP boundary;
+- the `python -m ctx_monitor` HTTP boundary;
 - local telemetry spools and optional exporters; and
 - the transition from an advisory recommendation to operator-approved execution.
 
@@ -119,7 +119,7 @@ or reaching the network. Output redaction does not prevent exfiltration.
 
 ### Monitor Boundary
 
-`ctx-monitor` defaults to `127.0.0.1` and is designed as a local operator tool.
+`python -m ctx_monitor` defaults to `127.0.0.1` and is designed as a local operator tool.
 On a loopback bind:
 
 - reads are available to loopback clients without authentication;
@@ -238,7 +238,7 @@ permission grant.
 
 For the lowest-risk supported posture:
 
-1. keep `ctx-monitor` on loopback;
+1. keep `python -m ctx_monitor` on loopback;
 2. leave telemetry network export disabled, or use a loopback collector;
 3. allow remote harness network access only to reviewed repository hosts and
    install from an inspected full commit SHA;

@@ -26,63 +26,28 @@ Documentation = "https://stevesolun.github.io/ctx/"
 Changelog = "https://github.com/stevesolun/ctx/blob/main/CHANGELOG.md"
 
 [project.scripts]
+# The public surface is one command. Modules behind the removed entry
+# points still run via `python -m <module>`; only the installed console
+# scripts were retired, so no capability was lost.
 # Plan 001 phase R5: entrypoints for modules moved in R1-R4 now point at
 # their canonical package path. Entrypoints for modules still at the
 # flat layout (ctx_init, ctx_monitor, etc.) stay unchanged — they will
 # move in a later R-phase. The legacy flat shims continue to exist so
 # anyone invoking the CLIs via `python path/to/module.py` keeps working.
 ctx-init = "ctx_init:main"
-ctx-install-hooks = "ctx.adapters.claude_code.inject_hooks:main"
-ctx-install-codex-hook = "ctx.adapters.codex.install_query_hook:main"
-ctx-monitor = "ctx_monitor:main"
 ctx-scan-repo = "scan_repo:main"
-ctx-skill-quality = "skill_quality:main"
-ctx-skill-health = "ctx.adapters.claude_code.skill_health:main"
-ctx-toolbox = "toolbox:main"
-ctx-lifecycle = "ctx_lifecycle:main"
-ctx-skill-add = "skill_add:main"
-ctx-skill-install = "ctx.adapters.claude_code.install.skill_install:main"
-ctx-skill-unload = "ctx.adapters.claude_code.install.skill_unload:skill_main"
-ctx-skill-mirror = "skill_mirror:main"
-ctx-bundle-suggest = "ctx.adapters.claude_code.hooks.bundle_orchestrator:main"
-ctx-recommend = "ctx.cli.recommend:main"
+ctx-source-registry = "ctx.core.source_registry:main"
 ctx-telemetry-export = "ctx.cli.telemetry:main"
 ctx-telemetry-retention = "ctx.cli.telemetry:retention_main"
-ctx-agent-add = "agent_add:main"
-ctx-agent-mirror = "agent_mirror:main"
-ctx-agent-install = "ctx.adapters.claude_code.install.agent_install:main"
-ctx-agent-unload = "ctx.adapters.claude_code.install.skill_unload:agent_main"
-ctx-harness-add = "harness_add:main"
-ctx-harness-install = "harness_install:main"
-ctx-mcp-add = "mcp_add:main"
-ctx-mcp-fetch = "mcp_fetch:main"
-ctx-mcp-ingest = "mcp_ingest:main"
-ctx-mcp-enrich = "mcp_enrich:main"
-ctx-mcp-install = "ctx.adapters.claude_code.install.mcp_install:install_main"
-ctx-mcp-uninstall = "ctx.adapters.claude_code.install.mcp_install:uninstall_main"
-ctx-mcp-quality = "mcp_quality:main"
-ctx-mcp-rebuild-index = "mcp_rebuild_index:main"
-ctx-wiki-graphify = "ctx.core.wiki.wiki_graphify:main"
-ctx-wiki-worker = "ctx.core.wiki.wiki_queue_worker:main"
-ctx-graph-store = "ctx.core.graph.graph_store:main"
-ctx-pack-compact = "ctx.core.wiki.pack_compaction:main"
-ctx-incremental-attach = "ctx.core.graph.incremental_attach:main"
-ctx-incremental-shadow = "ctx.core.graph.incremental_shadow:main"
-ctx-source-registry = "ctx.core.source_registry:main"
 # Pre-ship dedup gate: flag entity pairs at or above the given cosine
 # similarity threshold (default 0.85). Cross-type by design — finds
 # duplicates across skills, agents, and MCPs in any combination.
-ctx-dedup-check = "ctx.core.quality.dedup_check:main"
 # Pre-ship tag-completeness gate: scan skills/agents for empty
 # `tags:` frontmatter and propose backfills from slug tokens + body
 # keywords + the existing tag vocabulary. Report-only by default;
 # `--apply` to write.
-ctx-tag-backfill = "ctx.core.quality.tag_backfill:main"
 # Optional release-audit helper. SkillSpector itself remains external because
 # it currently requires Python 3.12+ while ctx supports Python 3.11.
-ctx-skillspector-scan = "ctx.core.quality.skillspector_service:main"
-ctx-skillspector-audit = "ctx.core.quality.skillspector_audit:main"
-ctx-skillspector-remediation = "ctx.core.quality.skillspector_remediation:main"
 # Plan 001 phase H7: the generic harness CLI — `ctx run`,
 # `ctx resume`, `ctx sessions`. Ships v1 of the model-agnostic
 # harness; requires the [harness] optional dep for LiteLLM.

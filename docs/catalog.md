@@ -2,7 +2,7 @@
 
 Use this page when you click a README badge from GitHub, PyPI, or Hugging Face.
 It is public and always reachable. The full live catalog runs locally inside
-`ctx-monitor`.
+`python -m ctx_monitor`.
 
 !!! tip "Run the full local catalog"
     ```bash

@@ -1,7 +1,7 @@
 # ctx
 
 [![CI](https://github.com/stevesolun/ctx/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
-[![Tests](https://img.shields.io/badge/Tests-8342_inventory-blue.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
+[![Tests](https://img.shields.io/badge/Tests-8354_inventory-blue.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
 
 **Find the cheapest AI coding setup that actually works on your repo.**
@@ -99,11 +99,19 @@ The dry run inspects the local spool without exporting it.
 
 | Task | CLI | Guide |
 | --- | --- | --- |
+| Analyze a repository and get a recommendation | `ctx` | [Entity onboarding](https://stevesolun.github.io/ctx/entity-onboarding/) |
+| Check why a real evaluation cannot run yet | `ctx doctor` | [Entity onboarding](https://stevesolun.github.io/ctx/entity-onboarding/) |
 | Initialize ctx and install graph data | `ctx-init` | [Knowledge graph](https://stevesolun.github.io/ctx/knowledge-graph/) |
-| Scan a repository and get recommendations | `ctx-scan-repo`, `ctx-recommend` | [Entity onboarding](https://stevesolun.github.io/ctx/entity-onboarding/) |
-| Connect an MCP, Python, or CLI host | `ctx-mcp-server`, `ctx` | [Host integration](https://stevesolun.github.io/ctx/harness/attaching-to-hosts/) |
-| Inspect the local runtime | `ctx-monitor serve` | [Dashboard](https://stevesolun.github.io/ctx/dashboard/) |
+| Scan a repository | `ctx-scan-repo` | [Entity onboarding](https://stevesolun.github.io/ctx/entity-onboarding/) |
+| Connect an MCP, Python, or CLI host | `ctx-mcp-server`, `ctx advanced run` | [Host integration](https://stevesolun.github.io/ctx/harness/attaching-to-hosts/) |
+| Inspect the local runtime | `python -m ctx_monitor serve` | [Dashboard](https://stevesolun.github.io/ctx/dashboard/) |
 | Review or export telemetry | `ctx-telemetry-export`, `ctx-telemetry-retention` | [Telemetry](https://stevesolun.github.io/ctx/telemetry/) |
+
+The agent-loop harness (`run`, `resume`, `sessions`) is still there and still
+supported; it now lives under `ctx advanced` so the top-level help stays about
+the product. Maintenance utilities that used to be console scripts are reached
+with `python -m` — for example `python -m ctx.cli.recommend` or
+`python -m ctx.core.quality.dedup_check`.
 
 See the [full documentation](https://stevesolun.github.io/ctx/) for configuration,
 APIs, entity lifecycle, and operational details.
@@ -113,7 +121,7 @@ APIs, entity lifecycle, and operational details.
 | Tracker ID | User outcome |
 | --- | --- |
 | `CLI-002` | Scan a repository and receive a bounded skill, agent, and MCP recommendation set. |
-| `CLI-026` | Review a custom-model harness recommendation with `ctx-harness-install --dry-run` before installation. |
+| `CLI-026` | Review a custom-model harness recommendation with `python -m harness_install --dry-run` before installation. |
 | `API-011` | Manage local entities through the dashboard's validated API. |
 
 <details>

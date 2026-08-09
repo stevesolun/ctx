@@ -268,8 +268,26 @@ reviewer set is Product + Architecture + Security + QA.
 
 ### FIT-900 · Deletion program
 - **Priority:** P1 · **Depends on:** FIT-003 · **Reviewer:** architecture + QA
-- **Status:** `BLOCKED` on FIT-003
+- **Status:** `DONE (surface)` — command surface and console scripts landed; LOC deletion still open
 - **Notes:** Execute the ARCHIVE/DELETE classifications with evidence. Success is measured in public commands and LOC removed while the gate stays green.
+
+**Delivered.** The advertised command surface is now `{fit, doctor, advanced}`. `run`, `resume`, and `sessions` still work and are additionally reachable as `ctx advanced <command>`; they are hidden from help rather than removed, so existing scripts do not break. Bare `ctx` runs the product. Console scripts went from **45 to 7**. `src/tests/fit/test_cli_surface.py` pins all of this so the surface cannot quietly regrow.
+
+**Not delivered: the target of 2 console scripts.** Five of the remaining seven are load-bearing and cannot be dropped by editing `pyproject.toml` alone:
+
+| Script | Why it stays |
+| --- | --- |
+| `ctx` | The product. |
+| `ctx-init` | First-run install path. |
+| `ctx-mcp-server` | MCP hosts spawn it by name; renaming it breaks configured clients. |
+| `ctx-scan-repo` | Invoked by CI lanes. |
+| `ctx-source-registry` | Pinned by `src/tests/test_threat_model_docs.py:190` as a threat-model control. |
+| `ctx-telemetry-export` | Invoked by CI lanes. |
+| `ctx-telemetry-retention` | Invoked by CI lanes. |
+
+Reaching 2 requires migrating each call site to `python -m`, updating the clean-host contract, and amending the threat-model test — a separate change with its own review, not a line in this one.
+
+**Also fixed here.** `test_concurrent_cross_host_manage_prompts_apply_one_workspace_install` was flaking under full-suite load. Root cause confirmed by reproduction, not inference: two hosts contend for one lock, and the production default `lock_timeout_seconds=2.0` fails closed. Forcing `0.01` reproduces the exact gate signature (`status='failed'`, no permit). The production default is correct — a prompt hook must not stall — so the test now passes `lock_timeout_seconds=10.0`, matching the existing convention in `test_query_hook_delivery.py`.
 
 ### FIT-901 · Dogfood CTX Fit on CTX
 - **Priority:** P1 · **Reviewer:** product

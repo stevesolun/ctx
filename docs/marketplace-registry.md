@@ -108,7 +108,7 @@ When a user asks for help or the scanner detects a stack/task gap:
 
 Entity updates are intentionally explicit:
 
-- `ctx-skill-add`, `ctx-agent-add`, `ctx-mcp-add`, and `ctx-harness-add` create
+- `python -m skill_add`, `python -m agent_add`, `python -m mcp_add`, and `python -m harness_add` create
   new entities when no duplicate exists.
 - If a duplicate exists, the command emits an update review and refuses to
   replace content unless the user passes the update flag.

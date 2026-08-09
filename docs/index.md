@@ -32,10 +32,14 @@ gets smarter every session.
     Optional extras: `pip install "claude-ctx[embeddings]"` for the
     semantic backend, `pip install "claude-ctx[harness]"` for local/API
     model harness runs, `pip install "claude-ctx[dev]"` for the
-    pytest/mypy/ruff toolchain. After install the `ctx`, `ctx-scan-repo`,
-    `ctx-skill-quality`, `ctx-skill-health`, and `ctx-toolbox` console
-    scripts are on PATH; `python -m ctx --help` reaches the same
-    run/resume/sessions CLI as `ctx`. `ctx-init --graph` installs the fast
+    pytest/mypy/ruff toolchain. After install the `ctx`, `ctx-init`,
+    `ctx-scan-repo`, `ctx-mcp-server`, `ctx-source-registry`,
+    `ctx-telemetry-export`, and `ctx-telemetry-retention` console scripts are
+    on PATH; `python -m ctx --help` reaches the same CLI as `ctx`. Skill
+    quality and health tooling moved off PATH and is reached with
+    `python -m skill_quality` and
+    `python -m ctx.adapters.claude_code.skill_health`.
+    `ctx-init --graph` installs the fast
     pre-built runtime graph that powers recommendations and harness dry-runs;
     source checkouts use `graph/wiki-graph-runtime.tar.gz`, while pip installs
     download the matching GitHub release asset. Use
@@ -163,7 +167,7 @@ graph-based discovery:
   before they enter a plan.
 - During custom/API/local model onboarding and LoopFlow/agent-loop adapter
   calls with explicit user-owned model consent, `ctx-init`,
-  `ctx-harness-install`, and `python -m ctx.adapters.loopflow` use the same
+  `python -m harness_install`, and `python -m ctx.adapters.loopflow` use the same
   graph to recommend harnesses above the configured harness match floor.
 
 The result: you always know what skills, agents, and MCP servers are available
@@ -182,7 +186,8 @@ ones are flagged. New ones self-ingest.
     79,958 shipped graph nodes: 12,934 curated skill/agent/MCP/harness nodes plus 67,024 body-backed skill nodes. The graph has
     1,778,069 weighted edges and 52 Louvain communities.
     Ships pre-built in `graph/wiki-graph.tar.gz` and powers the
-    graph-aware recommendations + the pre-ship `ctx-dedup-check` gate.
+    graph-aware recommendations + the pre-ship
+    `python -m ctx.core.quality.dedup_check` gate.
 
     [:octicons-arrow-right-24: Knowledge graph](knowledge-graph.md)
 
@@ -200,7 +205,7 @@ ones are flagged. New ones self-ingest.
 
     ---
 
-    `ctx-monitor serve` opens a local HTTP dashboard with live graph,
+    `python -m ctx_monitor serve` opens a local HTTP dashboard with live graph,
     skill grades + four-signal scores, session timelines, one-click
     load/unload for skills, agents, and MCP servers, selectable
     recommendations, runtime token history, plus harness wiki and graph
@@ -252,13 +257,14 @@ ones are flagged. New ones self-ingest.
     ---
 
     Current main is **v1.0.21** — MIT, CI-matrixed (Ubuntu 3.12 plus Windows/macOS 3.11/3.12),
-    8,342 test inventory. Adds enterprise OpenTelemetry-ready telemetry and
-    ships console scripts including `ctx-init`,
-    `ctx-monitor` (local dashboard with graph + wiki + load/unload for
+    8,354 test inventory. Adds enterprise OpenTelemetry-ready telemetry and
+    ships seven console scripts led by `ctx` and `ctx-init`. The maintenance
+    tools are still shipped and still work, now via `python -m`:
+    `ctx_monitor serve` (local dashboard with graph + wiki + load/unload for
     skills, agents, and MCP servers, plus Harness Setup for user-owned LLMs),
-    `ctx-incremental-attach`, `ctx-incremental-shadow`, `ctx-dedup-check`
-    (pre-ship near-duplicate gate), and
-    `ctx-tag-backfill` (entity hygiene), plus a fast runtime graph artifact
+    `ctx.core.graph.incremental_attach`, `ctx.core.graph.incremental_shadow`,
+    `ctx.core.quality.dedup_check` (pre-ship near-duplicate gate), and
+    `ctx.core.quality.tag_backfill` (entity hygiene), plus a fast runtime graph artifact
     and the full ~281 MiB wiki tarball with **79,958 nodes / 1,778,069 edges / 52 Louvain communities**.
 
     [:octicons-arrow-right-24: CHANGELOG](https://github.com/stevesolun/ctx/blob/main/CHANGELOG.md) ·

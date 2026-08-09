@@ -92,7 +92,7 @@ be the failure mode the pivot brief explicitly warns about.
 | Bounded 0–5 capability selection and benefit closure | `REUSE_AS_IS` | `src/ctx/engine/benefit.py`, `src/ctx/runtime/benefit_closure.py`, `eligible_catalog.py` | This is the search-space reducer that keeps candidate generation non-combinatorial — the answer to the combinatorial-cost stop condition. |
 | Event-sourced engine, provenance, isolation | `DO_NOT_REWRITE` | `src/ctx/engine/`, `src/ctx/runtime/composition.py`; catalog/planning-environment digests | Supplies reproducibility and provenance for Fit runs. |
 | Telemetry with redaction and opt-in export | `REUSE_AS_IS` | `ctx-telemetry-export`, `ctx-telemetry-retention`; `~/.ctx/telemetry/{events,metrics}.jsonl`; `local_redacted` default | Preserves the privacy posture the brief requires. |
-| Dashboard / monitor | `MODIFY` | `ctx-monitor serve`, `src/ctx_monitor.py`, `src/kpi_dashboard.py` | Add a Fit view; do not rebuild the dashboard. |
+| Dashboard / monitor | `MODIFY` | `python -m ctx_monitor serve`, `src/ctx_monitor.py`, `src/kpi_dashboard.py` | Add a Fit view; do not rebuild the dashboard. |
 | 19-lane preflight gate | `REUSE_AS_IS` | `scripts/ci_preflight.py --profile pr` | New Fit code must keep this green; it already enforces docs-strict, tracker, packaging, and typing lanes. |
 
 ## 4. Must change
@@ -103,7 +103,7 @@ be the failure mode the pivot brief explicitly warns about.
 | **Single-dimension treatment delta** | `MODIFY` | `"context_delta": "exact suffix: two LF bytes plus accepted prepared context"`, `scripts/ctx_ab_benchmark.py:5214` | Today the only variable is prompt-context injection. Fit must vary at least model and harness, and must record which dimensions actually differed per comparison. |
 | **Codex-only host** | `MODIFY` | `--codex` argument and the Codex runtime contract at `scripts/ctx_ab_benchmark.py:1114-1134` | Fit compares harnesses, so at least one more host must be executable, or harness comparison must be honestly declared out of scope for V1. |
 | **Task source** | `MODIFY` | `benchmarks/ctx_ab/scenarios.yaml` contains exactly two scenarios — `click-echo-json` (`pallets/click`) and `requests-json-or` (`psf/requests`) — both hand-written against external repositories | Fit needs tasks derived from the *target* repository, with recorded provenance and generated/historical labelling. |
-| **`ctx-recommend` intent surface** | `MODIFY` | `ctx-recommend` takes free-text intent and returns ≤5 capabilities | Fit is repository-driven, not intent-driven; reuse the resolver beneath it rather than the CLI shape. |
+| **`python -m ctx.cli.recommend` intent surface** | `MODIFY` | `python -m ctx.cli.recommend` takes free-text intent and returns ≤5 capabilities | Fit is repository-driven, not intent-driven; reuse the resolver beneath it rather than the CLI shape. |
 
 ## 5. Missing
 
@@ -112,7 +112,7 @@ be the failure mode the pivot brief explicitly warns about.
 | Unified cost record across both execution paths | `MISSING` | Split source of truth: `ctx run` reports a nullable LiteLLM `cost_usd` with `attribution="unavailable"` (`src/ctx/cli/run.py:1776-1801`), while the A/B benchmark accounts tokens only and has no `usd`/`cost` field at all. CTX Fit needs one versioned cost record spanning both, preserving unknown-ness. |
 | Aggregate (campaign-level) budget | `MISSING` | Per-execution budget already exists — `--budget-usd` and `--budget-tokens` (`src/ctx/cli/run.py:1965`, `:1971`). What is absent is a budget across all candidates, tasks, and executions in one Fit run, plus a fail-before-spend pre-flight. |
 | Repository-native verification in any packaged CLI | `MISSING` | The only packaged executor's `--evaluator` is an LLM judge (`src/ctx/adapters/generic/evaluator.py`); file/git access is via npx-launched MCP presets (`src/ctx/cli/run.py:893-910`). Deterministic verification exists only inside the benchmark's scenario contract. This is the largest single gap against the "never trust the agent saying done" rule. |
-| `--dry-run` on the execution path | `MISSING` | `ctx run` has none, but the repository-native pattern exists in `ctx-harness-install --dry-run` (`src/harness_install.py:1108`) and `ctx-mcp-add --dry-run`. `ctx fit --dry-run` must therefore gate *before* invoking execution rather than delegating a flag. |
+| `--dry-run` on the execution path | `MISSING` | `ctx run` has none, but the repository-native pattern exists in `python -m harness_install --dry-run` (`src/harness_install.py:1108`) and `python -m mcp_add --dry-run`. `ctx fit --dry-run` must therefore gate *before* invoking execution rather than delegating a flag. |
 | Repository-derived task generation | `MISSING` | Including provenance labelling and leakage safeguards for historical tasks. |
 | Verification-mechanism discovery | `MISSING` | Deriving a repository's own test/lint/typecheck/build commands, as opposed to a scenario declaring them. |
 | Configuration-level candidate generation with provenance | `MISSING` | Each candidate must explain why it was selected. |
@@ -121,7 +121,7 @@ be the failure mode the pivot brief explicitly warns about.
 | Fit run identity and result schema | `MISSING` | A versioned, machine-readable result record. |
 | Budget controls in dollars | `MISSING` | `--max-tokens`, `--trials`, `--timeout` exist; a dollar budget and a fail-safe-before-spend path do not. |
 | Configuration artifact generation and PR preparation | `MISSING` | Installers exist but are not wired as experiment outputs. |
-| `ctx fit` command surface | `MISSING` | Closest existing surfaces are `ctx-scan-repo --recommend` and `ctx-recommend`. |
+| `ctx fit` command surface | `MISSING` | Closest existing surfaces are `ctx-scan-repo --recommend` and `python -m ctx.cli.recommend`. |
 
 ## 6. Technical debt affecting CTX Fit
 
