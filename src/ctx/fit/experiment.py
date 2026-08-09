@@ -39,6 +39,7 @@ PlanDecision = Literal[
     "blocked-unknown-cost",
     "blocked-over-budget",
     "blocked-not-evaluable",
+    "blocked-no-tasks",
 ]
 
 DECISION_EXPLANATION: dict[PlanDecision, str] = {
@@ -51,6 +52,10 @@ DECISION_EXPLANATION: dict[PlanDecision, str] = {
     "blocked-over-budget": "the estimated cost exceeds the budget",
     "blocked-not-evaluable": (
         "this repository has no runnable tests, so no candidate could be verified"
+    ),
+    "blocked-no-tasks": (
+        "no representative task could be derived, so an experiment would run zero "
+        "executions and produce no evidence"
     ),
 }
 
@@ -73,6 +78,37 @@ class ModelPrice:
         return (
             input_tokens * self.usd_per_million_input + output_tokens * self.usd_per_million_output
         ) / 1_000_000
+
+    @classmethod
+    def from_litellm(cls, model: str) -> ModelPrice | None:
+        """Read rates from LiteLLM's own table, or return None if unavailable.
+
+        LiteLLM is already the source of truth for *actual* cost at runtime, so
+        using its table for the pre-flight estimate keeps both halves of the
+        cost story consistent and avoids CTX shipping a rate that goes stale.
+        Returning None rather than a guess keeps the budget gate fail-closed.
+        """
+
+        try:
+            import litellm
+        except ImportError:
+            return None
+        table = getattr(litellm, "model_cost", None)
+        if not isinstance(table, dict):
+            return None
+        entry = table.get(model)
+        if not isinstance(entry, dict):
+            return None
+        per_input = entry.get("input_cost_per_token")
+        per_output = entry.get("output_cost_per_token")
+        if not isinstance(per_input, int | float) or not isinstance(per_output, int | float):
+            return None
+        return cls(
+            model=model,
+            usd_per_million_input=float(per_input) * 1_000_000,
+            usd_per_million_output=float(per_output) * 1_000_000,
+            source="litellm model_cost",
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,6 +247,10 @@ def plan_experiment(
     decision: PlanDecision
     if not profile.is_fit_evaluable or candidates.abstained:
         decision = "blocked-not-evaluable"
+    elif task_count <= 0:
+        # Zero tasks means zero executions. Such a plan trivially "fits" any
+        # budget while proving nothing, so it must never be reported runnable.
+        decision = "blocked-no-tasks"
     elif budget_usd is None:
         decision = "blocked-no-budget"
     elif not cost.is_known:

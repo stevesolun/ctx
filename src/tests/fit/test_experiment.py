@@ -144,6 +144,16 @@ def test_plan_is_serializable_and_versioned(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------
 
 
+def test_zero_tasks_is_never_reported_as_runnable(tmp_path: Path) -> None:
+    """A plan with no tasks fits any budget while proving nothing."""
+
+    plan = _plan(tmp_path, task_count=0, budget_usd=1000.0, price=PRICE)
+
+    assert plan.executions == 0
+    assert plan.decision == "blocked-no-tasks"
+    assert plan.can_execute is False
+
+
 def test_budget_flag_renders_a_plan_and_never_spends(tmp_path: Path, capsys) -> None:
     repo = _repo(tmp_path)
 
@@ -151,9 +161,8 @@ def test_budget_flag_renders_a_plan_and_never_spends(tmp_path: Path, capsys) -> 
 
     output = capsys.readouterr().out
     assert "Experiment plan" in output
+    # A scratch repository has no derivable history, so the run is refused.
     assert "Not runnable" in output
-    # No cost may be invented when none can be derived.
-    assert "Estimated cost:    unknown" in output
 
 
 def test_plan_appears_in_json_when_budget_given(tmp_path: Path, capsys) -> None:

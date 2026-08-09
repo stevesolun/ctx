@@ -195,7 +195,8 @@ def test_ctx_fit_dry_run_states_cost_is_not_calculable(
     output = capsys.readouterr().out
     assert exit_code == 0
     assert "No model was invoked and nothing was spent." in output
-    # The product must never invent a cost it cannot derive: with no pricing
-    # configured, the estimate is reported as unknown and no figure appears.
-    assert "Estimated cost:    unknown" in output
+    # The product must never present a meaningless figure: a scratch repository
+    # yields no tasks, so there is no experiment to price and no dollar amount
+    # is shown.
+    assert "not applicable — nothing would run" in output
     assert "$" not in output

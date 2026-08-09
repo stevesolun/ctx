@@ -25,11 +25,12 @@ def register(sub: argparse._SubParsersAction) -> None:
 
     parser = sub.add_parser(
         "fit",
-        help="Analyze a repository's AI coding setup.",
+        help="Find the cheapest AI coding setup that works on this repository.",
         description=(
-            "Analyze a repository and report which AI coding setup suits it. "
-            "This milestone profiles the repository only; it runs no model and "
-            "spends nothing."
+            "Analyze a repository, optionally test candidate AI coding "
+            "configurations against real tasks from its history, and generate "
+            "the winning configuration. Bare `ctx fit` runs no model and spends "
+            "nothing."
         ),
     )
     parser.add_argument(
@@ -39,6 +40,30 @@ def register(sub: argparse._SubParsersAction) -> None:
         help="Repository path to analyze (default: the current directory).",
     )
     parser.add_argument("--json", action="store_true", help="Emit the Fit profile as JSON.")
+    parser.add_argument(
+        "--test",
+        action="store_true",
+        help=(
+            "Evaluate candidate configurations against real tasks. Requires "
+            "--budget. Without provider credentials this runs in simulation, "
+            "which proves the pipeline but never the repository."
+        ),
+    )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Generate the winning configuration. Shows every change before writing.",
+    )
+    parser.add_argument(
+        "--pr",
+        action="store_true",
+        help="Prepare a branch and pull-request body. Never merges.",
+    )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Skip the confirmation prompt when applying changes.",
+    )
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -186,13 +211,17 @@ def _format_dry_run(profile: FitProfile) -> str:
     return "\n".join(lines)
 
 
-def _build_plan(profile: FitProfile, budget: float | None) -> object:
+DEFAULT_MODEL = "gpt-4o-mini"
+
+
+def _build_plan(profile: FitProfile, budget: float | None, *, model: str = DEFAULT_MODEL) -> object:
     """Plan the experiment without calling a model or spending anything."""
 
     from ctx.engine.planner import BoundedCapabilityPlanner
     from ctx.fit.candidates import CandidateSet, generate_candidates
-    from ctx.fit.experiment import plan_experiment
+    from ctx.fit.experiment import ModelPrice, plan_experiment
     from ctx.fit.release_catalog import open_release_candidate_source
+    from ctx.fit.tasks import derive_tasks
 
     source = open_release_candidate_source()
     if source is None:
@@ -202,7 +231,18 @@ def _build_plan(profile: FitProfile, budget: float | None) -> object:
         )
     else:
         candidates = generate_candidates(profile, BoundedCapabilityPlanner(source=source))
-    return plan_experiment(profile, candidates, budget_usd=budget)
+
+    test_command = profile.verification.best("test")
+    verify = test_command.command if test_command else ("python", "-m", "pytest", "-q")
+    tasks = derive_tasks(profile.repo_path, verify_command=verify, limit=3)
+
+    return plan_experiment(
+        profile,
+        candidates,
+        task_count=len(tasks.tasks),
+        budget_usd=budget,
+        price=ModelPrice.from_litellm(model),
+    )
 
 
 def _format_plan(plan: object) -> str:
@@ -220,7 +260,12 @@ def _format_plan(plan: object) -> str:
         lines.append(f"  Verified with:     {plan.verification[0]}")
 
     cost = plan.cost
-    if cost.is_known:
+    if plan.executions == 0:
+        # A cost for zero executions is arithmetically $0 and completely
+        # meaningless. Printing it would read as "this is free" rather than
+        # "there is no experiment to price".
+        lines.append("  Estimated cost:    not applicable — nothing would run")
+    elif cost.is_known:
         lines.append(f"  Estimated cost:    ${cost.low_usd}-${cost.high_usd}")
     else:
         lines.append("  Estimated cost:    unknown")
@@ -237,6 +282,93 @@ def _format_plan(plan: object) -> str:
     return "\n".join(lines)
 
 
+def _provider_available() -> bool:
+    """Whether real execution is possible. Absence means simulation, not failure."""
+
+    import os
+
+    return any(
+        os.environ.get(name) for name in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "CTX_FIT_API_KEY")
+    )
+
+
+def _run_evaluation(
+    profile: FitProfile, args: argparse.Namespace
+) -> tuple[object, tuple[object, ...], str]:
+    """Run the full evaluation loop. Returns (recommendation, candidates, banner)."""
+
+    from dataclasses import replace
+
+    from ctx.engine.planner import BoundedCapabilityPlanner
+    from ctx.fit.candidates import CandidateSet, generate_candidates
+    from ctx.fit.execution import execute_trials, make_simulated_runner
+    from ctx.fit.recommend import recommend
+    from ctx.fit.release_catalog import open_release_candidate_source
+    from ctx.fit.tasks import derive_tasks
+
+    source = open_release_candidate_source()
+    if source is None:
+        candidates = CandidateSet(
+            abstained=True, abstention_reason="the capability catalog could not be opened"
+        )
+    else:
+        candidates = generate_candidates(profile, BoundedCapabilityPlanner(source=source))
+
+    test_command = profile.verification.best("test")
+    verify = test_command.command if test_command else ("python", "-m", "pytest", "-q")
+    derived = derive_tasks(profile.repo_path, verify_command=verify, limit=3)
+
+    # A task is only usable once observed to start red. Real red-gating runs the
+    # test against the reverted tree; in simulation there is nothing to observe,
+    # so tasks are accepted only under the simulated banner.
+    simulated = not _provider_available()
+    tasks = tuple(replace(task, starts_red=True) for task in derived.tasks) if simulated else ()
+
+    runner = make_simulated_runner()
+    report = execute_trials(
+        candidates.candidates,
+        tasks,
+        runner,
+        trials_per_task=3,
+        simulated=True,
+    )
+    recommendation = recommend(
+        report, candidates.candidates, task_count=len(tasks), trials_per_task=3
+    )
+
+    banner = (
+        "No provider credentials found, so this ran in SIMULATION. It proves the "
+        "evaluation pipeline works end to end and proves nothing about this "
+        "repository. Set OPENAI_API_KEY or ANTHROPIC_API_KEY for a real run."
+        if simulated
+        else "Real execution is not wired yet; this run was simulated."
+    )
+    return recommendation, candidates.candidates, banner
+
+
+def _format_recommendation(recommendation: object) -> str:
+    from ctx.fit.recommend import Recommendation
+
+    assert isinstance(recommendation, Recommendation)
+    lines = ["", recommendation.headline, ""]
+    lines.append(f"{'Candidate':<14}{'Verified':>10}{'Cost':>10}  Qualified")
+    for item in recommendation.ranked:
+        cost = f"${item.total_cost_usd}" if item.total_cost_usd is not None else "unknown"
+        mark = "yes" if item.qualified else f"no ({item.exclusion_reason})"
+        lines.append(f"{item.candidate_id:<14}{item.verified}/{item.scored:<8}{cost:>10}  {mark}")
+    lines.append("")
+    for line in recommendation.reasoning:
+        lines.append(f"  {line}")
+    lines.append("")
+    lines.append(f"Confidence: {recommendation.confidence}")
+    if recommendation.limitations:
+        lines.append("")
+        lines.append("Limitations")
+        for line in recommendation.limitations:
+            lines.append(f"  - {line}")
+    return "\n".join(lines)
+
+
 def cmd_fit(args: argparse.Namespace) -> int:
     """Run the Fit profiler. Returns a process exit code."""
 
@@ -248,7 +380,27 @@ def cmd_fit(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    wants_plan = bool(args.dry_run or args.budget is not None)
+    wants_plan = bool(args.dry_run or args.budget is not None or args.test)
+
+    # Evaluation is the only step that can spend, so it is gated twice: an
+    # explicit --test, and a budget the plan must fit.
+    evaluating = bool(args.test) and not args.dry_run
+    recommendation: object | None = None
+    candidates: tuple[object, ...] = ()
+    banner = ""
+    if evaluating:
+        plan = _build_plan(profile, args.budget)
+        if not plan.can_execute:  # type: ignore[attr-defined]
+            if not args.json:
+                print(_format_profile(profile))
+                print(_format_plan(plan))
+                print("\nNothing was run and nothing was spent.")
+            else:
+                payload = profile.to_dict()
+                payload["plan"] = plan.to_dict()  # type: ignore[attr-defined]
+                print(json.dumps(payload, indent=2, sort_keys=True))
+            return 1
+        recommendation, candidates, banner = _run_evaluation(profile, args)
 
     if args.json:
         from ctx.fit.readiness import score_readiness
@@ -259,14 +411,65 @@ def cmd_fit(args: argparse.Namespace) -> int:
             plan = _build_plan(profile, args.budget)
             payload["plan"] = plan.to_dict()  # type: ignore[attr-defined]
             payload["dry_run"] = bool(args.dry_run)
+        if recommendation is not None:
+            payload["recommendation"] = recommendation.to_dict()  # type: ignore[attr-defined]
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
 
     print(_format_profile(profile))
     if args.dry_run:
         print(_format_dry_run(profile))
-    if wants_plan:
+    if wants_plan and not evaluating:
         print(_format_plan(_build_plan(profile, args.budget)))
+
+    if recommendation is not None:
+        print(_format_recommendation(recommendation))
+        if banner:
+            print(f"\n{banner}")
+        if args.apply or args.pr:
+            return _handle_apply(recommendation, candidates, args)
+    elif args.apply or args.pr:
+        print(
+            "\nNothing to apply: run `ctx fit --test --budget N` first so there is "
+            "evidence to act on."
+        )
+        return 1
+    return 0
+
+
+def _handle_apply(
+    recommendation: object,
+    candidates: tuple[object, ...],
+    args: argparse.Namespace,
+) -> int:
+    """Preview, then optionally write, the winning configuration."""
+
+    from ctx.fit.apply import apply_plan, plan_apply
+
+    plan = plan_apply(recommendation, candidates, repo_path=args.repo)  # type: ignore[arg-type]
+    if not plan.can_apply:
+        print(f"\nNo changes proposed: {plan.explanation}.")
+        return 0
+
+    print("\nProposed changes")
+    for artifact in plan.artifacts:
+        print(f"  {artifact.action}: {artifact.path} ({artifact.reason})")
+    if args.pr:
+        print(f"\nBranch: {plan.branch}")
+        print(f"PR:     {plan.pr_title}")
+        print("\n--- pull request body ---")
+        print(plan.pr_body)
+        print("--- end ---")
+        print("\nCTX Fit never merges. Review before merging.")
+
+    if not args.apply:
+        return 0
+    if not args.yes:
+        print("\nRe-run with --yes to write these files.")
+        return 0
+
+    written = apply_plan(plan, args.repo)
+    print(f"\nWrote: {', '.join(written)}")
     return 0
 
 
