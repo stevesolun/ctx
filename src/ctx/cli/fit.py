@@ -48,6 +48,16 @@ def register(sub: argparse._SubParsersAction) -> None:
         ),
     )
     parser.add_argument(
+        "--budget",
+        type=float,
+        default=None,
+        metavar="USD",
+        help=(
+            "Maximum dollars CTX Fit may spend on an evaluation. Required before "
+            "any paid execution; without it CTX Fit only plans."
+        ),
+    )
+    parser.add_argument(
         "--max-depth",
         type=int,
         default=4,
@@ -171,10 +181,59 @@ def _format_dry_run(profile: FitProfile) -> str:
         "reliability is a requirement, not a tie-break. If nothing beats your "
         "current setup, CTX Fit says so and recommends keeping it.",
         "",
-        "Estimated cost: not calculable yet — execution is not implemented, and "
-        "CTX Fit never guesses a number it cannot derive.",
         "No model was invoked and nothing was spent.",
     ]
+    return "\n".join(lines)
+
+
+def _build_plan(profile: FitProfile, budget: float | None) -> object:
+    """Plan the experiment without calling a model or spending anything."""
+
+    from ctx.engine.planner import BoundedCapabilityPlanner
+    from ctx.fit.candidates import CandidateSet, generate_candidates
+    from ctx.fit.experiment import plan_experiment
+    from ctx.fit.release_catalog import open_release_candidate_source
+
+    source = open_release_candidate_source()
+    if source is None:
+        candidates = CandidateSet(
+            abstained=True,
+            abstention_reason="the capability catalog could not be opened",
+        )
+    else:
+        candidates = generate_candidates(profile, BoundedCapabilityPlanner(source=source))
+    return plan_experiment(profile, candidates, budget_usd=budget)
+
+
+def _format_plan(plan: object) -> str:
+    """Render the experiment plan and the budget decision."""
+
+    from ctx.fit.experiment import ExperimentPlan
+
+    assert isinstance(plan, ExperimentPlan)
+    lines = ["", "Experiment plan"]
+    lines.append(f"  Candidates:        {plan.candidate_count}")
+    lines.append(f"  Tasks:             {plan.task_count or 'not yet derived'}")
+    lines.append(f"  Trials per task:   {plan.trials_per_task} (for reliability)")
+    lines.append(f"  Total executions:  {plan.executions}")
+    if plan.verification:
+        lines.append(f"  Verified with:     {plan.verification[0]}")
+
+    cost = plan.cost
+    if cost.is_known:
+        lines.append(f"  Estimated cost:    ${cost.low_usd}-${cost.high_usd}")
+    else:
+        lines.append("  Estimated cost:    unknown")
+        lines.append(f"                     {cost.basis}")
+
+    lines.append("")
+    lines.append(
+        f"Ready to run: {plan.explanation}."
+        if plan.can_execute
+        else f"Not runnable: {plan.explanation}."
+    )
+    for warning in plan.warnings:
+        lines.append(f"  - {warning}")
     return "\n".join(lines)
 
 
@@ -189,19 +248,25 @@ def cmd_fit(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
+    wants_plan = bool(args.dry_run or args.budget is not None)
+
     if args.json:
         from ctx.fit.readiness import score_readiness
 
         payload = profile.to_dict()
         payload["readiness"] = score_readiness(profile).to_dict()
-        if args.dry_run:
-            payload["dry_run"] = True
+        if wants_plan:
+            plan = _build_plan(profile, args.budget)
+            payload["plan"] = plan.to_dict()  # type: ignore[attr-defined]
+            payload["dry_run"] = bool(args.dry_run)
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
 
     print(_format_profile(profile))
     if args.dry_run:
         print(_format_dry_run(profile))
+    if wants_plan:
+        print(_format_plan(_build_plan(profile, args.budget)))
     return 0
 
 
