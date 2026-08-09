@@ -1823,7 +1823,17 @@ def _loop_result_outcome(result: Any) -> tuple[str, str | None]:
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
+    if getattr(args, "command", None) is None:
+        # Bare `ctx` means "look at this repository" — the product's default
+        # path, which is read-only, free, and spends nothing.
+        from ctx.cli.fit import cmd_fit, default_namespace
+
+        return cmd_fit(default_namespace())
     try:
+        if args.command == "doctor":
+            from ctx.cli.doctor import cmd_doctor
+
+            return cmd_doctor(args)
         if args.command == "run":
             return _cmd_run(args)
         if args.command == "resume":
@@ -1859,13 +1869,17 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
-    sub = p.add_subparsers(dest="command", required=True)
+    # Not required: a bare `ctx` runs the product rather than printing an error.
+    # The product promise is one command, so typing it must do something useful.
+    sub = p.add_subparsers(dest="command", required=False)
 
     # fit — repository-specific AI coding stack analysis. Registered from its
     # own module so the Fit product layer stays out of the harness CLI.
+    from ctx.cli.doctor import register as _register_doctor
     from ctx.cli.fit import register as _register_fit
 
     _register_fit(sub)
+    _register_doctor(sub)
 
     # run
     r = sub.add_parser(

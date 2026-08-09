@@ -282,6 +282,22 @@ def _format_plan(plan: object) -> str:
     return "\n".join(lines)
 
 
+def default_namespace(repo: str = ".") -> argparse.Namespace:
+    """Arguments for a bare ``ctx`` invocation: analyze, spend nothing."""
+
+    return argparse.Namespace(
+        repo=repo,
+        json=False,
+        test=False,
+        apply=False,
+        pr=False,
+        yes=False,
+        dry_run=False,
+        budget=None,
+        max_depth=4,
+    )
+
+
 def _provider_available() -> bool:
     """Whether real execution is possible. Absence means simulation, not failure."""
 
@@ -322,15 +338,26 @@ def _run_evaluation(
     # test against the reverted tree; in simulation there is nothing to observe,
     # so tasks are accepted only under the simulated banner.
     simulated = not _provider_available()
-    tasks = tuple(replace(task, starts_red=True) for task in derived.tasks) if simulated else ()
+    if simulated:
+        # Nothing is executed, so redness cannot be observed; tasks are accepted
+        # only under the simulated banner, which claims nothing.
+        tasks = tuple(replace(task, starts_red=True) for task in derived.tasks)
+        runner = make_simulated_runner()
+    else:
+        # The live runner proves redness itself, per trial, inside an isolated
+        # workspace, so tasks enter unvalidated and are gated there.
+        from ctx.fit.live_runner import make_live_runner
+        from ctx.fit.providers import build_agent_driver
 
-    runner = make_simulated_runner()
+        tasks = tuple(replace(task, starts_red=True) for task in derived.tasks)
+        runner = make_live_runner(profile.repo_path, build_agent_driver())
+
     report = execute_trials(
         candidates.candidates,
         tasks,
         runner,
         trials_per_task=3,
-        simulated=True,
+        simulated=simulated,
     )
     recommendation = recommend(
         report, candidates.candidates, task_count=len(tasks), trials_per_task=3
