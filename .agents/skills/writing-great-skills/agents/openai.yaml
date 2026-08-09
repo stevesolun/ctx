@@ -1,0 +1,5 @@
+interface:
+  display_name: "Writing Great Skills"
+  short_description: "Design concise, adaptable skills"
+policy:
+  allow_implicit_invocation: false

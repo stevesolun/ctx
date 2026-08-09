@@ -1,0 +1,133 @@
+"""Host-neutral production composition for the CTX capability engine."""
+
+from ctx.runtime.composition import (
+    DEFAULT_RUNTIME_PLANNER_VERSION,
+    EngineComposition,
+    open_engine_composition,
+    open_managed_engine_composition,
+)
+from ctx.runtime.planning_v3 import (
+    AuthenticatedBenefitFactsPort,
+    AuthenticatedReplayDecisionPlannerV3,
+    CatalogMaterialAuthorityPort,
+)
+from ctx.runtime.activation_execution import (
+    ActivationExecutionError,
+    ActivationExecutionHandleConsumed,
+    ActivationExecutionProcessMismatch,
+    ActivationExecutionReport,
+    prepare_activation_execution,
+)
+from ctx.runtime.install_execution import (
+    InstallExecutionError,
+    InstallExecutionHandleConsumed,
+    InstallExecutionProcessMismatch,
+    InstallExecutionReport,
+)
+from ctx.runtime.agent_file import AgentFileBodySource, AgentFileRuntimeConfig
+from ctx.runtime.skill_cas import SkillCasBodySource, SkillCasRuntimeConfig
+from ctx.runtime.production_catalog import (
+    ReleaseCatalogError,
+    ReleasePinnedQueryCatalog,
+    open_release_pinned_query_catalog,
+)
+from ctx.runtime.release_skill_dispatcher import (
+    ReleaseSkillDispatchError,
+    ReleaseSkillDispatchResult,
+    ReleaseSkillInstallRequest,
+    dispatch_release_skill_install,
+)
+from ctx.runtime.release_skill_lifecycle import (
+    ReleaseSkillActivationError,
+    ReleaseSkillActivationEvidence,
+    activate_installed_release_skill,
+)
+from ctx.runtime.query_decision import (
+    CapabilitySelection,
+    CommittedQueryDecision,
+    QueryDecisionFailure,
+    QueryDecisionResult,
+    QueryDecisionValidationError,
+    QueryHostDescriptor,
+    accept_query_decision,
+    prepare_query_decision,
+    render_query_decision_context,
+)
+from ctx.runtime.managed_query_service import (
+    ManagedActionSummary,
+    ManagedConsentChallengeProjection,
+    ManagedConsentResolutionResult,
+    ManagedDesiredSetBusyError,
+    ManagedDesiredSetConflictError,
+    ManagedDesiredSetRequest,
+    ManagedDesiredSetResult,
+    ManagedDesiredSetSupersededError,
+    ManagedQueryHeadDriftError,
+    ManagedQueryInput,
+    ManagedQueryInputAuthority,
+    ManagedQueryRequest,
+    ManagedQueryService,
+    ManagedQueryServiceError,
+    ManagedQueryServiceResult,
+    ManagedQuerySupersededError,
+    open_managed_query_service,
+)
+
+__all__ = [
+    "DEFAULT_RUNTIME_PLANNER_VERSION",
+    "AuthenticatedBenefitFactsPort",
+    "AuthenticatedReplayDecisionPlannerV3",
+    "CatalogMaterialAuthorityPort",
+    "CapabilitySelection",
+    "CommittedQueryDecision",
+    "AgentFileBodySource",
+    "AgentFileRuntimeConfig",
+    "ActivationExecutionError",
+    "ActivationExecutionHandleConsumed",
+    "ActivationExecutionProcessMismatch",
+    "ActivationExecutionReport",
+    "EngineComposition",
+    "InstallExecutionError",
+    "InstallExecutionHandleConsumed",
+    "InstallExecutionProcessMismatch",
+    "InstallExecutionReport",
+    "prepare_activation_execution",
+    "ManagedActionSummary",
+    "ManagedConsentChallengeProjection",
+    "ManagedConsentResolutionResult",
+    "ManagedDesiredSetBusyError",
+    "ManagedDesiredSetConflictError",
+    "ManagedDesiredSetRequest",
+    "ManagedDesiredSetResult",
+    "ManagedDesiredSetSupersededError",
+    "ManagedQueryHeadDriftError",
+    "ManagedQueryInput",
+    "ManagedQueryInputAuthority",
+    "ManagedQueryRequest",
+    "ManagedQueryService",
+    "ManagedQueryServiceError",
+    "ManagedQueryServiceResult",
+    "ManagedQuerySupersededError",
+    "SkillCasBodySource",
+    "SkillCasRuntimeConfig",
+    "ReleaseCatalogError",
+    "ReleasePinnedQueryCatalog",
+    "ReleaseSkillActivationError",
+    "ReleaseSkillActivationEvidence",
+    "ReleaseSkillDispatchError",
+    "ReleaseSkillDispatchResult",
+    "ReleaseSkillInstallRequest",
+    "QueryDecisionFailure",
+    "QueryDecisionResult",
+    "QueryDecisionValidationError",
+    "QueryHostDescriptor",
+    "open_engine_composition",
+    "open_managed_engine_composition",
+    "open_managed_query_service",
+    "open_release_pinned_query_catalog",
+    "activate_installed_release_skill",
+    "dispatch_release_skill_install",
+    "accept_query_decision",
+    "prepare_query_decision",
+    "render_query_decision_context",
+]

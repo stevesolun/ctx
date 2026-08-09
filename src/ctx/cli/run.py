@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import nullcontext, redirect_stdout
+import hashlib
 import json
 import logging
 import math
@@ -43,11 +44,13 @@ from ctx import __version__
 from ctx.adapters.generic.adaptive_runtime import AdaptiveRuntimeController, SelectedSkill
 from ctx.adapters.generic.compaction import TokenBudgetCompactor
 from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox, make_tool_executor
+from ctx.adapters.generic.engine_turn import EngineTurnController
 from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
 from ctx.adapters.generic.loop import (
     LoopObserver,
     LoopResult,
     ToolPolicy,
+    TurnController,
     TurnActivation,
     TurnAuthorization,
     TurnPreparation,
@@ -75,6 +78,18 @@ from ctx.adapters.generic.state import (
 )
 from ctx.adapters.generic.tools import TOOL_SEPARATOR, McpRouter, McpServerConfig
 from ctx.telemetry import record_event, record_exception, telemetry_span
+from ctx.runtime.query_decision import (
+    CommittedQueryDecision,
+    QueryDecisionFailure,
+    QueryHostDescriptor,
+    accept_query_decision,
+)
+from ctx.runtime.query_session import prepare_ctx_run_query_decision
+from ctx.runtime.production_catalog import (
+    RELEASE_QUERY_CATALOG_MODE,
+    RELEASE_QUERY_CATALOG_ROOT_SHA256,
+    RELEASE_QUERY_CATALOG_SEQUENCE,
+)
 from ctx.utils._secret_scan import find_inline_secret_arg
 
 
@@ -95,7 +110,41 @@ _GITHUB_MCP_CREDENTIAL_ENV = (
 )
 _TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 _CTX_TOOL_SURFACES = ("adaptive", "minimal", "full")
+_CTX_ENGINE_MODES = ("legacy", "shadow", "recommend")
+_CTX_ENGINE_MODE_ENV = "CTX_ENGINE_MODE"
+_CTX_FORCE_LEGACY_ENV = "CTX_FORCE_LEGACY"
 _CTX_BOOTSTRAP_TOOL_NAMES = frozenset({"ctx__recommend_bundle", "ctx__wiki_get"})
+_CTX_ENGINE_SUPPRESSED_LEGACY_TOOLS = (
+    "ctx__recommend_bundle",
+    "ctx__recommend_related",
+    "ctx__graph_query",
+    "ctx__wiki_search",
+    "ctx__wiki_get",
+    "ctx__loop_provision",
+    "ctx__loop_topup",
+    "ctx__load_entity",
+    "ctx__mark_entity_used",
+    "ctx__unload_entity",
+)
+_CTX_ENGINE_SAFE_TOKEN_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_CTX_ENGINE_METADATA_FIELDS = frozenset(
+    {
+        "requested_mode",
+        "resolved_mode",
+        "effective_mode",
+        "status",
+        "circuit_breaker_tripped",
+        "failure_code",
+        "recommendation_count",
+        "plan_digest",
+        "journal_revision",
+        "journal_record_digest",
+        "release_root_digest",
+        "release_sequence",
+        "catalog_mode",
+    }
+)
 _MAX_AUXILIARY_AGENT_TIMEOUT = 45.0
 
 
@@ -257,6 +306,10 @@ def _normalise_tool_patterns(patterns: list[str] | tuple[str, ...] | None) -> tu
     return tuple(p.strip() for p in (patterns or []) if p and p.strip())
 
 
+def _merge_tool_patterns(*groups: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(pattern for group in groups for pattern in group))
+
+
 def _resolve_ctx_tool_surface(explicit: str | None, recorded: Any = _MISSING) -> str:
     if explicit in _CTX_TOOL_SURFACES:
         return explicit
@@ -264,6 +317,333 @@ def _resolve_ctx_tool_surface(explicit: str | None, recorded: Any = _MISSING) ->
         return str(recorded)
     # Sessions created before surfaces were recorded exposed all ctx tools.
     return "full" if recorded is _MISSING else "minimal"
+
+
+def _env_flag_enabled(value: str | None) -> bool:
+    if value is None:
+        return False
+    normalized = value.strip().lower()
+    return bool(normalized) and normalized not in {"0", "false", "no", "off"}
+
+
+def _resolve_ctx_engine_mode(explicit: str | None) -> tuple[str, str]:
+    """Return the safe requested and emergency-resolved new-session modes."""
+
+    if explicit is not None:
+        if explicit not in _CTX_ENGINE_MODES:
+            raise ValueError(f"unsupported CTX engine mode: {explicit!r}")
+        requested = explicit
+    else:
+        configured = os.environ.get(_CTX_ENGINE_MODE_ENV, "").strip().lower()
+        requested = configured if configured in _CTX_ENGINE_MODES else "legacy"
+    resolved = "legacy" if _env_flag_enabled(os.environ.get(_CTX_FORCE_LEGACY_ENV)) else requested
+    return requested, resolved
+
+
+def _ctx_engine_state_paths(
+    store: SessionStore,
+    *,
+    session_id: str,
+) -> tuple[Path, Path]:
+    """Derive private sidecars for this exact session-file instance."""
+
+    stat = store.path.stat()
+    instance_digest = hashlib.sha256(
+        (
+            f"ctx-run-query-v1\0{session_id}\0{stat.st_dev}\0{stat.st_ino}\0{stat.st_ctime_ns}"
+        ).encode("utf-8")
+    ).hexdigest()
+    root = store.path.parent / ".ctx-engine"
+    return (
+        root / f"{instance_digest}.journal.sqlite3",
+        root / f"{instance_digest}.benefit.sqlite3",
+    )
+
+
+def _legacy_ctx_engine_metadata(*, requested: str, resolved: str) -> dict[str, Any]:
+    return {
+        "requested_mode": requested,
+        "resolved_mode": resolved,
+        "effective_mode": "legacy",
+        "status": "legacy",
+        "circuit_breaker_tripped": False,
+        "failure_code": None,
+        "recommendation_count": 0,
+        "plan_digest": None,
+        "journal_revision": None,
+        "journal_record_digest": None,
+        "release_root_digest": None,
+        "release_sequence": None,
+        "catalog_mode": None,
+    }
+
+
+def _failed_ctx_engine_metadata(
+    *,
+    requested: str,
+    resolved: str,
+    failure_code: str,
+) -> dict[str, Any]:
+    code = (
+        failure_code
+        if _CTX_ENGINE_SAFE_TOKEN_RE.fullmatch(failure_code)
+        else "query-session-failed"
+    )
+    metadata = _legacy_ctx_engine_metadata(requested=requested, resolved=resolved)
+    metadata.update(
+        {
+            "status": "failed",
+            "circuit_breaker_tripped": True,
+            "failure_code": code,
+        }
+    )
+    return metadata
+
+
+def _successful_ctx_engine_metadata(
+    *,
+    requested: str,
+    resolved: str,
+    decision: object,
+) -> tuple[dict[str, Any], str | None] | None:
+    """Copy only bounded authority-free receipts from one closed decision."""
+
+    try:
+        accepted = accept_query_decision(
+            decision,
+            host=QueryHostDescriptor.ctx_run(),
+        )
+    except Exception:  # noqa: BLE001 - the session circuit breaker must fail soft.
+        return None
+    if type(accepted) is not CommittedQueryDecision:
+        return None
+    status = accepted.status
+    context = accepted.recommendation_context
+    count = accepted.recommendation_count
+    plan_digest = accepted.plan_digest
+    journal_revision = accepted.journal_revision
+    journal_digest = accepted.journal_record_digest
+    release_digest = accepted.release_root_digest
+    release_sequence = accepted.release_sequence
+    catalog_mode = accepted.catalog_mode
+    if (
+        status not in {"presented", "abstained"}
+        or isinstance(count, bool)
+        or not isinstance(count, int)
+        or journal_revision != 2
+        or not isinstance(journal_digest, str)
+        or _SHA256_RE.fullmatch(journal_digest) is None
+        or release_digest != RELEASE_QUERY_CATALOG_ROOT_SHA256
+        or release_sequence != RELEASE_QUERY_CATALOG_SEQUENCE
+        or catalog_mode != RELEASE_QUERY_CATALOG_MODE
+        or not isinstance(plan_digest, str)
+        or _SHA256_RE.fullmatch(plan_digest) is None
+    ):
+        return None
+    if status == "presented":
+        if not isinstance(context, str) or not context.strip() or not 1 <= count <= 5:
+            return None
+    elif context is not None or count != 0:
+        return None
+    return (
+        {
+            "requested_mode": requested,
+            "resolved_mode": resolved,
+            "effective_mode": resolved,
+            "status": status,
+            "circuit_breaker_tripped": False,
+            "failure_code": None,
+            "recommendation_count": count,
+            "plan_digest": plan_digest,
+            "journal_revision": journal_revision,
+            "journal_record_digest": journal_digest,
+            "release_root_digest": release_digest,
+            "release_sequence": release_sequence,
+            "catalog_mode": catalog_mode,
+        },
+        context,
+    )
+
+
+def _prepare_ctx_engine_for_run(
+    *,
+    requested: str,
+    resolved: str,
+    task: str,
+    session_id: str,
+    workspace: Path,
+    store: SessionStore,
+) -> tuple[dict[str, Any], str | None]:
+    """Finish one closed engine decision before any provider call."""
+
+    if resolved == "legacy":
+        return _legacy_ctx_engine_metadata(requested=requested, resolved=resolved), None
+    try:
+        journal_path, benefit_audit_path = _ctx_engine_state_paths(
+            store,
+            session_id=session_id,
+        )
+        decision = prepare_ctx_run_query_decision(
+            task=task,
+            language="",
+            session_id=session_id,
+            workspace=workspace,
+            journal_path=journal_path,
+            benefit_audit_path=benefit_audit_path,
+        )
+    except Exception:  # noqa: BLE001 - the session circuit breaker must fail soft.
+        return (
+            _failed_ctx_engine_metadata(
+                requested=requested,
+                resolved=resolved,
+                failure_code="query-session-failed",
+            ),
+            None,
+        )
+    try:
+        accepted = accept_query_decision(
+            decision,
+            host=QueryHostDescriptor.ctx_run(),
+        )
+    except Exception:  # noqa: BLE001 - the session circuit breaker must fail soft.
+        return (
+            _failed_ctx_engine_metadata(
+                requested=requested,
+                resolved=resolved,
+                failure_code="invalid-query-decision",
+            ),
+            None,
+        )
+    if type(accepted) is QueryDecisionFailure:
+        return (
+            _failed_ctx_engine_metadata(
+                requested=requested,
+                resolved=resolved,
+                failure_code=accepted.failure_code,
+            ),
+            None,
+        )
+    try:
+        validated_decision = _successful_ctx_engine_metadata(
+            requested=requested,
+            resolved=resolved,
+            decision=accepted,
+        )
+    except Exception:  # noqa: BLE001 - the session circuit breaker must fail soft.
+        validated_decision = None
+    if validated_decision is None:
+        return (
+            _failed_ctx_engine_metadata(
+                requested=requested,
+                resolved=resolved,
+                failure_code="invalid-query-decision",
+            ),
+            None,
+        )
+    metadata, validated_context = validated_decision
+    context = (
+        validated_context if resolved == "recommend" and metadata["status"] == "presented" else None
+    )
+    if context is not None:
+        try:
+            EngineTurnController(recommendation_context=context, delegate=None)
+        except (TypeError, ValueError):
+            return (
+                _failed_ctx_engine_metadata(
+                    requested=requested,
+                    resolved=resolved,
+                    failure_code="invalid-recommendation-context",
+                ),
+                None,
+            )
+    return metadata, context
+
+
+def _resume_requires_engine_only(meta: dict[str, Any]) -> bool:
+    """Fail closed when a recorded engine session cannot safely resume legacy policy."""
+
+    if "ctx_engine" not in meta:
+        return False
+    recorded = meta.get("ctx_engine")
+    if not isinstance(recorded, dict) or set(recorded) != _CTX_ENGINE_METADATA_FIELDS:
+        return True
+    requested = recorded.get("requested_mode")
+    resolved = recorded.get("resolved_mode")
+    effective = recorded.get("effective_mode")
+    status = recorded.get("status")
+    breaker = recorded.get("circuit_breaker_tripped")
+    failure_code = recorded.get("failure_code")
+    count = recorded.get("recommendation_count")
+    plan_digest = recorded.get("plan_digest")
+    journal_revision = recorded.get("journal_revision")
+    journal_digest = recorded.get("journal_record_digest")
+    release_digest = recorded.get("release_root_digest")
+    release_sequence = recorded.get("release_sequence")
+    catalog_mode = recorded.get("catalog_mode")
+    if (
+        not isinstance(requested, str)
+        or requested not in _CTX_ENGINE_MODES
+        or not isinstance(resolved, str)
+        or resolved not in _CTX_ENGINE_MODES
+        or isinstance(count, bool)
+        or not isinstance(count, int)
+    ):
+        return True
+    if (
+        effective == "legacy"
+        and resolved == "legacy"
+        and status == "legacy"
+        and breaker is False
+        and failure_code is None
+        and count == 0
+        and plan_digest is None
+        and journal_revision is None
+        and journal_digest is None
+        and release_digest is None
+        and release_sequence is None
+        and catalog_mode is None
+    ):
+        return False
+    if (
+        effective == "legacy"
+        and resolved in {"shadow", "recommend"}
+        and requested == resolved
+        and status == "failed"
+        and breaker is True
+        and isinstance(failure_code, str)
+        and _CTX_ENGINE_SAFE_TOKEN_RE.fullmatch(failure_code) is not None
+        and count == 0
+        and plan_digest is None
+        and journal_revision is None
+        and journal_digest is None
+        and release_digest is None
+        and release_sequence is None
+        and catalog_mode is None
+    ):
+        return False
+    if status in {"presented", "abstained"}:
+        success_valid = (
+            requested == resolved
+            and resolved in {"shadow", "recommend"}
+            and effective == resolved
+            and breaker is False
+            and failure_code is None
+            and isinstance(plan_digest, str)
+            and _SHA256_RE.fullmatch(plan_digest) is not None
+            and journal_revision == 2
+            and isinstance(journal_digest, str)
+            and _SHA256_RE.fullmatch(journal_digest) is not None
+            and release_digest == RELEASE_QUERY_CATALOG_ROOT_SHA256
+            and release_sequence == RELEASE_QUERY_CATALOG_SEQUENCE
+            and catalog_mode == RELEASE_QUERY_CATALOG_MODE
+            and (
+                (status == "presented" and 1 <= count <= 5)
+                or (status == "abstained" and count == 0)
+            )
+        )
+        if success_valid:
+            return resolved == "recommend"
+    return True
 
 
 def _ctx_toolbox_for_surface(
@@ -533,7 +913,7 @@ _MCP_PRESETS: dict[str, McpServerConfig] = {
 # ── Default system prompt ──────────────────────────────────────────────────
 
 
-def _mcp_configs_from_metadata(meta: dict) -> list[McpServerConfig]:
+def _mcp_configs_from_metadata(meta: dict[str, Any]) -> list[McpServerConfig]:
     """Recreate MCP server configs from a session's metadata block.
 
     Codex review fix #3: ``ctx resume`` was creating a router from
@@ -1450,6 +1830,10 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_resume(args)
         if args.command == "sessions":
             return _cmd_sessions(args)
+        if args.command == "fit":
+            from ctx.cli.fit import cmd_fit
+
+            return cmd_fit(args)
     except RuntimeError as exc:
         if _is_missing_harness_extra_error(exc):
             print(f"error: {exc}", file=sys.stderr)
@@ -1475,6 +1859,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = p.add_subparsers(dest="command", required=True)
+
+    # fit — repository-specific AI coding stack analysis. Registered from its
+    # own module so the Fit product layer stays out of the harness CLI.
+    from ctx.cli.fit import register as _register_fit
+
+    _register_fit(sub)
 
     # run
     r = sub.add_parser(
@@ -1534,6 +1924,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-ctx-tools",
         action="store_true",
         help="Do not attach the built-in ctx__* tool surface.",
+    )
+    r.add_argument(
+        "--ctx-engine-mode",
+        choices=_CTX_ENGINE_MODES,
+        default=None,
+        help=(
+            "New-session CTX engine rollout mode. Default: CTX_ENGINE_MODE when "
+            "valid, otherwise legacy. CTX_FORCE_LEGACY is the emergency override."
+        ),
     )
     _add_ctx_tool_surface_arg(r, default="adaptive")
     _add_tool_policy_args(r)
@@ -1800,6 +2199,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
             "(all three agents share the same testable success criteria)."
         )
 
+    ctx_engine_requested_mode, ctx_engine_resolved_mode = _resolve_ctx_engine_mode(
+        args.ctx_engine_mode
+    )
+
     sdir = Path(args.sessions_dir) if args.sessions_dir else default_sessions_dir()
 
     api_key_env = _resolve_api_key_env(args.api_key_env, args.model, args.provider)
@@ -1874,6 +2277,15 @@ def _cmd_run(args: argparse.Namespace) -> int:
             )
         return 1
 
+    ctx_engine_metadata, engine_recommendation_context = _prepare_ctx_engine_for_run(
+        requested=ctx_engine_requested_mode,
+        resolved=ctx_engine_resolved_mode,
+        task=args.task,
+        session_id=session_id,
+        workspace=Path.cwd(),
+        store=store,
+    )
+
     lifecycle = RuntimeLifecycleStore()
 
     # Planner pass (opt-in, SOLO path only — when --evaluator is set,
@@ -1932,6 +2344,12 @@ def _cmd_run(args: argparse.Namespace) -> int:
     ctx_tool_surface = _resolve_ctx_tool_surface(args.ctx_tool_surface)
     allow_tools = _normalise_tool_patterns(args.allow_tool)
     deny_tools = _normalise_tool_patterns(args.deny_tool)
+    engine_recommend_active = ctx_engine_metadata["effective_mode"] == "recommend"
+    effective_ctx_deny_tools = (
+        _merge_tool_patterns(deny_tools, _CTX_ENGINE_SUPPRESSED_LEGACY_TOOLS)
+        if engine_recommend_active
+        else deny_tools
+    )
 
     try:
         mcp_configs = _apply_mcp_env_overlays(
@@ -1956,14 +2374,15 @@ def _cmd_run(args: argparse.Namespace) -> int:
     # ctx-core tools.
     extra_tools: list[ToolDefinition] = []
     tool_executor = None
-    turn_controller: AdaptiveRuntimeController | _AdaptiveMcpController | None = None
+    adaptive_controller: AdaptiveRuntimeController | _AdaptiveMcpController | None = None
+    turn_controller: TurnController | None = None
     if ctx_tools_enabled:
         toolbox, ctx_definitions = _ctx_toolbox_for_surface(
             lifecycle_dir=lifecycle.root,
             bound_session_id=session_id,
             surface=ctx_tool_surface,
             allow_patterns=allow_tools,
-            deny_patterns=deny_tools,
+            deny_patterns=effective_ctx_deny_tools,
         )
         if ctx_definitions:
             extra_tools.extend(ctx_definitions)
@@ -1974,33 +2393,40 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 ctx_definitions,
             )
         if ctx_tool_surface == "adaptive":
-            if mcp_configs:
-                router = McpRouter(mcp_configs, session_id=session_id, lazy=True)
-            if mcp_configs or not ctx_definitions:
-                turn_controller = _adaptive_controller_for_task(
-                    args.task,
-                    cwd=Path.cwd(),
-                    lifecycle=lifecycle,
-                    session_id=session_id,
-                    router=router,
-                    mcp_server_names=_adaptive_mcp_server_names(
-                        mcp_configs,
-                        allow_tools,
-                        deny_tools,
-                    ),
-                    mcp_configured_count=len(mcp_configs),
-                    allow_patterns=allow_tools,
-                    deny_patterns=deny_tools,
-                )
+            if not engine_recommend_active:
+                if mcp_configs:
+                    router = McpRouter(mcp_configs, session_id=session_id, lazy=True)
+                if mcp_configs or not ctx_definitions:
+                    adaptive_controller = _adaptive_controller_for_task(
+                        args.task,
+                        cwd=Path.cwd(),
+                        lifecycle=lifecycle,
+                        session_id=session_id,
+                        router=router,
+                        mcp_server_names=_adaptive_mcp_server_names(
+                            mcp_configs,
+                            allow_tools,
+                            deny_tools,
+                        ),
+                        mcp_configured_count=len(mcp_configs),
+                        allow_patterns=allow_tools,
+                        deny_patterns=deny_tools,
+                    )
+                    turn_controller = adaptive_controller
             if not ctx_definitions:
                 system_prompt = _without_ctx_session_instructions(system_prompt)
         elif not ctx_definitions:
             system_prompt = _without_ctx_session_instructions(system_prompt)
     if router is None and mcp_configs:
         router = McpRouter(mcp_configs, session_id=session_id)
+    if engine_recommendation_context is not None:
+        turn_controller = EngineTurnController(
+            recommendation_context=engine_recommendation_context,
+            delegate=turn_controller,
+        )
 
     compactor = None if args.no_compact else TokenBudgetCompactor()
-    tool_policy = _compile_tool_policy(allow_tools, deny_tools)
+    tool_policy = _compile_tool_policy(allow_tools, effective_ctx_deny_tools)
 
     with telemetry_span() as span:
         metadata = {
@@ -2030,8 +2456,16 @@ def _cmd_run(args: argparse.Namespace) -> int:
             "ctx_tools_enabled": ctx_tools_enabled,
             "ctx_tool_surface": ctx_tool_surface,
             "ctx_tool_names": [definition.name for definition in extra_tools],
-            "ctx_adaptive": turn_controller.summary() if turn_controller else {"enabled": False},
-            "tool_policy": {"allow": list(allow_tools), "deny": list(deny_tools)},
+            "ctx_adaptive": (
+                adaptive_controller.summary()
+                if adaptive_controller is not None
+                else {"enabled": False}
+            ),
+            "ctx_engine": ctx_engine_metadata,
+            "tool_policy": {
+                "allow": list(allow_tools),
+                "deny": list(effective_ctx_deny_tools),
+            },
             "planner_used": plan_artifact is not None,
             "contract_used": bool(args.evaluator and args.contract),
             "evaluator_used": args.evaluator,
@@ -2063,7 +2497,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             )
             _record_adaptive_selection_request(
                 lifecycle,
-                turn_controller,
+                adaptive_controller,
                 session_id=session_id,
             )
         _record_cli_telemetry(
@@ -2079,7 +2513,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
                     deny_count=len(deny_tools),
                     plan_available=plan_artifact is not None,
                 ),
-                **_adaptive_runtime_payload(turn_controller),
+                **_adaptive_runtime_payload(adaptive_controller),
             },
             outcome="ok",
             duration_ms=_duration_ms(telemetry_started),
@@ -2273,7 +2707,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             else:
                 failure_payload = {
                     **_loop_result_payload(result),
-                    **_adaptive_runtime_payload(turn_controller),
+                    **_adaptive_runtime_payload(adaptive_controller),
                 }
                 if deferred_stop_observer is not None:
                     failure_payload["ctx.usage.complete"] = False
@@ -2297,10 +2731,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 for role in reversed(loaded_runtime_agents):
                     _unload_runtime_agent(lifecycle, session_id=session_id, role=role)
                 loaded_runtime_agents.clear()
-                if turn_controller is not None:
+                if adaptive_controller is not None:
                     _write_session_config_safely(
                         store,
-                        {"ctx_adaptive": turn_controller.summary()},
+                        {"ctx_adaptive": adaptive_controller.summary()},
                     )
                 if lifecycle_active:
                     _record_lifecycle_safely(
@@ -2319,7 +2753,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         outcome, error_kind = _loop_result_outcome(result)
         finish_payload = {
             **_loop_result_payload(result),
-            **_adaptive_runtime_payload(turn_controller),
+            **_adaptive_runtime_payload(adaptive_controller),
         }
         finish_payload["ctx.evaluator.round_count"] = (
             len(evaluator_rounds) if evaluator_rounds is not None else 0
@@ -2466,6 +2900,12 @@ def _cmd_resume(args: argparse.Namespace) -> int:
     tool_executor = None
     turn_controller: AdaptiveRuntimeController | _AdaptiveMcpController | None = None
     allow_tools, deny_tools = _resume_tool_policy_patterns(args, meta)
+    engine_only_resume = _resume_requires_engine_only(meta)
+    effective_ctx_deny_tools = (
+        _merge_tool_patterns(deny_tools, _CTX_ENGINE_SUPPRESSED_LEGACY_TOOLS)
+        if engine_only_resume
+        else deny_tools
+    )
     ctx_tool_surface = _resolve_ctx_tool_surface(
         args.ctx_tool_surface,
         meta["ctx_tool_surface"] if "ctx_tool_surface" in meta else _MISSING,
@@ -2476,7 +2916,7 @@ def _cmd_resume(args: argparse.Namespace) -> int:
             bound_session_id=args.session_id,
             surface=ctx_tool_surface,
             allow_patterns=allow_tools,
-            deny_patterns=deny_tools,
+            deny_patterns=effective_ctx_deny_tools,
         )
         if ctx_definitions:
             extra_tools.extend(ctx_definitions)
@@ -2487,24 +2927,25 @@ def _cmd_resume(args: argparse.Namespace) -> int:
                 ctx_definitions,
             )
         if ctx_tool_surface == "adaptive":
-            if mcp_configs:
-                router = McpRouter(mcp_configs, session_id=args.session_id, lazy=True)
-            if mcp_configs or not ctx_definitions:
-                turn_controller = _adaptive_controller_for_task(
-                    args.task,
-                    cwd=Path.cwd(),
-                    lifecycle=lifecycle,
-                    session_id=args.session_id,
-                    router=router,
-                    mcp_server_names=_adaptive_mcp_server_names(
-                        mcp_configs,
-                        allow_tools,
-                        deny_tools,
-                    ),
-                    mcp_configured_count=len(mcp_configs),
-                    allow_patterns=allow_tools,
-                    deny_patterns=deny_tools,
-                )
+            if not engine_only_resume:
+                if mcp_configs:
+                    router = McpRouter(mcp_configs, session_id=args.session_id, lazy=True)
+                if mcp_configs or not ctx_definitions:
+                    turn_controller = _adaptive_controller_for_task(
+                        args.task,
+                        cwd=Path.cwd(),
+                        lifecycle=lifecycle,
+                        session_id=args.session_id,
+                        router=router,
+                        mcp_server_names=_adaptive_mcp_server_names(
+                            mcp_configs,
+                            allow_tools,
+                            deny_tools,
+                        ),
+                        mcp_configured_count=len(mcp_configs),
+                        allow_patterns=allow_tools,
+                        deny_patterns=deny_tools,
+                    )
             if not ctx_definitions:
                 system_prompt = _without_ctx_session_instructions(str(system_prompt))
         elif not ctx_definitions:
@@ -2520,11 +2961,14 @@ def _cmd_resume(args: argparse.Namespace) -> int:
             "ctx_tool_surface": ctx_tool_surface,
             "ctx_tool_names": [definition.name for definition in extra_tools],
             "ctx_adaptive": turn_controller.summary() if turn_controller else {"enabled": False},
-            "tool_policy": {"allow": list(allow_tools), "deny": list(deny_tools)},
+            "tool_policy": {
+                "allow": list(allow_tools),
+                "deny": list(effective_ctx_deny_tools),
+            },
         }
     )
     resume_messages = _resume_messages_with_system_prompt(state.messages, system_prompt)
-    tool_policy = _compile_tool_policy(allow_tools, deny_tools)
+    tool_policy = _compile_tool_policy(allow_tools, effective_ctx_deny_tools)
 
     with telemetry_span():
         if not args.quiet:

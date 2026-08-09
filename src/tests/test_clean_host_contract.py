@@ -16,6 +16,7 @@ from scripts.clean_host_contract import (
     CompletedCommand,
     LIVE_CLAUDE_ACK_ENV,
     LIVE_CLAUDE_ACK_VALUE,
+    _assert_fake_codex_hook_output,
     _assert_fake_claude_hook_output,
     _assert_live_claude_sentinel,
     _append_live_claude_sentinel_hooks,
@@ -26,6 +27,7 @@ from scripts.clean_host_contract import (
     run_contract,
     venv_script,
     write_fake_claude_cli,
+    write_fake_codex_cli,
     write_fake_litellm,
     write_tiny_repo,
 )
@@ -83,13 +85,16 @@ class RecordingRunner(CommandRunner):
                 settings = home / ".claude" / "settings.json"
                 settings.parent.mkdir(parents=True, exist_ok=True)
                 settings.write_text("{}", encoding="utf-8")
+                codex_hooks = home / ".codex" / "hooks.json"
+                codex_hooks.parent.mkdir(parents=True, exist_ok=True)
+                codex_hooks.write_text("{}", encoding="utf-8")
         elif call and Path(call[0]).name.startswith("ctx-scan-repo"):
             output = Path(call[call.index("--output") + 1])
             output.write_text("{}", encoding="utf-8")
         elif any(Path(part).name == "fake_claude.py" for part in call):
             stdout = json.dumps(
                 {
-                    "hook_commands": 5,
+                    "hook_commands": 6,
                     "failed": 0,
                     "commands": [
                         {"command": "ctx.adapters.claude_code.hooks.context_monitor"},
@@ -97,6 +102,28 @@ class RecordingRunner(CommandRunner):
                         {"command": "ctx.adapters.claude_code.hooks.bundle_orchestrator"},
                         {"command": "usage_tracker"},
                         {"command": "ctx.adapters.claude_code.hooks.lifecycle_hooks"},
+                        {
+                            "command": "ctx.adapters.claude_code.query_handler",
+                            "stdout": (
+                                '# ctx Python Testing\n{"hookEventName":"UserPromptSubmit"}'
+                            ),
+                        },
+                    ],
+                }
+            )
+            return CompletedCommand(call, cwd, 0, stdout, "")
+        elif any(Path(part).name == "fake_codex.py" for part in call):
+            stdout = json.dumps(
+                {
+                    "hook_commands": 1,
+                    "failed": 0,
+                    "commands": [
+                        {
+                            "command": "ctx.adapters.codex.hook_handler",
+                            "stdout": (
+                                '# ctx Python Testing\n{"hookEventName":"UserPromptSubmit"}'
+                            ),
+                        }
                     ],
                 }
             )
@@ -142,6 +169,7 @@ def test_isolated_env_redirects_user_state(tmp_path: Path) -> None:
     assert env["XDG_CONFIG_HOME"] == str(paths.xdg_config)
     assert env["XDG_CACHE_HOME"] == str(paths.xdg_cache)
     assert env["PIP_CACHE_DIR"] == str(paths.pip_cache)
+    assert env["CODEX_HOME"] == str(paths.home / ".codex")
     assert env["PYTHONPATH"].split(os.pathsep)[0] == str(paths.fake_modules)
 
 
@@ -207,21 +235,32 @@ def test_fake_litellm_can_emit_stop_or_tool_call(tmp_path: Path) -> None:
     assert "tool_calls" in body
 
 
-def test_fake_claude_cli_executes_post_tool_and_stop_hooks(tmp_path: Path) -> None:
+def test_fake_claude_cli_executes_prompt_post_tool_and_stop_hooks(tmp_path: Path) -> None:
     fake = write_fake_claude_cli(tmp_path)
     body = fake.read_text(encoding="utf-8")
 
     assert "PostToolUse" in body
+    assert "UserPromptSubmit" in body
     assert "Stop" in body
     assert "subprocess.run" in body
     assert "shell=True" in body
     assert "shlex.split(command)" not in body
 
 
+def test_fake_codex_cli_executes_registered_prompt_hook(tmp_path: Path) -> None:
+    fake = write_fake_codex_cli(tmp_path)
+    body = fake.read_text(encoding="utf-8")
+
+    assert "UserPromptSubmit" in body
+    assert "turn_id" in body
+    assert "subprocess.run" in body
+    assert "shell=True" in body
+
+
 def test_fake_claude_hook_output_requires_all_generated_hooks() -> None:
     good = json.dumps(
         {
-            "hook_commands": 5,
+            "hook_commands": 6,
             "failed": 0,
             "commands": [
                 {"command": "ctx.adapters.claude_code.hooks.context_monitor"},
@@ -229,6 +268,10 @@ def test_fake_claude_hook_output_requires_all_generated_hooks() -> None:
                 {"command": "ctx.adapters.claude_code.hooks.bundle_orchestrator"},
                 {"command": "usage_tracker"},
                 {"command": "ctx.adapters.claude_code.hooks.lifecycle_hooks"},
+                {
+                    "command": "ctx.adapters.claude_code.query_handler",
+                    "stdout": ('# ctx Python Testing\n{"hookEventName":"UserPromptSubmit"}'),
+                },
             ],
         }
     )
@@ -243,6 +286,28 @@ def test_fake_claude_hook_output_requires_all_generated_hooks() -> None:
     )
     with pytest.raises(AssertionError):
         _assert_fake_claude_hook_output(missing)
+
+
+def test_fake_codex_hook_output_requires_registered_canary_context() -> None:
+    good = json.dumps(
+        {
+            "hook_commands": 1,
+            "failed": 0,
+            "commands": [
+                {
+                    "command": "ctx.adapters.codex.hook_handler",
+                    "stdout": ('# ctx Python Testing\n{"hookEventName":"UserPromptSubmit"}'),
+                }
+            ],
+        }
+    )
+
+    _assert_fake_codex_hook_output(good)
+
+    with pytest.raises(AssertionError):
+        _assert_fake_codex_hook_output(
+            json.dumps({"hook_commands": 0, "failed": 0, "commands": []})
+        )
 
 
 def test_tiny_repo_contains_fastapi_signals(tmp_path: Path) -> None:
@@ -274,7 +339,9 @@ def test_contract_command_sequence_without_real_build(tmp_path: Path, monkeypatc
     assert any("-m venv" in call for call in joined)
     assert any("-m pip install" in call for call in joined)
     assert any("ctx-init" in call and "--hooks" in call for call in joined)
+    assert any("ctx-init" in call and "--codex-hooks" in call for call in joined)
     assert any("fake_claude.py" in call and "--settings" in call for call in joined)
+    assert any("fake_codex.py" in call and "--hooks" in call for call in joined)
     assert any("ctx-scan-repo" in call and "--recommend" in call for call in joined)
     assert any("ctx run" in call or "ctx.exe run" in call for call in joined)
     assert any("--deny-tool ctx__wiki_get" in call for call in joined)

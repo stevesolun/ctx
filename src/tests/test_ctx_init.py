@@ -6,7 +6,9 @@ import builtins
 import hashlib
 import io
 import json
+import os
 import sqlite3
+import stat
 import sys
 import tarfile
 import zlib
@@ -23,7 +25,48 @@ from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox
 from ctx.adapters.generic.providers import ToolCall
 from ctx.core.graph.graph_packs import write_base_pack
 from ctx.core.graph.graph_store import validate_graph_store
+from ctx.core.install_policy_store import (
+    has_persisted_install_policy as has_real_install_policy,
+    load_current_install_policy as load_real_install_policy,
+    persist_install_policy as persist_real_install_policy,
+)
 from ctx.core.wiki.wiki_packs import write_wiki_base_pack
+from ctx.engine.installation import InstallConsentPolicy
+
+
+@pytest.fixture(autouse=True)
+def _mock_install_policy_store(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+    """Keep ctx-init policy tests independent from the real user store."""
+
+    state: dict[str, object] = {
+        "persisted": False,
+        "policy": InstallConsentPolicy.safe_default(),
+        "writes": [],
+    }
+
+    def load() -> InstallConsentPolicy:
+        policy = state["policy"]
+        assert isinstance(policy, InstallConsentPolicy)
+        return policy
+
+    def persist(policy: InstallConsentPolicy) -> str:
+        assert isinstance(policy, InstallConsentPolicy)
+        writes = state["writes"]
+        assert isinstance(writes, list)
+        writes.append(policy)
+        state["policy"] = policy
+        state["persisted"] = True
+        return policy.policy_digest
+
+    monkeypatch.setattr(ci, "load_current_install_policy", load, raising=False)
+    monkeypatch.setattr(ci, "persist_install_policy", persist, raising=False)
+    monkeypatch.setattr(
+        ci,
+        "has_persisted_install_policy",
+        lambda: state["persisted"],
+        raising=False,
+    )
+    return state
 
 
 def _write_dashboard_index(path: Path, *, export_id: str = "test-export") -> None:
@@ -188,6 +231,9 @@ def test_main_auto_wizard_in_terminal_configures_custom_model(
             "y",  # hooks
             "enriched",  # knowledge mode
             "n",  # graph
+            "preapproved-auto",  # skill install consent
+            "",  # agent install consent: safe default
+            "preapproved-auto",  # MCP install consent
             "custom",  # model mode
             "openai/gpt-5.5",  # model
             "",  # provider default: openai
@@ -256,6 +302,9 @@ def test_wizard_flag_prompts_without_tty(tmp_path: Path, monkeypatch) -> None:
         [
             "n",  # hooks
             "local",  # knowledge mode
+            "",  # skill install consent: safe default
+            "",  # agent install consent: safe default
+            "",  # MCP install consent: safe default
             "claude-code",  # model mode
             "maintain FastAPI services",
         ]
@@ -289,6 +338,282 @@ def test_explicit_args_do_not_auto_wizard_in_terminal(
     assert ci.main(["--model-mode", "skip", "--knowledge-mode", "local"]) == 0
     user_config = json.loads((tmp_path / "skill-system-config.json").read_text())
     assert user_config["knowledge"]["mode"] == "local"
+
+
+def test_explicit_install_consent_trio_persists_independent_modes_before_tools(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    _mock_install_policy_store: dict[str, object],
+) -> None:
+    monkeypatch.setattr(ci, "_claude_dir", lambda: tmp_path)
+    order: list[str] = []
+
+    def persist(policy: InstallConsentPolicy) -> str:
+        order.append("policy")
+        writes = _mock_install_policy_store["writes"]
+        assert isinstance(writes, list)
+        writes.append(policy)
+        _mock_install_policy_store["policy"] = policy
+        _mock_install_policy_store["persisted"] = True
+        return policy.policy_digest
+
+    def record_toolbox_seed(force: bool = False) -> int:
+        order.append("toolboxes")
+        return 0
+
+    monkeypatch.setattr(ci, "persist_install_policy", persist)
+    monkeypatch.setattr(ci, "seed_toolboxes", record_toolbox_seed)
+
+    rc = ci.main(
+        [
+            "--model-mode",
+            "skip",
+            "--skill-install-consent",
+            "preapproved-auto",
+            "--agent-install-consent",
+            "ask-each-time",
+            "--mcp-install-consent",
+            "preapproved-auto",
+        ]
+    )
+
+    assert rc == 0
+    assert order == ["policy", "toolboxes"]
+    policy = _mock_install_policy_store["policy"]
+    assert isinstance(policy, InstallConsentPolicy)
+    assert policy.skill_mode == "preapproved-auto"
+    assert policy.agent_mode == "ask-each-time"
+    assert policy.mcp_server_mode == "preapproved-auto"
+    output = capsys.readouterr().out
+    assert policy.policy_digest in output
+    assert "skills=preapproved-auto" in output
+    assert "agents=ask-each-time" in output
+    assert "mcp-servers=preapproved-auto" in output
+
+
+def test_ctx_init_install_policy_round_trips_through_real_filesystem_store(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    policy_root = tmp_path / "install-policy"
+    claude_root = tmp_path / "claude"
+    monkeypatch.setattr(
+        ci,
+        "has_persisted_install_policy",
+        lambda: has_real_install_policy(policy_root),
+    )
+    monkeypatch.setattr(
+        ci,
+        "load_current_install_policy",
+        lambda: load_real_install_policy(policy_root),
+    )
+    monkeypatch.setattr(
+        ci,
+        "persist_install_policy",
+        lambda policy: persist_real_install_policy(policy, policy_root),
+    )
+    monkeypatch.setattr(ci, "_claude_dir", lambda: claude_root)
+    monkeypatch.setattr(ci, "seed_toolboxes", lambda force=False: 0)
+
+    rc = ci.main(
+        [
+            "--model-mode",
+            "skip",
+            "--skill-install-consent",
+            "preapproved-auto",
+            "--agent-install-consent",
+            "ask-each-time",
+            "--mcp-install-consent",
+            "preapproved-auto",
+        ]
+    )
+
+    loaded = load_real_install_policy(policy_root)
+    expected = InstallConsentPolicy(
+        skill_mode="preapproved-auto",
+        agent_mode="ask-each-time",
+        mcp_server_mode="preapproved-auto",
+    )
+    assert rc == 0
+    assert loaded == expected
+    assert loaded.policy_digest == expected.policy_digest
+    current = policy_root / "current.json"
+    snapshot = policy_root / "snapshots" / f"{expected.policy_digest}.json"
+    assert current.is_file()
+    assert snapshot.is_file()
+    if os.name != "nt":
+        assert stat.S_IMODE(policy_root.stat().st_mode) == 0o700
+        assert stat.S_IMODE((policy_root / "snapshots").stat().st_mode) == 0o700
+        assert stat.S_IMODE(current.stat().st_mode) == 0o600
+        assert stat.S_IMODE(snapshot.stat().st_mode) == 0o600
+
+
+def test_partial_noninteractive_install_consent_is_rejected_before_side_effects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        ci,
+        "ensure_directories",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("side effect")),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        ci.main(
+            [
+                "--model-mode",
+                "skip",
+                "--skill-install-consent",
+                "preapproved-auto",
+            ]
+        )
+
+    assert exc_info.value.code == 2
+
+
+def test_no_install_consent_flags_preserve_policy_even_with_force(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    _mock_install_policy_store: dict[str, object],
+) -> None:
+    existing = InstallConsentPolicy(
+        skill_mode="preapproved-auto",
+        agent_mode="ask-each-time",
+        mcp_server_mode="preapproved-auto",
+    )
+    _mock_install_policy_store["policy"] = existing
+    _mock_install_policy_store["persisted"] = True
+    monkeypatch.setattr(ci, "_claude_dir", lambda: tmp_path)
+    monkeypatch.setattr(ci, "seed_toolboxes", lambda force=False: 0)
+
+    assert ci.main(["--force", "--model-mode", "skip"]) == 0
+
+    assert _mock_install_policy_store["writes"] == []
+    assert _mock_install_policy_store["policy"] == existing
+
+
+def test_wizard_prompts_all_install_modes_before_model_and_persists(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    _mock_install_policy_store: dict[str, object],
+) -> None:
+    existing = InstallConsentPolicy(
+        skill_mode="preapproved-auto",
+        agent_mode="ask-each-time",
+        mcp_server_mode="ask-each-time",
+    )
+    _mock_install_policy_store["policy"] = existing
+    _mock_install_policy_store["persisted"] = True
+    monkeypatch.setattr(ci, "_claude_dir", lambda: tmp_path)
+    monkeypatch.setattr(ci, "_stdio_is_interactive", lambda: False)
+    monkeypatch.setattr(ci, "seed_toolboxes", lambda force=False: 0)
+    prompts: list[str] = []
+    answers = iter(
+        [
+            "n",  # hooks
+            "local",  # knowledge
+            "",  # skills preserve preapproved
+            "preapproved-auto",  # agents change
+            "",  # MCP preserve ask
+            "skip",  # model
+        ]
+    )
+
+    def answer(prompt: str) -> str:
+        prompts.append(prompt)
+        return next(answers)
+
+    monkeypatch.setattr(builtins, "input", answer)
+
+    assert ci.main(["--wizard"]) == 0
+    policy = _mock_install_policy_store["policy"]
+    assert isinstance(policy, InstallConsentPolicy)
+    assert policy == InstallConsentPolicy(
+        skill_mode="preapproved-auto",
+        agent_mode="preapproved-auto",
+        mcp_server_mode="ask-each-time",
+    )
+    assert next(index for index, value in enumerate(prompts) if "skill" in value.lower()) < next(
+        index for index, value in enumerate(prompts) if "model" in value.lower()
+    )
+
+
+def test_policy_persistence_failure_stops_before_tool_graph_or_hook_actions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(ci, "_claude_dir", lambda: tmp_path)
+    calls: list[str] = []
+
+    def fail_persist(_policy: InstallConsentPolicy) -> None:
+        raise OSError("token=must-not-leak")
+
+    def record_toolbox_seed(force: bool = False) -> int:
+        calls.append("toolboxes")
+        return 0
+
+    def record_hook_install(**_kwargs: object) -> int:
+        calls.append("hooks")
+        return 0
+
+    def record_graph_build(*_args: object, **_kwargs: object) -> int:
+        calls.append("graph")
+        return 0
+
+    monkeypatch.setattr(ci, "persist_install_policy", fail_persist)
+    monkeypatch.setattr(ci, "seed_toolboxes", record_toolbox_seed)
+    monkeypatch.setattr(ci, "install_hooks", record_hook_install)
+    monkeypatch.setattr(ci, "build_graph", record_graph_build)
+
+    rc = ci.main(
+        [
+            "--hooks",
+            "--graph",
+            "--model-mode",
+            "skip",
+            "--skill-install-consent",
+            "ask-each-time",
+            "--agent-install-consent",
+            "ask-each-time",
+            "--mcp-install-consent",
+            "ask-each-time",
+        ]
+    )
+
+    assert rc == 1
+    assert calls == []
+    captured = capsys.readouterr()
+    assert "install consent policy" in captured.err
+    assert "must-not-leak" not in captured.err
+
+
+def test_policy_persistence_digest_mismatch_fails_closed_before_tools(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ci, "_claude_dir", lambda: tmp_path)
+    monkeypatch.setattr(ci, "persist_install_policy", lambda _policy: "0" * 64)
+    monkeypatch.setattr(
+        ci,
+        "seed_toolboxes",
+        lambda force=False: (_ for _ in ()).throw(AssertionError("toolbox side effect")),
+    )
+
+    rc = ci.main(
+        [
+            "--model-mode",
+            "skip",
+            "--skill-install-consent",
+            "ask-each-time",
+            "--agent-install-consent",
+            "ask-each-time",
+            "--mcp-install-consent",
+            "ask-each-time",
+        ]
+    )
+
+    assert rc == 1
 
 
 def test_main_with_hooks_flag_invokes_inject(tmp_path: Path, monkeypatch) -> None:
@@ -1504,6 +1829,55 @@ def test_main_with_requested_hook_failure_exits_nonzero(tmp_path: Path, monkeypa
     monkeypatch.setattr(ci.subprocess, "run", fake_run)
 
     assert ci.main(["--hooks"]) == 7
+
+
+def test_main_registers_codex_hook_only_when_explicitly_requested(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(ci, "_claude_dir", lambda: tmp_path)
+    calls: list[list[str]] = []
+
+    class _FakeResult:
+        returncode = 0
+        stdout = "registered; trust remains host-owned"
+        stderr = ""
+
+    def fake_run(command: list[str], **_kwargs: object) -> _FakeResult:
+        calls.append(command)
+        return _FakeResult()
+
+    monkeypatch.setattr(ci.subprocess, "run", fake_run)
+
+    assert ci.main(["--codex-hooks", "--model-mode", "skip"]) == 0
+
+    assert any("ctx.adapters.codex.install_query_hook" in call for call in calls)
+    assert not any("ctx.adapters.claude_code.inject_hooks" in call for call in calls)
+    assert "approve it in Codex /hooks" in capsys.readouterr().out
+
+
+def test_main_propagates_requested_codex_hook_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ci, "_claude_dir", lambda: tmp_path)
+
+    class _FakeResult:
+        stdout = ""
+        stderr = "managed policy"
+
+        def __init__(self, returncode: int) -> None:
+            self.returncode = returncode
+
+    def fake_run(command: list[str], **_kwargs: object) -> _FakeResult:
+        if "ctx.adapters.codex.install_query_hook" in command:
+            return _FakeResult(9)
+        return _FakeResult(0)
+
+    monkeypatch.setattr(ci.subprocess, "run", fake_run)
+
+    assert ci.main(["--codex-hooks", "--model-mode", "skip"]) == 9
 
 
 def test_main_custom_model_writes_profile_and_recommends_harness(

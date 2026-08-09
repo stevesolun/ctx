@@ -18,6 +18,7 @@ once the full H1-H7 stack is proven on a live model.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import io
 import json
@@ -38,6 +39,8 @@ import ctx.telemetry as telemetry
 from ctx.adapters.generic.adaptive_runtime import SelectedSkill
 from ctx.adapters.generic.evaluator import EvaluationLoopResult
 from ctx.adapters.generic.loop import LoopResult, ProviderFailure
+from ctx.adapters.recommendation_presentation import render_present_bundle_context
+from ctx.adapters.generic.state import load_session
 from ctx.cli.run import (
     _apply_mcp_env_overlays,
     _compile_tool_policy,
@@ -48,10 +51,262 @@ from ctx.cli.run import (
     main,
 )
 from ctx.adapters.generic.providers import ToolCall, ToolDefinition, Usage
+from ctx.engine.lineage import CatalogCapabilityIdentity
+from ctx.engine.planner import CapabilityCandidate
+from ctx.engine.planning_v3 import (
+    BenefitAuditReference,
+    CapabilityBenefitProjection,
+    CapabilityPlanSelectionV3,
+    ManualPlanningAuthority,
+)
+from ctx.engine.protocol import HostAction, ScopeRef, Transition
+from ctx.engine.state import CommittedPlanV3, PlanCapabilityV3
+from ctx.runtime.production_catalog import (
+    RELEASE_QUERY_CATALOG_MODE,
+    RELEASE_QUERY_CATALOG_ROOT_SHA256,
+    RELEASE_QUERY_CATALOG_SEQUENCE,
+)
+from ctx.runtime.query_decision import (
+    CommittedQueryDecision,
+    QueryDecisionFailure,
+    QueryHostDescriptor,
+    _commit_query_decision,
+)
 from ctx.telemetry import read_events, record_event as real_record_event
 
 
 _MCP_FIXTURE = Path(__file__).parent / "fixtures" / "fake_mcp_server.py"
+
+
+def _provider_call_bytes(calls: list[dict[str, Any]]) -> bytes:
+    """Canonical bytes for comparing the exact provider boundary."""
+
+    return json.dumps(
+        calls,
+        ensure_ascii=True,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+
+
+def _ctx_run_argv(
+    sessions_dir: Path,
+    *,
+    session_id: str,
+    task: str,
+    mode: str | None = None,
+    ctx_tool_surface: str | None = None,
+) -> list[str]:
+    argv = [
+        "run",
+        "--model",
+        "ollama/x",
+        "--task",
+        task,
+        "--sessions-dir",
+        str(sessions_dir),
+        "--session-id",
+        session_id,
+    ]
+    if mode is not None:
+        argv.extend(("--ctx-engine-mode", mode))
+    if ctx_tool_surface is None:
+        argv.append("--no-ctx-tools")
+    else:
+        argv.extend(("--ctx-tool-surface", ctx_tool_surface))
+    argv.append("--quiet")
+    return argv
+
+
+def _digest(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+_SYNTHETIC_REVIEWED_ROOT_SHA256 = _digest("ctx-run-synthetic-reviewed-release-root")
+_SYNTHETIC_REVIEWED_SEQUENCE = RELEASE_QUERY_CATALOG_SEQUENCE + 1
+_SYNTHETIC_REVIEWED_MODE = "reviewed"
+
+
+def _ctx_run_scope() -> ScopeRef:
+    return ScopeRef(
+        tenant_id="tenant-1",
+        workspace_id="workspace-1",
+        repository_id="repository-1",
+        session_id="ctx-run-session",
+        exposure_id="exposure-1",
+        host_context_id="ctx-run",
+    )
+
+
+def _benefit_audit(*, candidates: int, evaluations: int) -> BenefitAuditReference:
+    return BenefitAuditReference(
+        result_schema_id="ctx.benefit-result-v1",
+        result_digest=_digest("ctx-run-synthetic-benefit-result"),
+        policy_schema_id="ctx.benefit-policy-v1",
+        policy_digest=_digest("ctx-run-synthetic-benefit-policy"),
+        selection_algorithm_id="ctx.benefit-selection-v1",
+        calibration_digest=_digest("ctx-run-synthetic-calibration"),
+        requested_limit=5,
+        candidate_pool_count=candidates,
+        search_evaluation_count=evaluations,
+    )
+
+
+def _closed_v3_plan_and_transition(
+    *,
+    plan_digest: str | None = None,
+) -> tuple[CommittedPlanV3, Transition]:
+    """Build one exact reviewed plan and its matching full-v3 transition."""
+
+    scope = _ctx_run_scope()
+    capability_id = "agent:reviewer"
+    presentation = CapabilityCandidate(
+        capability_id=capability_id,
+        kind="agent",
+        name="reviewer",
+        source_digest=_digest("ctx-run-catalog-entry"),
+        normalized_score_ppm=600_000,
+        matching_signals=("python", "review"),
+        reason_codes=("reviewed-match",),
+        actionability="manual",
+    )
+    selection = CapabilityPlanSelectionV3(
+        presentation=presentation,
+        catalog_identity=CatalogCapabilityIdentity.create(
+            capability_id=capability_id,
+            kind="agent",
+            catalog_namespace_digest=_digest("ctx-run-catalog"),
+        ),
+        benefit=CapabilityBenefitProjection(
+            tier="advisory",
+            individual_net_benefit_u=600_000,
+            marginal_net_benefit_u=600_000,
+        ),
+        authority=ManualPlanningAuthority(),
+    )
+    committed_digest = plan_digest or _digest("ctx-run-schema-v3-plan")
+    plan = CommittedPlanV3(
+        plan_id="ctx-run-schema-v3-plan",
+        catalog_snapshot_id=_digest("ctx-run-synthetic-catalog-snapshot"),
+        decision_digest=committed_digest,
+        status="ready",
+        abstention_code=None,
+        benefit_audit=_benefit_audit(candidates=1, evaluations=1),
+        capabilities=(PlanCapabilityV3(selection=selection),),
+    )
+    transition = Transition(
+        event_id="ctx-run-intent-observed",
+        scope=scope,
+        from_revision=1,
+        to_revision=2,
+        actions=(
+            HostAction(
+                action_id="ctx-run-present-bundle",
+                kind="PresentBundle",
+                scope=scope,
+                precondition_revision=2,
+                payload={
+                    "plan_digest": plan.decision_digest,
+                    "capabilities": (selection.to_mapping(),),
+                },
+            ),
+        ),
+    )
+    return plan, transition
+
+
+def _closed_v3_recommendation() -> tuple[str, str]:
+    """Return one independently pinned closed schema-v3 recommendation."""
+
+    plan, transition = _closed_v3_plan_and_transition()
+    expected = (
+        "CTX recommendation bundle (committed, advisory only):\n"
+        "1. kind=agent | name=reviewer | id=agent:reviewer | "
+        "actionability=manual | score_ppm=600000\n"
+        "Use only capabilities relevant to the current task. "
+        "Do not install, load, or activate anything without user approval."
+    )
+    assert render_present_bundle_context(transition) == expected
+    return expected, plan.decision_digest
+
+
+def _abstained_plan_and_transition(*, plan_digest: str) -> tuple[CommittedPlanV3, Transition]:
+    plan = CommittedPlanV3(
+        plan_id="ctx-run-abstained-plan",
+        catalog_snapshot_id=_digest("ctx-run-production-catalog-snapshot"),
+        decision_digest=plan_digest,
+        status="abstained",
+        abstention_code="no-feasible-capability",
+        benefit_audit=_benefit_audit(candidates=0, evaluations=0),
+        capabilities=(),
+    )
+    return (
+        plan,
+        Transition(
+            event_id="ctx-run-abstained-intent",
+            scope=_ctx_run_scope(),
+            from_revision=1,
+            to_revision=2,
+        ),
+    )
+
+
+def _stub_ctx_run_decision(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    status: str,
+    recommendation_context: str | None,
+    recommendation_count: int,
+    plan_digest: str,
+) -> CommittedQueryDecision:
+    """Return one sealed decision from an exact plan and transition."""
+
+    if status == "presented":
+        if recommendation_context is None or recommendation_count != 1:
+            raise AssertionError("presented fixture must declare its one exact context")
+        plan, transition = _closed_v3_plan_and_transition(plan_digest=plan_digest)
+        release_root = _SYNTHETIC_REVIEWED_ROOT_SHA256
+        release_sequence = _SYNTHETIC_REVIEWED_SEQUENCE
+        catalog_mode = _SYNTHETIC_REVIEWED_MODE
+        monkeypatch.setattr(run_cli, "RELEASE_QUERY_CATALOG_ROOT_SHA256", release_root)
+        monkeypatch.setattr(run_cli, "RELEASE_QUERY_CATALOG_SEQUENCE", release_sequence)
+        monkeypatch.setattr(run_cli, "RELEASE_QUERY_CATALOG_MODE", catalog_mode)
+    elif status == "abstained":
+        if recommendation_context is not None or recommendation_count != 0:
+            raise AssertionError("abstained fixture cannot declare recommendation context")
+        plan, transition = _abstained_plan_and_transition(plan_digest=plan_digest)
+        release_root = RELEASE_QUERY_CATALOG_ROOT_SHA256
+        release_sequence = RELEASE_QUERY_CATALOG_SEQUENCE
+        catalog_mode = RELEASE_QUERY_CATALOG_MODE
+    else:
+        raise AssertionError("sealed success fixture supports presented or abstained only")
+    decision = _commit_query_decision(
+        host=QueryHostDescriptor.ctx_run(),
+        transition=transition,
+        plan=plan,
+        journal_revision=2,
+        journal_record_digest=_digest(f"ctx-run-journal:{status}"),
+        release_root_digest=release_root,
+        release_sequence=release_sequence,
+        catalog_mode=catalog_mode,
+        work_signature_digest=_digest(f"ctx-run-work:{status}"),
+        host_invocation_digest=_digest(f"ctx-run-invocation:{status}"),
+    )
+    assert decision.recommendation_context == recommendation_context
+    assert decision.recommendation_count == recommendation_count
+    return decision
+
+
+def _unsafe_ctx_run_decision(
+    valid: CommittedQueryDecision,
+    **overrides: object,
+) -> CommittedQueryDecision:
+    """Hostile mutation of a sealed local fixture, used only to prove rejection."""
+
+    for field_name, value in overrides.items():
+        object.__setattr__(valid, field_name, value)
+    return valid
 
 
 def test_version_flag(capsys: pytest.CaptureFixture[str]) -> None:
@@ -359,6 +614,842 @@ class TestRunCommand:
         # Stdout is the final answer; stderr has the [ctx] status lines.
         captured = capsys.readouterr()
         assert "final answer" in captured.out
+
+    def test_ctx_engine_mode_defaults_to_byte_identical_legacy_provider_payload(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        engine_calls: list[dict[str, Any]] = []
+
+        def unexpected_engine_open(**kwargs: Any) -> object:
+            engine_calls.append(kwargs)
+            raise AssertionError("legacy mode must not open the CTX query engine")
+
+        monkeypatch.setattr(
+            run_cli,
+            "prepare_ctx_run_query_decision",
+            unexpected_engine_open,
+            raising=False,
+        )
+        task = "preserve the exact legacy provider request"
+        default_exit = main(
+            _ctx_run_argv(
+                tmp_path / "default",
+                session_id="legacy-compatible",
+                task=task,
+            )
+        )
+        default_calls = _provider_call_bytes(fake_litellm._calls)
+        default_output = capsys.readouterr()
+        fake_litellm._calls.clear()
+
+        explicit_exit = main(
+            _ctx_run_argv(
+                tmp_path / "explicit",
+                session_id="legacy-compatible",
+                task=task,
+                mode="legacy",
+            )
+        )
+        explicit_calls = _provider_call_bytes(fake_litellm._calls)
+        explicit_output = capsys.readouterr()
+
+        assert default_exit == explicit_exit == 0
+        assert default_calls == explicit_calls
+        assert default_output == explicit_output
+        assert engine_calls == []
+
+    def test_ctx_engine_shadow_commits_before_provider_but_keeps_legacy_payload(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        task = "review the Python change"
+        assert (
+            main(
+                _ctx_run_argv(
+                    tmp_path / "legacy",
+                    session_id="shadow-compatible",
+                    task=task,
+                )
+            )
+            == 0
+        )
+        legacy_calls = _provider_call_bytes(fake_litellm._calls)
+        fake_litellm._calls.clear()
+
+        context, plan_digest = _closed_v3_recommendation()
+        events: list[str] = []
+
+        def prepare_decision(**_kwargs: Any) -> CommittedQueryDecision:
+            events.append("decision-journaled")
+            return _stub_ctx_run_decision(
+                monkeypatch,
+                status="presented",
+                recommendation_context=context,
+                recommendation_count=1,
+                plan_digest=plan_digest,
+            )
+
+        original_completion = fake_litellm.completion
+
+        def completion(**kwargs: Any) -> dict[str, Any]:
+            events.append("provider")
+            return cast(dict[str, Any], original_completion(**kwargs))
+
+        monkeypatch.setattr(
+            run_cli,
+            "prepare_ctx_run_query_decision",
+            prepare_decision,
+            raising=False,
+        )
+        fake_litellm.completion = completion
+
+        shadow_exit = main(
+            _ctx_run_argv(
+                tmp_path / "shadow",
+                session_id="shadow-compatible",
+                task=task,
+                mode="shadow",
+            )
+        )
+
+        assert shadow_exit == 0
+        assert events == ["decision-journaled", "provider"]
+        assert _provider_call_bytes(fake_litellm._calls) == legacy_calls
+        shadow_contents = "\n".join(
+            message["content"] for call in fake_litellm._calls for message in call["messages"]
+        )
+        assert context not in shadow_contents
+        metadata = load_session(
+            "shadow-compatible",
+            sessions_dir=tmp_path / "shadow",
+        ).metadata["ctx_engine"]
+        assert metadata["requested_mode"] == "shadow"
+        assert metadata["resolved_mode"] == "shadow"
+        assert metadata["effective_mode"] == "shadow"
+        assert metadata["status"] == "presented"
+        assert metadata["circuit_breaker_tripped"] is False
+        assert metadata["recommendation_count"] == 1
+        assert metadata["plan_digest"] == plan_digest
+        assert metadata["journal_revision"] == 2
+        assert metadata["journal_record_digest"]
+
+    def test_ctx_engine_recommend_injects_one_exact_lower_authority_v3_bundle(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        task = "review the Python change"
+        assert (
+            main(
+                _ctx_run_argv(
+                    tmp_path / "legacy",
+                    session_id="recommend-compatible",
+                    task=task,
+                )
+            )
+            == 0
+        )
+        legacy_system_prompt = fake_litellm._calls[0]["messages"][0]["content"]
+        fake_litellm._calls.clear()
+
+        context, plan_digest = _closed_v3_recommendation()
+        events: list[str] = []
+
+        def prepare_decision(**_kwargs: Any) -> CommittedQueryDecision:
+            events.append("decision-journaled")
+            return _stub_ctx_run_decision(
+                monkeypatch,
+                status="presented",
+                recommendation_context=context,
+                recommendation_count=1,
+                plan_digest=plan_digest,
+            )
+
+        original_completion = fake_litellm.completion
+
+        def completion(**kwargs: Any) -> dict[str, Any]:
+            events.append("provider")
+            return cast(dict[str, Any], original_completion(**kwargs))
+
+        monkeypatch.setattr(
+            run_cli,
+            "prepare_ctx_run_query_decision",
+            prepare_decision,
+            raising=False,
+        )
+        fake_litellm.completion = completion
+
+        recommend_exit = main(
+            _ctx_run_argv(
+                tmp_path / "recommend",
+                session_id="recommend-compatible",
+                task=task,
+                mode="recommend",
+            )
+        )
+
+        assert recommend_exit == 0
+        assert events == ["decision-journaled", "provider"]
+        assert len(fake_litellm._calls) == 1
+        messages = fake_litellm._calls[0]["messages"]
+        assert messages == [
+            {"role": "system", "content": legacy_system_prompt},
+            {
+                "role": "user",
+                "content": context + "\n\n--- current user request ---\n" + task,
+            },
+        ]
+        assert "\n".join(message["content"] for message in messages).count(context) == 1
+        session_text = (tmp_path / "recommend" / "recommend-compatible.jsonl").read_text(
+            encoding="utf-8"
+        )
+        assert context.splitlines()[0] not in session_text
+        replay = load_session(
+            "recommend-compatible",
+            sessions_dir=tmp_path / "recommend",
+        )
+        assert all(context not in message.content for message in replay.messages)
+        metadata = replay.metadata["ctx_engine"]
+        assert metadata["effective_mode"] == "recommend"
+        assert metadata["status"] == "presented"
+        assert metadata["recommendation_count"] == 1
+        assert metadata["plan_digest"] == plan_digest
+
+    def test_ctx_engine_recommend_abstention_is_successful_and_byte_identical_to_legacy(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        task = "make no recommendation when benefit is not positive"
+        assert (
+            main(
+                _ctx_run_argv(
+                    tmp_path / "legacy",
+                    session_id="abstention-compatible",
+                    task=task,
+                )
+            )
+            == 0
+        )
+        legacy_calls = _provider_call_bytes(fake_litellm._calls)
+        fake_litellm._calls.clear()
+        decision_calls: list[dict[str, Any]] = []
+        abstained_plan_digest = hashlib.sha256(b"committed-abstention-plan").hexdigest()
+
+        def prepare_decision(**kwargs: Any) -> CommittedQueryDecision:
+            decision_calls.append(kwargs)
+            return _stub_ctx_run_decision(
+                monkeypatch,
+                status="abstained",
+                recommendation_context=None,
+                recommendation_count=0,
+                plan_digest=abstained_plan_digest,
+            )
+
+        monkeypatch.setattr(
+            run_cli,
+            "prepare_ctx_run_query_decision",
+            prepare_decision,
+            raising=False,
+        )
+
+        recommend_exit = main(
+            _ctx_run_argv(
+                tmp_path / "recommend",
+                session_id="abstention-compatible",
+                task=task,
+                mode="recommend",
+            )
+        )
+
+        assert recommend_exit == 0
+        assert len(decision_calls) == 1
+        assert _provider_call_bytes(fake_litellm._calls) == legacy_calls
+        metadata = load_session(
+            "abstention-compatible",
+            sessions_dir=tmp_path / "recommend",
+        ).metadata["ctx_engine"]
+        assert metadata["effective_mode"] == "recommend"
+        assert metadata["status"] == "abstained"
+        assert metadata["circuit_breaker_tripped"] is False
+        assert metadata["failure_code"] is None
+        assert metadata["recommendation_count"] == 0
+        assert metadata["plan_digest"] == abstained_plan_digest
+
+    def test_ctx_engine_failure_falls_back_once_and_records_session_breaker(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        task = "finish after one tool call"
+
+        def install_two_turn_provider_script() -> None:
+            fake_litellm._calls.clear()
+
+            def completion(**kwargs: Any) -> dict[str, Any]:
+                fake_litellm._calls.append(kwargs)
+                if len(fake_litellm._calls) == 1:
+                    return _tool_call_completion("ctx__wiki_get")
+                return {
+                    "choices": [
+                        {
+                            "message": {"content": "done", "tool_calls": None},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 5, "completion_tokens": 1},
+                }
+
+            fake_litellm.completion = completion
+
+        install_two_turn_provider_script()
+        assert (
+            main(
+                _ctx_run_argv(
+                    tmp_path / "legacy",
+                    session_id="engine-failure-compatible",
+                    task=task,
+                    ctx_tool_surface="minimal",
+                )
+            )
+            == 0
+        )
+        legacy_calls = _provider_call_bytes(fake_litellm._calls)
+        assert len(fake_litellm._calls) == 2
+
+        engine_calls: list[dict[str, Any]] = []
+
+        def fail_engine(**kwargs: Any) -> QueryDecisionFailure:
+            engine_calls.append(kwargs)
+            return QueryDecisionFailure(failure_code="catalog-open-failed")
+
+        monkeypatch.setattr(
+            run_cli,
+            "prepare_ctx_run_query_decision",
+            fail_engine,
+            raising=False,
+        )
+        install_two_turn_provider_script()
+
+        recommend_exit = main(
+            _ctx_run_argv(
+                tmp_path / "recommend",
+                session_id="engine-failure-compatible",
+                task=task,
+                mode="recommend",
+                ctx_tool_surface="minimal",
+            )
+        )
+
+        assert recommend_exit == 0
+        assert len(engine_calls) == 1
+        assert len(fake_litellm._calls) == 2
+        assert _provider_call_bytes(fake_litellm._calls) == legacy_calls
+        metadata = load_session(
+            "engine-failure-compatible",
+            sessions_dir=tmp_path / "recommend",
+        ).metadata["ctx_engine"]
+        assert metadata["requested_mode"] == "recommend"
+        assert metadata["resolved_mode"] == "recommend"
+        assert metadata["effective_mode"] == "legacy"
+        assert metadata["status"] == "failed"
+        assert metadata["circuit_breaker_tripped"] is True
+        assert metadata["failure_code"] == "catalog-open-failed"
+
+    @pytest.mark.parametrize("mode", ("shadow", "recommend"))
+    def test_ctx_engine_mode_uses_environment_when_cli_mode_is_omitted(
+        self,
+        mode: str,
+        fake_litellm: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("CTX_ENGINE_MODE", mode)
+        monkeypatch.delenv("CTX_FORCE_LEGACY", raising=False)
+        context, plan_digest = _closed_v3_recommendation()
+        decision_calls: list[dict[str, Any]] = []
+
+        def prepare_decision(**kwargs: Any) -> CommittedQueryDecision:
+            decision_calls.append(kwargs)
+            return _stub_ctx_run_decision(
+                monkeypatch,
+                status="presented",
+                recommendation_context=context,
+                recommendation_count=1,
+                plan_digest=plan_digest,
+            )
+
+        monkeypatch.setattr(
+            run_cli,
+            "prepare_ctx_run_query_decision",
+            prepare_decision,
+            raising=False,
+        )
+        session_id = f"environment-{mode}"
+
+        exit_code = main(
+            _ctx_run_argv(
+                tmp_path / mode,
+                session_id=session_id,
+                task="resolve the engine mode from the environment",
+            )
+        )
+
+        assert exit_code == 0
+        assert len(decision_calls) == 1
+        metadata = load_session(session_id, sessions_dir=tmp_path / mode).metadata["ctx_engine"]
+        assert metadata["requested_mode"] == mode
+        assert metadata["resolved_mode"] == mode
+        assert metadata["effective_mode"] == mode
+        provider_text = "\n".join(
+            message["content"] for call in fake_litellm._calls for message in call["messages"]
+        )
+        assert (context in provider_text) is (mode == "recommend")
+
+    def test_explicit_ctx_engine_mode_wins_over_environment(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("CTX_ENGINE_MODE", "recommend")
+        monkeypatch.delenv("CTX_FORCE_LEGACY", raising=False)
+        context, plan_digest = _closed_v3_recommendation()
+        decision_calls: list[dict[str, Any]] = []
+
+        def prepare_decision(**kwargs: Any) -> CommittedQueryDecision:
+            decision_calls.append(kwargs)
+            return _stub_ctx_run_decision(
+                monkeypatch,
+                status="presented",
+                recommendation_context=context,
+                recommendation_count=1,
+                plan_digest=plan_digest,
+            )
+
+        monkeypatch.setattr(
+            run_cli,
+            "prepare_ctx_run_query_decision",
+            prepare_decision,
+            raising=False,
+        )
+
+        exit_code = main(
+            _ctx_run_argv(
+                tmp_path,
+                session_id="explicit-shadow",
+                task="the command line must override the environment",
+                mode="shadow",
+            )
+        )
+
+        assert exit_code == 0
+        assert len(decision_calls) == 1
+        metadata = load_session("explicit-shadow", sessions_dir=tmp_path).metadata["ctx_engine"]
+        assert metadata["requested_mode"] == "shadow"
+        assert metadata["resolved_mode"] == "shadow"
+        assert metadata["effective_mode"] == "shadow"
+        provider_text = "\n".join(
+            message["content"] for call in fake_litellm._calls for message in call["messages"]
+        )
+        assert context not in provider_text
+
+    def test_truthy_ctx_force_legacy_overrides_recommend_without_opening_engine(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.delenv("CTX_ENGINE_MODE", raising=False)
+        monkeypatch.delenv("CTX_FORCE_LEGACY", raising=False)
+        task = "force exact legacy compatibility"
+        assert (
+            main(
+                _ctx_run_argv(
+                    tmp_path / "baseline",
+                    session_id="force-legacy",
+                    task=task,
+                )
+            )
+            == 0
+        )
+        baseline_calls = _provider_call_bytes(fake_litellm._calls)
+        fake_litellm._calls.clear()
+        engine_calls: list[dict[str, Any]] = []
+
+        def unexpected_engine_open(**kwargs: Any) -> object:
+            engine_calls.append(kwargs)
+            raise AssertionError("CTX_FORCE_LEGACY must not open an engine session")
+
+        monkeypatch.setattr(
+            run_cli,
+            "prepare_ctx_run_query_decision",
+            unexpected_engine_open,
+            raising=False,
+        )
+        monkeypatch.setenv("CTX_ENGINE_MODE", "recommend")
+        monkeypatch.setenv("CTX_FORCE_LEGACY", "true")
+
+        exit_code = main(
+            _ctx_run_argv(
+                tmp_path / "forced",
+                session_id="force-legacy",
+                task=task,
+            )
+        )
+
+        assert exit_code == 0
+        assert engine_calls == []
+        assert _provider_call_bytes(fake_litellm._calls) == baseline_calls
+        metadata = load_session(
+            "force-legacy",
+            sessions_dir=tmp_path / "forced",
+        ).metadata["ctx_engine"]
+        assert metadata["requested_mode"] == "recommend"
+        assert metadata["resolved_mode"] == "legacy"
+        assert metadata["effective_mode"] == "legacy"
+
+    def test_recommend_suppresses_legacy_ctx_surface_but_preserves_explicit_mcp(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        router_modes: list[bool] = []
+
+        class FakeRouter:
+            def __init__(
+                self,
+                configs: list[Any],
+                *,
+                session_id: str | None = None,
+                lazy: bool = False,
+            ) -> None:
+                assert len(configs) == 1
+                assert session_id in {"mcp-baseline", "mcp-recommend"}
+                self.started = False
+                router_modes.append(lazy)
+
+            def start(self) -> None:
+                self.started = True
+
+            def stop(self) -> None:
+                self.started = False
+
+            def list_tools(self) -> list[ToolDefinition]:
+                assert self.started
+                return [
+                    ToolDefinition(
+                        name="external__read",
+                        description="read from the explicit external MCP",
+                        parameters={"type": "object", "properties": {}},
+                    )
+                ]
+
+            def call(self, name: str, arguments: dict[str, Any]) -> str:
+                raise AssertionError(f"unexpected tool call: {name} {arguments}")
+
+        monkeypatch.setattr(run_cli, "McpRouter", FakeRouter)
+        baseline_argv = _ctx_run_argv(
+            tmp_path / "baseline",
+            session_id="mcp-baseline",
+            task="keep the explicit MCP provider schema",
+        )
+        baseline_argv[-1:-1] = ["--mcp", "external:ignored-command"]
+        assert main(baseline_argv) == 0
+        baseline_tools = json.loads(json.dumps(fake_litellm._calls[0]["tools"]))
+        assert _submitted_tool_names(fake_litellm._calls[0]) == {"external__read"}
+        fake_litellm._calls.clear()
+
+        adaptive_calls: list[dict[str, Any]] = []
+
+        def unexpected_adaptive_controller(cls: type[Any], *args: Any, **kwargs: Any) -> object:
+            adaptive_calls.append({"args": args, "kwargs": kwargs})
+            raise AssertionError(
+                "a successful recommend decision must suppress the legacy adaptive controller"
+            )
+
+        monkeypatch.setattr(
+            run_cli.AdaptiveRuntimeController,
+            "from_task",
+            classmethod(unexpected_adaptive_controller),
+        )
+        context, plan_digest = _closed_v3_recommendation()
+
+        def prepare_decision(**_kwargs: Any) -> CommittedQueryDecision:
+            return _stub_ctx_run_decision(
+                monkeypatch,
+                status="presented",
+                recommendation_context=context,
+                recommendation_count=1,
+                plan_digest=plan_digest,
+            )
+
+        monkeypatch.setattr(
+            run_cli,
+            "prepare_ctx_run_query_decision",
+            prepare_decision,
+            raising=False,
+        )
+        recommend_argv = _ctx_run_argv(
+            tmp_path / "recommend",
+            session_id="mcp-recommend",
+            task="use the engine recommendation and explicit MCP",
+            mode="recommend",
+            ctx_tool_surface="adaptive",
+        )
+        recommend_argv[-1:-1] = ["--mcp", "external:ignored-command"]
+
+        exit_code = main(recommend_argv)
+
+        assert exit_code == 0
+        assert adaptive_calls == []
+        assert len(fake_litellm._calls) == 1
+        recommend_call = fake_litellm._calls[0]
+        assert recommend_call["tools"] == baseline_tools
+        assert _submitted_tool_names(recommend_call) == {"external__read"}
+        assert all(not name.startswith("ctx__") for name in _submitted_tool_names(recommend_call))
+        assert context in "\n".join(message["content"] for message in recommend_call["messages"])
+        assert router_modes
+
+    def test_recommend_full_surface_exposes_only_safe_ctx_evidence_and_status_schemas(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        context, plan_digest = _closed_v3_recommendation()
+
+        def prepare_decision(**_kwargs: Any) -> CommittedQueryDecision:
+            return _stub_ctx_run_decision(
+                monkeypatch,
+                status="presented",
+                recommendation_context=context,
+                recommendation_count=1,
+                plan_digest=plan_digest,
+            )
+
+        monkeypatch.setattr(
+            run_cli,
+            "prepare_ctx_run_query_decision",
+            prepare_decision,
+            raising=False,
+        )
+
+        exit_code = main(
+            _ctx_run_argv(
+                tmp_path,
+                session_id="recommend-safe-full-surface",
+                task="use only the closed recommendation decision",
+                mode="recommend",
+                ctx_tool_surface="full",
+            )
+        )
+
+        assert exit_code == 0
+        names = _submitted_tool_names(fake_litellm._calls[0])
+        forbidden = {
+            "ctx__recommend_bundle",
+            "ctx__recommend_related",
+            "ctx__graph_query",
+            "ctx__wiki_search",
+            "ctx__wiki_get",
+            "ctx__loop_provision",
+            "ctx__loop_topup",
+            "ctx__load_entity",
+            "ctx__mark_entity_used",
+            "ctx__unload_entity",
+        }
+        safe_evidence_or_status = {
+            "ctx__observe_dev_event",
+            "ctx__record_validation",
+            "ctx__record_escalation",
+            "ctx__session_end",
+            "ctx__session_state",
+        }
+        assert names.isdisjoint(forbidden)
+        assert names <= safe_evidence_or_status
+
+    @pytest.mark.parametrize(
+        "invalid_kind",
+        (
+            "duck-type",
+            "hostile-duck",
+            "uninitialized-real",
+            "unsealed-copy",
+            "release-root",
+            "release-sequence",
+            "catalog-mode",
+        ),
+    )
+    def test_invalid_success_receipt_falls_back_before_suppression_or_injection(
+        self,
+        invalid_kind: str,
+        fake_litellm: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        task = "reject a success receipt outside the code-owned release"
+        assert (
+            main(
+                _ctx_run_argv(
+                    tmp_path / "legacy",
+                    session_id="invalid-success-receipt",
+                    task=task,
+                    ctx_tool_surface="full",
+                )
+            )
+            == 0
+        )
+        legacy_calls = _provider_call_bytes(fake_litellm._calls)
+        fake_litellm._calls.clear()
+        context, plan_digest = _closed_v3_recommendation()
+        valid = _stub_ctx_run_decision(
+            monkeypatch,
+            status="presented",
+            recommendation_context=context,
+            recommendation_count=1,
+            plan_digest=plan_digest,
+        )
+        public_fields = tuple(
+            field
+            for field in dataclasses.fields(CommittedQueryDecision)
+            if not field.name.startswith("_")
+        )
+        if invalid_kind == "duck-type":
+            invalid: object = types.SimpleNamespace(
+                **{field.name: getattr(valid, field.name) for field in public_fields}
+            )
+        elif invalid_kind == "hostile-duck":
+
+            class HostileDecision:
+                @property
+                def failure_code(self) -> str:
+                    raise RuntimeError("private hostile receipt detail")
+
+            invalid = HostileDecision()
+        elif invalid_kind == "uninitialized-real":
+            invalid = object.__new__(CommittedQueryDecision)
+        elif invalid_kind == "unsealed-copy":
+            invalid = object.__new__(CommittedQueryDecision)
+            for field in public_fields:
+                object.__setattr__(invalid, field.name, getattr(valid, field.name))
+        elif invalid_kind == "release-root":
+            invalid = _unsafe_ctx_run_decision(
+                valid,
+                release_root_digest=hashlib.sha256(b"unapproved-release").hexdigest(),
+            )
+        elif invalid_kind == "release-sequence":
+            invalid = _unsafe_ctx_run_decision(
+                valid,
+                release_sequence=_SYNTHETIC_REVIEWED_SEQUENCE + 1,
+            )
+        else:
+            invalid = _unsafe_ctx_run_decision(valid, catalog_mode="alternate-reviewed")
+        engine_calls: list[dict[str, Any]] = []
+
+        def prepare_decision(**kwargs: Any) -> object:
+            engine_calls.append(kwargs)
+            return invalid
+
+        monkeypatch.setattr(
+            run_cli,
+            "prepare_ctx_run_query_decision",
+            prepare_decision,
+            raising=False,
+        )
+
+        exit_code = main(
+            _ctx_run_argv(
+                tmp_path / "recommend",
+                session_id="invalid-success-receipt",
+                task=task,
+                mode="recommend",
+                ctx_tool_surface="full",
+            )
+        )
+
+        assert exit_code == 0
+        assert len(engine_calls) == 1
+        metadata = load_session(
+            "invalid-success-receipt",
+            sessions_dir=tmp_path / "recommend",
+        ).metadata["ctx_engine"]
+        assert metadata["effective_mode"] == "legacy"
+        assert metadata["status"] == "failed"
+        assert metadata["circuit_breaker_tripped"] is True
+        assert _provider_call_bytes(fake_litellm._calls) == legacy_calls
+        provider_text = "\n".join(
+            message["content"] for call in fake_litellm._calls for message in call["messages"]
+        )
+        assert context not in provider_text
+
+    @pytest.mark.parametrize("invalid_plan_digest", (None, "not-a-digest"))
+    def test_abstention_with_invalid_plan_digest_trips_breaker_and_falls_back(
+        self,
+        invalid_plan_digest: str | None,
+        fake_litellm: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        task = "reject an uncommitted abstention"
+        assert (
+            main(
+                _ctx_run_argv(
+                    tmp_path / "legacy",
+                    session_id="invalid-abstention",
+                    task=task,
+                    ctx_tool_surface="full",
+                )
+            )
+            == 0
+        )
+        legacy_calls = _provider_call_bytes(fake_litellm._calls)
+        fake_litellm._calls.clear()
+        valid = _stub_ctx_run_decision(
+            monkeypatch,
+            status="abstained",
+            recommendation_context=None,
+            recommendation_count=0,
+            plan_digest=hashlib.sha256(b"valid-abstention-plan").hexdigest(),
+        )
+        invalid = _unsafe_ctx_run_decision(valid, plan_digest=invalid_plan_digest)
+
+        monkeypatch.setattr(
+            run_cli,
+            "prepare_ctx_run_query_decision",
+            lambda **_kwargs: invalid,
+            raising=False,
+        )
+
+        exit_code = main(
+            _ctx_run_argv(
+                tmp_path / "recommend",
+                session_id="invalid-abstention",
+                task=task,
+                mode="recommend",
+                ctx_tool_surface="full",
+            )
+        )
+
+        assert exit_code == 0
+        metadata = load_session(
+            "invalid-abstention",
+            sessions_dir=tmp_path / "recommend",
+        ).metadata["ctx_engine"]
+        assert metadata["effective_mode"] == "legacy"
+        assert metadata["status"] == "failed"
+        assert metadata["circuit_breaker_tripped"] is True
+        assert _provider_call_bytes(fake_litellm._calls) == legacy_calls
 
     def test_run_passes_session_id_to_mcp_router(
         self,
@@ -2398,6 +3489,280 @@ class TestResumeCommand:
             1 for line in text.splitlines() if line and json.loads(line)["type"] == "stop"
         )
         assert stop_count == 2
+
+    def test_resume_does_not_reopen_or_reproject_recorded_ctx_engine_mode(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        context, plan_digest = _closed_v3_recommendation()
+        decision_calls: list[dict[str, Any]] = []
+
+        def prepare_decision(**kwargs: Any) -> CommittedQueryDecision:
+            decision_calls.append(kwargs)
+            return _stub_ctx_run_decision(
+                monkeypatch,
+                status="presented",
+                recommendation_context=context,
+                recommendation_count=1,
+                plan_digest=plan_digest,
+            )
+
+        monkeypatch.setattr(
+            run_cli,
+            "prepare_ctx_run_query_decision",
+            prepare_decision,
+            raising=False,
+        )
+        assert (
+            main(
+                _ctx_run_argv(
+                    tmp_path,
+                    session_id="recommend-resume",
+                    task="initial task",
+                    mode="recommend",
+                )
+            )
+            == 0
+        )
+        capsys.readouterr()
+        assert len(decision_calls) == 1
+        assert context in "\n".join(
+            message["content"] for message in fake_litellm._calls[0]["messages"]
+        )
+        fake_litellm._calls.clear()
+
+        resume_exit = main(
+            [
+                "resume",
+                "recommend-resume",
+                "--task",
+                "follow-up task",
+                "--sessions-dir",
+                str(tmp_path),
+                "--quiet",
+            ]
+        )
+
+        assert resume_exit == 0
+        assert len(decision_calls) == 1
+        assert len(fake_litellm._calls) == 1
+        resumed_payload = "\n".join(
+            message["content"] for message in fake_litellm._calls[0]["messages"]
+        )
+        assert context not in resumed_payload
+        assert "follow-up task" in resumed_payload
+        session_text = (tmp_path / "recommend-resume.jsonl").read_text(encoding="utf-8")
+        assert context.splitlines()[0] not in session_text
+        replay = load_session("recommend-resume", sessions_dir=tmp_path)
+        assert all(context not in message.content for message in replay.messages)
+        metadata = replay.metadata
+        assert metadata["ctx_engine"]["requested_mode"] == "recommend"
+        assert metadata["ctx_engine"]["status"] == "presented"
+
+    @pytest.mark.parametrize("status", ("presented", "abstained"))
+    def test_resume_of_successful_recommend_uses_nonlazy_mcp_without_legacy_adaptive(
+        self,
+        status: str,
+        fake_litellm: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        router_modes: list[bool] = []
+
+        class FakeRouter:
+            def __init__(
+                self,
+                configs: list[Any],
+                *,
+                session_id: str | None = None,
+                lazy: bool = False,
+            ) -> None:
+                assert len(configs) == 1
+                assert session_id == f"recommend-resume-{status}"
+                self.started = False
+                self.lazy = lazy
+                router_modes.append(lazy)
+
+            def start(self) -> None:
+                self.started = True
+
+            def stop(self) -> None:
+                self.started = False
+
+            def list_tools(self) -> list[ToolDefinition]:
+                assert self.started
+                return [
+                    ToolDefinition(
+                        name="external__read",
+                        description="read from the restored explicit MCP",
+                        parameters={"type": "object", "properties": {}},
+                    )
+                ]
+
+            def call(self, name: str, arguments: dict[str, Any]) -> str:
+                raise AssertionError(f"unexpected tool call: {name} {arguments}")
+
+        monkeypatch.setattr(run_cli, "McpRouter", FakeRouter)
+        adaptive_calls: list[dict[str, Any]] = []
+
+        def unexpected_adaptive_controller(cls: type[Any], *args: Any, **kwargs: Any) -> object:
+            adaptive_calls.append({"args": args, "kwargs": kwargs})
+            raise AssertionError(
+                "a recorded successful recommend session must not resume legacy adaptive"
+            )
+
+        monkeypatch.setattr(
+            run_cli.AdaptiveRuntimeController,
+            "from_task",
+            classmethod(unexpected_adaptive_controller),
+        )
+        presented_context, presented_digest = _closed_v3_recommendation()
+        context = presented_context if status == "presented" else None
+        plan_digest = (
+            presented_digest
+            if status == "presented"
+            else hashlib.sha256(b"resume-abstention-plan").hexdigest()
+        )
+        decision_calls: list[dict[str, Any]] = []
+
+        def prepare_decision(**kwargs: Any) -> CommittedQueryDecision:
+            decision_calls.append(kwargs)
+            return _stub_ctx_run_decision(
+                monkeypatch,
+                status=status,
+                recommendation_context=context,
+                recommendation_count=1 if status == "presented" else 0,
+                plan_digest=plan_digest,
+            )
+
+        monkeypatch.setattr(
+            run_cli,
+            "prepare_ctx_run_query_decision",
+            prepare_decision,
+            raising=False,
+        )
+        session_id = f"recommend-resume-{status}"
+        run_argv = _ctx_run_argv(
+            tmp_path,
+            session_id=session_id,
+            task="initial recommendation task",
+            mode="recommend",
+            ctx_tool_surface="adaptive",
+        )
+        run_argv[-1:-1] = ["--mcp", "external:ignored-command"]
+        assert main(run_argv) == 0
+        assert len(decision_calls) == 1
+        assert adaptive_calls == []
+        assert router_modes == [False]
+        fake_litellm._calls.clear()
+
+        resume_exit = main(
+            [
+                "resume",
+                session_id,
+                "--task",
+                "follow-up task",
+                "--sessions-dir",
+                str(tmp_path),
+                "--restore-session-mcp",
+                "--quiet",
+            ]
+        )
+
+        assert resume_exit == 0
+        assert len(decision_calls) == 1
+        assert adaptive_calls == []
+        assert router_modes == [False, False]
+        assert len(fake_litellm._calls) == 1
+        resumed_call = fake_litellm._calls[0]
+        assert _submitted_tool_names(resumed_call) == {"external__read"}
+        resumed_text = "\n".join(message["content"] for message in resumed_call["messages"])
+        assert presented_context not in resumed_text
+        metadata = load_session(session_id, sessions_dir=tmp_path).metadata["ctx_engine"]
+        assert metadata["status"] == status
+        assert metadata["plan_digest"] == plan_digest
+
+    @pytest.mark.parametrize(
+        "ctx_engine",
+        (
+            {"effective_mode": "recommend"},
+            {
+                "requested_mode": "legacy",
+                "resolved_mode": "legacy",
+                "effective_mode": "legacy",
+                "status": "legacy",
+                "circuit_breaker_tripped": False,
+                "failure_code": None,
+                "recommendation_count": 999,
+                "plan_digest": "unexpected",
+                "journal_revision": 2,
+                "journal_record_digest": "unexpected",
+                "release_root_digest": "unexpected",
+                "release_sequence": 1,
+                "catalog_mode": "unexpected",
+            },
+        ),
+    )
+    def test_resume_with_malformed_ctx_engine_metadata_suppresses_legacy_discovery(
+        self,
+        ctx_engine: dict[str, object],
+        fake_litellm: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        session_id = "malformed-engine-resume"
+        (tmp_path / f"{session_id}.jsonl").write_text(
+            json.dumps(
+                {
+                    "type": "session_start",
+                    "ts": "t",
+                    "session_id": session_id,
+                    "task": "old",
+                    "model": "ollama/x",
+                    "ctx_tools_enabled": True,
+                    "ctx_tool_surface": "adaptive",
+                    "system_prompt": run_cli._DEFAULT_SYSTEM_PROMPT,
+                    "ctx_engine": ctx_engine,
+                    "tool_policy": {
+                        "allow": [],
+                        "deny": ["ctx__recommend_bundle", "ctx__wiki_get"],
+                    },
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        adaptive_calls: list[dict[str, Any]] = []
+
+        def unexpected_adaptive_controller(cls: type[Any], *args: Any, **kwargs: Any) -> object:
+            adaptive_calls.append({"args": args, "kwargs": kwargs})
+            raise AssertionError("malformed engine metadata must fail closed")
+
+        monkeypatch.setattr(
+            run_cli.AdaptiveRuntimeController,
+            "from_task",
+            classmethod(unexpected_adaptive_controller),
+        )
+
+        exit_code = main(
+            [
+                "resume",
+                session_id,
+                "--task",
+                "follow-up task",
+                "--sessions-dir",
+                str(tmp_path),
+                "--quiet",
+            ]
+        )
+
+        assert exit_code == 0
+        assert adaptive_calls == []
+        assert len(fake_litellm._calls) == 1
+        assert _submitted_tool_names(fake_litellm._calls[0]) == set()
 
     def test_legacy_session_without_surface_resumes_full_tool_inventory(
         self,

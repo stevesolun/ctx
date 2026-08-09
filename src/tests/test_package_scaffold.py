@@ -25,16 +25,20 @@ import pytest
 
 _EXPECTED_SUBPACKAGES: tuple[str, ...] = (
     "ctx",
+    "ctx.assets",
     "ctx.core",
     "ctx.core.graph",
     "ctx.core.quality",
     "ctx.core.wiki",
     "ctx.core.resolve",
     "ctx.core.bundle",
+    "ctx.engine",
+    "ctx.runtime",
     "ctx.adapters",
     "ctx.adapters.claude_code",
     "ctx.adapters.claude_code.hooks",
     "ctx.adapters.claude_code.install",
+    "ctx.adapters.codex",
     "ctx.adapters.generic",
     "ctx.adapters.generic.providers",
     "ctx.adapters.generic.tools",
@@ -59,6 +63,7 @@ _EXPECTED_CONSOLE_SCRIPTS: tuple[str, ...] = (
     "ctx-incremental-attach",
     "ctx-incremental-shadow",
     "ctx-init",
+    "ctx-install-codex-hook",
     "ctx-install-hooks",
     "ctx-lifecycle",
     "ctx-mcp-add",
@@ -193,6 +198,15 @@ def test_runtime_availability_json_is_declared_as_package_data() -> None:
     package_data = set(data["tool"]["setuptools"]["package-data"]["ctx"])
     assert "assets/*.json" in package_data
     assert (root / "src" / "ctx" / "assets" / "runtime-availability.json").is_file()
+    for name in (
+        "benefit-eligible-catalog-v1.json",
+        "release-install-skill-material-v1.json",
+        "release-load-skill-material-v1.json",
+        "release-query-catalog-root-v1.json",
+        "reviewed-benefit-profiles-v2.json",
+        "reviewed-net-benefit-policy-v1.json",
+    ):
+        assert (root / "src" / "ctx" / "assets" / name).is_file()
 
 
 def test_flat_console_scripts_are_packaged() -> None:

@@ -10,8 +10,10 @@ Verifies:
 """
 
 import json
+import os
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -22,7 +24,7 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from ctx.adapters.claude_code import inject_hooks  # noqa: E402
-from ctx.adapters.claude_code.inject_hooks import make_hooks, merge_hooks, write_settings_atomic  # noqa: E402
+from ctx.adapters.claude_code.inject_hooks import make_hooks, merge_hooks  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -59,13 +61,9 @@ def _all_modules(hooks_block: dict) -> list[str]:
 
 def _run_inject(ctx_dir: str, settings_path: Path) -> None:
     """Run the full inject pipeline (load → merge → atomic write)."""
-    from ctx.adapters.claude_code.inject_hooks import load_settings, _remove_stale_hooks
+    from ctx.adapters.claude_code.inject_hooks import install_hooks_file
 
-    settings = load_settings(settings_path)
-    settings = _remove_stale_hooks(settings)
-    new_hooks = make_hooks(ctx_dir)
-    updated = merge_hooks(settings, new_hooks)
-    write_settings_atomic(settings_path, updated)
+    install_hooks_file(settings_path, ctx_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -275,12 +273,286 @@ class TestPackagedHookCommands:
 
         modules = _all_modules(hooks)
         assert {
+            "ctx.adapters.claude_code.query_handler",
             "ctx.adapters.claude_code.hooks.context_monitor",
             "skill_add_detector",
             "ctx.adapters.claude_code.hooks.bundle_orchestrator",
             "usage_tracker",
             "ctx.adapters.claude_code.hooks.lifecycle_hooks",
         } <= set(modules)
+
+    def test_user_prompt_submit_hook_is_bounded_and_has_no_matcher(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        entry = make_hooks(str(tmp_path / "ctx"))["UserPromptSubmit"]
+
+        assert entry == [
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": inject_hooks._module_cmd(
+                            "ctx.adapters.claude_code.query_handler"
+                        ),
+                        "timeout": 10,
+                    }
+                ]
+            }
+        ]
+
+
+class TestStrictLockedUpdate:
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            b"{",
+            b"[]",
+            b'{"hooks":{},"hooks":{}}',
+            b'{"hooks":[]}',
+            b'{"hooks":{"Stop":[42]}}',
+            b'{"hooks":{"Stop":[{"hooks":[42]}]}}',
+            b'{"hooks":{"Stop":[{"hooks":[{}]}]}}',
+            b'{"hooks":{"Stop":[{"hooks":[{"type":"command"}]}]}}',
+            b"\xff",
+        ],
+    )
+    def test_malformed_settings_are_preserved_byte_for_byte(
+        self,
+        tmp_path: Path,
+        raw: bytes,
+    ) -> None:
+        path = tmp_path / "settings.json"
+        path.write_bytes(raw)
+
+        with pytest.raises(ValueError):
+            inject_hooks.install_hooks_file(path, str(tmp_path / "ctx"))
+
+        assert path.read_bytes() == raw
+
+    def test_second_install_does_not_rewrite_the_file(self, tmp_path: Path) -> None:
+        path = tmp_path / "settings.json"
+        _run_inject(str(tmp_path / "ctx"), path)
+        before = (path.read_bytes(), path.stat().st_mtime_ns)
+
+        _run_inject(str(tmp_path / "ctx"), path)
+
+        assert (path.read_bytes(), path.stat().st_mtime_ns) == before
+
+    def test_install_replaces_prior_query_handler_interpreter_and_fields(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        path = tmp_path / "settings.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "UserPromptSubmit": [
+                            {
+                                "hooks": [
+                                    {
+                                        "type": "http",
+                                        "command": (
+                                            "/old/python -m ctx.adapters.claude_code.query_handler"
+                                        ),
+                                        "timeout": 999_999,
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        installed = inject_hooks.install_hooks_file(path, str(tmp_path / "ctx"))
+
+        assert (
+            installed["hooks"]["UserPromptSubmit"]
+            == make_hooks(  # type: ignore[index]
+                str(tmp_path / "ctx")
+            )["UserPromptSubmit"]
+        )
+
+    def test_locked_read_modify_write_preserves_concurrent_union(self, tmp_path: Path) -> None:
+        from ctx.adapters.hook_config import update_json_object_locked
+
+        path = tmp_path / "settings.json"
+
+        def slow_update(value: dict[str, object]) -> dict[str, object]:
+            value["first"] = True
+            time.sleep(0.05)
+            return value
+
+        def second_update(value: dict[str, object]) -> dict[str, object]:
+            value["second"] = True
+            return value
+
+        first = threading.Thread(target=update_json_object_locked, args=(path, slow_update))
+        second = threading.Thread(target=update_json_object_locked, args=(path, second_update))
+        first.start()
+        time.sleep(0.01)
+        second.start()
+        first.join()
+        second.join()
+
+        assert json.loads(path.read_text()) == {"first": True, "second": True}
+
+    def test_lock_companion_replacement_cannot_bypass_mutual_exclusion(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from ctx.adapters.hook_config import update_json_object_locked
+
+        path = tmp_path / "settings.json"
+        first_inside = threading.Event()
+        release_first = threading.Event()
+        second_done = threading.Event()
+        errors: list[BaseException] = []
+
+        def first_update(value: dict[str, object]) -> dict[str, object]:
+            value["first"] = True
+            first_inside.set()
+            assert release_first.wait(timeout=5)
+            return value
+
+        def run_first() -> None:
+            try:
+                update_json_object_locked(path, first_update)
+            except BaseException as error:
+                errors.append(error)
+
+        def run_second() -> None:
+            try:
+                update_json_object_locked(
+                    path,
+                    lambda value: {**value, "second": True},
+                )
+            except BaseException as error:
+                errors.append(error)
+            finally:
+                second_done.set()
+
+        first = threading.Thread(target=run_first)
+        first.start()
+        assert first_inside.wait(timeout=5)
+        lock_path = path.with_suffix(path.suffix + ".lock")
+        replacement = tmp_path / "replacement.lock"
+        replacement.write_bytes(b"")
+        try:
+            os.replace(replacement, lock_path)
+        except PermissionError as error:
+            release_first.set()
+            first.join(timeout=5)
+            pytest.skip(f"platform prevents replacement of an open lock: {error}")
+
+        second = threading.Thread(target=run_second)
+        second.start()
+        assert not second_done.wait(timeout=0.05)
+        release_first.set()
+        first.join(timeout=5)
+        second.join(timeout=5)
+
+        assert not errors
+        assert json.loads(path.read_text()) == {"first": True, "second": True}
+
+    def test_live_parent_replacement_cannot_bypass_path_stable_lock(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from ctx.adapters.hook_config import update_json_object_locked
+
+        parent = tmp_path / "config"
+        parent.mkdir()
+        path = parent / "settings.json"
+        first_inside = threading.Event()
+        release_first = threading.Event()
+        second_done = threading.Event()
+        errors: list[BaseException] = []
+
+        def first_update(value: dict[str, object]) -> dict[str, object]:
+            value["first"] = True
+            first_inside.set()
+            assert release_first.wait(timeout=5)
+            return value
+
+        def run_first() -> None:
+            try:
+                update_json_object_locked(path, first_update)
+            except BaseException as error:
+                errors.append(error)
+
+        def run_second() -> None:
+            try:
+                update_json_object_locked(
+                    path,
+                    lambda value: {**value, "second": True},
+                )
+            except BaseException as error:
+                errors.append(error)
+            finally:
+                second_done.set()
+
+        first = threading.Thread(target=run_first)
+        first.start()
+        assert first_inside.wait(timeout=5)
+        parent.rename(tmp_path / "moved-config")
+        parent.mkdir()
+        second = threading.Thread(target=run_second)
+        second.start()
+        assert not second_done.wait(timeout=0.05)
+        release_first.set()
+        first.join(timeout=5)
+        second.join(timeout=5)
+
+        assert not errors
+        assert json.loads(path.read_text()) == {"first": True, "second": True}
+
+    def test_symlinked_parent_is_rejected_before_lock_side_effect(self, tmp_path: Path) -> None:
+        target = tmp_path / "target"
+        target.mkdir()
+        parent = tmp_path / "linked"
+        try:
+            parent.symlink_to(target, target_is_directory=True)
+        except OSError as error:
+            pytest.skip(f"directory symlinks unavailable: {error}")
+
+        with pytest.raises((OSError, ValueError)):
+            inject_hooks.install_hooks_file(parent / "settings.json", str(tmp_path / "ctx"))
+
+        assert not (target / "settings.json").exists()
+        assert not (target / "settings.json.lock").exists()
+
+    def test_official_http_and_mcp_tool_handlers_are_preserved(self, tmp_path: Path) -> None:
+        path = tmp_path / "settings.json"
+        http_handler = {
+            "type": "http",
+            "url": "http://localhost:8080/hooks/pre-tool-use",
+            "timeout": 30,
+            "headers": {"Authorization": "Bearer $MY_TOKEN"},
+            "allowedEnvVars": ["MY_TOKEN"],
+        }
+        mcp_handler = {
+            "type": "mcp_tool",
+            "server": "my_server",
+            "tool": "security_scan",
+            "input": {"file_path": "${tool_input.file_path}"},
+        }
+        original_group = {
+            "matcher": "Write|Edit",
+            "hooks": [http_handler, mcp_handler],
+        }
+        path.write_text(
+            json.dumps({"hooks": {"PostToolUse": [original_group]}}),
+            encoding="utf-8",
+        )
+
+        installed = inject_hooks.install_hooks_file(path, str(tmp_path / "ctx"))
+
+        post_tool = installed["hooks"]["PostToolUse"]  # type: ignore[index]
+        assert original_group in post_tool
 
 
 # ---------------------------------------------------------------------------
@@ -356,7 +628,7 @@ class TestAtomicWrite:
 
         call_count = {"n": 0}
 
-        def _failing_replace(src: str, dst: str) -> None:
+        def _failing_replace(src: str, dst: str, **_kwargs: object) -> None:
             call_count["n"] += 1
             raise OSError("simulated disk full")
 
@@ -366,5 +638,5 @@ class TestAtomicWrite:
             _ih.write_settings_atomic(settings_path, {"hooks": {}})
 
         # No stale .tmp files should remain
-        tmp_files = list(tmp_path.glob("settings.json.*.tmp"))
+        tmp_files = list(tmp_path.glob("*settings.json*.tmp"))
         assert not tmp_files, f"Stale tempfiles not cleaned up: {tmp_files}"

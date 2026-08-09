@@ -33,6 +33,7 @@ Changelog = "https://github.com/stevesolun/ctx/blob/main/CHANGELOG.md"
 # anyone invoking the CLIs via `python path/to/module.py` keeps working.
 ctx-init = "ctx_init:main"
 ctx-install-hooks = "ctx.adapters.claude_code.inject_hooks:main"
+ctx-install-codex-hook = "ctx.adapters.codex.install_query_hook:main"
 ctx-monitor = "ctx_monitor:main"
 ctx-scan-repo = "scan_repo:main"
 ctx-skill-quality = "skill_quality:main"
@@ -223,10 +224,13 @@ packages = [
     "ctx.core.wiki",
     "ctx.core.resolve",
     "ctx.core.bundle",
+    "ctx.engine",
+    "ctx.runtime",
     "ctx.adapters",
     "ctx.adapters.claude_code",
     "ctx.adapters.claude_code.hooks",
     "ctx.adapters.claude_code.install",
+    "ctx.adapters.codex",
     "ctx.adapters.generic",
     "ctx.adapters.generic.providers",
     "ctx.adapters.generic.tools",

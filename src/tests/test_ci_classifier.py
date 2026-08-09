@@ -1345,6 +1345,30 @@ def test_windows_high_risk_paths_are_classified_selectively() -> None:
         "scripts/ctx_ab_swebench.py",
         "src/tests/test_ctx_ab_benchmark.py",
         "src/tests/test_ctx_ab_swebench.py",
+        "src/ctx/runtime/agent_file.py",
+        "src/ctx/runtime/_query_attempt_posix.py",
+        "src/ctx/runtime/_skill_cas_posix.py",
+        "src/ctx/runtime/composition.py",
+        "src/ctx/runtime/authenticated_benefit.py",
+        "src/ctx/runtime/benefit_closure.py",
+        "src/ctx/runtime/eligible_catalog.py",
+        "src/ctx/runtime/install_execution.py",
+        "src/ctx/runtime/production_catalog.py",
+        "src/ctx/runtime/query_delivery.py",
+        "src/ctx/runtime/query_vocabulary.py",
+        "src/ctx/runtime/query_work.py",
+        "src/ctx/runtime/skill_cas.py",
+        "src/ctx/assets/benefit-eligible-catalog-v1.json",
+        "src/ctx/cli/run.py",
+        "src/tests/runtime/test_agent_file.py",
+        "src/tests/runtime/test_composition.py",
+        "src/tests/runtime/test_eligible_catalog.py",
+        "src/tests/runtime/test_install_execution.py",
+        "src/tests/runtime/test_production_catalog.py",
+        "src/tests/runtime/test_query_delivery_windows.py",
+        "src/tests/runtime/test_skill_cas.py",
+        "src/tests/runtime/test_skill_cas_posix.py",
+        "src/tests/test_harness_cli_run.py",
         "scripts/ci_classifier.py",
         "scripts/ci_required.py",
         ".github/workflows/test.yml",
@@ -1855,4 +1879,27 @@ def test_workflow_runs_targeted_windows_high_risk_gate() -> None:
     assert "src/tests/test_import_strix_skills.py" in windows_job
     assert "src/tests/test_ctx_ab_benchmark.py" in windows_job
     assert "src/tests/test_ctx_ab_swebench.py" in windows_job
+    assert "src/tests/runtime/test_agent_file.py" in windows_job
+    assert "src/tests/runtime/test_install_execution.py" in windows_job
+    assert "src/tests/runtime/test_skill_cas.py" in windows_job
+    assert "src/tests/runtime/test_skill_cas_posix.py" in windows_job
+    assert "src/tests/runtime/test_composition.py" in windows_job
+    assert "src/tests/runtime/test_authenticated_benefit.py" in windows_job
+    assert "src/tests/runtime/test_benefit_closure.py" in windows_job
+    assert "src/tests/runtime/test_eligible_catalog.py" in windows_job
+    assert "src/tests/runtime/test_production_catalog.py" in windows_job
+    assert "src/tests/runtime/test_query_work.py" in windows_job
+    assert "src/tests/runtime/test_query_delivery_windows.py" in windows_job
     assert "matrix:" not in windows_job
+
+
+def test_package_smoke_opens_the_release_pinned_catalog_from_the_wheel() -> None:
+    workflow = Path(".github/workflows/test.yml").read_text(encoding="utf-8")
+    package_job = workflow.split("\n  package-smoke:\n", maxsplit=1)[1].split(
+        "\n  clean-host-contract:", maxsplit=1
+    )[0]
+
+    assert "from ctx.runtime import open_release_pinned_query_catalog" in package_job
+    assert "release_catalog = open_release_pinned_query_catalog()" in package_job
+    assert 'release_catalog.mode != "reviewed"' in package_job
+    assert "release_catalog.close()" in package_job

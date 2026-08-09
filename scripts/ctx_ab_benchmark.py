@@ -7,6 +7,8 @@ import argparse
 import csv
 import hashlib
 import importlib
+import importlib.util
+import ipaddress
 import json
 import os
 import platform
@@ -16,6 +18,7 @@ import shlex
 import shutil
 import signal
 import socket
+import sqlite3
 import stat
 import subprocess
 import sys
@@ -26,10 +29,12 @@ import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from importlib import metadata as importlib_metadata
 from math import comb
 from pathlib import Path, PurePosixPath
 from statistics import median
-from typing import Any
+from typing import TYPE_CHECKING, Any, TypedDict, cast
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -80,7 +85,7 @@ PRODUCTION_RUNTIME_AVAILABILITY = ROOT / "src" / "ctx" / "assets" / "runtime-ava
 PRODUCTION_PRIVATE_RUN_ROOT = ROOT / ".gate" / "ctx-ab-runs"
 PRODUCTION_PRIVATE_SCENARIO_ROOT = ROOT / ".gate" / "ctx-ab-private"
 OFFICIAL_CAMPAIGN_STATE_BASE = Path.home() / ".ctx" / "benchmark-state"
-PRODUCTION_CATALOG_CACHE_VERSION = 2
+PRODUCTION_CATALOG_CACHE_VERSION = 3
 PRODUCTION_CATALOG_BODY_MAX_BYTES = 16 * 1024
 PRODUCTION_TOOL_OUTPUT_LIMIT_BYTES = 32 * 1024
 PRODUCTION_CATALOG_MCP_TOOLS = ("ctx__recommend_bundle", "ctx__wiki_get")
@@ -221,6 +226,535 @@ class CatalogSnapshot:
     provenance: dict[str, Any]
     cache_hit: bool = False
     prepare_seconds: float = 0.0
+
+
+@dataclass(frozen=True)
+class EngineTreatmentEvidence:
+    """Verifiable recommendation and ephemeral-content treatment evidence."""
+
+    status: str
+    code: str | None
+    evidence_eligible: bool
+    observation_signals: tuple[str, ...]
+    observation_languages: tuple[str, ...]
+    ordered_ids: tuple[str, ...]
+    ordered_kinds: tuple[str, ...]
+    ordered_matching_signals: tuple[tuple[str, ...], ...]
+    prepared_capability_id: str | None
+    prepared_content_sha256: str | None
+    prepared_content_bytes: int
+    prepared_estimated_tokens: int
+    activation_action_id: str | None
+    preparation_action_id: str | None
+    rendered_context: str | None
+    context_sha256: str | None
+    transition_sha256: str
+    journal_sha256: str
+    catalog_artifact_sha256: str
+    catalog_snapshot_digest: str
+    journal_record_count: int
+    reducer_version: str
+    setup_seconds: float
+    planning_seconds: float
+    content_seconds: float
+    render_seconds: float
+    ctx_setup_seconds: float
+
+
+_ENGINE_VERSION = "ctx-engine-v1"
+_ENGINE_PLANNER_VERSION = "ctx-bounded-planner-v4"
+_ENGINE_POLICY_VERSION = "ctx-ephemeral-content-treatment-v1"
+UNIFIED_ENGINE_TREATMENT = "codex-unified-engine-v2"
+DETERMINISTIC_BRIDGE_EVIDENCE_LEVEL = "deterministic_bridge_demo"
+DETERMINISTIC_BRIDGE_PAIR_SCHEMA = "ctx.deterministic-bridge-pair-v1"
+DETERMINISTIC_BRIDGE_API_KEY_ENV = "CTX_AB_DETERMINISTIC_BRIDGE_APPROVAL"
+DETERMINISTIC_BRIDGE_RESPONSE = "deterministic bridge diagnostic; no product claim"
+LIVE_CODING_PAIR_EVIDENCE_LEVEL = "live_pair_contract_only"
+LIVE_CODING_PAIR_DIAGNOSTIC_LEVEL = "diagnostic_single_live_pair"
+LIVE_CODING_PAIR_SCHEMA = "ctx.live-coding-pair-plan-v1"
+RELEASE_CATALOG_EVIDENCE_ASSETS = (
+    "benefit-eligible-catalog-v1.json",
+    "release-install-skill-material-v1.json",
+    "release-load-skill-material-v1.json",
+    "release-query-catalog-root-v1.json",
+    "reviewed-benefit-profiles-v2.json",
+    "reviewed-net-benefit-policy-v1.json",
+)
+
+
+def _engine_digest(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def prepare_engine_treatment(
+    *,
+    query: str,
+    task: str,
+    language: str,
+    repo_slug: str,
+    task_prompt_sha256: str,
+    assignment_id: str,
+    catalog_snapshot: CatalogSnapshot,
+    journal_path: Path,
+) -> EngineTreatmentEvidence:
+    """Prepare one exact, engine-authorized capability treatment from public inputs."""
+
+    from ctx.adapters.codex.engine_adapter import (  # noqa: PLC0415
+        render_prepared_context,
+        render_recommendation_context,
+    )
+    from ctx.core.resolve.engine_content import (  # noqa: PLC0415
+        AuthenticatedCatalogContentSource,
+    )
+    from ctx.core.resolve.engine_candidates import (  # noqa: PLC0415
+        IndexedGraphCandidateSource,
+    )
+    from ctx.engine.capability_schema import MAX_HOST_CONTEXT_CHARS  # noqa: PLC0415
+    from ctx.engine.engine import CtxEngine  # noqa: PLC0415
+    from ctx.engine.observation import normalize_public_current_work  # noqa: PLC0415
+    from ctx.engine.planner import (  # noqa: PLC0415
+        ABSTENTION_CODES,
+        DEGRADATION_CODES,
+        BoundedCapabilityPlanner,
+        CapabilitySelection,
+        ReplayDecisionPlanner,
+    )
+    from ctx.engine.protocol import EngineEvent, ScopeRef  # noqa: PLC0415
+    from ctx.engine.reducer import PLANNING_REDUCER_VERSION  # noqa: PLC0415
+    from ctx.engine.replay import (  # noqa: PLC0415
+        DefaultReplayInputFactory,
+        ObservationReference,
+        StructuredSurrogate,
+    )
+    from ctx.engine.state import EngineState  # noqa: PLC0415
+    from ctx.engine.store import SQLiteEngineStore, StreamId  # noqa: PLC0415
+
+    if not all(isinstance(value, str) for value in (query, task, language, repo_slug)):
+        raise TypeError("query, task, language, and repo_slug must be strings")
+    if (
+        not isinstance(task_prompt_sha256, str)
+        or re.fullmatch(r"[0-9a-f]{64}", task_prompt_sha256) is None
+    ):
+        raise ValueError("task_prompt_sha256 must be a lowercase SHA-256 digest")
+    if (
+        not isinstance(assignment_id, str)
+        or not assignment_id.strip()
+        or assignment_id != assignment_id.strip()
+    ):
+        raise ValueError("assignment_id must be a non-empty trimmed string")
+    if not isinstance(catalog_snapshot, CatalogSnapshot):
+        raise TypeError("catalog_snapshot must be a CatalogSnapshot")
+
+    setup_started = time.perf_counter()
+    raw_store_path = catalog_snapshot.provenance.get("graph_store_path")
+    expected_store_sha256 = catalog_snapshot.provenance.get("graph_store_sha256")
+    if not isinstance(raw_store_path, str) or not isinstance(expected_store_sha256, str):
+        raise ValueError("catalog snapshot lacks authenticated graph store provenance")
+    store_path = catalog_snapshot.wiki_dir / _safe_relative_path(
+        raw_store_path,
+        field="catalog graph store path",
+    )
+    observation = normalize_public_current_work(
+        query=query,
+        task=task,
+        language=language,
+        repo_slug=repo_slug,
+    )
+    observation_value = {
+        "signals": list(observation.signals),
+        "languages": list(observation.languages),
+        "baseline_capability_ids": [],
+        "active_capability_ids": [],
+        "rejected_capability_ids": [],
+        "requested_limit": observation.requested_limit,
+    }
+
+    def normalize_public_observation(
+        _reference: ObservationReference,
+        _state: EngineState | None,
+    ) -> StructuredSurrogate:
+        return StructuredSurrogate.create(
+            schema_id="ctx.observation.current-work",
+            schema_version=1,
+            value=observation_value,
+        )
+
+    store = SQLiteEngineStore(journal_path)
+    content_source = AuthenticatedCatalogContentSource(
+        catalog_snapshot.wiki_dir,
+        catalog_snapshot.provenance.get("runtime_availability_files"),
+    )
+    source = IndexedGraphCandidateSource(
+        store_path,
+        expected_store_sha256,
+        material_port=content_source,
+    )
+    planner = ReplayDecisionPlanner(
+        BoundedCapabilityPlanner(
+            source,
+            minimum_matching_signals=2,
+            minimum_non_language_matching_signals=2,
+            allowed_actionability_states=frozenset({"load"}),
+        ),
+        planner_version=_ENGINE_PLANNER_VERSION,
+    )
+    engine = CtxEngine(
+        store=store,
+        replay_factory=DefaultReplayInputFactory(
+            observation_normalizer=normalize_public_observation,
+            decision_planner=planner,
+            reducer_version=PLANNING_REDUCER_VERSION,
+        ),
+    )
+    assignment_digest = _engine_digest(assignment_id)
+    observation_json = json.dumps(
+        observation_value,
+        ensure_ascii=True,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    work_signature = _engine_digest(f"{task_prompt_sha256}:{observation_json}")
+    host_descriptor_digest = _engine_digest("codex:activating:ephemeral-content:v1")
+    semantic_disabled_digest = _engine_digest("semantic-retrieval-disabled:v1")
+    occurred_at = datetime.now(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
+    scope = ScopeRef(
+        tenant_id="ctx-ab",
+        workspace_id=f"assignment-{assignment_digest[:32]}",
+        repository_id=f"task-{task_prompt_sha256[:32]}",
+        session_id=f"session-{assignment_digest[:32]}",
+        exposure_id=f"exposure-{assignment_digest[:32]}",
+        host_context_id="codex-ephemeral-content",
+    )
+
+    class CommonEventFields(TypedDict):
+        scope: ScopeRef
+        occurred_at: str
+        engine_version: str
+        planner_version: str
+        policy_version: str
+        host_descriptor_digest: str
+        catalog_snapshot_digest: str
+        semantic_model_digest: str
+        semantic_index_digest: str
+        work_signature: str
+        random_seed: int
+
+    common_event_fields: CommonEventFields = {
+        "scope": scope,
+        "occurred_at": occurred_at,
+        "engine_version": _ENGINE_VERSION,
+        "planner_version": _ENGINE_PLANNER_VERSION,
+        "policy_version": _ENGINE_POLICY_VERSION,
+        "host_descriptor_digest": host_descriptor_digest,
+        "catalog_snapshot_digest": source.catalog_snapshot_digest,
+        "semantic_model_digest": semantic_disabled_digest,
+        "semantic_index_digest": semantic_disabled_digest,
+        "work_signature": work_signature,
+        "random_seed": 0,
+    }
+    transitions = []
+    setup_seconds = 0.0
+    planning_seconds = 0.0
+    content_seconds = 0.0
+    render_seconds = 0.0
+    capabilities: tuple[Mapping[str, Any], ...] = ()
+    prepared_capability_id: str | None = None
+    prepared_content_sha256: str | None = None
+    prepared_content_bytes = 0
+    prepared_estimated_tokens = 0
+    activation_action_id: str | None = None
+    preparation_action_id: str | None = None
+    rendered_context: str | None = None
+    status = "degraded"
+    code: str | None = "planner-failed"
+    catalog_snapshot_digest = source.catalog_snapshot_digest
+
+    def receipt_event(*, action: Any, expected_revision: int, suffix: str) -> EngineEvent:
+        return EngineEvent(
+            event_id=f"ctx-ab-{assignment_digest}-{suffix}",
+            kind="ActionApplied",
+            expected_revision=expected_revision,
+            payload={
+                "action_id": action.action_id,
+                "action_kind": action.kind,
+                "action_content_digest": action.content_digest,
+                "action_precondition_revision": action.precondition_revision,
+                "verification": {"host_state": action.verification["expected_state"]},
+            },
+            causation_id=action.action_id,
+            **common_event_fields,
+        )
+
+    try:
+        transitions.append(
+            engine.process(
+                EngineEvent(
+                    event_id=f"ctx-ab-{assignment_digest}-start",
+                    kind="SessionStarted",
+                    expected_revision=0,
+                    payload={"host_level": "activating"},
+                    **common_event_fields,
+                )
+            )
+        )
+        setup_seconds = time.perf_counter() - setup_started
+
+        planning_started = time.perf_counter()
+        recommendation_transition = engine.process(
+            EngineEvent(
+                event_id=f"ctx-ab-{assignment_digest}-intent",
+                kind="IntentObserved",
+                expected_revision=1,
+                payload={
+                    "observation_ref": {
+                        "provider_id": "ctx-ab-public-task",
+                        "opaque_id": f"observation-{assignment_digest[:32]}",
+                        "content_digest": work_signature,
+                    }
+                },
+                **common_event_fields,
+            )
+        )
+        transitions.append(recommendation_transition)
+        planning_seconds = time.perf_counter() - planning_started
+
+        render_started = time.perf_counter()
+        recommendation_context = render_recommendation_context(recommendation_transition)
+        render_seconds = time.perf_counter() - render_started
+        bundles = tuple(
+            action for action in recommendation_transition.actions if action.kind == "PresentBundle"
+        )
+        if not bundles:
+            plan_codes = tuple(
+                str(diagnostic["code"])
+                for diagnostic in recommendation_transition.diagnostics
+                if diagnostic.get("code") in ABSTENTION_CODES | DEGRADATION_CODES
+            )
+            if len(plan_codes) != 1:
+                raise RuntimeError("engine treatment did not return one closed plan status")
+            code = plan_codes[0]
+            status = "degraded" if code in DEGRADATION_CODES else "abstained"
+        else:
+            raw_capabilities = bundles[0].payload["capabilities"]
+            capabilities = tuple(raw_capabilities)  # type: ignore[arg-type]
+            first_loadable_skill = next(
+                (
+                    row
+                    for row in capabilities
+                    if row.get("kind") == "skill" and row.get("actionability") == "load"
+                ),
+                None,
+            )
+            if first_loadable_skill is None or recommendation_context is None:
+                raise RuntimeError("ready engine plan has no exact loadable skill")
+            selection = CapabilitySelection(
+                capability_id=str(first_loadable_skill["capability_id"]),
+                kind=str(first_loadable_skill["kind"]),
+                name=str(first_loadable_skill["name"]),
+                source_digest=str(first_loadable_skill["catalog_entry_digest"]),
+                normalized_score_ppm=int(first_loadable_skill["normalized_score_ppm"]),
+                matching_signals=tuple(
+                    str(signal) for signal in first_loadable_skill["matching_signals"]
+                ),
+                reason_codes=tuple(str(reason) for reason in first_loadable_skill["reason_codes"]),
+                actionability=str(first_loadable_skill["actionability"]),
+            )
+            plan_digest = str(bundles[0].payload["plan_digest"])
+            lease_id = f"lease-{assignment_digest[:32]}"
+            content_started = time.perf_counter()
+            activation_transition = engine.process(
+                EngineEvent(
+                    event_id=f"ctx-ab-{assignment_digest}-activate",
+                    kind="ReassessmentRequested",
+                    expected_revision=2,
+                    correlation_id=plan_digest,
+                    causation_id=recommendation_transition.event_id,
+                    payload={
+                        "owner_id": "ctx-ab-ephemeral-treatment",
+                        "desired_capabilities": [
+                            {
+                                "capability_id": selection.capability_id,
+                                "source_digest": selection.source_digest,
+                                "lease_id": lease_id,
+                            }
+                        ],
+                    },
+                    **common_event_fields,
+                )
+            )
+            transitions.append(activation_transition)
+            activation_actions = tuple(
+                action
+                for action in activation_transition.actions
+                if action.kind == "ActivateCapability"
+            )
+            if len(activation_actions) != 1:
+                raise RuntimeError("engine treatment did not issue one activation action")
+            activation_action = activation_actions[0]
+            activation_action_id = activation_action.action_id
+            transitions.append(
+                engine.process(
+                    receipt_event(
+                        action=activation_action,
+                        expected_revision=3,
+                        suffix="activation-applied",
+                    )
+                )
+            )
+            turn_transition = engine.process(
+                EngineEvent(
+                    event_id=f"ctx-ab-{assignment_digest}-turn",
+                    kind="TurnStarting",
+                    expected_revision=4,
+                    payload={},
+                    causation_id=activation_action.action_id,
+                    **common_event_fields,
+                )
+            )
+            transitions.append(turn_transition)
+            preparation_actions = tuple(
+                action for action in turn_transition.actions if action.kind == "PrepareExposure"
+            )
+            if len(preparation_actions) != 1:
+                raise RuntimeError("engine treatment did not issue one preparation action")
+            preparation_action = preparation_actions[0]
+            preparation_action_id = preparation_action.action_id
+            prepared = content_source.prepare(
+                preparation_action,
+                selection,
+                expected_catalog_snapshot_digest=catalog_snapshot_digest,
+                authority=engine,
+            )
+            transitions.append(
+                engine.process(
+                    receipt_event(
+                        action=preparation_action,
+                        expected_revision=5,
+                        suffix="preparation-applied",
+                    )
+                )
+            )
+            content_seconds = time.perf_counter() - content_started
+            prepared_capability_id = prepared.capability_id
+            prepared_content_sha256 = prepared.content_sha256
+            prepared_content_bytes = prepared.content_bytes
+            prepared_estimated_tokens = prepared.estimated_tokens
+
+            render_started = time.perf_counter()
+            prepared_context = render_prepared_context(prepared)
+            rendered_context = recommendation_context + "\n\n" + prepared_context
+            render_seconds += time.perf_counter() - render_started
+            if len(rendered_context) > MAX_HOST_CONTEXT_CHARS:
+                raise RuntimeError("combined engine treatment context exceeds host budget")
+            status = "ready"
+            code = None
+    finally:
+        source.close()
+
+    records = tuple(store.records(StreamId.from_scope(scope)))
+    expected_record_count = 6 if status == "ready" else 2
+    if len(records) != expected_record_count or not records[-1].record_digest:
+        raise RuntimeError("engine treatment journal is incomplete")
+    transition_sha256 = _engine_digest("\n".join(item.to_json() for item in transitions))
+    context_sha256 = _engine_digest(rendered_context) if rendered_context is not None else None
+    return EngineTreatmentEvidence(
+        status=status,
+        code=code,
+        evidence_eligible=status != "degraded",
+        observation_signals=observation.signals,
+        observation_languages=observation.languages,
+        ordered_ids=tuple(str(row["capability_id"]) for row in capabilities),
+        ordered_kinds=tuple(str(row["kind"]) for row in capabilities),
+        ordered_matching_signals=tuple(
+            tuple(str(signal) for signal in row["matching_signals"]) for row in capabilities
+        ),
+        prepared_capability_id=prepared_capability_id,
+        prepared_content_sha256=prepared_content_sha256,
+        prepared_content_bytes=prepared_content_bytes,
+        prepared_estimated_tokens=prepared_estimated_tokens,
+        activation_action_id=activation_action_id,
+        preparation_action_id=preparation_action_id,
+        rendered_context=rendered_context,
+        context_sha256=context_sha256,
+        transition_sha256=transition_sha256,
+        journal_sha256=records[-1].record_digest,
+        catalog_artifact_sha256=expected_store_sha256,
+        catalog_snapshot_digest=source.catalog_snapshot_digest,
+        journal_record_count=len(records),
+        reducer_version=PLANNING_REDUCER_VERSION,
+        setup_seconds=setup_seconds,
+        planning_seconds=planning_seconds,
+        content_seconds=content_seconds,
+        render_seconds=render_seconds,
+        ctx_setup_seconds=setup_seconds + planning_seconds + content_seconds + render_seconds,
+    )
+
+
+def engine_treatment_result_fields(
+    evidence: EngineTreatmentEvidence | None,
+) -> dict[str, Any]:
+    """Project typed engine evidence into one benchmark result row."""
+
+    if evidence is None:
+        return {
+            "engine_treatment_status": None,
+            "engine_treatment_code": None,
+            "engine_treatment_evidence_eligible": None,
+            "engine_treatment_observation_signals": [],
+            "engine_treatment_observation_languages": [],
+            "engine_treatment_ordered_ids": [],
+            "engine_treatment_ordered_kinds": [],
+            "engine_treatment_ordered_matching_signals": [],
+            "engine_treatment_prepared_capability_id": None,
+            "engine_treatment_prepared_content_sha256": None,
+            "engine_treatment_prepared_content_bytes": 0,
+            "engine_treatment_prepared_estimated_tokens": 0,
+            "engine_treatment_activation_action_id": None,
+            "engine_treatment_preparation_action_id": None,
+            "engine_treatment_context": None,
+            "engine_treatment_context_sha256": None,
+            "engine_treatment_transition_sha256": None,
+            "engine_treatment_journal_sha256": None,
+            "engine_treatment_catalog_artifact_sha256": None,
+            "engine_treatment_catalog_snapshot_digest": None,
+            "engine_treatment_journal_record_count": 0,
+            "engine_treatment_reducer_version": None,
+            "engine_treatment_setup_seconds": 0.0,
+            "engine_treatment_planning_seconds": 0.0,
+            "engine_treatment_content_seconds": 0.0,
+            "engine_treatment_render_seconds": 0.0,
+        }
+    return {
+        "engine_treatment_status": evidence.status,
+        "engine_treatment_code": evidence.code,
+        "engine_treatment_evidence_eligible": evidence.evidence_eligible,
+        "engine_treatment_observation_signals": list(evidence.observation_signals),
+        "engine_treatment_observation_languages": list(evidence.observation_languages),
+        "engine_treatment_ordered_ids": list(evidence.ordered_ids),
+        "engine_treatment_ordered_kinds": list(evidence.ordered_kinds),
+        "engine_treatment_ordered_matching_signals": [
+            list(signals) for signals in evidence.ordered_matching_signals
+        ],
+        "engine_treatment_prepared_capability_id": evidence.prepared_capability_id,
+        "engine_treatment_prepared_content_sha256": evidence.prepared_content_sha256,
+        "engine_treatment_prepared_content_bytes": evidence.prepared_content_bytes,
+        "engine_treatment_prepared_estimated_tokens": evidence.prepared_estimated_tokens,
+        "engine_treatment_activation_action_id": evidence.activation_action_id,
+        "engine_treatment_preparation_action_id": evidence.preparation_action_id,
+        "engine_treatment_context": evidence.rendered_context,
+        "engine_treatment_context_sha256": evidence.context_sha256,
+        "engine_treatment_transition_sha256": evidence.transition_sha256,
+        "engine_treatment_journal_sha256": evidence.journal_sha256,
+        "engine_treatment_catalog_artifact_sha256": evidence.catalog_artifact_sha256,
+        "engine_treatment_catalog_snapshot_digest": evidence.catalog_snapshot_digest,
+        "engine_treatment_journal_record_count": evidence.journal_record_count,
+        "engine_treatment_reducer_version": evidence.reducer_version,
+        "engine_treatment_setup_seconds": round(evidence.setup_seconds, 6),
+        "engine_treatment_planning_seconds": round(evidence.planning_seconds, 6),
+        "engine_treatment_content_seconds": round(evidence.content_seconds, 6),
+        "engine_treatment_render_seconds": round(evidence.render_seconds, 6),
+    }
 
 
 @dataclass(frozen=True)
@@ -1956,9 +2490,22 @@ def run_process(
     input_text: str | None = None,
     resource_limits: bool = False,
     contain_descendants: bool = False,
+    containment_token: str | None = None,
 ) -> CommandResult:
     started = time.perf_counter()
-    process_token = secrets.token_hex(16) if contain_descendants else None
+    if containment_token is not None and (
+        not contain_descendants or re.fullmatch(r"[0-9a-f]{32}", containment_token) is None
+    ):
+        raise ValueError(
+            "containment_token requires descendant containment and 32 lowercase hex characters"
+        )
+    process_token = (
+        containment_token
+        if contain_descendants and containment_token is not None
+        else secrets.token_hex(16)
+        if contain_descendants
+        else None
+    )
     child_env = env
     if process_token is not None:
         child_env = dict(os.environ if env is None else env)
@@ -2486,9 +3033,19 @@ def _validate_runtime_availability_files(
     entries = payload.get("entries") if isinstance(payload, dict) else None
     if not isinstance(entries, list) or not entries:
         raise ValueError("runtime availability pack has no entries")
-    declared: dict[str, bytes] = {}
+    declared: dict[str, tuple[str, bytes]] = {}
     for entry_index, entry in enumerate(entries):
         files = entry.get("files") if isinstance(entry, dict) else None
+        capability_id = entry.get("id") if isinstance(entry, dict) else None
+        if (
+            not isinstance(capability_id, str)
+            or re.fullmatch(
+                r"(skill|agent|mcp-server|harness):[a-z0-9][a-z0-9._@-]{0,127}",
+                capability_id,
+            )
+            is None
+        ):
+            raise ValueError(f"runtime availability entry {entry_index} has an invalid id")
         if not isinstance(files, list) or not files:
             raise ValueError(f"runtime availability entry {entry_index} has no files")
         for file_index, file_spec in enumerate(files):
@@ -2502,9 +3059,9 @@ def _validate_runtime_availability_files(
             )
             if relative in declared:
                 raise ValueError(f"runtime availability file is declared twice: {relative}")
-            declared[relative] = file_spec["content"].encode("utf-8")
+            declared[relative] = (capability_id, file_spec["content"].encode("utf-8"))
     records: list[dict[str, Any]] = []
-    for relative, expected in sorted(declared.items()):
+    for relative, (capability_id, expected) in sorted(declared.items()):
         installed = wiki_dir / relative
         if installed.is_symlink() or not installed.is_file() or installed.read_bytes() != expected:
             raise ValueError(
@@ -2512,6 +3069,7 @@ def _validate_runtime_availability_files(
             )
         records.append(
             {
+                "capability_id": capability_id,
                 "path": relative,
                 "sha256": hashlib.sha256(expected).hexdigest(),
                 "size_bytes": len(expected),
@@ -2566,6 +3124,32 @@ def _catalog_provenance(
     }
 
 
+def _finalize_catalog_graph_store(wiki_dir: Path) -> None:
+    """Checkpoint one graph store into a sidecar-free immutable artifact."""
+
+    graph_store = wiki_dir / "graphify-out" / "graph-store.sqlite3"
+    if graph_store.is_symlink() or not graph_store.is_file():
+        raise ValueError("installed catalog graph store is missing or symlinked")
+    connection = sqlite3.connect(graph_store)
+    try:
+        checkpoint = connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        if checkpoint is None or tuple(int(value) for value in checkpoint) != (0, 0, 0):
+            raise ValueError("installed catalog graph store could not be checkpointed")
+        journal_mode = connection.execute("PRAGMA journal_mode=DELETE").fetchone()
+        if journal_mode is None or str(journal_mode[0]).casefold() != "delete":
+            raise ValueError("installed catalog graph store could not leave WAL mode")
+    finally:
+        connection.close()
+    for suffix in ("-wal", "-shm"):
+        sidecar = Path(f"{graph_store}{suffix}")
+        if sidecar.exists():
+            if sidecar.is_symlink() or not sidecar.is_file() or sidecar.stat().st_size:
+                raise ValueError("installed catalog graph store has an unsafe sidecar")
+            sidecar.unlink()
+    if any(os.path.lexists(Path(f"{graph_store}{suffix}")) for suffix in ("-wal", "-shm")):
+        raise ValueError("installed catalog graph store sidecars remain")
+
+
 def _freeze_catalog_tree(root: Path) -> None:
     paths = sorted(root.rglob("*"), key=lambda path: len(path.parts), reverse=True)
     for path in paths:
@@ -2611,9 +3195,11 @@ def _load_catalog_snapshot(
     runtime_files = _validate_runtime_availability_files(wiki_dir)
     if provenance.get("runtime_availability_files") != runtime_files:
         raise ValueError("cached production catalog runtime files do not match provenance")
+    graph_store = wiki_dir / "graphify-out" / "graph-store.sqlite3"
     critical = (
         wiki_dir,
         wiki_dir / "graphify-out" / "graph-export-manifest.json",
+        graph_store,
         wiki_dir / "graphify-out" / "entity-overlays.jsonl",
         wiki_dir / "converted" / "ctx-python-testing" / "SKILL.md",
     )
@@ -2621,6 +3207,8 @@ def _load_catalog_snapshot(
         raise ValueError("cached production catalog is incomplete or symlinked")
     if any(path.stat().st_mode & (stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH) for path in critical):
         raise ValueError("cached production catalog is not read-only")
+    if any(os.path.lexists(Path(f"{graph_store}{suffix}")) for suffix in ("-wal", "-shm")):
+        raise ValueError("cached production catalog graph store has SQLite sidecars")
     digest_paths = {
         "graph_export_manifest_sha256": wiki_dir / str(provenance["graph_export_manifest_path"]),
         "graph_store_sha256": wiki_dir / str(provenance["graph_store_path"]),
@@ -2669,6 +3257,7 @@ def prepare_production_catalog(
         if _install_shipped_catalog(claude_dir, archive=archive):
             raise RuntimeError("ctx_init.build_graph failed to install the shipped runtime catalog")
         wiki_dir = claude_dir / "skill-wiki"
+        _finalize_catalog_graph_store(wiki_dir)
         provenance = _catalog_provenance(
             archive,
             wiki_dir,
@@ -4491,6 +5080,1975 @@ def production_ctx_command(
     else:
         command.append("--no-ctx-tools")
     return command
+
+
+def deterministic_bridge_pair_contract(
+    *,
+    scenario: Scenario,
+    scenarios_path: Path,
+    model: str,
+    timeout: float,
+    max_tokens: int,
+    provider_timeout: float,
+    token_budget: int,
+) -> dict[str, Any]:
+    """Return the canonical, pre-execution approval contract for one demo pair."""
+
+    if not isinstance(scenario, Scenario):
+        raise TypeError("scenario must be a Scenario")
+    if not isinstance(scenarios_path, Path):
+        raise TypeError("scenarios_path must be a Path")
+    if (
+        not isinstance(model, str)
+        or not model.startswith("openai/")
+        or not model.removeprefix("openai/").strip()
+    ):
+        raise ValueError("deterministic bridge model must use the explicit openai/ prefix")
+    for field_name, value in (
+        ("timeout", timeout),
+        ("provider_timeout", provider_timeout),
+    ):
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+            raise ValueError(f"{field_name} must be positive")
+    for field_name, value in (
+        ("max_tokens", max_tokens),
+        ("token_budget", token_budget),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"{field_name} must be a positive integer")
+    if scenarios_path.is_symlink():
+        raise ValueError("deterministic bridge scenarios must not be a symlink")
+    resolved_scenarios = scenarios_path.resolve(strict=True)
+    if not resolved_scenarios.is_file():
+        raise ValueError("deterministic bridge scenarios must be a regular file")
+    runtime_path = (ROOT / "src" / "ctx" / "cli" / "run.py").resolve(strict=True)
+    bridge_path = (ROOT / "scripts" / "ctx_ab_deterministic_bridge.py").resolve(strict=True)
+    query_session_path = (ROOT / "src" / "ctx" / "runtime" / "query_session.py").resolve(
+        strict=True
+    )
+    prepared_delivery_path = (
+        ROOT / "src" / "ctx" / "runtime" / "prepared_query_delivery.py"
+    ).resolve(strict=True)
+    provider_adapter_path = (
+        ROOT / "src" / "ctx" / "adapters" / "generic" / "providers" / "litellm_provider.py"
+    ).resolve(strict=True)
+    try:
+        litellm_version = importlib_metadata.version("litellm")
+    except importlib_metadata.PackageNotFoundError as exc:
+        raise ValueError("deterministic bridge requires the installed LiteLLM runtime") from exc
+    python_path = Path(sys.executable).resolve(strict=True)
+    task = task_prompt(scenario)
+    inherited_environment = {
+        key: os.environ[key]
+        for key in (
+            "COMSPEC",
+            "LANG",
+            "LC_ALL",
+            "LC_CTYPE",
+            "PATH",
+            "PATHEXT",
+            "SSL_CERT_DIR",
+            "SSL_CERT_FILE",
+            "SYSTEMROOT",
+            "WINDIR",
+        )
+        if os.environ.get(key)
+    }
+    return {
+        "schema": DETERMINISTIC_BRIDGE_PAIR_SCHEMA,
+        "evidence_level": DETERMINISTIC_BRIDGE_EVIDENCE_LEVEL,
+        "arms": ["baseline", "ctx-light"],
+        "execution_order": ["baseline", "ctx-light"],
+        "scenario": {
+            "id": scenario.id,
+            "repository_url": scenario.repo_url,
+            "commit": scenario.commit,
+            "language": scenario.language,
+            "task_only_sha256": _sha256_bytes(task.encode("utf-8")),
+            "scenario_source_sha256": _stable_regular_file_sha256(resolved_scenarios),
+        },
+        "runtime": {
+            "argv_prefix": [sys.executable, "-m", "ctx.cli.run", "run"],
+            "python_executable_sha256": _stable_regular_file_sha256(python_path),
+            "ctx_run_module_sha256": _stable_regular_file_sha256(runtime_path),
+            "benchmark_script_sha256": _stable_regular_file_sha256(Path(__file__).resolve()),
+            "deterministic_bridge_module_sha256": _stable_regular_file_sha256(bridge_path),
+            "query_session_module_sha256": _stable_regular_file_sha256(query_session_path),
+            "prepared_query_delivery_module_sha256": _stable_regular_file_sha256(
+                prepared_delivery_path
+            ),
+            "provider_adapter_module_sha256": _stable_regular_file_sha256(provider_adapter_path),
+            "ctx_package_sha256": _stable_python_tree_sha256(ROOT / "src" / "ctx"),
+            "generic_adapter_package_sha256": _stable_python_tree_sha256(
+                ROOT / "src" / "ctx" / "adapters" / "generic"
+            ),
+            "engine_package_sha256": _stable_python_tree_sha256(ROOT / "src" / "ctx" / "engine"),
+            "runtime_package_sha256": _stable_python_tree_sha256(ROOT / "src" / "ctx" / "runtime"),
+            "litellm_version": litellm_version,
+            "litellm_package_sha256": _installed_python_package_sha256("litellm"),
+            "release_catalog_assets": {
+                name: _stable_regular_file_sha256(ROOT / "src" / "ctx" / "assets" / name)
+                for name in RELEASE_CATALOG_EVIDENCE_ASSETS
+            },
+            "engine_factory": "ctx.runtime.query_session.prepare_query_delivery",
+            "engine_host": "ctx-run",
+            "engine_execution_intent": "activate",
+            "engine_receipt_revision": 3,
+        },
+        "provider": {
+            "kind": "deterministic-loopback-openai-compatible",
+            "endpoint_path": "/v1/chat/completions",
+            "requested_model": model,
+            "wire_model": model.removeprefix("openai/"),
+            "response_content_sha256": _sha256_bytes(DETERMINISTIC_BRIDGE_RESPONSE.encode("utf-8")),
+            "token_accounting": "ceil(exact_utf8_bytes/4)",
+            "token_budget": token_budget,
+            "max_output_tokens": max_tokens,
+        },
+        "controls": {
+            "max_iterations": 1,
+            "timeout_seconds": float(timeout),
+            "provider_timeout_seconds": float(provider_timeout),
+            "core_tool_schemas": [],
+            "core_tool_schema_sha256": _sha256_bytes(b"[]"),
+            "context_delta": "exact suffix: two LF bytes plus accepted prepared context",
+            "ctx_run_engine_mode": "legacy",
+        },
+        "evaluator": {
+            "test_path": scenario.test_path,
+            "test_body_sha256": _sha256_bytes(scenario.test_body.encode("utf-8")),
+            "verify": list(scenario.verify),
+            "regression_verify": [list(command) for command in scenario.regression_verify],
+            "expected_test_count": scenario.expected_test_count,
+        },
+        "environment": {
+            "inherited_allowlist": inherited_environment,
+            "isolated_values": {
+                "CODEX_HOME": "<ARM_ROOT>/codex-home",
+                "HOME": "<ARM_ROOT>/home",
+                "USERPROFILE": "<ARM_ROOT>/home",
+                "TEMP": "<ARM_ROOT>/home/tmp",
+                "TMP": "<ARM_ROOT>/home/tmp",
+                "TMPDIR": "<ARM_ROOT>/home/tmp",
+                "CTX_RUNTIME_LIFECYCLE_DIR": "<ARM_ROOT>/lifecycle",
+            },
+            "fixed_values": {
+                "CTX_ENGINE_MODE": "legacy",
+                "CTX_TELEMETRY_ENABLED": "0",
+                "NO_PROXY": "127.0.0.1,::1,localhost",
+                "PYTHONNOUSERSITE": "1",
+                "PYTHONPATH": str(ROOT / "src"),
+                "no_proxy": "127.0.0.1,::1,localhost",
+            },
+            "pair_scoped_values": {
+                DETERMINISTIC_BRIDGE_API_KEY_ENV: "<APPROVAL_DIGEST>",
+                PROCESS_MARKER: "<PAIR_SCOPED_NONCE>",
+            },
+        },
+        "claim_policy": {
+            "production_efficiency_eligible": False,
+            "product_claim_eligible": False,
+            "benefit_verdict_allowed": False,
+        },
+    }
+
+
+def deterministic_bridge_pair_contract_sha256(contract: Mapping[str, Any]) -> str:
+    """Hash the exact canonical pair contract used for explicit approval."""
+
+    if not isinstance(contract, Mapping):
+        raise TypeError("deterministic bridge contract must be a mapping")
+    return _sha256_bytes(_canonical_json_bytes(dict(contract)))
+
+
+def live_coding_pair_contract(
+    *,
+    scenario: Scenario,
+    scenarios_path: Path,
+    output: Path,
+    cache_root: Path,
+    model: str,
+    api_key_env: str,
+    timeout: float,
+    max_iterations: int,
+    max_tokens: int,
+    provider_timeout: float,
+    execute: bool = False,
+) -> dict[str, Any]:
+    """Return one canonical, claim-ineligible future live-pair plan."""
+
+    if not isinstance(scenario, Scenario):
+        raise TypeError("scenario must be a Scenario")
+    if type(execute) is not bool:
+        raise TypeError("execute must be a boolean")
+    for field_name, path_value in (
+        ("scenarios_path", scenarios_path),
+        ("output", output),
+        ("cache_root", cache_root),
+    ):
+        if not isinstance(path_value, Path):
+            raise TypeError(f"{field_name} must be a Path")
+        if path_value.is_symlink():
+            raise ValueError(f"live coding pair {field_name} must not be a symlink")
+    if not isinstance(model, str) or re.fullmatch(r"[a-z0-9][a-z0-9_.-]*/[^/\s]+", model) is None:
+        raise ValueError("live coding pair model must include an explicit provider prefix")
+    if (
+        not isinstance(api_key_env, str)
+        or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", api_key_env) is None
+    ):
+        raise ValueError("live coding pair requires an explicit provider key environment name")
+    for field_name, duration in (
+        ("timeout", timeout),
+        ("provider_timeout", provider_timeout),
+    ):
+        if isinstance(duration, bool) or not isinstance(duration, (int, float)) or duration <= 0:
+            raise ValueError(f"{field_name} must be positive")
+    for field_name, limit in (
+        ("max_iterations", max_iterations),
+        ("max_tokens", max_tokens),
+    ):
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+            raise ValueError(f"{field_name} must be a positive integer")
+    if max_iterations != 1:
+        raise ValueError("live coding pair currently requires exactly one model iteration")
+    resolved_scenarios = scenarios_path.resolve(strict=True)
+    if not resolved_scenarios.is_file():
+        raise ValueError("live coding pair scenarios must be a regular file")
+    resolved_output = output.resolve()
+    resolved_cache = cache_root.resolve()
+    if resolved_output == resolved_cache:
+        raise ValueError("live coding pair output and cache roots must be distinct")
+
+    runtime_path = (ROOT / "src" / "ctx" / "cli" / "run.py").resolve(strict=True)
+    query_session_path = (ROOT / "src" / "ctx" / "runtime" / "query_session.py").resolve(
+        strict=True
+    )
+    prepared_delivery_path = (
+        ROOT / "src" / "ctx" / "runtime" / "prepared_query_delivery.py"
+    ).resolve(strict=True)
+    provider_adapter_path = (
+        ROOT / "src" / "ctx" / "adapters" / "generic" / "providers" / "litellm_provider.py"
+    ).resolve(strict=True)
+    try:
+        litellm_version = importlib_metadata.version("litellm")
+    except importlib_metadata.PackageNotFoundError as exc:
+        raise ValueError("live coding pair requires the installed LiteLLM runtime") from exc
+    from ctx.runtime.production_catalog import (  # noqa: PLC0415
+        RELEASE_QUERY_CATALOG_MODE,
+        RELEASE_QUERY_CATALOG_ROOT_SHA256,
+        RELEASE_QUERY_CATALOG_SEQUENCE,
+        open_release_pinned_query_catalog,
+    )
+
+    release_catalog = open_release_pinned_query_catalog()
+    try:
+        opened_release_identity = {
+            "release_root_digest": release_catalog.release_root_digest,
+            "release_sequence": release_catalog.release_sequence,
+            "catalog_mode": release_catalog.mode,
+        }
+    finally:
+        release_catalog.close()
+    if opened_release_identity != {
+        "release_root_digest": RELEASE_QUERY_CATALOG_ROOT_SHA256,
+        "release_sequence": RELEASE_QUERY_CATALOG_SEQUENCE,
+        "catalog_mode": RELEASE_QUERY_CATALOG_MODE,
+    }:
+        raise ValueError("live coding pair opened release catalog identity is not code-approved")
+
+    inherited_environment = {
+        key: os.environ[key]
+        for key in (
+            "COMSPEC",
+            "LANG",
+            "LC_ALL",
+            "LC_CTYPE",
+            "PATH",
+            "PATHEXT",
+            "SSL_CERT_DIR",
+            "SSL_CERT_FILE",
+            "SYSTEMROOT",
+            "WINDIR",
+        )
+        if os.environ.get(key)
+    }
+    pair_root = resolved_output / scenario.id / "live-coding-pair"
+    arm_paths = {
+        arm: {
+            "arm_root": str(pair_root / arm),
+            "workspace_root": str(pair_root / arm / "repo"),
+            "home_root": str(pair_root / arm / "home"),
+            "session_root": str(pair_root / arm / "sessions"),
+        }
+        for arm in ("baseline", "ctx-light")
+    }
+    task_bytes = scenario.task.encode("utf-8")
+    return {
+        "schema": LIVE_CODING_PAIR_SCHEMA,
+        "evidence_level": (
+            LIVE_CODING_PAIR_DIAGNOSTIC_LEVEL if execute else LIVE_CODING_PAIR_EVIDENCE_LEVEL
+        ),
+        "arms": ["baseline", "ctx-light"],
+        "execution_order": ["baseline", "ctx-light"],
+        "execution": {
+            "enabled": execute,
+            "mode": "diagnostic_single_pair" if execute else "approved_contract_only",
+            "provider_calls_allowed": execute,
+            "workspace_mutation_allowed": execute,
+        },
+        "scenario": {
+            "id": scenario.id,
+            "repository_url": scenario.repo_url,
+            "commit": scenario.commit,
+            "language": scenario.language,
+            "benchmark_class": scenario.benchmark_class,
+            "task_sha256": _sha256_bytes(task_bytes),
+            "task_bytes": len(task_bytes),
+            "query_sha256": _sha256_bytes(scenario.query.encode("utf-8")),
+            "allowed_changes": list(scenario.allowed_changes),
+            "scenario_source_sha256": _stable_regular_file_sha256(resolved_scenarios),
+            "base_prompt_recipe": "production_task_prompt_from_approved_commit-v1",
+            "base_prompt_source_limit_bytes": 256_000,
+        },
+        "paths": {
+            "output_root": str(resolved_output),
+            "cache_root": str(resolved_cache),
+            "pair_root": str(pair_root),
+            "arms": arm_paths,
+            "all_arm_roots_distinct": True,
+        },
+        "runtime": {
+            "argv_prefix": [sys.executable, "-m", "ctx.cli.run", "run"],
+            "python_executable_sha256": _stable_regular_file_sha256(
+                Path(sys.executable).resolve(strict=True)
+            ),
+            "ctx_run_module_sha256": _stable_regular_file_sha256(runtime_path),
+            "benchmark_script_sha256": _stable_regular_file_sha256(Path(__file__).resolve()),
+            "query_session_module_sha256": _stable_regular_file_sha256(query_session_path),
+            "prepared_query_delivery_module_sha256": _stable_regular_file_sha256(
+                prepared_delivery_path
+            ),
+            "provider_adapter_module_sha256": _stable_regular_file_sha256(provider_adapter_path),
+            "ctx_package_sha256": _stable_python_tree_sha256(ROOT / "src" / "ctx"),
+            "generic_adapter_package_sha256": _stable_python_tree_sha256(
+                ROOT / "src" / "ctx" / "adapters" / "generic"
+            ),
+            "engine_package_sha256": _stable_python_tree_sha256(ROOT / "src" / "ctx" / "engine"),
+            "runtime_package_sha256": _stable_python_tree_sha256(ROOT / "src" / "ctx" / "runtime"),
+            "litellm_version": litellm_version,
+            "litellm_package_sha256": _installed_python_package_sha256("litellm"),
+            "python_version": platform.python_version(),
+            "platform_system": platform.system(),
+            "platform_release": platform.release(),
+            "platform_machine": platform.machine(),
+            "release_catalog_assets": {
+                name: _stable_regular_file_sha256(ROOT / "src" / "ctx" / "assets" / name)
+                for name in RELEASE_CATALOG_EVIDENCE_ASSETS
+            },
+            "release_catalog_authentication": "open_release_pinned_query_catalog",
+            "release_catalog_open_verified": True,
+            "opened_release_identity": opened_release_identity,
+        },
+        "provider": {
+            "route": "provider_default",
+            "provider_prefix": model.split("/", 1)[0],
+            "requested_model": model,
+            "api_key_environment": api_key_env,
+            "credential_policy": "same secret value in both arms; never persisted",
+        },
+        "controls": {
+            "engine": PRODUCTION_CATALOG_ENGINE,
+            "unified_engine_treatment": True,
+            "trials": 1,
+            "retries": 0,
+            "max_iterations": max_iterations,
+            "max_output_tokens_per_arm": max_tokens,
+            "pair_max_output_tokens": max_tokens * 2,
+            "wall_timeout_seconds_per_arm": float(timeout),
+            "provider_timeout_seconds_per_request": float(provider_timeout),
+            "model_tool_schemas": [],
+            "model_tool_schema_sha256": _sha256_bytes(b"[]"),
+            "ctx_run_tool_mode": "--no-ctx-tools",
+            "ctx_run_engine_mode": "legacy",
+            "arm_equality": [
+                "repository",
+                "commit",
+                "base_prompt",
+                "model",
+                "model_tools",
+                "max_iterations",
+                "max_output_tokens",
+                "wall_timeout",
+                "provider_timeout",
+                "evaluator",
+                "runtime",
+                "environment_except_isolated_paths",
+            ],
+        },
+        "treatment_delta": {
+            "baseline": "base prompt only",
+            "ctx-light": (
+                "base prompt plus two LF bytes plus one accepted current-release CTX delivery"
+            ),
+            "delivery_factory": "ctx.runtime.query_session.prepare_query_delivery",
+            "delivery_acceptor": (
+                "ctx.runtime.prepared_query_delivery.accept_prepared_query_delivery"
+            ),
+            "host": "ctx-run",
+            "execution_intent": "activate",
+            "required_receipt_revision": 3,
+            "accepted_nonempty_delivery_required": True,
+            "accepted_delivery_identity_phase": (
+                "after approval and workspace attestation; before either provider arm"
+            ),
+            "accepted_delivery_identity_preapproved": False,
+            "required_delivery_evidence_fields": [
+                "host_context_id",
+                "host_descriptor_digest",
+                "host_invocation_digest",
+                "decision_receipt_digest",
+                "release_root_digest",
+                "release_sequence",
+                "catalog_mode",
+                "catalog_snapshot_digest",
+                "plan_digest",
+                "presentation_digest",
+                "delivery_digest",
+                "receipt_event_content_digest",
+                "final_journal_revision",
+                "final_journal_record_digest",
+                "context_sha256",
+                "context_bytes",
+                "capabilities",
+            ],
+            "host_invocation_digest_must_equal_approval": True,
+            "policy_abstention_executes_pair": False,
+            "all_other_differences_forbidden": True,
+        },
+        "evaluator": {
+            "test_path": scenario.test_path,
+            "test_body_sha256": _sha256_bytes(scenario.test_body.encode("utf-8")),
+            "verify": list(scenario.verify),
+            "regression_verify": [list(command) for command in scenario.regression_verify],
+            "expected_test_count": scenario.expected_test_count,
+            "red_failure_contains_sha256": _sha256_bytes(
+                scenario.red_failure_contains.encode("utf-8")
+            ),
+            "reference_patch_sha256": _sha256_bytes(scenario.reference_patch.encode("utf-8")),
+            "materialization": "after each agent arm and before evaluation",
+            "same_evaluator_both_arms": True,
+        },
+        "environment": {
+            "inherited_allowlist": inherited_environment,
+            "fixed_values": {
+                "CTX_ENGINE_MODE": "legacy",
+                "CTX_TELEMETRY_ENABLED": "0",
+                "PYTHONNOUSERSITE": "1",
+                "PYTHONPATH": str(ROOT / "src"),
+            },
+            "isolated_per_arm": [
+                "CODEX_HOME",
+                "HOME",
+                "USERPROFILE",
+                "TEMP",
+                "TMP",
+                "TMPDIR",
+                "CTX_RUNTIME_LIFECYCLE_DIR",
+                "sessions",
+                "workspace",
+            ],
+            "provider_secret": "same runtime value; excluded from artifacts and hashes",
+        },
+        "paired_evidence": {
+            "both_arms_required": True,
+            "partial_pair_publishable": False,
+            "initial_commit_and_tree_equality_required": True,
+            "base_prompt_byte_equality_required": True,
+            "delivered_prompt_delta_verification_required": True,
+            "raw_provider_request_body_observed": False,
+            "provider_identity_and_model_equality_required": True,
+            "exact_usage_accounting_required": True,
+            "evaluator_identity_and_result_required": True,
+            "accepted_delivery_re_attestation_required_before_provider": True,
+            "ctx_setup_time_charged_to_treatment": True,
+            "application_path_isolation_required": True,
+            "os_process_isolation_claimed": False,
+        },
+        "scope_limitations": {
+            "single_pair_pilot": True,
+            "approved_scenario_count": 1,
+            "approved_repository_count": 1,
+            "approved_catalog_scope": "exact release assets, root, sequence, and mode",
+            "accepted_delivery_status": (
+                "not created by this plan; future execution must record and validate the "
+                "required delivery evidence tuple before provider access"
+            ),
+            "provider_sampling_seed_controlled": False,
+            "execution_order_counterbalanced": False,
+            "causal_or_general_benefit_inference_allowed": False,
+            "minimum_product_claim_scenarios": PRODUCT_CLAIM_MIN_SCENARIOS,
+            "minimum_product_claim_repositories": PRODUCT_CLAIM_MIN_REPOSITORIES,
+            "minimum_product_claim_trials": PRODUCT_CLAIM_MIN_TRIALS,
+            "authenticated_campaign_design_required": True,
+        },
+        "claim_policy": {
+            "production_efficiency_eligible": False,
+            "product_claim_eligible": False,
+            "benefit_verdict_allowed": False,
+        },
+    }
+
+
+def live_coding_pair_contract_sha256(contract: Mapping[str, Any]) -> str:
+    """Hash the exact canonical future live-pair plan."""
+
+    if not isinstance(contract, Mapping):
+        raise TypeError("live coding pair contract must be a mapping")
+    return _sha256_bytes(_canonical_json_bytes(dict(contract)))
+
+
+def approve_live_coding_pair_plan(
+    *,
+    scenario: Scenario,
+    scenarios_path: Path,
+    output: Path,
+    cache_root: Path,
+    model: str,
+    api_key_env: str,
+    timeout: float,
+    max_iterations: int,
+    max_tokens: int,
+    provider_timeout: float,
+    execute: bool = False,
+    approval_digest: str,
+    contract: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Validate one approval without mutating a workspace or contacting a provider."""
+
+    actual_contract = live_coding_pair_contract(
+        scenario=scenario,
+        scenarios_path=scenarios_path,
+        output=output,
+        cache_root=cache_root,
+        model=model,
+        api_key_env=api_key_env,
+        timeout=timeout,
+        max_iterations=max_iterations,
+        max_tokens=max_tokens,
+        provider_timeout=provider_timeout,
+        execute=execute,
+    )
+    if _canonical_json_bytes(dict(contract)) != _canonical_json_bytes(actual_contract):
+        raise ValueError("live coding pair supplied contract does not match the actual execution")
+    expected_approval = live_coding_pair_contract_sha256(actual_contract)
+    if not secrets.compare_digest(approval_digest, expected_approval):
+        raise ValueError("live coding pair approval digest does not match the pair contract")
+    return {
+        "schema": "ctx.live-coding-pair-approval-v1",
+        "evidence_level": (
+            LIVE_CODING_PAIR_DIAGNOSTIC_LEVEL if execute else LIVE_CODING_PAIR_EVIDENCE_LEVEL
+        ),
+        "approval_digest": expected_approval,
+        "pair_contract": actual_contract,
+        "pair_contract_sha256": expected_approval,
+        "execution_enabled": execute,
+        "provider_calls_made": 0,
+        "workspace_mutations_made": 0,
+        "production_efficiency_eligible": False,
+        "product_claim_eligible": False,
+        "benefit_verdict_allowed": False,
+        "benefit_verdict": None,
+        "warning": (
+            "This approval enables one diagnostic single-pair pilot but is not itself "
+            "execution evidence and does not provide product-benefit evidence."
+            if execute
+            else "This approves a future single-pair pilot contract only. It does not execute "
+            "a provider, mutate a workspace, or provide product-benefit evidence."
+        ),
+    }
+
+
+def _live_coding_delivery_identity(value: object) -> dict[str, Any]:
+    """Return the exact digest-only identity required by the live pilot."""
+
+    from ctx.runtime.prepared_query_delivery import (  # noqa: PLC0415
+        PreparedQueryDelivery,
+    )
+
+    if type(value) is not PreparedQueryDelivery:
+        raise RuntimeError("live coding pair did not receive an accepted prepared delivery")
+    delivery = cast(PreparedQueryDelivery, value)
+    decision = delivery.decision
+    if (
+        not delivery.context
+        or _sha256_bytes(delivery.context.encode("utf-8")) != delivery.context_sha256
+    ):
+        raise RuntimeError("live coding pair accepted delivery context is invalid")
+    try:
+        expires_at = datetime.fromisoformat(delivery.expires_at.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise RuntimeError("live coding pair accepted delivery expiry is invalid") from exc
+    if expires_at.tzinfo is None or expires_at <= datetime.now(UTC):
+        raise RuntimeError("live coding pair accepted delivery expired before provider execution")
+    return {
+        "host_context_id": decision.host_context_id,
+        "host_descriptor_digest": decision.host_descriptor_digest,
+        "host_invocation_digest": decision.host_invocation_digest,
+        "decision_receipt_digest": decision.receipt_digest,
+        "release_root_digest": decision.release_root_digest,
+        "release_sequence": decision.release_sequence,
+        "catalog_mode": decision.catalog_mode,
+        "catalog_snapshot_digest": decision.catalog_snapshot_digest,
+        "plan_digest": decision.plan_digest,
+        "presentation_digest": decision.presentation_digest,
+        "delivery_digest": delivery.delivery_digest,
+        "receipt_event_content_digest": delivery.receipt_event_content_digest,
+        "final_journal_revision": delivery.final_journal_revision,
+        "final_journal_record_digest": delivery.final_journal_record_digest,
+        "context_sha256": delivery.context_sha256,
+        "context_bytes": delivery.context_bytes,
+        "capabilities": [item.to_dict() for item in delivery.capabilities],
+    }
+
+
+def _live_coding_workspace_identity(workspace: Path) -> dict[str, str]:
+    head = run_process(["git", "rev-parse", "HEAD"], cwd=workspace, timeout=30)
+    tree = run_process(["git", "rev-parse", "HEAD^{tree}"], cwd=workspace, timeout=30)
+    status_result = run_process(
+        [
+            "git",
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            "core.untrackedCache=false",
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=all",
+        ],
+        cwd=workspace,
+        timeout=30,
+    )
+    if head.returncode or tree.returncode or status_result.returncode:
+        raise RuntimeError("live coding pair workspace identity is unavailable")
+    return {
+        "commit": head.stdout.strip(),
+        "tree_sha1": tree.stdout.strip(),
+        "worktree_status_sha256": _sha256_bytes(status_result.stdout.encode("utf-8")),
+        "worktree_status": status_result.stdout,
+    }
+
+
+def _live_coding_pair_environment(
+    *,
+    arm_root: Path,
+    api_key_env: str,
+    provider_secret: str,
+    containment_token: str,
+) -> dict[str, str]:
+    env = _ctx_env(arm_root / "home", arm_root / "lifecycle")
+    env.update(
+        {
+            "CODEX_HOME": str(arm_root / "codex-home"),
+            "CTX_ENGINE_MODE": "legacy",
+            api_key_env: provider_secret,
+            PROCESS_MARKER: containment_token,
+        }
+    )
+    return env
+
+
+def _normalized_live_coding_pair_environment(
+    environment: Mapping[str, str],
+    *,
+    arm_root: Path,
+    api_key_env: str,
+) -> dict[str, str]:
+    root = str(arm_root.resolve())
+    normalized = {
+        key: value.replace(root, "<ARM_ROOT>") for key, value in sorted(environment.items())
+    }
+    normalized[api_key_env] = "<PROVIDER_SECRET>"
+    normalized[PROCESS_MARKER] = "<PAIR_SCOPED_NONCE>"
+    return normalized
+
+
+def _execute_live_coding_provider_arm(
+    *,
+    command: list[str],
+    cwd: Path,
+    environment: dict[str, str],
+    timeout: float,
+    containment_token: str,
+) -> CommandResult:
+    """External provider boundary; tests replace this function with a no-network fake."""
+
+    return run_process(
+        command,
+        cwd=cwd,
+        env=environment,
+        timeout=timeout,
+        contain_descendants=True,
+        containment_token=containment_token,
+    )
+
+
+def _assert_live_coding_contract_current(
+    *,
+    scenario: Scenario,
+    scenarios_path: Path,
+    output: Path,
+    cache_root: Path,
+    model: str,
+    api_key_env: str,
+    timeout: float,
+    max_iterations: int,
+    max_tokens: int,
+    provider_timeout: float,
+    approval_digest: str,
+    contract: Mapping[str, Any],
+) -> None:
+    current = live_coding_pair_contract(
+        scenario=scenario,
+        scenarios_path=scenarios_path,
+        output=output,
+        cache_root=cache_root,
+        model=model,
+        api_key_env=api_key_env,
+        timeout=timeout,
+        max_iterations=max_iterations,
+        max_tokens=max_tokens,
+        provider_timeout=provider_timeout,
+        execute=True,
+    )
+    if _canonical_json_bytes(current) != _canonical_json_bytes(dict(contract)):
+        raise RuntimeError("live coding pair contract or authenticated catalog changed")
+    if not secrets.compare_digest(
+        live_coding_pair_contract_sha256(current),
+        approval_digest,
+    ):
+        raise RuntimeError("live coding pair current contract lost its approval")
+
+
+def _write_live_coding_pair_failure(
+    *,
+    pair_root: Path,
+    approval_digest: str,
+    completed_arms: Sequence[str],
+    error: BaseException,
+    redactions: Sequence[str] = (),
+) -> None:
+    error_message = str(error)
+    for secret_value in redactions:
+        if secret_value:
+            error_message = error_message.replace(secret_value, "<REDACTED>")
+    failure = {
+        "schema": "ctx.live-coding-pair-failure-v1",
+        "evidence_level": LIVE_CODING_PAIR_DIAGNOSTIC_LEVEL,
+        "approval_digest": approval_digest,
+        "completed_arms": list(completed_arms),
+        "paired_evidence_complete": False,
+        "error_type": type(error).__name__,
+        "error": error_message,
+        "production_efficiency_eligible": False,
+        "product_claim_eligible": False,
+        "benefit_verdict_allowed": False,
+        "benefit_verdict": None,
+    }
+    (pair_root / "live-coding-pair-failure.json").write_bytes(_indented_json_bytes(failure))
+
+
+def run_live_coding_pair(
+    scenario: Scenario,
+    *,
+    cache: Path,
+    scenarios_path: Path,
+    output: Path,
+    cache_root: Path,
+    model: str,
+    api_key_env: str,
+    timeout: float,
+    max_iterations: int,
+    max_tokens: int,
+    provider_timeout: float,
+    approval_digest: str,
+    contract: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Execute one approved, serial, claim-ineligible live coding pair."""
+
+    if output.exists():
+        raise ValueError("live coding pair output directory must be absent")
+    approval = approve_live_coding_pair_plan(
+        scenario=scenario,
+        scenarios_path=scenarios_path,
+        output=output,
+        cache_root=cache_root,
+        model=model,
+        api_key_env=api_key_env,
+        timeout=timeout,
+        max_iterations=max_iterations,
+        max_tokens=max_tokens,
+        provider_timeout=provider_timeout,
+        execute=True,
+        approval_digest=approval_digest,
+        contract=contract,
+    )
+    if approval["execution_enabled"] is not True:
+        raise RuntimeError("live coding pair execution was not explicitly approved")
+    expected_cache = (cache_root / scenario.id).resolve()
+    if cache.resolve() != expected_cache:
+        raise ValueError("live coding pair cache does not match the approved cache root")
+    provider_secret = os.environ.get(api_key_env)
+    if not provider_secret:
+        raise ValueError("live coding pair approved provider key environment is not set")
+
+    output.mkdir(mode=stat.S_IRWXU, parents=True, exist_ok=False)
+    output.chmod(stat.S_IRWXU)
+    pair_root = output / scenario.id / "live-coding-pair"
+    pair_root.mkdir(parents=True, exist_ok=False)
+    completed_arms: list[str] = []
+    arm_results: list[dict[str, Any]] = []
+    try:
+        workspaces: dict[str, Path] = {}
+        initial_identities: dict[str, dict[str, str]] = {}
+        base_prompts: dict[str, str] = {}
+        for arm in ("baseline", "ctx-light"):
+            workspace = pair_root / arm / "repo"
+            workspace.parent.mkdir(parents=True)
+            prepare_workspace(
+                scenario,
+                cache,
+                workspace,
+                include_evaluator_test=False,
+            )
+            workspaces[arm] = workspace
+            identity = _live_coding_workspace_identity(workspace)
+            if identity["commit"] != scenario.commit or identity["worktree_status"]:
+                raise RuntimeError("live coding pair workspace does not match its pristine commit")
+            initial_identities[arm] = identity
+            base_prompts[arm] = production_task_prompt(scenario, workspace)
+        if initial_identities["baseline"] != initial_identities["ctx-light"]:
+            raise RuntimeError("live coding pair arms did not start from one repository identity")
+        if base_prompts["baseline"].encode("utf-8") != base_prompts["ctx-light"].encode("utf-8"):
+            raise RuntimeError("live coding pair base prompts are not byte-identical")
+
+        from ctx.runtime.prepared_query_delivery import (  # noqa: PLC0415
+            PreparedQueryDelivery,
+            accept_prepared_query_delivery,
+        )
+        from ctx.runtime.query_decision import QueryHostDescriptor  # noqa: PLC0415
+        from ctx.runtime.query_session import prepare_query_delivery  # noqa: PLC0415
+
+        host = QueryHostDescriptor.ctx_run("activate")
+        ctx_setup_started = time.perf_counter()
+        prepared = prepare_query_delivery(
+            host=host,
+            task=scenario.task,
+            language=scenario.language,
+            session_id=f"ctx-ab-live-{scenario.id}",
+            workspace=workspaces["ctx-light"],
+            journal_path=pair_root / "engine" / "journal.sqlite3",
+            benefit_audit_path=pair_root / "engine" / "benefit.sqlite3",
+            host_invocation_digest=approval_digest,
+        )
+        if not isinstance(prepared, PreparedQueryDelivery):
+            raise RuntimeError("live coding pair CTX delivery abstained or failed")
+        accepted = accept_prepared_query_delivery(prepared, host=host)
+        ctx_setup_seconds = time.perf_counter() - ctx_setup_started
+        delivery_identity = _live_coding_delivery_identity(accepted)
+        opened_release = contract.get("runtime", {}).get("opened_release_identity")
+        if not isinstance(opened_release, Mapping) or any(
+            delivery_identity[field] != opened_release[opened_field]
+            for field, opened_field in (
+                ("release_root_digest", "release_root_digest"),
+                ("release_sequence", "release_sequence"),
+                ("catalog_mode", "catalog_mode"),
+            )
+        ):
+            raise RuntimeError(
+                "live coding pair accepted delivery is not from the approved release"
+            )
+        if delivery_identity["host_invocation_digest"] != approval_digest:
+            raise RuntimeError("live coding pair accepted delivery is not approval-bound")
+        _assert_live_coding_contract_current(
+            scenario=scenario,
+            scenarios_path=scenarios_path,
+            output=output,
+            cache_root=cache_root,
+            model=model,
+            api_key_env=api_key_env,
+            timeout=timeout,
+            max_iterations=max_iterations,
+            max_tokens=max_tokens,
+            provider_timeout=provider_timeout,
+            approval_digest=approval_digest,
+            contract=contract,
+        )
+
+        prompts = {
+            "baseline": base_prompts["baseline"],
+            "ctx-light": base_prompts["baseline"] + "\n\n" + accepted.context,
+        }
+        if prompts["ctx-light"] != prompts["baseline"] + "\n\n" + accepted.context:
+            raise RuntimeError("live coding pair treatment prompt is not the exact CTX suffix")
+        containment_token = _sha256_bytes(
+            f"{approval_digest}:{pair_root.resolve()}".encode("utf-8")
+        )[:32]
+        normalized_environments: dict[str, dict[str, str]] = {}
+        normalized_commands: dict[str, list[str]] = {}
+        session_id = f"ctx-ab-live-{scenario.id}"
+
+        for arm in ("baseline", "ctx-light"):
+            _assert_live_coding_contract_current(
+                scenario=scenario,
+                scenarios_path=scenarios_path,
+                output=output,
+                cache_root=cache_root,
+                model=model,
+                api_key_env=api_key_env,
+                timeout=timeout,
+                max_iterations=max_iterations,
+                max_tokens=max_tokens,
+                provider_timeout=provider_timeout,
+                approval_digest=approval_digest,
+                contract=contract,
+            )
+            if _live_coding_delivery_identity(accepted) != delivery_identity:
+                raise RuntimeError("live coding pair accepted delivery identity changed")
+            if _live_coding_workspace_identity(workspaces[arm]) != initial_identities[arm]:
+                raise RuntimeError("live coding pair workspace changed before its provider arm")
+
+            arm_root = pair_root / arm
+            sessions_dir = arm_root / "sessions"
+            command = production_ctx_command(
+                model=model,
+                prompt=prompts[arm],
+                session_id=session_id,
+                sessions_dir=sessions_dir,
+                with_ctx=False,
+                api_key_env=api_key_env,
+                base_url=None,
+                max_iterations=max_iterations,
+                max_tokens=max_tokens,
+                provider_timeout=provider_timeout,
+            )
+            command.extend(["--ctx-engine-mode", "legacy"])
+            normalized_commands[arm] = _scrub_deterministic_pair_command(command)
+            environment = _live_coding_pair_environment(
+                arm_root=arm_root,
+                api_key_env=api_key_env,
+                provider_secret=provider_secret,
+                containment_token=containment_token,
+            )
+            normalized_environments[arm] = _normalized_live_coding_pair_environment(
+                environment,
+                arm_root=arm_root,
+                api_key_env=api_key_env,
+            )
+            agent = _execute_live_coding_provider_arm(
+                command=command,
+                cwd=workspaces[arm],
+                environment=environment,
+                timeout=timeout,
+                containment_token=containment_token,
+            )
+            (arm_root / "ctx-run.json").write_text(
+                agent.stdout.replace(provider_secret, "<REDACTED>"),
+                encoding="utf-8",
+            )
+            (arm_root / "ctx-run.stderr.log").write_text(
+                agent.stderr.replace(provider_secret, "<REDACTED>"),
+                encoding="utf-8",
+            )
+            (arm_root / "command.json").write_bytes(
+                _indented_json_bytes({"argv": normalized_commands[arm]})
+            )
+            if agent.returncode or agent.timed_out or agent.residual_descendants:
+                raise RuntimeError(f"live coding pair {arm} provider arm failed")
+            try:
+                payload = validate_production_payload(
+                    json.loads(agent.stdout), session_id=session_id
+                )
+                usage = extract_production_usage(payload)
+                if usage["output_tokens"] > max_tokens:
+                    raise ValueError("ctx run output usage exceeded the approved token limit")
+                provenance = extract_provider_response_provenance(
+                    sessions_dir=sessions_dir,
+                    session_id=session_id,
+                    model=model,
+                    base_url=None,
+                    api_key_env=api_key_env,
+                    env=environment,
+                    expected_ctx_tool_names=(),
+                )
+                if not all(
+                    provenance.get(field) is True
+                    for field in (
+                        "provider_identity_verified",
+                        "provider_endpoint_verified",
+                        "provider_authentication_verified",
+                        "provider_response_success",
+                        "configured_ctx_tool_surface_verified",
+                    )
+                ):
+                    raise ValueError("live coding pair provider provenance is incomplete")
+                if provenance.get("provider_response_count") != 1:
+                    raise ValueError(
+                        "live coding pair provider must produce exactly one response per arm"
+                    )
+                patch = extract_production_patch(payload)
+                patch_paths = apply_production_patch(scenario, workspaces[arm], patch)
+            except (json.JSONDecodeError, ValueError) as exc:
+                raise RuntimeError(f"live coding pair {arm} evidence is invalid: {exc}") from exc
+
+            materialize_evaluator_test(
+                scenario,
+                workspaces[arm],
+                expected_hash=_sha256_bytes(scenario.test_body.encode("utf-8")),
+                require_pristine=True,
+            )
+            verification = verify_workspace(
+                scenario,
+                workspaces[arm],
+                _sha256_bytes(scenario.test_body.encode("utf-8")),
+            )
+            (arm_root / "verification.log").write_text(
+                verification.stdout + verification.stderr,
+                encoding="utf-8",
+            )
+            diff = run_process(
+                ["git", "diff", "--binary", scenario.commit],
+                cwd=workspaces[arm],
+                timeout=30,
+            )
+            if diff.returncode:
+                raise RuntimeError(f"live coding pair {arm} final diff is unavailable")
+            row = {
+                "arm": arm,
+                "status": "completed",
+                "verification_passed": not verification.returncode,
+                "verification_returncode": verification.returncode,
+                "patch_paths": patch_paths,
+                "patch_sha256": _sha256_bytes(patch.encode("utf-8")),
+                "final_diff_sha256": _sha256_bytes(diff.stdout.encode("utf-8")),
+                "agent_seconds": round(agent.elapsed, 6),
+                "verification_seconds": round(verification.elapsed, 6),
+                "ctx_setup_seconds": round(ctx_setup_seconds if arm == "ctx-light" else 0.0, 6),
+                "development_seconds": round(
+                    agent.elapsed + (ctx_setup_seconds if arm == "ctx-light" else 0.0),
+                    6,
+                ),
+                "token_attribution": usage["attribution"],
+                **{key: value for key, value in usage.items() if key != "attribution"},
+                "provider_identity": provenance["provider_identity"],
+                "provider_adapter": provenance["provider_adapter"],
+                "provider_session_sha256": provenance["provider_session_sha256"],
+                "provider_response_count": provenance["provider_response_count"],
+            }
+            arm_results.append(row)
+            completed_arms.append(arm)
+            (pair_root / "live-coding-pair-progress.json").write_bytes(
+                _indented_json_bytes(
+                    {
+                        "schema": "ctx.live-coding-pair-progress-v1",
+                        "approval_digest": approval_digest,
+                        "completed_arms": list(completed_arms),
+                        "paired_evidence_complete": False,
+                        "product_claim_eligible": False,
+                    }
+                )
+            )
+
+        if completed_arms != ["baseline", "ctx-light"] or len(arm_results) != 2:
+            raise RuntimeError("live coding pair is incomplete")
+        if normalized_commands["baseline"] != normalized_commands["ctx-light"]:
+            raise RuntimeError("live coding pair commands differ outside isolated prompt paths")
+        if normalized_environments["baseline"] != normalized_environments["ctx-light"]:
+            raise RuntimeError("live coding pair normalized environments differ")
+        if len({row["provider_identity"] for row in arm_results}) != 1:
+            raise RuntimeError("live coding pair provider identity differs between arms")
+        if len({row["provider_adapter"] for row in arm_results}) != 1:
+            raise RuntimeError("live coding pair provider adapter differs between arms")
+        _assert_live_coding_contract_current(
+            scenario=scenario,
+            scenarios_path=scenarios_path,
+            output=output,
+            cache_root=cache_root,
+            model=model,
+            api_key_env=api_key_env,
+            timeout=timeout,
+            max_iterations=max_iterations,
+            max_tokens=max_tokens,
+            provider_timeout=provider_timeout,
+            approval_digest=approval_digest,
+            contract=contract,
+        )
+        if _live_coding_delivery_identity(accepted) != delivery_identity:
+            raise RuntimeError("live coding pair accepted delivery identity changed")
+
+        baseline_result, treatment_result = arm_results
+        report = {
+            "schema": "ctx.live-coding-pair-report-v1",
+            "evidence_level": LIVE_CODING_PAIR_DIAGNOSTIC_LEVEL,
+            "approval_digest": approval_digest,
+            "pair_contract": dict(contract),
+            "pair_contract_sha256": approval_digest,
+            "execution_order": ["baseline", "ctx-light"],
+            "provider_calls_completed": 2,
+            "paired_evidence_complete": True,
+            "serial_execution_verified": True,
+            "fairness_contract_verified": True,
+            "fairness_contract_definition": (
+                "same approved repository, commit, task, base prompt, model, empty tool surface, "
+                "budgets, evaluator, runtime, and normalized environment; the only semantic "
+                "request delta is two LF bytes plus the accepted CTX context"
+            ),
+            "evidence_trust_boundary": (
+                "delivered prompts, provider provenance, and usage are ctx-run/harness artifacts; "
+                "the raw provider HTTP request body is not independently observed"
+            ),
+            "cryptographic_independence": False,
+            "application_path_isolation_verified": True,
+            "os_process_isolation_verified": False,
+            "normalized_environment_contract_verified": True,
+            "normalized_environment_sha256": _sha256_bytes(
+                _canonical_json_bytes(normalized_environments["baseline"])
+            ),
+            "base_prompt_sha256": _sha256_bytes(prompts["baseline"].encode("utf-8")),
+            "request_delta": {
+                "exact_context_suffix_verified": True,
+                "semantic_delivery_boundary": "ctx run --task argument",
+                "raw_provider_request_body_observed": False,
+                "separator": "two LF bytes",
+                "baseline_prompt_sha256": _sha256_bytes(prompts["baseline"].encode("utf-8")),
+                "treatment_prompt_sha256": _sha256_bytes(prompts["ctx-light"].encode("utf-8")),
+                "context_sha256": accepted.context_sha256,
+                "context_bytes": accepted.context_bytes,
+                "model_tool_schema_sha256": _sha256_bytes(b"[]"),
+            },
+            "engine_delivery": delivery_identity,
+            "arms": arm_results,
+            "paired_metrics": {
+                "verification_outcomes": {
+                    "baseline": baseline_result["verification_passed"],
+                    "ctx-light": treatment_result["verification_passed"],
+                },
+                "total_token_delta": (
+                    treatment_result["total_tokens"] - baseline_result["total_tokens"]
+                ),
+                "development_seconds_delta": round(
+                    treatment_result["development_seconds"]
+                    - baseline_result["development_seconds"],
+                    6,
+                ),
+                "interpretation": "diagnostic raw paired measurements only",
+            },
+            "production_efficiency_eligible": False,
+            "product_claim_eligible": False,
+            "benefit_verdict_allowed": False,
+            "benefit_verdict": None,
+            "warning": (
+                "This is one non-counterbalanced, potentially stochastic diagnostic pair. It "
+                "does not support causal, production-efficiency, or product-benefit claims."
+            ),
+        }
+        (output / "live-coding-pair-report.json").write_bytes(_indented_json_bytes(report))
+        return report
+    except Exception as exc:
+        _write_live_coding_pair_failure(
+            pair_root=pair_root,
+            approval_digest=approval_digest,
+            completed_arms=completed_arms,
+            error=exc,
+            redactions=(provider_secret,),
+        )
+        if isinstance(exc, RuntimeError) and str(exc).startswith("live coding pair"):
+            raise
+        raise RuntimeError(f"live coding pair execution failed: {exc}") from exc
+
+
+def _stable_regular_file_sha256(path: Path) -> str:
+    """Hash one regular file while rejecting identity changes during the read."""
+
+    if path.is_symlink():
+        raise ValueError("deterministic bridge contract input must not be a symlink")
+    before = path.stat()
+    if not stat.S_ISREG(before.st_mode):
+        raise ValueError("deterministic bridge contract input must be a regular file")
+    hasher = hashlib.sha256()
+    with path.open("rb") as handle:
+        opened = os.fstat(handle.fileno())
+        if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+            raise ValueError("deterministic bridge contract input changed before read")
+        while chunk := handle.read(1024 * 1024):
+            hasher.update(chunk)
+        after_open = os.fstat(handle.fileno())
+    after_path = path.stat()
+    identity = lambda value: (  # noqa: E731 - compact exact stat projection.
+        value.st_dev,
+        value.st_ino,
+        value.st_size,
+        value.st_mtime_ns,
+    )
+    if identity(before) != identity(after_open) or identity(before) != identity(after_path):
+        raise ValueError("deterministic bridge contract input changed during read")
+    return hasher.hexdigest()
+
+
+def _stable_python_tree_sha256(root: Path) -> str:
+    resolved = root.resolve(strict=True)
+    if root.is_symlink() or not resolved.is_dir():
+        raise ValueError("deterministic bridge runtime tree must be a real directory")
+    records = [
+        {
+            "path": path.relative_to(resolved).as_posix(),
+            "sha256": _stable_regular_file_sha256(path),
+        }
+        for path in sorted(resolved.rglob("*.py"))
+        if path.is_file()
+    ]
+    if not records:
+        raise ValueError("deterministic bridge runtime tree contains no Python modules")
+    return _sha256_bytes(_canonical_json_bytes(records))
+
+
+def _installed_python_package_sha256(package: str) -> str:
+    spec = importlib.util.find_spec(package)
+    locations = None if spec is None else spec.submodule_search_locations
+    if locations is None or len(locations) != 1:
+        raise ValueError(f"deterministic bridge dependency package is unavailable: {package}")
+    return _stable_python_tree_sha256(Path(next(iter(locations))))
+
+
+def _deterministic_bridge_base_url(value: str) -> str:
+    target = urlsplit(value)
+    try:
+        address = ipaddress.ip_address(target.hostname or "")
+    except ValueError as exc:
+        raise ValueError(
+            "deterministic bridge provider URL must use a loopback IP literal"
+        ) from exc
+    if (
+        target.scheme != "http"
+        or not address.is_loopback
+        or target.username is not None
+        or target.password is not None
+        or target.query
+        or target.fragment
+        or target.path not in {"", "/v1"}
+        or target.port is None
+    ):
+        raise ValueError("deterministic bridge provider URL must be a plain loopback HTTP URL")
+    return value.rstrip("/")
+
+
+def _deterministic_pair_environment(
+    *,
+    arm_root: Path,
+    approval_digest: str,
+) -> dict[str, str]:
+    home = arm_root / "home"
+    lifecycle = arm_root / "lifecycle"
+    env = _ctx_env(home, lifecycle)
+    env.update(
+        {
+            "CODEX_HOME": str(arm_root / "codex-home"),
+            "CTX_ENGINE_MODE": "legacy",
+            DETERMINISTIC_BRIDGE_API_KEY_ENV: approval_digest,
+            "NO_PROXY": "127.0.0.1,::1,localhost",
+            "no_proxy": "127.0.0.1,::1,localhost",
+        }
+    )
+    return env
+
+
+def _normalized_deterministic_pair_environment(
+    environment: Mapping[str, str],
+    *,
+    arm_root: Path,
+) -> dict[str, str]:
+    root = str(arm_root.resolve())
+    return {key: value.replace(root, "<ARM_ROOT>") for key, value in sorted(environment.items())}
+
+
+def _deterministic_workspace_identity(
+    scenario: Scenario,
+    *,
+    workspace: Path,
+) -> dict[str, str]:
+    head = run_process(["git", "rev-parse", "HEAD"], cwd=workspace, timeout=30)
+    tree = run_process(["git", "rev-parse", "HEAD^{tree}"], cwd=workspace, timeout=30)
+    status_result = run_process(
+        [
+            "git",
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            "core.untrackedCache=false",
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=all",
+        ],
+        cwd=workspace,
+        timeout=30,
+    )
+    if head.returncode or tree.returncode or status_result.returncode:
+        raise RuntimeError("deterministic bridge workspace identity is unavailable")
+    evaluator_path = workspace / scenario.test_path
+    if not evaluator_path.is_file() or evaluator_path.is_symlink():
+        raise RuntimeError("deterministic bridge evaluator input is unavailable")
+    if status_result.stdout != f"?? {scenario.test_path}\0":
+        raise RuntimeError(
+            "deterministic bridge workspace is not pristine except for its evaluator"
+        )
+    return {
+        "commit": head.stdout.strip(),
+        "tree_sha1": tree.stdout.strip(),
+        "evaluator_test_sha256": _sha256_file(evaluator_path),
+        "worktree_status_sha256": _sha256_bytes(status_result.stdout.encode("utf-8")),
+    }
+
+
+def _scrub_deterministic_pair_command(command: Sequence[str]) -> list[str]:
+    scrubbed = list(command)
+    for option, replacement in (
+        ("--task", "<DELIVERED_PROMPT>"),
+        ("--sessions-dir", "<ARM_ROOT>/sessions"),
+    ):
+        index = scrubbed.index(option)
+        scrubbed[index + 1] = replacement
+    return scrubbed
+
+
+def _deterministic_provider_request_payload(data: bytes) -> dict[str, Any]:
+    payload = _strict_json_object(data, label="deterministic bridge provider request")
+    messages = payload.get("messages")
+    if not isinstance(messages, list) or not messages:
+        raise ValueError("deterministic bridge provider request has no messages")
+    if payload.get("tools") not in (None, []):
+        raise ValueError("deterministic bridge provider request exposed a tool schema")
+    return payload
+
+
+def _bridge_record_body(record: object, *, request: bool) -> tuple[bytes, str]:
+    prefix = "request" if request else "response"
+    data = getattr(record, f"{prefix}_body_bytes", None)
+    digest = getattr(record, f"{prefix}_body_sha256", None)
+    if not isinstance(data, bytes) or not isinstance(digest, str):
+        raise RuntimeError("deterministic bridge record omitted exact HTTP body evidence")
+    if digest != _sha256_bytes(data):
+        raise RuntimeError("deterministic bridge HTTP body evidence does not match its digest")
+    return data, digest
+
+
+def _normalize_delivered_prompt_http_body(body: bytes, *, delivered_prompt: str) -> bytes:
+    _strict_json_object(body, label="deterministic bridge raw provider request")
+    candidates = {
+        json.dumps(delivered_prompt, ensure_ascii=ensure_ascii).encode("utf-8")
+        for ensure_ascii in (True, False)
+    }
+    matches: list[tuple[int, bytes]] = []
+    for candidate in candidates:
+        start = 0
+        while (index := body.find(candidate, start)) >= 0:
+            matches.append((index, candidate))
+            start = index + 1
+    if len(matches) != 1:
+        raise ValueError(
+            "deterministic bridge raw request must contain one exact delivered-prompt literal"
+        )
+    index, literal = matches[0]
+    placeholder = json.dumps("<DELIVERED_PROMPT>", ensure_ascii=True).encode("ascii")
+    return body[:index] + placeholder + body[index + len(literal) :]
+
+
+def _assert_deterministic_raw_request_delta(
+    *,
+    baseline_body: bytes,
+    treatment_body: bytes,
+    baseline_prompt: str,
+    treatment_prompt: str,
+) -> dict[str, Any]:
+    normalized_baseline = _normalize_delivered_prompt_http_body(
+        baseline_body,
+        delivered_prompt=baseline_prompt,
+    )
+    normalized_treatment = _normalize_delivered_prompt_http_body(
+        treatment_body,
+        delivered_prompt=treatment_prompt,
+    )
+    if normalized_baseline != normalized_treatment:
+        raise ValueError(
+            "deterministic bridge raw request bodies differ outside the delivered prompt"
+        )
+    return {
+        "raw_http_body_delta_verified": True,
+        "normalized_raw_http_body_sha256": _sha256_bytes(normalized_baseline),
+    }
+
+
+def _assert_deterministic_request_delta(
+    *,
+    baseline_payload: dict[str, Any],
+    treatment_payload: dict[str, Any],
+    task: str,
+    context: str,
+) -> dict[str, Any]:
+    baseline_messages = baseline_payload.get("messages")
+    treatment_messages = treatment_payload.get("messages")
+    if not isinstance(baseline_messages, list) or not isinstance(treatment_messages, list):
+        raise ValueError("deterministic bridge request messages are malformed")
+    if len(baseline_messages) != len(treatment_messages):
+        raise ValueError("deterministic bridge arms submitted different message counts")
+    user_indices = [
+        index
+        for index, message in enumerate(baseline_messages)
+        if isinstance(message, dict) and message.get("role") == "user"
+    ]
+    if not user_indices or user_indices != [
+        index
+        for index, message in enumerate(treatment_messages)
+        if isinstance(message, dict) and message.get("role") == "user"
+    ]:
+        raise ValueError("deterministic bridge arms submitted different user-message structure")
+    task_index = user_indices[-1]
+    baseline_task = baseline_messages[task_index]
+    treatment_task = treatment_messages[task_index]
+    if not isinstance(baseline_task, dict) or not isinstance(treatment_task, dict):
+        raise ValueError("deterministic bridge task message is malformed")
+    expected_treatment = task + "\n\n" + context
+    if baseline_task.get("content") != task or treatment_task.get("content") != expected_treatment:
+        raise ValueError("deterministic bridge delivered prompt is not the exact approved suffix")
+
+    normalized_baseline = json.loads(json.dumps(baseline_payload, allow_nan=False))
+    normalized_treatment = json.loads(json.dumps(treatment_payload, allow_nan=False))
+    normalized_baseline["messages"][task_index]["content"] = "<DELIVERED_PROMPT>"
+    normalized_treatment["messages"][task_index]["content"] = "<DELIVERED_PROMPT>"
+    if normalized_baseline != normalized_treatment:
+        raise ValueError("deterministic bridge provider requests differ outside the CTX suffix")
+    outside_messages_baseline = dict(baseline_payload)
+    outside_messages_treatment = dict(treatment_payload)
+    outside_messages_baseline.pop("messages", None)
+    outside_messages_treatment.pop("messages", None)
+    if outside_messages_baseline != outside_messages_treatment:
+        raise ValueError("deterministic bridge provider fields differ outside messages")
+    return {
+        "only_semantic_delta_verified": True,
+        "parsed_canonical_semantic_delta_verified": True,
+        "task_message_index": task_index,
+        "normalized_request_sha256": _sha256_bytes(_canonical_json_bytes(normalized_baseline)),
+        "outside_messages_sha256": _sha256_bytes(_canonical_json_bytes(outside_messages_baseline)),
+        "core_tool_schema_sha256": _sha256_bytes(b"[]"),
+    }
+
+
+def _load_deterministic_bridge_module() -> Any:
+    """Load only the exact sibling bridge in package and direct-script modes."""
+
+    module = importlib.import_module(
+        "scripts.ctx_ab_deterministic_bridge" if __package__ else "ctx_ab_deterministic_bridge"
+    )
+    source = getattr(module, "__file__", None)
+    expected = (ROOT / "scripts" / "ctx_ab_deterministic_bridge.py").resolve(strict=True)
+    if not isinstance(source, str) or Path(source).resolve(strict=True) != expected:
+        raise RuntimeError("deterministic bridge import did not resolve to the approved sibling")
+    return module
+
+
+def run_deterministic_bridge_pair(
+    scenario: Scenario,
+    *,
+    cache: Path,
+    scenarios_path: Path,
+    output: Path,
+    model: str,
+    timeout: float,
+    max_tokens: int,
+    provider_timeout: float,
+    token_budget: int,
+    approval_digest: str,
+    contract: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Run one serial, isolated, claim-ineligible deterministic provider pair."""
+
+    if TYPE_CHECKING:
+        from scripts.ctx_ab_deterministic_bridge import (  # noqa: PLC0415
+            DeterministicProviderBridge,
+            RequestRecord,
+        )
+    else:
+        bridge_module = _load_deterministic_bridge_module()
+        DeterministicProviderBridge = bridge_module.DeterministicProviderBridge
+        RequestRecord = bridge_module.RequestRecord
+    from ctx.runtime.prepared_query_delivery import (  # noqa: PLC0415
+        PreparedQueryDelivery,
+        accept_prepared_query_delivery,
+    )
+    from ctx.runtime.production_catalog import (  # noqa: PLC0415
+        RELEASE_QUERY_CATALOG_MODE,
+        RELEASE_QUERY_CATALOG_ROOT_SHA256,
+        RELEASE_QUERY_CATALOG_SEQUENCE,
+    )
+    from ctx.runtime.query_decision import QueryHostDescriptor  # noqa: PLC0415
+    from ctx.runtime.query_session import prepare_query_delivery  # noqa: PLC0415
+
+    actual_contract = deterministic_bridge_pair_contract(
+        scenario=scenario,
+        scenarios_path=scenarios_path,
+        model=model,
+        timeout=timeout,
+        max_tokens=max_tokens,
+        provider_timeout=provider_timeout,
+        token_budget=token_budget,
+    )
+    if _canonical_json_bytes(dict(contract)) != _canonical_json_bytes(actual_contract):
+        raise ValueError(
+            "deterministic bridge supplied contract does not match the actual execution"
+        )
+    expected_approval = deterministic_bridge_pair_contract_sha256(actual_contract)
+    if not secrets.compare_digest(approval_digest, expected_approval):
+        raise ValueError("deterministic bridge approval digest does not match the pair contract")
+    pair_root = output / scenario.id / "deterministic-bridge-pair"
+    pair_root.mkdir(parents=True, exist_ok=False)
+    task = task_prompt(scenario)
+    task_sha256 = _sha256_bytes(task.encode("utf-8"))
+    workspaces: dict[str, Path] = {}
+    workspace_identities: dict[str, dict[str, str]] = {}
+    for arm in ("baseline", "ctx-light"):
+        workspace = pair_root / arm / "repo"
+        workspace.parent.mkdir(parents=True)
+        prepare_workspace(scenario, cache, workspace)
+        workspaces[arm] = workspace
+        workspace_identities[arm] = _deterministic_workspace_identity(
+            scenario,
+            workspace=workspace,
+        )
+        if workspace_identities[arm]["commit"] != scenario.commit or workspace_identities[arm][
+            "evaluator_test_sha256"
+        ] != _sha256_bytes(scenario.test_body.encode("utf-8")):
+            raise RuntimeError(
+                "deterministic bridge workspace does not match the approved commit or evaluator"
+            )
+    if workspace_identities["baseline"] != workspace_identities["ctx-light"]:
+        raise RuntimeError("deterministic bridge arms did not start from the same repository")
+
+    host = QueryHostDescriptor.ctx_run("activate")
+    ctx_setup_started = time.perf_counter()
+    prepared = prepare_query_delivery(
+        host=host,
+        task=task,
+        language=scenario.language,
+        session_id=f"ctx-ab-bridge-{scenario.id}",
+        workspace=workspaces["ctx-light"],
+        journal_path=pair_root / "engine" / "journal.sqlite3",
+        benefit_audit_path=pair_root / "engine" / "benefit.sqlite3",
+        host_invocation_digest=approval_digest,
+    )
+    if not isinstance(prepared, PreparedQueryDelivery):
+        raise RuntimeError("deterministic bridge treatment did not prepare capability context")
+    accepted = accept_prepared_query_delivery(prepared, host=host)
+    ctx_setup_seconds = time.perf_counter() - ctx_setup_started
+    if (
+        accepted.final_journal_revision != 3
+        or accepted.decision.release_root_digest != RELEASE_QUERY_CATALOG_ROOT_SHA256
+        or accepted.decision.release_sequence != RELEASE_QUERY_CATALOG_SEQUENCE
+        or accepted.decision.catalog_mode != RELEASE_QUERY_CATALOG_MODE
+    ):
+        raise RuntimeError(
+            "deterministic bridge treatment lacks the current release revision-three receipt"
+        )
+    delivered_prompts = {
+        "baseline": task,
+        "ctx-light": task + "\n\n" + accepted.context,
+    }
+
+    bridge = DeterministicProviderBridge(
+        approval_digest=approval_digest,
+        token_budget=token_budget,
+        response_content=DETERMINISTIC_BRIDGE_RESPONSE,
+    )
+    arms: list[dict[str, Any]] = []
+    request_records: dict[str, RequestRecord] = {}
+    normalized_environments: dict[str, dict[str, str]] = {}
+    final_workspace_identities: dict[str, dict[str, str]] = {}
+    pair_containment_token = _sha256_bytes(
+        f"{approval_digest}:{pair_root.resolve()}".encode("utf-8")
+    )[:32]
+    with bridge:
+        base_url = _deterministic_bridge_base_url(bridge.base_url + "/v1")
+        for arm in ("baseline", "ctx-light"):
+            arm_root = pair_root / arm
+            sessions_dir = arm_root / "sessions"
+            command = production_ctx_command(
+                model=model,
+                prompt=delivered_prompts[arm],
+                session_id=f"ctx-ab-bridge-{scenario.id}",
+                sessions_dir=sessions_dir,
+                with_ctx=False,
+                api_key_env=DETERMINISTIC_BRIDGE_API_KEY_ENV,
+                base_url=base_url,
+                max_iterations=1,
+                max_tokens=max_tokens,
+                provider_timeout=provider_timeout,
+            )
+            command.extend(["--ctx-engine-mode", "legacy"])
+            env = _deterministic_pair_environment(
+                arm_root=arm_root,
+                approval_digest=approval_digest,
+            )
+            env[PROCESS_MARKER] = pair_containment_token
+            normalized_environments[arm] = _normalized_deterministic_pair_environment(
+                env,
+                arm_root=arm_root,
+            )
+            if (
+                _deterministic_workspace_identity(scenario, workspace=workspaces[arm])
+                != workspace_identities[arm]
+            ):
+                raise RuntimeError("deterministic bridge workspace changed before its provider arm")
+            before_records = len(bridge.records)
+            agent = run_process(
+                command,
+                cwd=workspaces[arm],
+                env=env,
+                timeout=timeout,
+                contain_descendants=True,
+                containment_token=pair_containment_token,
+            )
+            (arm_root / "ctx-run.json").write_text(agent.stdout, encoding="utf-8")
+            (arm_root / "ctx-run.stderr.log").write_text(agent.stderr, encoding="utf-8")
+            (arm_root / "command.json").write_bytes(
+                _indented_json_bytes({"argv": _scrub_deterministic_pair_command(command)})
+            )
+            records = bridge.records
+            if len(records) != before_records + 1:
+                raise RuntimeError("deterministic bridge arm did not make exactly one request")
+            record = records[-1]
+            request_records[arm] = record
+            if agent.returncode or agent.timed_out or agent.residual_descendants:
+                raise RuntimeError(
+                    f"deterministic bridge {arm} ctx run failed: "
+                    f"{agent.stderr.strip() or agent.returncode}"
+                )
+            payload = validate_production_payload(
+                _strict_json_object(
+                    agent.stdout.encode("utf-8"),
+                    label=f"deterministic bridge {arm} ctx run output",
+                ),
+                session_id=f"ctx-ab-bridge-{scenario.id}",
+            )
+            usage = extract_production_usage(payload)
+            expected_usage = record.usage
+            if (
+                payload.get("final_message") != DETERMINISTIC_BRIDGE_RESPONSE
+                or usage.get("input_tokens") != expected_usage.input_tokens
+                or usage.get("cached_input_tokens") != expected_usage.cached_input_tokens
+                or usage.get("output_tokens") != expected_usage.output_tokens
+                or usage.get("total_tokens") != expected_usage.total_tokens
+            ):
+                raise RuntimeError(
+                    "deterministic bridge response content or usage was not consumed exactly"
+                )
+            provenance = extract_provider_response_provenance(
+                sessions_dir=sessions_dir,
+                session_id=f"ctx-ab-bridge-{scenario.id}",
+                model=model,
+                base_url=base_url,
+                api_key_env=DETERMINISTIC_BRIDGE_API_KEY_ENV,
+                env=env,
+                expected_ctx_tool_names=(),
+            )
+            provenance_verified = all(
+                provenance.get(field) is True
+                for field in (
+                    "provider_endpoint_verified",
+                    "provider_authentication_verified",
+                    "provider_response_success",
+                    "configured_ctx_tool_surface_verified",
+                )
+            )
+            if (
+                not provenance_verified
+                or provenance.get("provider_response_models") != [model]
+                or provenance.get("provider_reported_response_models") != [record.model]
+            ):
+                raise RuntimeError("deterministic bridge provider provenance is incomplete")
+            request_body, request_body_sha256 = _bridge_record_body(record, request=True)
+            response_body, response_body_sha256 = _bridge_record_body(record, request=False)
+            if (
+                _deterministic_workspace_identity(scenario, workspace=workspaces[arm])
+                != workspace_identities[arm]
+            ):
+                raise RuntimeError(
+                    "deterministic bridge no-tool provider arm changed its workspace"
+                )
+            verification = verify_workspace(
+                scenario,
+                workspaces[arm],
+                workspace_identities[arm]["evaluator_test_sha256"],
+            )
+            final_workspace_identities[arm] = _deterministic_workspace_identity(
+                scenario,
+                workspace=workspaces[arm],
+            )
+            if final_workspace_identities[arm] != workspace_identities[arm]:
+                raise RuntimeError(
+                    "deterministic bridge evaluator changed its approved workspace identity"
+                )
+            (arm_root / "verification.log").write_text(
+                verification.stdout + verification.stderr,
+                encoding="utf-8",
+            )
+            arms.append(
+                {
+                    "arm": arm,
+                    "task_only_sha256": task_sha256,
+                    "delivered_prompt_sha256": _sha256_bytes(
+                        delivered_prompts[arm].encode("utf-8")
+                    ),
+                    "workspace_identity": workspace_identities[arm],
+                    "ctx_run_payload_sha256": _sha256_bytes(agent.stdout.encode("utf-8")),
+                    "provider_request_body_sha256": request_body_sha256,
+                    "provider_request_body_bytes": len(request_body),
+                    "provider_response_body_sha256": response_body_sha256,
+                    "provider_response_body_bytes": len(response_body),
+                    "provider_response_consumption_evidence": (
+                        "content_usage_model_and_session-provenance-match; "
+                        "raw response bytes are bridge-emission evidence only"
+                    ),
+                    "input_tokens": expected_usage.input_tokens,
+                    "cached_input_tokens": expected_usage.cached_input_tokens,
+                    "uncached_input_tokens": expected_usage.uncached_input_tokens,
+                    "output_tokens": expected_usage.output_tokens,
+                    "total_tokens": expected_usage.total_tokens,
+                    "evaluator_returncode": verification.returncode,
+                    "evaluator_passed": verification.returncode == 0,
+                    "ctx_setup_seconds": round(
+                        ctx_setup_seconds if arm == "ctx-light" else 0.0,
+                        6,
+                    ),
+                    "agent_seconds": round(agent.elapsed, 6),
+                    "evaluator_seconds": round(verification.elapsed, 6),
+                    "timing_evidence_level": "diagnostic_wall_clock_non_production",
+                    "normalized_environment_sha256": _sha256_bytes(
+                        _canonical_json_bytes(normalized_environments[arm])
+                    ),
+                    "provider_session_sha256": provenance["provider_session_sha256"],
+                    "command_contract_sha256": _sha256_bytes(
+                        _canonical_json_bytes(_scrub_deterministic_pair_command(command))
+                    ),
+                }
+            )
+    if len(bridge.records) != 2:
+        raise RuntimeError("deterministic bridge pair did not make exactly two serial requests")
+    baseline_request_body, _ = _bridge_record_body(
+        request_records["baseline"],
+        request=True,
+    )
+    treatment_request_body, _ = _bridge_record_body(
+        request_records["ctx-light"],
+        request=True,
+    )
+    baseline_request = _deterministic_provider_request_payload(baseline_request_body)
+    treatment_request = _deterministic_provider_request_payload(treatment_request_body)
+    for arm, payload in (
+        ("baseline", baseline_request),
+        ("ctx-light", treatment_request),
+    ):
+        record = request_records[arm]
+        request_body, request_body_sha256 = _bridge_record_body(record, request=True)
+        response_body, response_body_sha256 = _bridge_record_body(record, request=False)
+        response_payload = _strict_json_object(
+            response_body,
+            label=f"deterministic bridge {arm} provider response body",
+        )
+        approved_provider = contract.get("provider")
+        wire_model = (
+            approved_provider.get("wire_model") if isinstance(approved_provider, Mapping) else None
+        )
+        output_budgets = [
+            payload[field] for field in ("max_tokens", "max_completion_tokens") if field in payload
+        ]
+        raw_messages = payload.get("messages")
+        captured_messages = (
+            tuple(
+                (message.get("role"), message.get("content"))
+                for message in raw_messages
+                if isinstance(message, dict)
+            )
+            if isinstance(raw_messages, list)
+            else ()
+        )
+        response_usage = response_payload.get("usage")
+        choices = response_payload.get("choices")
+        response_message = (
+            choices[0].get("message")
+            if isinstance(choices, list) and len(choices) == 1 and isinstance(choices[0], dict)
+            else None
+        )
+        if (
+            record.approval_digest != approval_digest
+            or record.method != "POST"
+            or record.path != "/v1/chat/completions"
+            or record.response_status != 200
+            or record.model != wire_model
+            or payload.get("model") != wire_model
+            or response_payload.get("model") != wire_model
+            or not output_budgets
+            or any(value != max_tokens for value in output_budgets)
+            or captured_messages
+            != tuple((message.role, message.content) for message in record.messages)
+            or not isinstance(response_message, dict)
+            or response_message.get("content") != DETERMINISTIC_BRIDGE_RESPONSE
+            or not isinstance(response_usage, dict)
+            or response_usage.get("input_tokens") != record.usage.input_tokens
+            or response_usage.get("output_tokens") != record.usage.output_tokens
+            or response_usage.get("total_tokens") != record.usage.total_tokens
+            or request_body_sha256 != _sha256_bytes(request_body)
+            or response_body_sha256 != _sha256_bytes(response_body)
+        ):
+            raise RuntimeError(
+                "deterministic bridge provider body did not match the approved contract"
+            )
+    semantic_request_delta = _assert_deterministic_request_delta(
+        baseline_payload=baseline_request,
+        treatment_payload=treatment_request,
+        task=task,
+        context=accepted.context,
+    )
+    raw_request_delta = _assert_deterministic_raw_request_delta(
+        baseline_body=baseline_request_body,
+        treatment_body=treatment_request_body,
+        baseline_prompt=task,
+        treatment_prompt=task + "\n\n" + accepted.context,
+    )
+    request_delta = {**semantic_request_delta, **raw_request_delta}
+    if arms[0]["command_contract_sha256"] != arms[1]["command_contract_sha256"]:
+        raise RuntimeError("deterministic bridge arm command contracts are not identical")
+    if arms[0]["evaluator_returncode"] != arms[1]["evaluator_returncode"]:
+        raise RuntimeError("deterministic bridge evaluator outcomes diverged")
+    if final_workspace_identities["baseline"] != final_workspace_identities["ctx-light"]:
+        raise RuntimeError("deterministic bridge final workspace identities diverged")
+    if normalized_environments["baseline"] != normalized_environments["ctx-light"]:
+        raise RuntimeError("deterministic bridge arm environments differ after path normalization")
+    environment_contract = contract.get("environment")
+    if not isinstance(environment_contract, Mapping):
+        raise RuntimeError("deterministic bridge approval omitted its environment contract")
+    inherited_environment = environment_contract.get("inherited_allowlist")
+    fixed_environment = environment_contract.get("fixed_values")
+    isolated_environment = environment_contract.get("isolated_values")
+    if not all(
+        isinstance(value, Mapping)
+        for value in (inherited_environment, fixed_environment, isolated_environment)
+    ):
+        raise RuntimeError("deterministic bridge environment contract is malformed")
+    assert isinstance(inherited_environment, Mapping)
+    assert isinstance(fixed_environment, Mapping)
+    assert isinstance(isolated_environment, Mapping)
+    expected_normalized_environment = {
+        **dict(inherited_environment),
+        **dict(fixed_environment),
+        **dict(isolated_environment),
+        DETERMINISTIC_BRIDGE_API_KEY_ENV: approval_digest,
+        PROCESS_MARKER: pair_containment_token,
+    }
+    if normalized_environments["baseline"] != expected_normalized_environment:
+        raise RuntimeError("deterministic bridge runtime environment does not match its contract")
+    isolation_paths: dict[str, dict[str, str]] = {}
+    resolved_arm_roots: list[Path] = []
+    for arm in ("baseline", "ctx-light"):
+        arm_root = (pair_root / arm).resolve(strict=True)
+        home_root = (pair_root / arm / "home").resolve(strict=True)
+        session_root = (pair_root / arm / "sessions").resolve(strict=True)
+        workspace_root = workspaces[arm].resolve(strict=True)
+        if any(arm_root not in path.parents for path in (home_root, session_root, workspace_root)):
+            raise RuntimeError("deterministic bridge arm isolation path escaped its root")
+        resolved_arm_roots.append(arm_root)
+        isolation_paths[arm] = {
+            "arm_root": str(arm_root),
+            "home_root": str(home_root),
+            "session_root": str(session_root),
+            "workspace_root": str(workspace_root),
+        }
+    isolation_verified = bool(
+        len(set(resolved_arm_roots)) == 2
+        and all(
+            first not in second.parents and second not in first.parents
+            for first, second in ((resolved_arm_roots[0], resolved_arm_roots[1]),)
+        )
+        and len(
+            {
+                isolation_paths[arm][field]
+                for arm in ("baseline", "ctx-light")
+                for field in ("home_root", "session_root", "workspace_root")
+            }
+        )
+        == 6
+    )
+    if not isolation_verified:
+        raise RuntimeError("deterministic bridge arm homes or sessions are not isolated")
+    report = {
+        "schema": "ctx.deterministic-bridge-report-v1",
+        "evidence_level": DETERMINISTIC_BRIDGE_EVIDENCE_LEVEL,
+        "approval_digest": approval_digest,
+        "pair_contract": dict(contract),
+        "pair_contract_sha256": expected_approval,
+        "fairness_contract_verified": True,
+        "fairness_contract_definition": (
+            "application-level fair pair: same approved repository/task/model/runtime/empty "
+            "tool surface/budgets/timeouts/evaluator/environment contract, distinct arm paths, "
+            "and only the accepted CTX suffix as semantic delta; excludes OS unreadability"
+        ),
+        "execution_order": ["baseline", "ctx-light"],
+        "serial_execution_verified": True,
+        "path_roots_distinct_verified": isolation_verified,
+        "final_workspace_identity_verified": True,
+        "model_tool_surface_empty_verified": True,
+        "os_process_isolation_verified": False,
+        "sibling_filesystem_unreadability_verified": False,
+        "isolation_paths": isolation_paths,
+        "normalized_environment_contract_verified": True,
+        "normalized_environment_sha256": _sha256_bytes(
+            _canonical_json_bytes(normalized_environments["baseline"])
+        ),
+        "pair_containment_nonce_sha256": _sha256_bytes(pair_containment_token.encode("ascii")),
+        "task_only_sha256": task_sha256,
+        "ctx_setup_seconds": round(ctx_setup_seconds, 6),
+        "timing_evidence_level": "diagnostic_wall_clock_non_production",
+        "request_delta": request_delta,
+        "engine_delivery": {
+            "host_context_id": accepted.decision.host_context_id,
+            "host_invocation_digest": accepted.decision.host_invocation_digest,
+            "decision_receipt_digest": accepted.decision.receipt_digest,
+            "release_root_digest": accepted.decision.release_root_digest,
+            "release_sequence": accepted.decision.release_sequence,
+            "catalog_mode": accepted.decision.catalog_mode,
+            "catalog_snapshot_digest": accepted.decision.catalog_snapshot_digest,
+            "plan_digest": accepted.decision.plan_digest,
+            "presentation_digest": accepted.decision.presentation_digest,
+            "delivery_digest": accepted.delivery_digest,
+            "receipt_event_content_digest": accepted.receipt_event_content_digest,
+            "final_journal_revision": accepted.final_journal_revision,
+            "final_journal_record_digest": accepted.final_journal_record_digest,
+            "context_sha256": accepted.context_sha256,
+            "context_bytes": accepted.context_bytes,
+            "capabilities": [item.to_dict() for item in accepted.capabilities],
+        },
+        "arms": arms,
+        "production_efficiency_eligible": False,
+        "product_claim_eligible": False,
+        "benefit_verdict_allowed": False,
+        "benefit_verdict": None,
+        "warning": (
+            "This deterministic bridge demo validates application-level path separation, an "
+            "empty model tool surface, exact delivery, provider transport, and accounting. "
+            "It does not provide OS process isolation or make sibling paths unreadable, and "
+            "it is not product-benefit evidence."
+        ),
+    }
+    (output / "deterministic-bridge-report.json").write_bytes(_indented_json_bytes(report))
+    return report
 
 
 def production_ctx_tool_schemas() -> list[dict[str, Any]]:
@@ -6458,6 +9016,7 @@ def run_trial(
     official_source: OfficialSourceBundle | None = None,
     runtime_identity_before_arm: Mapping[str, str] | None = None,
     catalog_setup_charge_seconds: float = 0.0,
+    unified_engine_treatment: bool = False,
 ) -> dict[str, Any]:
     trial_started = time.perf_counter()
     production_catalog = catalog_snapshot is not None
@@ -6470,11 +9029,27 @@ def run_trial(
         raise ValueError("official holdout verification requires the production catalog treatment")
     if official_evaluator and arm != treatment_level:
         raise ValueError("official benchmark arm does not match its treatment level")
-    engine_name = PRODUCTION_CATALOG_ENGINE if production_catalog else "codex-controlled"
     ctx_enabled = treatment_level != "baseline"
     full_treatment = treatment_level == "ctx-full"
     if treatment_level not in TREATMENT_ARMS:
         raise ValueError(f"unsupported treatment level: {treatment_level}")
+    if type(unified_engine_treatment) is not bool:
+        raise TypeError("unified_engine_treatment must be a boolean")
+    if unified_engine_treatment and not dry_run:
+        raise ValueError("unified engine treatment is dry-run only until live controls pass")
+    if unified_engine_treatment and not production_catalog:
+        raise ValueError("unified engine treatment requires a production catalog snapshot")
+    if unified_engine_treatment and official_evaluator:
+        raise ValueError("unified engine treatment is not part of the frozen official protocol")
+    if unified_engine_treatment and full_treatment:
+        raise ValueError("unified engine treatment supports only baseline and ctx-light")
+    engine_name = (
+        UNIFIED_ENGINE_TREATMENT
+        if unified_engine_treatment
+        else PRODUCTION_CATALOG_ENGINE
+        if production_catalog
+        else "codex-controlled"
+    )
     if production_catalog and full_treatment:
         raise ValueError(f"{PRODUCTION_CATALOG_ENGINE} does not support ctx-full")
     if catalog_setup_charge_seconds < 0 or (
@@ -6543,6 +9118,7 @@ def run_trial(
     selected_ids: list[str] = []
     selected_items: list[dict[str, Any]] = []
     catalog: dict[str, Any] | None = None
+    engine_treatment_evidence: EngineTreatmentEvidence | None = None
     ctx_setup_seconds = 0.0
     recommendation_seconds = 0.0
     body_fetch_seconds = 0.0
@@ -6601,117 +9177,151 @@ def run_trial(
     try:
         if ctx_enabled:
             setup_started = time.perf_counter()
-            store = make_lifecycle_store(lifecycle_root)
-            if production_catalog:
+            if unified_engine_treatment:
                 assert catalog_snapshot is not None
-                bind_catalog_snapshot(home, catalog_snapshot)
-                catalog = recommend_production_catalog(
-                    scenario,
-                    home=home,
-                    lifecycle_root=lifecycle_root,
-                    session_id=session_id,
-                    snapshot=catalog_snapshot,
+                engine_treatment_evidence = prepare_engine_treatment(
+                    query=scenario.query,
+                    task=scenario.task,
+                    language=scenario.language,
+                    repo_slug="/".join(
+                        scenario.repo_url.removesuffix(".git").rstrip("/").split("/")[-2:]
+                    ),
+                    task_prompt_sha256=hashlib.sha256(task_only_prompt.encode("utf-8")).hexdigest(),
+                    assignment_id=f"{scenario.id}:{trial}:{attempt}:{arm}",
+                    catalog_snapshot=catalog_snapshot,
+                    journal_path=run_dir / "engine" / "engine.sqlite3",
                 )
-                recommendations = list(catalog["candidates"])
-                recommended_ids = list(catalog["candidate_ids"])
-                selected_ids = list(catalog["selected_ids"])
-                selected_item = catalog.get("selected_item")
-                selected_items = [dict(selected_item)] if isinstance(selected_item, dict) else []
-                recommendation_seconds = float(catalog["recommendation_seconds"])
-                body_fetch_seconds = float(catalog["body_fetch_seconds"])
-                store.record_dev_event(
-                    session_id=session_id,
-                    event_type="catalog_recommendation",
-                    host="codex-cli",
-                    cwd=str(workspace),
-                    payload={
-                        "candidate_ids": recommended_ids,
-                        "selected_ids": selected_ids,
-                        "context_policy": catalog["context_policy"],
-                        "archive_sha256": catalog_snapshot.provenance["archive_sha256"],
-                        "graph_export_id": catalog_snapshot.provenance["graph_export_id"],
-                    },
-                )
-                write_catalog_recommendation_evidence(
-                    run_dir / "recommendations.json",
-                    catalog,
-                    used_ids=[],
-                    snapshot=catalog_snapshot,
-                )
-            else:
-                write_ctx_fixture(scenario, home)
-                recommendations = recommend_context(
-                    scenario,
-                    home=home,
-                    lifecycle_root=lifecycle_root,
-                )
-                configured = {f"{item['type']}:{item['slug']}": item for item in scenario.context}
-                recommended_ids = [
-                    str(row.get("id")) for row in recommendations if row.get("id") in configured
-                ]
-                if full_treatment:
-                    selected_items = [dict(item) for item in scenario.context]
-                else:
-                    selected_skill_id = next(
-                        entity_id
-                        for entity_id in recommended_ids
-                        if configured[entity_id]["type"] == "skill"
-                    )
-                    selected_items = [dict(configured[selected_skill_id])]
-                selected_ids = [f"{item['type']}:{item['slug']}" for item in selected_items]
-                (run_dir / "recommendations.json").write_text(
+                recommended_ids = list(engine_treatment_evidence.ordered_ids)
+                selected_ids = list(engine_treatment_evidence.ordered_ids)
+                recommendation_seconds = engine_treatment_evidence.planning_seconds
+                if engine_treatment_evidence.rendered_context is not None:
+                    base_prompt += "\n\n" + engine_treatment_evidence.rendered_context
+                ctx_setup_seconds = engine_treatment_evidence.ctx_setup_seconds
+                (run_dir / "engine-treatment.json").write_text(
                     json.dumps(
-                        {
-                            "query": scenario.query,
-                            "treatment_level": treatment_level,
-                            "recommended_ids": recommended_ids,
-                            "selected_ids": selected_ids,
-                            "recommendations": recommendations,
-                        },
+                        engine_treatment_result_fields(engine_treatment_evidence),
                         indent=2,
+                        sort_keys=True,
                     )
                     + "\n",
                     encoding="utf-8",
                 )
-            load_started = time.perf_counter()
-            for item in selected_items:
-                store.load_entity(
-                    session_id=session_id,
-                    entity_type=str(item["type"]),
-                    slug=str(item["slug"]),
-                    reason=f"selected by explicit {treatment_level} benchmark policy",
-                    selected=True,
-                    selection_source="system",
-                    source_context={
-                        "benchmark": scenario.id,
-                        "arm": arm,
-                        "treatment_level": treatment_level,
-                    },
-                )
+            else:
+                store = make_lifecycle_store(lifecycle_root)
                 if production_catalog:
-                    store.mark_entity_loaded(
+                    assert catalog_snapshot is not None
+                    bind_catalog_snapshot(home, catalog_snapshot)
+                    catalog = recommend_production_catalog(
+                        scenario,
+                        home=home,
+                        lifecycle_root=lifecycle_root,
+                        session_id=session_id,
+                        snapshot=catalog_snapshot,
+                    )
+                    recommendations = list(catalog["candidates"])
+                    recommended_ids = list(catalog["candidate_ids"])
+                    selected_ids = list(catalog["selected_ids"])
+                    selected_item = catalog.get("selected_item")
+                    selected_items = (
+                        [dict(selected_item)] if isinstance(selected_item, dict) else []
+                    )
+                    recommendation_seconds = float(catalog["recommendation_seconds"])
+                    body_fetch_seconds = float(catalog["body_fetch_seconds"])
+                    store.record_dev_event(
+                        session_id=session_id,
+                        event_type="catalog_recommendation",
+                        host="codex-cli",
+                        cwd=str(workspace),
+                        payload={
+                            "candidate_ids": recommended_ids,
+                            "selected_ids": selected_ids,
+                            "context_policy": catalog["context_policy"],
+                            "archive_sha256": catalog_snapshot.provenance["archive_sha256"],
+                            "graph_export_id": catalog_snapshot.provenance["graph_export_id"],
+                        },
+                    )
+                    write_catalog_recommendation_evidence(
+                        run_dir / "recommendations.json",
+                        catalog,
+                        used_ids=[],
+                        snapshot=catalog_snapshot,
+                    )
+                else:
+                    write_ctx_fixture(scenario, home)
+                    recommendations = recommend_context(
+                        scenario,
+                        home=home,
+                        lifecycle_root=lifecycle_root,
+                    )
+                    configured = {
+                        f"{item['type']}:{item['slug']}": item for item in scenario.context
+                    }
+                    recommended_ids = [
+                        str(row.get("id")) for row in recommendations if row.get("id") in configured
+                    ]
+                    if full_treatment:
+                        selected_items = [dict(item) for item in scenario.context]
+                    else:
+                        selected_skill_id = next(
+                            entity_id
+                            for entity_id in recommended_ids
+                            if configured[entity_id]["type"] == "skill"
+                        )
+                        selected_items = [dict(configured[selected_skill_id])]
+                    selected_ids = [f"{item['type']}:{item['slug']}" for item in selected_items]
+                    (run_dir / "recommendations.json").write_text(
+                        json.dumps(
+                            {
+                                "query": scenario.query,
+                                "treatment_level": treatment_level,
+                                "recommended_ids": recommended_ids,
+                                "selected_ids": selected_ids,
+                                "recommendations": recommendations,
+                            },
+                            indent=2,
+                        )
+                        + "\n",
+                        encoding="utf-8",
+                    )
+                load_started = time.perf_counter()
+                for item in selected_items:
+                    store.load_entity(
                         session_id=session_id,
                         entity_type=str(item["type"]),
                         slug=str(item["slug"]),
-                        reason="exact bounded body fetched through ctx__wiki_get",
+                        reason=f"selected by explicit {treatment_level} benchmark policy",
+                        selected=True,
+                        selection_source="system",
+                        source_context={
+                            "benchmark": scenario.id,
+                            "arm": arm,
+                            "treatment_level": treatment_level,
+                        },
                     )
-            load_seconds = time.perf_counter() - load_started
-            if full_treatment:
-                preflight = preflight_ctx_mcp(
-                    scenario,
-                    home=home,
-                    lifecycle_root=lifecycle_root,
-                    session_id=session_id,
+                    if production_catalog:
+                        store.mark_entity_loaded(
+                            session_id=session_id,
+                            entity_type=str(item["type"]),
+                            slug=str(item["slug"]),
+                            reason="exact bounded body fetched through ctx__wiki_get",
+                        )
+                load_seconds = time.perf_counter() - load_started
+                if full_treatment:
+                    preflight = preflight_ctx_mcp(
+                        scenario,
+                        home=home,
+                        lifecycle_root=lifecycle_root,
+                        session_id=session_id,
+                    )
+                    (run_dir / "mcp-preflight.json").write_text(
+                        json.dumps(preflight, indent=2) + "\n", encoding="utf-8"
+                    )
+                base_prompt += (
+                    production_catalog_context_prompt(catalog)
+                    if production_catalog and catalog is not None
+                    else context_prompt(scenario, treatment_level)
                 )
-                (run_dir / "mcp-preflight.json").write_text(
-                    json.dumps(preflight, indent=2) + "\n", encoding="utf-8"
-                )
-            base_prompt += (
-                production_catalog_context_prompt(catalog)
-                if production_catalog and catalog is not None
-                else context_prompt(scenario, treatment_level)
-            )
-            ctx_setup_seconds = time.perf_counter() - setup_started
+                ctx_setup_seconds = time.perf_counter() - setup_started
         prompt_hash = hashlib.sha256(task_only_prompt.encode()).hexdigest()
         treatment_hash = hashlib.sha256(base_prompt.encode()).hexdigest()
         (run_dir / "prompt.txt").write_text(base_prompt, encoding="utf-8")
@@ -6770,6 +9380,7 @@ def run_trial(
                 "lifecycle_actions": lifecycle["actions"] if lifecycle else [],
                 "lifecycle_sha256": lifecycle["sha256"] if lifecycle else None,
                 "final_loaded": lifecycle["final_loaded"] if lifecycle else [],
+                **engine_treatment_result_fields(engine_treatment_evidence),
                 **catalog_result_fields(),
                 "artifact_dir": str(run_dir),
             }
@@ -8667,6 +11278,46 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--retries", type=int, default=1)
     parser.add_argument("--timeout", type=float, default=900)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--unified-engine-treatment",
+        action="store_true",
+        help="use the new ephemeral-content engine treatment in a non-official dry run",
+    )
+    parser.add_argument(
+        "--deterministic-bridge",
+        action="store_true",
+        help=(
+            "run one claim-ineligible loopback fair-pair diagnostic through the current "
+            "release query-delivery engine"
+        ),
+    )
+    parser.add_argument(
+        "--deterministic-bridge-approval-sha256",
+        help="explicitly approve the exact canonical deterministic bridge pair contract",
+    )
+    parser.add_argument(
+        "--deterministic-bridge-token-budget",
+        type=int,
+        default=100_000,
+        help="exact deterministic request-plus-response token ceiling (default: 100000)",
+    )
+    parser.add_argument(
+        "--live-coding-pair",
+        action="store_true",
+        help=(
+            "approve one future claim-ineligible live coding pair contract without "
+            "workspace mutation or provider execution"
+        ),
+    )
+    parser.add_argument(
+        "--live-coding-pair-approval-sha256",
+        help="explicitly approve the exact canonical future live coding pair contract",
+    )
+    parser.add_argument(
+        "--live-coding-pair-execute",
+        action="store_true",
+        help=("execute the explicitly approved diagnostic pair; default remains contract-only"),
+    )
     parser.add_argument("--list", action="store_true")
     return parser
 
@@ -8676,7 +11327,10 @@ def dry_run_results_complete(
     *,
     expected_keys: set[tuple[str, str, int]],
     engine: str,
+    unified_engine_treatment: bool = False,
 ) -> bool:
+    if type(unified_engine_treatment) is not bool:
+        raise TypeError("unified_engine_treatment must be a boolean")
     expected_evidence_level = {
         "codex-controlled": "controlled_wiring_only",
         PRODUCTION_CATALOG_ENGINE: "production_catalog_wiring_only",
@@ -8689,10 +11343,73 @@ def dry_run_results_complete(
         )
         for row in results
     }
-    return observed_keys == expected_keys and all(
+    generic_complete = observed_keys == expected_keys and all(
         row.get("status") == "wiring_only" and row.get("evidence_level") == expected_evidence_level
         for row in results
     )
+    if not generic_complete:
+        return False
+    if not unified_engine_treatment:
+        return True
+    if any(row.get("engine") != UNIFIED_ENGINE_TREATMENT for row in results):
+        return False
+    for row in results:
+        if row.get("arm") == "baseline":
+            if (
+                row.get("engine_treatment_status") is not None
+                or row.get("engine_treatment_evidence_eligible") is not None
+                or row.get("task_prompt_sha256") != row.get("delivered_prompt_sha256")
+            ):
+                return False
+            continue
+        status = row.get("engine_treatment_status")
+        if row.get("engine_treatment_evidence_eligible") is not True or status not in {
+            "ready",
+            "abstained",
+        }:
+            return False
+        recommended_ids = row.get("recommended_ids")
+        selected_ids = row.get("selected_ids")
+        if status == "ready":
+            context = row.get("engine_treatment_context")
+            prepared_capability_id = row.get("engine_treatment_prepared_capability_id")
+            prepared_content_sha256 = row.get("engine_treatment_prepared_content_sha256")
+            prepared_content_bytes = row.get("engine_treatment_prepared_content_bytes")
+            prepared_estimated_tokens = row.get("engine_treatment_prepared_estimated_tokens")
+            if (
+                not isinstance(recommended_ids, list)
+                or not 1 <= len(recommended_ids) <= 5
+                or selected_ids != recommended_ids
+                or prepared_capability_id not in recommended_ids
+                or not isinstance(prepared_content_sha256, str)
+                or re.fullmatch(r"[0-9a-f]{64}", prepared_content_sha256) is None
+                or type(prepared_content_bytes) is not int
+                or not 1 <= prepared_content_bytes <= 6_000
+                or type(prepared_estimated_tokens) is not int
+                or not 1 <= prepared_estimated_tokens <= 1_500
+                or not isinstance(row.get("engine_treatment_activation_action_id"), str)
+                or not isinstance(row.get("engine_treatment_preparation_action_id"), str)
+                or row.get("engine_treatment_journal_record_count") != 6
+                or not isinstance(context, str)
+                or not context.strip()
+                or row.get("task_prompt_sha256") == row.get("delivered_prompt_sha256")
+            ):
+                return False
+        elif (
+            recommended_ids != []
+            or selected_ids != []
+            or row.get("engine_treatment_prepared_capability_id") is not None
+            or row.get("engine_treatment_prepared_content_sha256") is not None
+            or row.get("engine_treatment_prepared_content_bytes", 0) != 0
+            or row.get("engine_treatment_prepared_estimated_tokens", 0) != 0
+            or row.get("engine_treatment_activation_action_id") is not None
+            or row.get("engine_treatment_preparation_action_id") is not None
+            or row.get("engine_treatment_journal_record_count", 2) != 2
+            or row.get("engine_treatment_context") is not None
+            or row.get("task_prompt_sha256") != row.get("delivered_prompt_sha256")
+        ):
+            return False
+    return True
 
 
 def _is_system_temp_path(path: Path) -> bool:
@@ -8767,8 +11484,282 @@ def _holdout_argument_values(args: argparse.Namespace) -> tuple[object, ...]:
     )
 
 
+def _run_deterministic_bridge_main(args: argparse.Namespace) -> int:
+    holdout_requested = any(value is not None for value in _holdout_argument_values(args))
+    if not args.unified_engine_treatment:
+        raise SystemExit("--deterministic-bridge requires --unified-engine-treatment")
+    if args.engine != PRODUCTION_CATALOG_ENGINE:
+        raise SystemExit("--deterministic-bridge requires --engine codex-production-catalog")
+    if holdout_requested:
+        raise SystemExit("--deterministic-bridge rejects official holdout inputs")
+    if args.arm != "both":
+        raise SystemExit("--deterministic-bridge requires --arm both")
+    if args.retries != 0:
+        raise SystemExit("--deterministic-bridge requires --retries 0")
+    if args.trials != 1:
+        raise SystemExit("--deterministic-bridge requires --trials 1")
+    if args.max_iterations != 1:
+        raise SystemExit("--deterministic-bridge requires --max-iterations 1")
+    if args.max_tokens is None or args.max_tokens < 1:
+        raise SystemExit("--deterministic-bridge requires a positive --max-tokens")
+    if args.provider_timeout <= 0 or args.timeout <= 0:
+        raise SystemExit("--deterministic-bridge timeouts must be positive")
+    if args.deterministic_bridge_token_budget < 1:
+        raise SystemExit("--deterministic-bridge-token-budget must be positive")
+    if args.base_url is not None or args.api_key_env is not None:
+        raise SystemExit("--deterministic-bridge rejects external provider routes and keys")
+    if args.dry_run or args.list:
+        raise SystemExit("--deterministic-bridge is an executing diagnostic, not list/dry-run")
+    try:
+        scenarios_path = args.scenarios.resolve(strict=True)
+    except OSError as exc:
+        raise SystemExit(f"deterministic bridge scenarios are unavailable: {exc}") from exc
+    scenarios = load_scenarios(scenarios_path)
+    if args.scenario:
+        requested = set(args.scenario)
+        scenarios = [scenario for scenario in scenarios if scenario.id in requested]
+        missing = requested - {scenario.id for scenario in scenarios}
+        if missing:
+            raise SystemExit(f"unknown scenarios: {', '.join(sorted(missing))}")
+    if len(scenarios) != 1:
+        raise SystemExit("--deterministic-bridge requires exactly one selected scenario")
+    scenario = scenarios[0]
+    try:
+        contract = deterministic_bridge_pair_contract(
+            scenario=scenario,
+            scenarios_path=scenarios_path,
+            model=args.model,
+            timeout=args.timeout,
+            max_tokens=args.max_tokens,
+            provider_timeout=args.provider_timeout,
+            token_budget=args.deterministic_bridge_token_budget,
+        )
+    except (OSError, ValueError) as exc:
+        raise SystemExit(str(exc)) from exc
+    expected_approval = deterministic_bridge_pair_contract_sha256(contract)
+    supplied_approval = args.deterministic_bridge_approval_sha256
+    if supplied_approval is None or not secrets.compare_digest(
+        supplied_approval,
+        expected_approval,
+    ):
+        raise SystemExit(
+            "deterministic bridge approval required before any workspace or provider "
+            f"execution; rerun with --deterministic-bridge-approval-sha256 {expected_approval}"
+        )
+
+    run_name = f"ctx-ab-bridge-{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{secrets.token_hex(4)}"
+    output = args.output or PRODUCTION_PRIVATE_RUN_ROOT / run_name
+    try:
+        output = _validate_production_output_path(output)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    if output.exists() and (not output.is_dir() or any(output.iterdir())):
+        raise SystemExit(f"output directory must be empty: {output}")
+    PRODUCTION_PRIVATE_RUN_ROOT.mkdir(mode=stat.S_IRWXU, parents=True, exist_ok=True)
+    PRODUCTION_PRIVATE_RUN_ROOT.chmod(stat.S_IRWXU)
+    output.mkdir(mode=stat.S_IRWXU, parents=True, exist_ok=True)
+    output.chmod(stat.S_IRWXU)
+    try:
+        cache = ensure_repo_cache(scenario, args.cache_root)
+        report = run_deterministic_bridge_pair(
+            scenario,
+            cache=cache,
+            scenarios_path=scenarios_path,
+            output=output,
+            model=args.model,
+            timeout=args.timeout,
+            max_tokens=args.max_tokens,
+            provider_timeout=args.provider_timeout,
+            token_budget=args.deterministic_bridge_token_budget,
+            approval_digest=supplied_approval,
+            contract=contract,
+        )
+    except Exception as exc:  # noqa: BLE001 - keep a private diagnostic failure artifact.
+        failure = {
+            "schema": "ctx.deterministic-bridge-failure-v1",
+            "evidence_level": DETERMINISTIC_BRIDGE_EVIDENCE_LEVEL,
+            "approval_digest": supplied_approval,
+            "pair_contract_sha256": expected_approval,
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+            "production_efficiency_eligible": False,
+            "product_claim_eligible": False,
+            "benefit_verdict_allowed": False,
+        }
+        (output / "deterministic-bridge-failure.json").write_bytes(_indented_json_bytes(failure))
+        print(output)
+        return 1
+    if (
+        report.get("fairness_contract_verified") is not True
+        or report.get("production_efficiency_eligible") is not False
+        or report.get("product_claim_eligible") is not False
+        or report.get("benefit_verdict_allowed") is not False
+    ):
+        raise RuntimeError("deterministic bridge report violated its claim gate")
+    print(output)
+    return 0
+
+
+def _run_live_coding_pair_main(args: argparse.Namespace) -> int:
+    """Approve a live pair and execute it only under the explicit second gate."""
+
+    holdout_requested = any(value is not None for value in _holdout_argument_values(args))
+    if not args.unified_engine_treatment:
+        raise SystemExit("--live-coding-pair requires --unified-engine-treatment")
+    if args.engine != PRODUCTION_CATALOG_ENGINE:
+        raise SystemExit("--live-coding-pair requires --engine codex-production-catalog")
+    if holdout_requested:
+        raise SystemExit("--live-coding-pair rejects official holdout inputs")
+    if args.arm != "both":
+        raise SystemExit("--live-coding-pair requires --arm both")
+    if args.retries != 0:
+        raise SystemExit("--live-coding-pair requires --retries 0")
+    if args.trials != 1:
+        raise SystemExit("--live-coding-pair requires --trials 1")
+    if args.max_iterations != 1:
+        raise SystemExit("--live-coding-pair requires --max-iterations 1")
+    if args.max_tokens is None or args.max_tokens < 1:
+        raise SystemExit("--live-coding-pair requires a positive --max-tokens")
+    if args.provider_timeout <= 0 or args.timeout <= 0:
+        raise SystemExit("--live-coding-pair timeouts must be positive")
+    if args.base_url is not None:
+        raise SystemExit("--live-coding-pair rejects custom provider routes")
+    if args.api_key_env is None:
+        raise SystemExit("--live-coding-pair requires --api-key-env")
+    if args.output is None:
+        raise SystemExit("--live-coding-pair requires an explicit --output path")
+    if args.dry_run or args.list:
+        raise SystemExit("--live-coding-pair is a contract gate, not list/dry-run")
+    if args.scenarios.is_symlink():
+        raise SystemExit("live coding pair scenarios must not be a symlink")
+    try:
+        scenarios_path = args.scenarios.resolve(strict=True)
+    except OSError as exc:
+        raise SystemExit(f"live coding pair scenarios are unavailable: {exc}") from exc
+    scenarios = load_scenarios(scenarios_path)
+    if args.scenario:
+        requested = set(args.scenario)
+        scenarios = [scenario for scenario in scenarios if scenario.id in requested]
+        missing = requested - {scenario.id for scenario in scenarios}
+        if missing:
+            raise SystemExit(f"unknown scenarios: {', '.join(sorted(missing))}")
+    if len(scenarios) != 1:
+        raise SystemExit("--live-coding-pair requires exactly one selected scenario")
+    if args.live_coding_pair_execute and args.output.exists():
+        raise SystemExit("live coding pair execute requires the output directory to be absent")
+    if args.output.exists() and (not args.output.is_dir() or any(args.output.iterdir())):
+        raise SystemExit(f"output directory must be absent or empty: {args.output}")
+    scenario = scenarios[0]
+    try:
+        contract = live_coding_pair_contract(
+            scenario=scenario,
+            scenarios_path=scenarios_path,
+            output=args.output,
+            cache_root=args.cache_root,
+            model=args.model,
+            api_key_env=args.api_key_env,
+            timeout=args.timeout,
+            max_iterations=args.max_iterations,
+            max_tokens=args.max_tokens,
+            provider_timeout=args.provider_timeout,
+            execute=args.live_coding_pair_execute,
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        raise SystemExit(str(exc)) from exc
+    expected_approval = live_coding_pair_contract_sha256(contract)
+    supplied_approval = args.live_coding_pair_approval_sha256
+    if supplied_approval is None or not secrets.compare_digest(
+        supplied_approval,
+        expected_approval,
+    ):
+        raise SystemExit(
+            "live coding pair approval required before any workspace or provider action; "
+            f"rerun with --live-coding-pair-approval-sha256 {expected_approval}"
+        )
+    report = approve_live_coding_pair_plan(
+        scenario=scenario,
+        scenarios_path=scenarios_path,
+        output=args.output,
+        cache_root=args.cache_root,
+        model=args.model,
+        api_key_env=args.api_key_env,
+        timeout=args.timeout,
+        max_iterations=args.max_iterations,
+        max_tokens=args.max_tokens,
+        provider_timeout=args.provider_timeout,
+        execute=args.live_coding_pair_execute,
+        approval_digest=supplied_approval,
+        contract=contract,
+    )
+    if not args.live_coding_pair_execute:
+        print(json.dumps(report, indent=2, sort_keys=True))
+        return 0
+    if not os.environ.get(args.api_key_env):
+        raise SystemExit("live coding pair approved provider key environment is not set")
+    try:
+        cache = ensure_repo_cache(scenario, args.cache_root)
+        executed = run_live_coding_pair(
+            scenario,
+            cache=cache,
+            scenarios_path=scenarios_path,
+            output=args.output,
+            cache_root=args.cache_root,
+            model=args.model,
+            api_key_env=args.api_key_env,
+            timeout=args.timeout,
+            max_iterations=args.max_iterations,
+            max_tokens=args.max_tokens,
+            provider_timeout=args.provider_timeout,
+            approval_digest=supplied_approval,
+            contract=contract,
+        )
+    except Exception as exc:  # noqa: BLE001 - preserve a private claim-ineligible failure.
+        if not args.output.exists():
+            args.output.mkdir(mode=stat.S_IRWXU, parents=True, exist_ok=False)
+            args.output.chmod(stat.S_IRWXU)
+        error_message = str(exc)
+        provider_secret = os.environ.get(args.api_key_env, "")
+        if provider_secret:
+            error_message = error_message.replace(provider_secret, "<REDACTED>")
+        failure = {
+            "schema": "ctx.live-coding-pair-execution-failure-v1",
+            "evidence_level": LIVE_CODING_PAIR_DIAGNOSTIC_LEVEL,
+            "approval_digest": supplied_approval,
+            "pair_contract_sha256": expected_approval,
+            "error_type": type(exc).__name__,
+            "error": error_message,
+            "paired_evidence_complete": False,
+            "production_efficiency_eligible": False,
+            "product_claim_eligible": False,
+            "benefit_verdict_allowed": False,
+            "benefit_verdict": None,
+        }
+        (args.output / "live-coding-pair-execution-failure.json").write_bytes(
+            _indented_json_bytes(failure)
+        )
+        print(args.output)
+        return 1
+    if (
+        executed.get("paired_evidence_complete") is not True
+        or executed.get("production_efficiency_eligible") is not False
+        or executed.get("product_claim_eligible") is not False
+        or executed.get("benefit_verdict_allowed") is not False
+    ):
+        raise RuntimeError("live coding pair report violated its evidence or claim gate")
+    print(args.output)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.live_coding_pair_execute and not args.live_coding_pair:
+        raise SystemExit("--live-coding-pair-execute requires --live-coding-pair")
+    if args.deterministic_bridge and args.live_coding_pair:
+        raise SystemExit("--deterministic-bridge and --live-coding-pair are mutually exclusive")
+    if args.deterministic_bridge:
+        return _run_deterministic_bridge_main(args)
+    if args.live_coding_pair:
+        return _run_live_coding_pair_main(args)
     holdout_values = _holdout_argument_values(args)
     campaign_lock: OfficialCampaignLock | None = None
     official_state_root: Path | None = None
@@ -8797,6 +11788,19 @@ def _run_main(
     official_repository_identity_start: dict[str, str] | None = None
     holdout_values = _holdout_argument_values(args)
     holdout_requested = any(value is not None for value in holdout_values)
+    if args.unified_engine_treatment:
+        if args.engine != PRODUCTION_CATALOG_ENGINE:
+            raise SystemExit(
+                "--unified-engine-treatment requires --engine codex-production-catalog"
+            )
+        if not args.dry_run:
+            raise SystemExit("--unified-engine-treatment currently requires --dry-run")
+        if holdout_requested:
+            raise SystemExit("--unified-engine-treatment is not valid for the frozen holdout")
+        if args.arm not in {"baseline", "ctx-light", "both"}:
+            raise SystemExit(
+                "--unified-engine-treatment supports only baseline, ctx-light, or both"
+            )
     if holdout_requested and not all(value is not None for value in holdout_values):
         raise SystemExit("official holdout execution requires every holdout and verifier argument")
     if holdout_requested:
@@ -9019,6 +12023,7 @@ def _run_main(
             "api_key_env": args.api_key_env,
             "base_url": args.base_url,
             "dry_run": args.dry_run,
+            "unified_engine_treatment": args.unified_engine_treatment,
             "cache_root": str(args.cache_root),
             "scenario_filters": list(args.scenario),
             "catalog_provenance": (
@@ -9275,6 +12280,11 @@ def _run_main(
                                 catalog_setup_charge_seconds=(
                                     catalog_setup_charge_seconds if arm != "baseline" else 0.0
                                 ),
+                                **(
+                                    {"unified_engine_treatment": True}
+                                    if args.unified_engine_treatment
+                                    else {}
+                                ),
                             )
                     except Exception as exc:  # noqa: BLE001 - persist harness failures.
                         incidents.add(
@@ -9470,6 +12480,7 @@ def _run_main(
                 results,
                 expected_keys=expected_keys,
                 engine=args.engine,
+                unified_engine_treatment=args.unified_engine_treatment,
             )
             and incidents.unresolved_count() == 0
             else 1

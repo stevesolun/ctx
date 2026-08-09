@@ -12,7 +12,9 @@ Each test targets a specific fix from the Phase 4b-6 code-review pass.
 
 from __future__ import annotations
 
+import errno
 import json
+import os
 import sys
 import threading
 import time
@@ -34,6 +36,7 @@ from ctx import dashboard_docs  # noqa: E402
 from ctx.adapters.claude_code.install import install_utils  # noqa: E402
 from ctx.adapters.claude_code.install import mcp_install  # noqa: E402
 from ctx.monitor.services import lifecycle as monitor_lifecycle  # noqa: E402
+from ctx.utils import _file_lock as file_lock_module  # noqa: E402
 from ctx.utils._file_lock import file_lock  # noqa: E402
 
 
@@ -123,6 +126,55 @@ def test_file_lock_creates_parent(tmp_path):
         pass
     # Only the lock file and its parent dir need exist.
     assert target.parent.exists()
+
+
+def test_file_lock_allows_nested_targets_in_same_directory(tmp_path):
+    """A broader operation may safely take a second child lock in its directory."""
+    outer = tmp_path / ".vector-index-upsert"
+    inner = tmp_path / "vector-index.meta.json"
+
+    with file_lock(outer, timeout=0.1):
+        with file_lock(inner, timeout=0.1):
+            pass
+
+
+def test_secure_file_lock_retries_transient_create_enoent(tmp_path, monkeypatch):
+    parent = tmp_path / "private"
+    parent.mkdir(mode=0o700)
+    target = parent / "audit.sqlite3"
+    lock_name = "audit.sqlite3.lock"
+    real_open = os.open
+    directory_fd = real_open(parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    transient_failures = 0
+
+    def flaky_open(path, flags, mode=0o777, *, dir_fd=None):
+        nonlocal transient_failures
+        if (
+            path == lock_name
+            and flags & os.O_CREAT
+            and dir_fd is not None
+            and transient_failures < 2
+        ):
+            transient_failures += 1
+            raise FileNotFoundError(errno.ENOENT, "transient create race", path)
+        if dir_fd is None:
+            return real_open(path, flags, mode)
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "open", flaky_open)
+
+    try:
+        lock_fd = file_lock_module._open_secure_lock_file(
+            directory_fd,
+            lock_name,
+            os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0),
+        )
+        os.close(lock_fd)
+    finally:
+        os.close(directory_fd)
+
+    assert transient_failures == 2
+    assert target.with_suffix(".sqlite3.lock").is_file()
 
 
 # ── toolbox.validate no longer misroutes YAML paths ─────────────────────────

@@ -257,6 +257,17 @@ jobs:
           src/tests/test_import_strix_skills.py
           src/tests/test_ctx_ab_benchmark.py
           src/tests/test_ctx_ab_swebench.py
+          src/tests/runtime/test_agent_file.py
+          src/tests/runtime/test_install_execution.py
+          src/tests/runtime/test_skill_cas.py
+          src/tests/runtime/test_skill_cas_posix.py
+          src/tests/runtime/test_composition.py
+          src/tests/runtime/test_authenticated_benefit.py
+          src/tests/runtime/test_benefit_closure.py
+          src/tests/runtime/test_eligible_catalog.py
+          src/tests/runtime/test_production_catalog.py
+          src/tests/runtime/test_query_work.py
+          src/tests/runtime/test_query_delivery_windows.py
 
   contract-compat:
     name: "Contract compatibility (${{ matrix.os }})"
@@ -764,6 +775,7 @@ jobs:
           from importlib.metadata import entry_points, version
 
           import ctx
+          from ctx.runtime import open_release_pinned_query_catalog
 
           with open("pyproject.toml", "rb") as fh:
               expected_scripts = set(tomllib.load(fh)["project"]["scripts"])
@@ -795,6 +807,15 @@ jobs:
                   failures.append(f"{ep.name}: {exc!r}")
           if failures:
               raise SystemExit("console script load failures:\n" + "\n".join(failures))
+
+          release_catalog = open_release_pinned_query_catalog()
+          try:
+              if release_catalog.mode != "reviewed":
+                  raise SystemExit(
+                      f"unexpected release catalog mode: {release_catalog.mode!r}"
+                  )
+          finally:
+              release_catalog.close()
 
           unsafe_help = {"ctx-mcp-server"}
           safe_help = sorted(expected_scripts - unsafe_help)

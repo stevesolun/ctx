@@ -1,0 +1,5 @@
+interface:
+  display_name: "Improve Codebase Architecture"
+  short_description: "Find high-leverage architecture improvements"
+policy:
+  allow_implicit_invocation: false
