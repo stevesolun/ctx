@@ -232,6 +232,12 @@ def build_fit_profile(
     else:
         signals = scan_repo.scan_directory(str(root), max_depth=max_depth)
         stack = scan_repo.detect_stack(str(root), signals)
+        # The legacy scanner stamps wall-clock time and an absolute path into
+        # its result. A Fit profile must be reproducible: identical inputs have
+        # to serialize identically, or provenance comparisons between runs are
+        # meaningless. Both facts are already carried by the profile itself.
+        for volatile in ("scanned_at", "repo_path"):
+            stack.pop(volatile, None)
 
     verification = discover_verification(root)
     warnings.extend(verification.warnings)

@@ -32,8 +32,8 @@ Removable code, per lane, before de-duplicating overlap:
 | --- | --- | --- |
 | A — Public CLI | ~21,900 | includes the 12,205-LOC monitor package also counted in E |
 | B — Graph/catalog | ~25,100 | production and curation, not consumption |
-| C — Engine/runtime | **~46,200 of 49,834 (93%)** | plus ~47,300 test LOC |
-| D — Benchmark | ~21,100 | net ≈ −38,000 including tests, after adding back ~900 |
+| C — Engine/runtime | see §3 — **two different claims, only one proven** | |
+| D — Benchmark | ~21,100 gross | estimate revised; see §3a |
 | E — Supporting | ~32,000 | plus ~29,000 test LOC |
 
 Lanes overlap (the dashboard is counted in both A and E), so these do not sum
@@ -73,9 +73,47 @@ Lane C examined `src/ctx/engine/` (20,959 LOC) and `src/ctx/runtime/`
 roughly 23 percent of the whole suite. This is recent, heavily reviewed,
 high-quality work.
 
-**Verdict: ~93 percent is removable for CTX Fit.**
+**Corrected after independent architecture review.** An earlier draft of this
+section headlined "~46,200 of 49,834 (93%) removable". That figure conflated
+two different claims, and only one of them is proven. The correction matters
+more than the original number, so it is stated first.
 
-The decisive evidence is not opinion. The auditor built an AST import graph over
+| Claim | Status | Figure |
+| --- | --- | --- |
+| **Proven dead** — reachable only from tests, no production consumer | **Verified twice, independently** | **10,741 LOC** |
+| **Not needed by the future product** — reachable today, but serves a lifecycle CTX Fit does not have | Judgement, not reachability | remainder of the lane |
+
+A second reviewer rebuilt the AST import graph from **all 45 console-script
+entry points** — a broader seed set than the original audit used — and
+deliberately did *not* suppress the `__init__` re-export hubs. It reproduced
+the 10,741 figure exactly, and concluded the original audit **understated** the
+dead-code finding.
+
+But the same graph contradicts the 93 percent headline as written: with today's
+entry points, **35,993 LOC of the lane are reachable** (20,821 of
+`src/ctx/engine`, 15,172 of `src/ctx/runtime`), much of it through the `ctx`
+binary itself. Removing that code is a *product decision* requiring real work,
+not the deletion of unreachable code. Only the 10,741 LOC can be removed on
+reachability evidence alone.
+
+**Practical consequence.** The deletion program starts with the proven-dead
+10,741 LOC, which is safe and mechanical. Everything beyond that is sequenced
+behind the milestones that actually replace it, and is re-measured before each
+step rather than asserted here.
+
+### 3a. Two further review corrections
+
+- **ADR-011's ~900 LOC extraction estimate is roughly 2x optimistic.** Seeding
+  the five named mechanisms plus the `Scenario` model and computing the
+  transitive in-file call closure yields 56 definitions, not the handful
+  assumed. Budget accordingly.
+- **ADR-011's delete list swallowed machinery the PRD depends on.** The
+  ~21,100 LOC figure includes ~6,012 LOC of holdout and exposure-ledger code
+  (`ctx_ab_holdout*.py`, `ctx_ab_exposure_ledger.py`) — the contamination
+  controls the PRD's own risk table names as the mitigation for invalid tasks.
+  That code is reclassified **ADAPT**, not DELETE.
+
+The decisive evidence for the proven-dead cluster is not opinion. The auditor built an AST import graph over
 all of `src/` (excluding tests) and computed reachability from every real entry
 point — `ctx.cli.run`, `ctx.cli.fit`, `ctx.cli.recommend`,
 `ctx.mcp_server.server`, the four hook adapters, and `ctx_init` — suppressing

@@ -25,8 +25,53 @@ def _python_repo(tmp_path: Path, *, with_pytest: bool = True) -> Path:
     return repo
 
 
+def _with_tests(repo: Path) -> Path:
+    tests = repo / "tests"
+    tests.mkdir(exist_ok=True)
+    (tests / "test_demo.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+    return repo
+
+
+def test_declared_runner_without_test_files_is_not_evaluable(tmp_path: Path) -> None:
+    """A configured runner is intent, not evidence.
+
+    Claiming evaluability from a manifest stanza alone would state an inference
+    as a fact, which is the one thing this product must never do.
+    """
+
+    repo = _python_repo(tmp_path)  # pyproject configures pytest; no tests exist
+    (repo / "app.py").write_text("x = 1\n", encoding="utf-8")
+
+    inventory = discover_verification(repo)
+
+    assert inventory.declares_test_command is True
+    assert inventory.test_files == ()
+    assert inventory.has_deterministic_verification is False
+    assert any("no test files were found" in warning for warning in inventory.warnings)
+    assert build_fit_profile(repo).is_fit_evaluable is False
+
+
+def test_declared_runner_with_test_files_is_evaluable(tmp_path: Path) -> None:
+    inventory = discover_verification(_with_tests(_python_repo(tmp_path)))
+
+    assert inventory.has_deterministic_verification is True
+    assert inventory.test_files == ("tests/",)
+
+
+def test_profile_json_is_byte_identical_across_runs(tmp_path: Path) -> None:
+    """Reproducibility: identical inputs must serialize identically."""
+
+    repo = _with_tests(_python_repo(tmp_path))
+
+    first = json.dumps(build_fit_profile(repo).to_dict(), sort_keys=True)
+    second = json.dumps(build_fit_profile(repo).to_dict(), sort_keys=True)
+
+    assert first == second
+    assert "scanned_at" not in first
+
+
 def test_discovers_python_verification_commands(tmp_path: Path) -> None:
-    inventory = discover_verification(_python_repo(tmp_path))
+    inventory = discover_verification(_with_tests(_python_repo(tmp_path)))
 
     assert inventory.has_deterministic_verification
     assert set(inventory.kinds) == {"test", "typecheck", "lint", "build"}
@@ -129,7 +174,7 @@ def test_ctx_fit_subcommand_runs_without_spending(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    repo = _python_repo(tmp_path)
+    repo = _with_tests(_python_repo(tmp_path))
 
     exit_code = ctx_main(["fit", str(repo), "--json"])
 

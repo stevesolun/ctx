@@ -30,7 +30,16 @@ Settled by the Milestone 0 audit. Each links to its evidence.
 
 - **D1 — CTX Fit is a layer inside CTX, not a fork or a rewrite.** Rejecting a
   second parallel implementation is an explicit architecture constraint.
-- **D2 — The paired A/B runner is extended, never rewritten.**
+> **Superseded notice.** D2 and D8 below were settled under the earlier
+> *evolution* mandate. The mandate changed to a rebuild, and both are now
+> superseded by **ADR-011 / ADR-012** in [`DECISIONS.md`](DECISIONS.md):
+> the experiment mechanisms are *extracted* into `ctx/core/execution.py` and
+> `ctx/fit/experiment.py` rather than wrapped, and the benchmark scripts are
+> deleted apart from the contamination controls and the deterministic bridge.
+> `DECISIONS.md` is the authoritative record; D2 and D8 are retained here only
+> as history.
+
+- **D2 — (SUPERSEDED) The paired A/B runner is extended, never rewritten.**
   `scripts/ctx_ab_benchmark.py` already provides isolation, counterbalanced
   execution order, deterministic verification, and contamination controls.
   ([`CURRENT_STATE.md` §3](CURRENT_STATE.md))
@@ -46,8 +55,9 @@ Settled by the Milestone 0 audit. Each links to its evidence.
 - **D7 — The experiment's arm model is the central thing that must change.**
   Arms are a validated module constant and the treatment delta is a prompt
   suffix, so today the rig varies exactly one dimension.
-- **D8 — A candidate configuration is a `scenario.context` capability set, and
-  each candidate runs as its own baseline-versus-candidate pair.** Resolves Q1.
+- **D8 — (SUPERSEDED by ADR-012; the candidate-representation insight survives)**
+  A candidate configuration is a `scenario.context` capability set, and each
+  candidate runs as its own baseline-versus-candidate pair. Resolves Q1.
   `write_ctx_fixture` already materializes a per-run isolated CTX home from
   `scenario.context` (skills, agents, MCP servers) and installs skills into the
   harness, so CTX Fit orchestrates *above* the runner and changes none of its

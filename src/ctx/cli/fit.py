@@ -87,31 +87,38 @@ def _format_profile(profile: FitProfile) -> str:
         lines.append("  no verification commands discovered")
     lines.append("")
 
-    lines.append("What CTX Fit could evaluate here")
-    for dimension in profile.dimensions:
-        mark = "yes" if dimension.evaluable else "no "
-        lines.append(f"  [{mark}] {dimension.name}")
-        lines.append(f"        {dimension.reason}")
-    lines.append("")
-
+    # The full dimension breakdown is CTX's own view of its experimental rig,
+    # not a fact about the user's repository, so it stays in --json. One human
+    # sentence carries the honest scope limit.
     if profile.is_fit_evaluable:
         lines.append(
             "This repository can be evaluated: it has deterministic tests, so a "
             "candidate configuration can be judged on evidence rather than on an "
             "agent's own claim."
         )
+        lines.append(
+            "We can compare capability sets, instructions and models here — not "
+            "coding agents, because only one is currently supported."
+        )
     else:
         lines.append(
-            "This repository cannot yet be evaluated honestly: without a "
-            "deterministic test command there is no way to tell a configuration "
-            "that solved a task from one that only claimed to."
+            "This repository cannot yet be evaluated honestly: without runnable "
+            "tests there is no way to tell a configuration that solved a task "
+            "from one that only claimed to."
         )
 
     if profile.warnings:
         lines.append("")
-        lines.append("Warnings")
+        lines.append("What to fix first")
         for warning in profile.warnings:
             lines.append(f"  - {warning}")
+
+    lines.append("")
+    lines.append(
+        "Next: `ctx fit --dry-run` shows what a full evaluation would involve."
+        if profile.is_fit_evaluable
+        else "Next: add runnable tests, then re-run `ctx fit`."
+    )
     return "\n".join(lines)
 
 

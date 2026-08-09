@@ -1,28 +1,53 @@
 # ctx
 
 [![CI](https://github.com/stevesolun/ctx/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
-[![Tests](https://img.shields.io/badge/Tests-8267_inventory-blue.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
+[![Tests](https://img.shields.io/badge/Tests-8270_inventory-blue.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
 
-ctx is a Python CLI and library that recommends a small, relevant set of
-skills, agents, and MCP servers for a repository or task. It can use your
-organization's local/private knowledge or the shipped graph. Harness selection
-for custom, API, and local models is a separate workflow. Recommendations do
-not install or load tools without an operator action or approval.
+**Find the AI coding setup that fits your repository.**
+
+`ctx fit` looks at your repository and tells you how ready it is for AI coding
+agents, how it can verify its own work, and what to improve. It runs locally,
+costs nothing, and changes no files.
+
+```bash
+pip install claude-ctx
+cd my-project
+ctx fit
+```
+
+```text
+Repository: /path/to/my-project
+Languages:  python
+
+Current AI coding setup
+  Instructions:  AGENTS.md, CLAUDE.md
+  Installed skills: 26
+
+How this repository verifies itself
+  test       python -m pytest -q
+             from pyproject.toml [tool.pytest] (high confidence)
+  typecheck  python -m mypy src
+             from pyproject.toml [tool.mypy] (high confidence)
+
+This repository can be evaluated: it has deterministic tests, so a candidate
+configuration can be judged on evidence rather than on an agent's own claim.
+```
+
+Requires Python 3.11 or newer. Add `--json` for machine-readable output, or
+`--dry-run` to see what a full evaluation would involve.
+
+> **Status.** `ctx fit` currently reports repository readiness. Testing
+> candidate configurations against real repository tasks (`ctx fit --test`) and
+> generating the winning configuration (`ctx fit --apply`) are in development;
+> see [`docs/ctx-fit/`](docs/ctx-fit/). The commands below are the older
+> recommendation surface, which still works.
 
 **Release status:** [v1.0.20](https://github.com/stevesolun/ctx/releases/tag/v1.0.20)
 is the current GitHub and [PyPI](https://pypi.org/project/claude-ctx/) release;
 this source tree declares `1.0.21` for unreleased work.
 
-## Install
-
-Requires Python 3.11 or newer.
-
-```bash
-pip install claude-ctx
-```
-
-## Quickstart
+## Recommendation surface (existing)
 
 From the repository you want to analyze, install the runtime graph and request
 recommendations:

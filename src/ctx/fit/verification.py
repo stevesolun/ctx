@@ -61,6 +61,8 @@ class VerificationInventory:
 
     commands: tuple[VerificationCommand, ...] = ()
     warnings: tuple[str, ...] = ()
+    test_files: tuple[str, ...] = ()
+    """Observed test locations. A declared runner is not evidence of tests."""
 
     @property
     def kinds(self) -> tuple[VerificationKind, ...]:
@@ -71,15 +73,24 @@ class VerificationInventory:
         return tuple(seen)
 
     @property
-    def has_deterministic_verification(self) -> bool:
-        """True when at least one *test* command exists.
-
-        Lint, typecheck, and build are useful regression signals but none of
-        them demonstrates that a task was actually accomplished, so they do not
-        by themselves make a repository Fit-evaluable.
-        """
+    def declares_test_command(self) -> bool:
+        """Whether the repository *declares* a way to run tests."""
 
         return any(command.kind == "test" for command in self.commands)
+
+    @property
+    def has_deterministic_verification(self) -> bool:
+        """True only when a test command is declared **and** tests exist.
+
+        Declaring a runner is not the same as having tests. A repository whose
+        manifest configures pytest but contains no test files would run the
+        command successfully against nothing, so treating it as evaluable would
+        state an inference as a fact — the exact failure this product must not
+        commit. Lint, typecheck, and build are useful regression signals but
+        none demonstrates that a task was accomplished.
+        """
+
+        return self.declares_test_command and bool(self.test_files)
 
     def best(self, kind: VerificationKind) -> VerificationCommand | None:
         order = {"high": 0, "medium": 1, "low": 2}
@@ -93,6 +104,8 @@ class VerificationInventory:
         return {
             "commands": [command.to_dict() for command in self.commands],
             "kinds": list(self.kinds),
+            "declares_test_command": self.declares_test_command,
+            "test_files": list(self.test_files),
             "has_deterministic_verification": self.has_deterministic_verification,
             "warnings": list(self.warnings),
         }
@@ -317,6 +330,56 @@ def _discover_make(root: Path) -> list[VerificationCommand]:
     return found
 
 
+#: Directories and glob patterns that constitute observed test material.
+_TEST_DIRS: tuple[str, ...] = ("tests", "test", "spec", "__tests__")
+_TEST_GLOBS: tuple[str, ...] = (
+    "test_*.py",
+    "*_test.py",
+    "*_test.go",
+    "*.test.ts",
+    "*.test.js",
+    "*.spec.ts",
+    "*.spec.js",
+    "*_test.rs",
+)
+_TEST_SCAN_DEPTH = 3
+
+
+def _find_test_files(root: Path) -> tuple[str, ...]:
+    """Return observed test locations, bounded so large repositories stay fast.
+
+    Existence of a runner in a manifest proves only intent. This looks for
+    material the runner could actually execute.
+    """
+
+    found: list[str] = []
+    for name in _TEST_DIRS:
+        candidate = root / name
+        if candidate.is_dir():
+            try:
+                if any(candidate.iterdir()):
+                    found.append(f"{name}/")
+            except OSError:
+                continue
+    if found:
+        return tuple(found)
+
+    for depth in range(_TEST_SCAN_DEPTH):
+        prefix = "*/" * depth
+        for pattern in _TEST_GLOBS:
+            try:
+                match = next(root.glob(prefix + pattern), None)
+            except OSError:
+                continue
+            if match is not None:
+                try:
+                    found.append(str(match.relative_to(root)))
+                except ValueError:  # pragma: no cover - defensive
+                    found.append(match.name)
+                return tuple(found)
+    return ()
+
+
 def discover_verification(repo_path: str | Path) -> VerificationInventory:
     """Inspect a repository and report how it can verify itself.
 
@@ -344,13 +407,24 @@ def discover_verification(repo_path: str | Path) -> VerificationInventory:
     commands.extend(_discover_other_ecosystems(root))
     commands.extend(_discover_make(root))
 
+    test_files = _find_test_files(root)
     if not any(command.kind == "test" for command in commands):
         warnings.append(
             "no test command discovered; a Fit experiment cannot verify task "
             "completion in this repository"
         )
+    elif not test_files:
+        warnings.append(
+            "a test command is declared but no test files were found; the "
+            "command would run against nothing, so this repository is not "
+            "evaluable until tests exist"
+        )
 
-    return VerificationInventory(commands=tuple(commands), warnings=tuple(warnings))
+    return VerificationInventory(
+        commands=tuple(commands),
+        warnings=tuple(warnings),
+        test_files=test_files,
+    )
 
 
 __all__ = [

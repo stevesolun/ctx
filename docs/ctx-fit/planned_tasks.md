@@ -47,15 +47,23 @@ reviewer set is Product + Architecture + Security + QA.
 ### FIT-003 · Quarry classification (`CTX_AUDIT.md`)
 - **User story:** As the team, we need every subsystem classified KEEP/ADAPT/ARCHIVE/DELETE so we can delete fearlessly with evidence.
 - **Priority:** P0 · **Depends on:** FIT-001 · **Worker:** 5-lane audit workflow · **Reviewer:** architecture + product
-- **Status:** `IN_PROGRESS`
-- **Tests:** n/a · **Evidence:** pending
-- **Notes:** Must answer the from-zero question per component and state what breaks on removal.
+- **Status:** `DONE`
+- **Tests:** n/a
+- **Evidence:** `CTX_AUDIT.md` — 130 components classified (14 KEEP, 38 ADAPT, 36 ARCHIVE, 42 DELETE); public surface 44 → 2. Independent architecture review reproduced the 10,741-LOC dead-code finding from a broader entry-point seed and corrected the lane headline; corrections applied in §3 and §3a.
 
-### FIT-004 · Architecture proposal + decision log
+### FIT-004 · Decision log
 - **User story:** As the team, we need the target architecture and its rationale recorded once so decisions are not relitigated.
 - **Priority:** P0 · **Depends on:** FIT-003 · **Worker:** coordinator · **Reviewer:** architecture
-- **Status:** `NOT_STARTED`
-- **Notes:** Produces `ARCHITECTURE_PROPOSAL.md` and `DECISIONS.md` (ADR format). Must include the canonical domain model.
+- **Status:** `DONE`
+- **Evidence:** `DECISIONS.md` ADR-001…013, including ADR-012 superseding D8 and the superseded-notice added to `MAP.md`.
+- **Notes:** A separate `ARCHITECTURE_PROPOSAL.md` was deliberately **not** created — it would have been a third overlapping document. The target architecture lives in `CTX_AUDIT.md` §2 (the KEEP core) plus `DECISIONS.md`. The canonical domain model is specified in `PRD.md` and tracked as FIT-040/FIT-080.
+
+### FIT-005 · M0 review-gate remediation
+- **User story:** As the team, the milestone gate must actually be able to reject, and its findings must be fixed rather than noted.
+- **Priority:** P0 · **Depends on:** FIT-003 · **Worker:** coordinator · **Reviewer:** product + architecture
+- **Status:** `DONE`
+- **Tests:** `src/tests/fit/test_fit_profile.py` — 14 passing, including two new regressions for the defects found.
+- **Evidence:** Both reviewers returned `accept-with-conditions`; every blocking objection was fixed, not argued: the evaluability overclaim, non-deterministic JSON, the duplicate tracker, the contradictory execution decision, the overstated audit headline, and front-door discoverability.
 
 ---
 
