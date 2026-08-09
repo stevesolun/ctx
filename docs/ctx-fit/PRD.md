@@ -5,9 +5,15 @@ Status: draft v1, 2026-08-09. Owner: coordinator. Supersedes the earlier
 
 ## 1. One sentence
 
-> Give it your repository. It tells you how ready the repo is for AI coding,
-> tests the most promising AI coding setups, and shows you what actually works
-> best.
+> Connect your GitHub repository. CTX Fit finds the cheapest AI coding setup
+> that reliably works on your codebase, then opens a PR containing the winning
+> configuration.
+
+Headline: **Find the cheapest AI coding setup that actually works on your repo.**
+
+Three words carry the whole product. *Cheapest* is the objective. *Reliably* is
+the constraint that makes cheapest meaningful. *PR* is the deliverable — the
+product is not finished when it produces a report.
 
 ## 2. The problem
 
@@ -90,13 +96,29 @@ These are correctness requirements, not preferences. Each maps to a test.
    possible.
 10. **The graph is invisible.** It is an internal optimizer, never the UX.
 
-## 7. Primary metric
+## 7. The objective function
 
-**Verified Work per Dollar** — verified engineering outcome over attributable
-execution cost. Never collapsed into a single scalar that hides quality, cost,
-latency, reliability, retries, or confidence. Where candidates trade off, a
-Pareto view (`BEST QUALITY` / `BEST VALUE` / `FASTEST` / `RECOMMENDED`) is
-preferred to a fake total ordering.
+**Cheapest that reliably works.** Selection is lexicographic, not a weighted
+score (ADR-014):
+
+```text
+1. FILTER    verified success rate across repeated trials >= reliability floor
+2. MINIMIZE  total attributable cost among the qualifying candidates
+3. TIE-BREAK prefer the simpler configuration
+```
+
+*Reliably* is a constraint, not a metric: a candidate that passes two runs out
+of three has not been shown to work, and cheapness among unreliable candidates
+is meaningless. *Cheapest* is the objective, which makes cost completeness
+load-bearing — a candidate whose cost is partial or unknown is reported
+unranked rather than allowed to win by having less data (ADR-004).
+
+Quality, latency, retries, and confidence remain separately measured and are
+shown alongside the winner (`BEST QUALITY` / `FASTEST` / `RECOMMENDED`), but
+that presentation never determines the choice.
+
+If no candidate clears the floor more cheaply than the baseline, the correct
+answer is **keep your current setup** — a success, not a failure.
 
 ## 8. Milestones
 

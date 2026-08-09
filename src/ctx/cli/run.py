@@ -1852,10 +1852,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="ctx",
         description=(
-            "ctx — find the AI coding setup that fits your repository. "
-            "Run `ctx fit` in a repository to see how ready it is for AI "
-            "coding agents and what to improve. The remaining subcommands are "
-            "the lower-level harness."
+            "ctx — find the cheapest AI coding setup that actually works on "
+            "your repo. Run `ctx fit` in a repository to see how ready it is "
+            "for AI coding agents and what to improve. The remaining "
+            "subcommands are the lower-level harness."
         ),
     )
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")

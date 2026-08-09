@@ -233,12 +233,34 @@ reviewer set is Product + Architecture + Security + QA.
 
 ---
 
-## M10 — PR
+## M10 — PR *(terminal deliverable, not optional)*
 
 ### FIT-100 · Branch and PR preparation
-- **Priority:** P1 · **Depends on:** FIT-090 · **Reviewer:** security + product
+- **Priority:** **P0** · **Depends on:** FIT-090 · **Reviewer:** security + product
 - **Status:** `NOT_STARTED`
-- **Notes:** PR contains evidence, not marketing. Never auto-merge.
+- **Notes:** ADR-014 makes the PR part of the product promise, not polish: "…then opens a PR containing the winning configuration." Priority raised from P1. The PR contains evidence, not marketing, and is never auto-merged.
+
+### FIT-101 · GitHub-first entry
+- **User story:** As a user, I connect a GitHub repository rather than only running CTX inside a local checkout.
+- **Priority:** P1 · **Depends on:** FIT-100 · **Reviewer:** security + product
+- **Status:** `NOT_STARTED`
+- **Notes:** The promise opens with "Connect your GitHub repository." Local-first stays fully supported (ADR: local-first is not crippled); this adds the hosted-repo entry path. Credential handling is a security-review gate.
+
+---
+
+## Objective-function tasks *(from ADR-014)*
+
+### FIT-110 · Reliability as a selection constraint
+- **User story:** As a user, I need "works" to mean "worked every time we tried", not "worked once".
+- **Priority:** P0 · **Depends on:** FIT-062 · **Reviewer:** QA
+- **Status:** `NOT_STARTED`
+- **Notes:** Repeated trials move from "when budget permits" to required for any recommendation. Defines and documents the reliability floor; a candidate below it is excluded before cost is even considered.
+
+### FIT-111 · Lexicographic winner selection
+- **User story:** As a user, I want to know exactly why one configuration won, in one sentence.
+- **Priority:** P0 · **Depends on:** FIT-110, FIT-061 · **Reviewer:** architecture + product
+- **Status:** `NOT_STARTED`
+- **Notes:** Replaces the earlier Pareto-selection sketch (see FIT-081). Filter by reliability → minimize attributable cost → tie-break toward the simpler configuration. Candidates with incomplete cost are reported unranked rather than winning by having less data. Pareto survives as presentation only.
 
 ---
 

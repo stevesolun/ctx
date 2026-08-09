@@ -162,12 +162,17 @@ def _format_dry_run(profile: FitProfile) -> str:
         "  1. profile this repository            (done; no cost)",
         "  2. derive representative tasks        (not implemented yet)",
         f"  3. generate bounded candidates over   {', '.join(evaluable) or 'nothing evaluable'}",
-        "  4. run each candidate against the baseline in a counterbalanced pair",
+        "  4. run each candidate against the baseline, repeated for reliability",
         "  5. verify every trial with the repository's own commands above",
-        "  6. compare verified work against attributable cost",
+        "  6. keep only candidates that reliably pass, then pick the cheapest",
+        "  7. open a PR containing the winning configuration",
         "",
-        "Estimated cost: not calculable yet — candidate generation and execution "
-        "are not implemented, and CTX Fit never guesses a number it cannot derive.",
+        "The winner is the cheapest configuration that reliably works — "
+        "reliability is a requirement, not a tie-break. If nothing beats your "
+        "current setup, CTX Fit says so and recommends keeping it.",
+        "",
+        "Estimated cost: not calculable yet — execution is not implemented, and "
+        "CTX Fit never guesses a number it cannot derive.",
         "No model was invoked and nothing was spent.",
     ]
     return "\n".join(lines)

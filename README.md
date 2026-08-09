@@ -4,11 +4,15 @@
 [![Tests](https://img.shields.io/badge/Tests-8292_inventory-blue.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
 
-**Find the AI coding setup that fits your repository.**
+**Find the cheapest AI coding setup that actually works on your repo.**
 
-`ctx fit` looks at your repository and tells you how ready it is for AI coding
-agents, how it can verify its own work, and what to improve. It runs locally,
-costs nothing, and changes no files.
+CTX Fit analyzes your repository, tests promising AI coding configurations
+against real tasks in it, and opens a PR containing the winning configuration.
+It picks the *cheapest* setup that *reliably* works — reliability is a
+requirement, not a tie-break — and if nothing beats what you already have, it
+says so.
+
+Start with the free, local, read-only analysis:
 
 ```bash
 pip install claude-ctx

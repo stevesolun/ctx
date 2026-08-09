@@ -8,6 +8,52 @@ Status values: `ACCEPTED` · `SUPERSEDED` · `PROPOSED`
 
 ---
 
+## ADR-014 — The objective is "cheapest that reliably works" · `ACCEPTED`
+
+**Product definition (authoritative).**
+
+> Connect your GitHub repository. CTX Fit finds the cheapest AI coding setup
+> that reliably works on your codebase, then opens a PR containing the winning
+> configuration.
+>
+> Headline: *Find the cheapest AI coding setup that actually works on your repo.*
+
+**Decision.** The winner is chosen by a lexicographic rule, not a weighted score
+and not a general Pareto search:
+
+1. **Filter on reliability.** A candidate qualifies only if its verified
+   success rate across repeated trials meets the reliability floor. A
+   configuration that sometimes works has not been shown to work.
+2. **Minimize attributable cost** among the qualifying candidates.
+3. **Tie-break toward simplicity** — fewer capabilities, less context — because
+   a simpler configuration is cheaper to maintain and less likely to drift.
+
+**Why this replaces the previous multi-objective framing.** The earlier PRD
+proposed a Pareto frontier with a documented default. That left the actual
+choice under-specified, and "recommendation scoring becomes arbitrary" is one of
+this project's own stop conditions. A lexicographic rule is deterministic,
+explainable in one sentence, and needs no weights to defend. The Pareto view
+survives as a *presentation* (`BEST QUALITY` / `FASTEST` alongside
+`RECOMMENDED`), never as the selection mechanism.
+
+**Consequences.**
+
+- **Reliability is a constraint, not a metric.** Repeated trials move from
+  "when budget permits" to required for any recommendation, and the confidence
+  model must report how many trials backed the result.
+- **Cost is the objective, so cost completeness is load-bearing.** A candidate
+  whose cost is `priced_partial` or `unpriced` cannot be declared cheapest;
+  it is reported as unranked rather than silently winning (ADR-004).
+- **"Keep your current setup" is the expected answer whenever no candidate
+  clears the floor more cheaply.** This is a success, not a failure.
+- **The PR is the terminal deliverable.** M10 is no longer optional polish; the
+  product promise is not met until a reviewable PR exists.
+- **The `lean` candidate role becomes central.** Testing whether fewer
+  capabilities suffice is the most direct route to "cheapest that works", not a
+  curiosity.
+
+---
+
 ## ADR-001 — CTX Fit becomes the primary product surface · `ACCEPTED`
 
 **Context.** CTX had 44 public console scripts and required architectural
