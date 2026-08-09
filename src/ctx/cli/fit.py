@@ -87,6 +87,38 @@ def _format_profile(profile: FitProfile) -> str:
         lines.append("  no verification commands discovered")
     lines.append("")
 
+    from ctx.fit.readiness import score_readiness
+
+    readiness = score_readiness(profile)
+    lines.append("AI agent readiness")
+    if readiness.score is None:
+        lines.append("  could not be assessed for this repository")
+    else:
+        lines.append(f"  {readiness.score}/100")
+        for dimension in readiness.dimensions:
+            if dimension.is_assessable:
+                lines.append(
+                    f"    {dimension.title:<22}{dimension.earned:>3}/{dimension.assessable}"
+                )
+    lines.append("")
+
+    if readiness.blockers:
+        lines.append("Blocking")
+        for blocker in readiness.blockers:
+            lines.append(f"  - {blocker.title}: {blocker.evidence[0] if blocker.evidence else ''}")
+            lines.append(f"    fix: {blocker.remedy}")
+        lines.append("")
+
+    top_fixes = readiness.improvements[:3]
+    if top_fixes:
+        lines.append("Highest-impact improvements")
+        for index, fix in enumerate(top_fixes, start=1):
+            gain = fix.possible - fix.earned
+            lines.append(f"  {index}. {fix.remedy} (+{gain})")
+            if fix.evidence:
+                lines.append(f"     {fix.evidence[0]}")
+        lines.append("")
+
     # The full dimension breakdown is CTX's own view of its experimental rig,
     # not a fact about the user's repository, so it stays in --json. One human
     # sentence carries the honest scope limit.
@@ -153,7 +185,10 @@ def cmd_fit(args: argparse.Namespace) -> int:
         return 2
 
     if args.json:
+        from ctx.fit.readiness import score_readiness
+
         payload = profile.to_dict()
+        payload["readiness"] = score_readiness(profile).to_dict()
         if args.dry_run:
             payload["dry_run"] = True
         print(json.dumps(payload, indent=2, sort_keys=True))
