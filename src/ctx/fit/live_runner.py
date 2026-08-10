@@ -19,9 +19,13 @@ byte-for-byte as they were handed over. What the agent said about its own work
 is not consulted, and an agent that edited the specification has not satisfied
 it: that trial is void.
 
-**The task must have started red.** Before the agent runs, the reverted tree is
-tested and must fail. A task that already passes cannot distinguish a working
-configuration from a broken one, so it is discarded rather than scored.
+**The task must have started red.** Before the agent runs, the workspace is
+tested twice: green at the task's commit, then red once the source change is
+reverted. Both halves are load-bearing. Without the green half, "the suite
+exits non-zero" is indistinguishable from "the suite cannot run here" or "this
+repository has an unrelated failing test", and either one turns every candidate
+into a failure it never earned. A task that does not swing green-to-red is
+discarded rather than scored.
 
 **Cost is reported or admitted unknown.** A trial whose spend could not be
 measured reports ``None``, which poisons the candidate total rather than
@@ -34,6 +38,7 @@ import hashlib
 import subprocess
 import tarfile
 import tempfile
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -171,40 +176,56 @@ def _was_written(path: str, written: frozenset[str]) -> bool:
     return path in written or any(item.startswith(f"{path.rstrip('/')}/") for item in written)
 
 
-def _prepare_workspace(repo: Path, task: FitTask, destination: Path) -> str | None:
-    """Build the task's starting tree, then revert the task's source change.
+def _task_commit(task: FitTask) -> str:
+    """The commit the task was derived from, or "" if it names none."""
 
-    Returns an error string, or None on success. The test files are pointedly
-    *not* reverted: they are the specification the agent must satisfy.
+    return task.provenance.removeprefix("commit ").strip()
+
+
+def _materialize_commit(repo: Path, task: FitTask, destination: Path) -> str | None:
+    """Lay down the task's commit, unchanged. Returns an error string or None.
 
     Nothing is copied out of the user's checkout, so the workspace is the
     pinned commit rather than whatever happens to be lying around in it, and it
     deliberately has no ``.git``. A copied one is either an alias for the user's
     real repository or, in a plain clone, the answer key: the very commit the
     agent is being asked to reimplement.
+
+    Reverting is a separate step because the tree has to be *tested* in between:
+    the untouched commit is the only state we know is supposed to pass.
     """
 
-    sha = task.provenance.removeprefix("commit ").strip()
-    if not sha:
+    if not _task_commit(task):
         return "task has no commit to revert"
     if not task.source_paths:
         # Reverting "everything" would revert the tests too, handing the agent
         # a green tree and calling it a pass.
         return "task names no source paths, so there is nothing to revert"
 
-    error, _ = _export_tree(repo, sha, destination)
+    error, _ = _export_tree(repo, _task_commit(task), destination)
     if error is not None:
         return error
-
-    error, reverted = _export_tree(repo, f"{sha}^", destination, paths=task.source_paths)
-    if error is not None:
-        return error
-    if unreverted := tuple(path for path in task.source_paths if not _was_written(path, reverted)):
-        return f"the repository's export rules hid {', '.join(unreverted)} from the revert"
     if absent := tuple(path for path in task.test_paths if not (destination / path).is_file()):
         # Silence here would be the worst kind: the suite could pass simply
         # because the test that judges the task never made it into the tree.
         return f"the workspace is missing the tests that decide this task: {', '.join(absent)}"
+    return None
+
+
+def _revert_source_change(repo: Path, task: FitTask, destination: Path) -> str | None:
+    """Undo the task's source change in place. Returns an error string or None.
+
+    The test files are pointedly *not* reverted: they are the specification the
+    agent must satisfy.
+    """
+
+    error, reverted = _export_tree(
+        repo, f"{_task_commit(task)}^", destination, paths=task.source_paths
+    )
+    if error is not None:
+        return error
+    if unreverted := tuple(path for path in task.source_paths if not _was_written(path, reverted)):
+        return f"the repository's export rules hid {', '.join(unreverted)} from the revert"
     return None
 
 
@@ -222,6 +243,42 @@ def _specification_digests(workspace: Path, test_paths: tuple[str, ...]) -> dict
         except OSError:
             digests[path] = None
     return digests
+
+
+def _drive_with_deadline(
+    driver: AgentDriver, invocation: AgentInvocation, timeout: int
+) -> AgentOutcome | None:
+    """Run ``driver``, and stop waiting for it after ``timeout`` seconds.
+
+    Returns None when the deadline passed with the driver still running; any
+    exception it raised is re-raised here, so the caller's handling of a broken
+    driver is unchanged.
+
+    An :data:`AgentDriver` is an arbitrary callable, so this cannot *stop* one
+    -- only stop the campaign from waiting on it. That is the guarantee the
+    timeout is documented to give, and the weaker one is still worth having: a
+    single wedged provider call otherwise blocks every remaining trial forever.
+    The abandoned thread is a daemon precisely so it cannot hold the process
+    open after the campaign has moved on.
+    """
+
+    outcome: list[AgentOutcome] = []
+    failure: list[BaseException] = []
+
+    def call() -> None:
+        try:
+            outcome.append(driver(invocation))
+        except BaseException as exc:  # noqa: BLE001 - re-raised below, in the caller's thread
+            failure.append(exc)
+
+    worker = threading.Thread(target=call, name="ctx-fit-trial-agent", daemon=True)
+    worker.start()
+    worker.join(timeout)
+    if worker.is_alive():
+        return None
+    if failure:
+        raise failure[0]
+    return outcome[0]
 
 
 def make_live_runner(
@@ -257,15 +314,56 @@ def make_live_runner(
                 detail="task names no test files, so its verdict cannot be trusted",
             )
 
-        with tempfile.TemporaryDirectory(prefix="ctx-fit-trial-") as scratch:
+        # An abandoned driver (see the trial timeout below) may still be writing
+        # in here while the tree is being removed. That is a mess to clean up,
+        # not a verdict, so it must not become an exception out of a finished
+        # trial.
+        with tempfile.TemporaryDirectory(
+            prefix="ctx-fit-trial-", ignore_cleanup_errors=True
+        ) as scratch:
             workspace = Path(scratch) / "repo"
-            error = _prepare_workspace(repo, task, workspace)
+            error = _materialize_commit(repo, task, workspace)
+            if error is not None:
+                return result("infrastructure-failure", detail=error)
+
+            # Green baseline. The task's own commit is a state the repository is
+            # supposed to pass in, so if it does not pass here the fault is the
+            # workspace's -- no test runner installed, a suite that needs
+            # something this machine lacks, an unrelated test already broken.
+            # Skipping this check is what let "exit code is non-zero" stand in
+            # for "the task starts red": the gate below would wave the trial
+            # through, the same non-zero would come back after the agent ran,
+            # and every candidate would be recorded as having failed a task
+            # nothing here was ever able to judge (FITBUG-018, FITBUG-019).
+            code, output = _run(task.verify_command, workspace, timeout=verify_timeout)
+            if code != 0:
+                return result(
+                    "infrastructure-failure",
+                    detail=(
+                        "the repository's own tests do not pass at this task's commit before "
+                        "anything is changed, so this workspace cannot judge a candidate: "
+                        f"{output.strip()[-200:] or 'no output'}"
+                    ),
+                )
+
+            error = _revert_source_change(repo, task, workspace)
             if error is not None:
                 return result("infrastructure-failure", detail=error)
 
             # Red gate. If the reverted tree already passes, the task proves
             # nothing and must not be scored against any candidate.
-            code, _ = _run(task.verify_command, workspace, timeout=verify_timeout)
+            code, output = _run(task.verify_command, workspace, timeout=verify_timeout)
+            if code is None:
+                # Not red: unknown. `None == 0` is False, so without this the
+                # gate reads a verify command that never finished as proof the
+                # task starts red, and an agent is hired on the strength of it.
+                return result(
+                    "infrastructure-failure",
+                    detail=(
+                        "the reverted tree could not be tested, so redness is unproven: "
+                        f"{output.strip()[-200:] or 'no output'}"
+                    ),
+                )
             if code == 0:
                 return result(
                     "infrastructure-failure",
@@ -279,7 +377,8 @@ def make_live_runner(
             specification = _specification_digests(workspace, task.test_paths)
 
             try:
-                agent = driver(
+                agent = _drive_with_deadline(
+                    driver,
                     AgentInvocation(
                         workspace=workspace,
                         task_title=task.title,
@@ -287,10 +386,24 @@ def make_live_runner(
                         verify_command=task.verify_command,
                         capability_ids=candidate.capability_ids,
                         model=candidate.model,
-                    )
+                    ),
+                    trial_timeout,
                 )
             except Exception as exc:  # noqa: BLE001 - any driver failure is ours, not the candidate's
                 return result("infrastructure-failure", detail=f"agent driver failed: {exc}")
+
+            if agent is None:
+                # Inconclusive, not failed: the workspace is still being written
+                # to, so any verdict read out of it now would be a race. Cost
+                # stays None because the driver never reported one -- unknown
+                # spend must poison the total rather than flatter it.
+                return result(
+                    "inconclusive",
+                    detail=(
+                        f"the agent was still running after {trial_timeout}s, so the trial "
+                        "was abandoned and learned nothing about this candidate"
+                    ),
+                )
 
             # A trial in which no model was ever contacted teaches nothing about
             # the candidate. Without this check the tests are simply re-run,

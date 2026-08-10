@@ -53,6 +53,12 @@ TrialOutcome = Literal[
 #: must not be read as missing cost data.
 _UNRUN_OUTCOMES = frozenset({"skipped-adaptive", "skipped-budget"})
 
+#: Outcomes for trials CTX itself could not carry out. They are excluded from
+#: reliability because the candidate never got its turn, and for the same
+#: reason an unmeasured cost on one of them is not the candidate's unmeasured
+#: spend: every path that produces one gives up before an agent is paid.
+_OUR_FAILURE_OUTCOMES = frozenset({"infrastructure-failure"})
+
 #: Fraction of trials that must verify for a candidate to qualify. A candidate
 #: below this is excluded before cost is considered at all.
 DEFAULT_RELIABILITY_FLOOR = 1.0
@@ -75,9 +81,17 @@ class TrialResult:
 
     @property
     def counts_toward_reliability(self) -> bool:
-        """Infrastructure failures are ours, not the candidate's."""
+        """Only trials the repository actually judged say anything about a candidate.
 
-        return self.outcome in {"verified", "failed", "inconclusive"}
+        Infrastructure failures are ours, not the candidate's. So is an
+        inconclusive trial: a verification that timed out or never returned
+        taught us nothing, and scoring it as a non-verified trial drove a
+        candidate's reliability to zero on its first timeout, abandoned every
+        remaining trial by adaptive stopping, and threw away the evidence for a
+        configuration that went on to verify everything else (FITBUG-013).
+        """
+
+        return self.outcome in {"verified", "failed"}
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -126,18 +140,43 @@ class CandidateOutcome:
 
     @property
     def total_cost_usd(self) -> float | None:
-        """Total cost, or None if any trial's cost is unknown.
+        """Total cost, or None if spend the candidate is answerable for went unmeasured.
 
         One unknown poisons the total. A candidate must never look cheaper
-        because part of its spend went unmeasured (ADR-004). Trials that never
-        ran are excluded rather than poisoning it: they are absent spend, not
-        unmeasured spend.
+        because part of its spend went unmeasured (ADR-004). Two kinds of trial
+        are exempt, because neither is unmeasured candidate spend. Trials that
+        never ran are absent spend, not unmeasured spend. And an infrastructure
+        failure is ours: every path that returns one abandons the trial before
+        an agent is paid, so charging the candidate an "unknown" for it made a
+        single unusable task -- a root commit that cannot be reverted, a task
+        that would not start red -- disqualify every candidate in the campaign
+        for incomplete cost (FITBUG-012). Whatever such a trial *does* report is
+        still added, so a failure that did spend money is never hidden.
         """
 
-        costs = [trial.cost_usd for trial in self.trials if trial.outcome not in _UNRUN_OUTCOMES]
-        if not costs or any(cost is None for cost in costs):
-            return None
-        return round(sum(cost for cost in costs if cost is not None), 4)
+        total = 0.0
+        measured = False
+        for trial in self.trials:
+            if trial.outcome in _UNRUN_OUTCOMES:
+                continue
+            if trial.cost_usd is None:
+                if trial.outcome in _OUR_FAILURE_OUTCOMES:
+                    continue
+                return None
+            total += trial.cost_usd
+            measured = True
+        return round(total, 4) if measured else None
+
+    @property
+    def budget_truncated(self) -> bool:
+        """Did the authorization run out before this candidate finished?
+
+        A candidate that only got through two of its nine trials has a real
+        cost for two trials, which is not comparable with a rival's cost for
+        nine. Naming that here keeps the comparison honest downstream.
+        """
+
+        return any(trial.outcome == "skipped-budget" for trial in self.trials)
 
     @property
     def cost_is_complete(self) -> bool:
@@ -154,6 +193,7 @@ class CandidateOutcome:
             "is_reliable": self.is_reliable,
             "total_cost_usd": self.total_cost_usd,
             "cost_is_complete": self.cost_is_complete,
+            "budget_truncated": self.budget_truncated,
             "simulated": self.simulated,
         }
 
@@ -353,6 +393,12 @@ def execute_trials(
                 if budget_usd is None:
                     continue
                 if result.cost_usd is None:
+                    if result.outcome in _OUR_FAILURE_OUTCOMES:
+                        # Our failure, raised before an agent could be paid.
+                        # There is no spend to lose track of, so halting the
+                        # whole campaign over it would abandon trials the user
+                        # authorized and paid nothing for.
+                        continue
                     budget_stop = _BUDGET_UNTRACKABLE
                     continue
                 spent = round(spent + result.cost_usd, 6)

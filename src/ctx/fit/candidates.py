@@ -34,7 +34,6 @@ from typing import Literal
 
 from ctx.engine.planner import (
     BoundedCapabilityPlanner,
-    CapabilityCandidate,
     CapabilityPlan,
     WorkObservation,
 )
@@ -186,7 +185,7 @@ def _observation_from_profile(profile: FitProfile, *, limit: int) -> WorkObserva
     )
 
 
-def _baseline(profile: FitProfile) -> CandidateConfiguration:
+def _baseline(profile: FitProfile, model: str | None) -> CandidateConfiguration:
     config = profile.existing_ai_config
     evidence: list[str] = []
     if config.instruction_files:
@@ -200,7 +199,10 @@ def _baseline(profile: FitProfile) -> CandidateConfiguration:
         candidate_id="baseline",
         role="baseline",
         capability_ids=(),
-        model=None,
+        # The control must run the same model as the treatment arms. A baseline
+        # on a different model turns every reported difference into a mixture of
+        # capability effect and model effect, which is not a comparison at all.
+        model=model,
         instructions=config.instruction_files,
         selection_reason=(
             "The repository's current setup. Every comparison needs a control, "
@@ -208,13 +210,6 @@ def _baseline(profile: FitProfile) -> CandidateConfiguration:
         ),
         evidence=tuple(evidence),
     )
-
-
-def _describe(candidate: CapabilityCandidate) -> str:
-    matched = ", ".join(candidate.matching_signals[:3])
-    if matched:
-        return f"{candidate.capability_id} (matches {matched})"
-    return candidate.capability_id
 
 
 def generate_candidates(
@@ -233,7 +228,7 @@ def generate_candidates(
     """
 
     warnings: list[str] = []
-    baseline = _baseline(profile)
+    baseline = _baseline(profile, model)
 
     if not profile.is_fit_evaluable:
         return CandidateSet(

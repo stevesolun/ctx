@@ -106,6 +106,79 @@ def test_unevaluable_repository_is_blocked_before_cost_is_considered(tmp_path: P
     assert plan.decision == "blocked-not-evaluable"
 
 
+def test_a_nan_budget_is_refused_rather_than_waved_through(tmp_path: Path) -> None:
+    """The gate before real spend must not fail open on a number it cannot use.
+
+    Every IEEE comparison against NaN is False, so an unchecked NaN budget slips
+    past the over-budget test and out the other side as "ready" — `--budget nan`
+    is accepted by argparse's `type=float` and authorizes an unbounded campaign.
+    """
+
+    plan = _plan(tmp_path, task_count=2, budget_usd=float("nan"), price=PRICE)
+
+    assert plan.cost.is_known  # the cost is fine; it is the budget that is not
+    assert plan.decision == "blocked-invalid-budget"
+    assert plan.can_execute is False
+
+
+def test_an_infinite_budget_is_not_a_budget(tmp_path: Path) -> None:
+    """A limit no cost can exceed places no limit on spending."""
+
+    plan = _plan(tmp_path, task_count=2, budget_usd=float("inf"), price=PRICE)
+
+    assert plan.decision == "blocked-invalid-budget"
+    assert plan.can_execute is False
+
+
+def test_a_finite_budget_still_passes_the_validity_check(tmp_path: Path) -> None:
+    """The NaN guard must reject NaN, not budgets in general."""
+
+    assert _plan(tmp_path, task_count=2, budget_usd=1000.0, price=PRICE).decision == "ready"
+
+
+# --------------------------------------------------------------------------
+# A refusal names the cause it actually observed.
+# --------------------------------------------------------------------------
+
+
+def test_abstaining_candidates_do_not_blame_the_repository_for_missing_tests(
+    tmp_path: Path,
+) -> None:
+    """A broken install must not be reported as a repository without tests.
+
+    Collapsing "no candidates" into "not evaluable" made the output contradict
+    itself: the same run said the repository has deterministic tests and that it
+    has none, and sent the user to add tests that were already there.
+    """
+
+    profile = build_fit_profile(_repo(tmp_path))
+    unopenable_catalog = CandidateSet(
+        abstained=True, abstention_reason="the capability catalog could not be opened"
+    )
+
+    plan = plan_experiment(
+        profile, unopenable_catalog, task_count=2, budget_usd=1000.0, price=PRICE
+    )
+
+    assert profile.is_fit_evaluable is True
+    assert plan.decision == "blocked-no-candidates"
+    assert plan.can_execute is False
+    assert plan.explanation == "the capability catalog could not be opened"
+    # The cause has to survive into the machine-readable payload too.
+    assert plan.to_dict()["explanation"] == "the capability catalog could not be opened"
+
+
+def test_an_abstention_without_a_reason_still_explains_itself(tmp_path: Path) -> None:
+    profile = build_fit_profile(_repo(tmp_path))
+
+    plan = plan_experiment(
+        profile, CandidateSet(abstained=True), task_count=2, budget_usd=1000.0, price=PRICE
+    )
+
+    assert plan.decision == "blocked-no-candidates"
+    assert "nothing to compare" in plan.explanation
+
+
 # --------------------------------------------------------------------------
 # Reliability and arithmetic.
 # --------------------------------------------------------------------------

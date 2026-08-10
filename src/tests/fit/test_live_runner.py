@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 from ctx.fit.candidates import CandidateConfiguration
@@ -60,8 +61,18 @@ def _git(repo: Path, *args: str) -> str:
     return completed.stdout
 
 
-def _repo_with_a_task(root: Path, *, gitattributes: str | None = None) -> tuple[Path, str]:
-    """A repository whose last commit added a check and the code that satisfies it."""
+def _repo_with_a_task(
+    root: Path,
+    *,
+    gitattributes: str | None = None,
+    scaffold_files: dict[str, str] | None = None,
+) -> tuple[Path, str]:
+    """A repository whose last commit added a check and the code that satisfies it.
+
+    ``scaffold_files`` land in the *first* commit, so they are part of the tree
+    the task's commit exports -- which is where a repository's pre-existing
+    problems live.
+    """
 
     repo = root / "origin"
     (repo / "src").mkdir(parents=True)
@@ -72,6 +83,8 @@ def _repo_with_a_task(root: Path, *, gitattributes: str | None = None) -> tuple[
 
     if gitattributes is not None:
         (repo / ".gitattributes").write_text(gitattributes, encoding="utf-8")
+    for name, body in (scaffold_files or {}).items():
+        (repo / name).write_text(body, encoding="utf-8")
     (repo / "run_checks.py").write_text(RUN_CHECKS, encoding="utf-8")
     (repo / "src" / "calc.py").write_text(_BROKEN_ADD, encoding="utf-8")
     (repo / "tests" / "check_other.py").write_text("assert True\n", encoding="utf-8")
@@ -264,6 +277,126 @@ def test_a_task_that_does_not_start_red_is_not_scored(tmp_path: Path) -> None:
     assert result.outcome == "infrastructure-failure"
     assert "red" in result.detail
     assert invoked == [], "no agent should be paid for a task that proves nothing"
+
+
+# --- FITBUG-018/019: non-zero is not the same fact as "the task starts red" --
+
+
+def test_a_repository_that_is_already_failing_cannot_judge_a_candidate(tmp_path: Path) -> None:
+    """FITBUG-018: one unrelated broken test made every candidate fail, after spend.
+
+    The suite exits non-zero before the revert and after the agent, so the gate
+    waves the trial through and the verdict step blames the candidate for a
+    failure that was in the repository all along.
+    """
+
+    origin, sha = _repo_with_a_task(
+        tmp_path, scaffold_files={"tests/check_broken.py": "raise SystemExit(1)\n"}
+    )
+    invoked: list[str] = []
+
+    def perfect(invocation: AgentInvocation) -> AgentOutcome:
+        invoked.append(invocation.task_title)
+        (invocation.workspace / "src" / "calc.py").write_text(_WORKING_ADD, encoding="utf-8")
+        return AgentOutcome(completed=True, cost_usd=0.42)
+
+    result = _trial(origin, perfect, _task(sha))
+
+    assert result.outcome == "infrastructure-failure", result.detail
+    assert result.counts_toward_reliability is False
+    assert invoked == [], "no agent should be paid to fix a repository that was already red"
+
+
+def test_a_workspace_with_no_usable_test_runner_is_not_a_candidate_failure(
+    tmp_path: Path,
+) -> None:
+    """FITBUG-019: "No module named pytest" exits non-zero, which is not redness."""
+
+    origin, sha = _repo_with_a_task(tmp_path)
+    invoked: list[str] = []
+
+    def perfect(invocation: AgentInvocation) -> AgentOutcome:
+        invoked.append(invocation.task_title)
+        (invocation.workspace / "src" / "calc.py").write_text(_WORKING_ADD, encoding="utf-8")
+        return AgentOutcome(completed=True, cost_usd=0.42)
+
+    result = _trial(
+        origin,
+        perfect,
+        _task(sha, verify_command=(sys.executable, "-m", "no_such_test_runner")),
+    )
+
+    assert result.outcome == "infrastructure-failure", result.detail
+    assert result.counts_toward_reliability is False
+    assert invoked == []
+
+
+def test_a_red_gate_that_never_finished_is_not_read_as_red(tmp_path: Path) -> None:
+    """A verify command that hangs on the reverted tree proves nothing.
+
+    ``_run`` reports the timeout as ``None``, and ``None == 0`` is False, so an
+    unfinished gate used to read as "this task starts red" -- hiring and
+    billing an agent on the strength of a run that never produced a result.
+    """
+
+    hangs_when_reverted = (
+        "import pathlib\n"
+        "import sys\n"
+        "import time\n"
+        "\n"
+        'if "NotImplementedError" in pathlib.Path("src/calc.py").read_text():\n'
+        "    time.sleep(60)\n"
+        "sys.exit(0)\n"
+    )
+    origin, sha = _repo_with_a_task(
+        tmp_path, scaffold_files={"slow_checks.py": hangs_when_reverted}
+    )
+    invoked: list[str] = []
+
+    def driver(invocation: AgentInvocation) -> AgentOutcome:
+        invoked.append(invocation.task_title)
+        return AgentOutcome(completed=True, cost_usd=0.42)
+
+    runner = make_live_runner(
+        origin,
+        driver,
+        verify_timeout=2,
+    )
+    result = runner(_candidate(), _task(sha, verify_command=(sys.executable, "slow_checks.py")), 0)
+
+    assert result.outcome == "infrastructure-failure", result.detail
+    assert "redness is unproven" in result.detail
+    assert invoked == []
+
+
+# --- FITBUG-039: the documented trial timeout has to actually bound a trial --
+
+
+def test_an_agent_that_outruns_the_trial_timeout_is_abandoned(tmp_path: Path) -> None:
+    """``trial_timeout`` was accepted, documented, and never applied."""
+
+    origin, sha = _repo_with_a_task(tmp_path)
+    released = threading.Event()
+    entered = threading.Event()
+
+    def never_returns(invocation: AgentInvocation) -> AgentOutcome:
+        entered.set()
+        # Bounded so a failing assertion cannot leave a thread wedged on a tree
+        # the temporary directory is about to remove.
+        released.wait(30)
+        return AgentOutcome(completed=True, cost_usd=99.0)
+
+    try:
+        runner = make_live_runner(origin, never_returns, trial_timeout=1)
+        result = runner(_candidate(), _task(sha), 0)
+    finally:
+        released.set()
+
+    assert entered.is_set(), "the driver was never called, so nothing was timed out"
+    assert result.outcome == "inconclusive", result.detail
+    assert "still running" in result.detail
+    # Unknown spend stays unknown: the driver never reported any.
+    assert result.cost_usd is None
 
 
 # --- FITBUG-005: the specification must survive the trial that depends on it -

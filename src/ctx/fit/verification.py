@@ -15,7 +15,9 @@ results and the product must say so.
 
 from __future__ import annotations
 
+import fnmatch
 import json
+import os
 import re
 import tomllib
 from dataclasses import dataclass
@@ -120,15 +122,29 @@ def _read_text(path: Path) -> str | None:
         return None
 
 
-def _load_toml(path: Path) -> dict[str, object]:
+def _load_toml(path: Path) -> tuple[dict[str, object], str | None]:
+    """Parse a TOML file, reporting *why* it yielded nothing.
+
+    Returns the mapping plus a human-readable problem, or ``None`` when there
+    is none. Collapsing "empty", "too large to read" and "invalid syntax" into
+    a bare ``{}`` made the product tell users with a zero-byte pyproject.toml —
+    which is perfectly valid TOML — to go fix a parse error that did not exist.
+    """
+
     try:
-        if not path.is_file() or path.stat().st_size > _MAX_READ_BYTES:
-            return {}
+        if not path.is_file():
+            return {}, None
+        if path.stat().st_size > _MAX_READ_BYTES:
+            return {}, f"{path.name} is larger than {_MAX_READ_BYTES // 1024} KB and was not read"
         with path.open("rb") as handle:
             loaded = tomllib.load(handle)
-    except (OSError, tomllib.TOMLDecodeError):
-        return {}
-    return loaded if isinstance(loaded, dict) else {}
+    except OSError:
+        return {}, f"{path.name} exists but could not be read"
+    except tomllib.TOMLDecodeError as exc:
+        return {}, f"{path.name} is not valid TOML: {exc}"
+    if not isinstance(loaded, dict):  # pragma: no cover - tomllib always yields a table
+        return {}, f"{path.name} is not a TOML table"
+    return loaded, None
 
 
 def _load_json(path: Path) -> dict[str, object]:
@@ -142,27 +158,77 @@ def _load_json(path: Path) -> dict[str, object]:
     return loaded if isinstance(loaded, dict) else {}
 
 
+_TOX_PYTEST_SECTION = re.compile(r"^\s*\[(?:pytest|tool:pytest)\]", re.MULTILINE)
+_PYTEST_WORD = re.compile(r"\bpytest\b")
+
+
+def _tox_pytest_evidence(root: Path) -> tuple[Confidence, str] | None:
+    """What a tox.ini actually says about pytest, having read it.
+
+    ``tox.ini`` is also where projects park ``[flake8]``, and plenty of tox
+    users drive unittest or a custom runner. Emitting a high-confidence pytest
+    command from the file's mere existence stated an inference as a fact, and
+    the evidence sentence described content nothing had opened.
+    """
+
+    text = _read_text(root / "tox.ini")
+    if text is None:
+        return None
+    if _TOX_PYTEST_SECTION.search(text):
+        return "high", "tox.ini declares a [pytest] section"
+    if _PYTEST_WORD.search(text):
+        return "medium", "tox.ini names pytest but declares no [pytest] section"
+    return None
+
+
+def _mypy_target(root: Path, pyproject: dict[str, object]) -> str | None:
+    """Pick a target that exists, rather than assuming a src/ layout.
+
+    ``python -m mypy src`` in a flat-layout repository fails with "Cannot read
+    file 'src'", so presenting it under "How this repository verifies itself"
+    was showing the user a command known not to work here.
+    """
+
+    if (root / "src").is_dir():
+        return "src"
+    project = pyproject.get("project")
+    name = project.get("name") if isinstance(project, dict) else None
+    if isinstance(name, str):
+        for candidate in (name, name.replace("-", "_")):
+            if candidate and (root / candidate).is_dir():
+                return candidate
+    return None
+
+
 def _discover_python(root: Path) -> tuple[list[VerificationCommand], list[str]]:
     found: list[VerificationCommand] = []
     warnings: list[str] = []
     pyproject_path = root / "pyproject.toml"
-    pyproject = _load_toml(pyproject_path)
+    pyproject, pyproject_problem = _load_toml(pyproject_path)
     tools = pyproject.get("tool")
     tools = tools if isinstance(tools, dict) else {}
 
-    if "pytest" in tools or (root / "pytest.ini").is_file() or (root / "tox.ini").is_file():
-        source = (
-            "pyproject.toml [tool.pytest]"
-            if "pytest" in tools
-            else ("pytest.ini" if (root / "pytest.ini").is_file() else "tox.ini")
-        )
+    tox_evidence = _tox_pytest_evidence(root)
+    if "pytest" in tools or (root / "pytest.ini").is_file() or tox_evidence is not None:
+        if "pytest" in tools:
+            source = "pyproject.toml [tool.pytest]"
+            confidence: Confidence = "high"
+            detail = f"{source} declares pytest configuration"
+        elif (root / "pytest.ini").is_file():
+            source = "pytest.ini"
+            confidence = "high"
+            detail = "pytest.ini declares pytest configuration"
+        else:
+            assert tox_evidence is not None
+            source = "tox.ini"
+            confidence, detail = tox_evidence
         found.append(
             VerificationCommand(
                 kind="test",
                 command=("python", "-m", "pytest", "-q"),
                 source=source,
-                confidence="high",
-                evidence=(f"{source} declares pytest configuration",),
+                confidence=confidence,
+                evidence=(detail,),
             )
         )
     elif (root / "tests").is_dir() or list(root.glob("test_*.py"))[:1]:
@@ -178,15 +244,24 @@ def _discover_python(root: Path) -> tuple[list[VerificationCommand], list[str]]:
 
     if "mypy" in tools or (root / "mypy.ini").is_file():
         source = "pyproject.toml [tool.mypy]" if "mypy" in tools else "mypy.ini"
-        found.append(
-            VerificationCommand(
-                kind="typecheck",
-                command=("python", "-m", "mypy", "src"),
-                source=source,
-                confidence="high" if (root / "src").is_dir() else "medium",
-                evidence=(f"{source} declares mypy configuration",),
+        target = _mypy_target(root, pyproject)
+        if target is None:
+            # No inspectable target: say nothing rather than emit a command
+            # that cannot run here.
+            warnings.append(
+                f"{source} declares mypy but no source directory could be "
+                "identified, so no typecheck command is offered"
             )
-        )
+        else:
+            found.append(
+                VerificationCommand(
+                    kind="typecheck",
+                    command=("python", "-m", "mypy", target),
+                    source=source,
+                    confidence="high",
+                    evidence=(f"{source} declares mypy configuration", f"target {target}/ exists"),
+                )
+            )
 
     if "ruff" in tools or (root / "ruff.toml").is_file() or (root / ".ruff.toml").is_file():
         source = "pyproject.toml [tool.ruff]" if "ruff" in tools else "ruff.toml"
@@ -212,8 +287,8 @@ def _discover_python(root: Path) -> tuple[list[VerificationCommand], list[str]]:
             )
         )
 
-    if pyproject_path.is_file() and not pyproject:
-        warnings.append("pyproject.toml exists but could not be parsed")
+    if pyproject_problem is not None:
+        warnings.append(pyproject_problem)
     return found, warnings
 
 
@@ -224,6 +299,20 @@ _NODE_SCRIPT_KINDS: tuple[tuple[str, VerificationKind], ...] = (
     ("type-check", "typecheck"),
     ("tsc", "typecheck"),
     ("build", "build"),
+)
+
+#: ``npm init -y`` writes a ``test`` script whose whole job is to announce that
+#: there are no tests. Accepting it as high-confidence verification let the
+#: product declare such a repository evaluable and invite the user into a paid
+#: trial on the strength of it.
+_NODE_NO_TEST_SCRIPT = re.compile(r"no tests?\s+(?:specified|configured|yet)", re.IGNORECASE)
+
+#: Test runners we recognise. A body that names one is evidence; a body that
+#: does not is a script we cannot vouch for, so it is not "high" confidence.
+_NODE_TEST_RUNNERS = re.compile(
+    r"\b(?:jest|vitest|mocha|ava|tap|tape|karma|jasmine|playwright|cypress|nyc|c8|uvu|"
+    r"react-scripts\s+test|ng\s+test|bun\s+test|node\s+--test)\b",
+    re.IGNORECASE,
 )
 
 
@@ -252,18 +341,34 @@ def _discover_node(root: Path) -> tuple[list[VerificationCommand], list[str]]:
             break
 
     for script_name, kind in _NODE_SCRIPT_KINDS:
-        if script_name in scripts:
-            found.append(
-                VerificationCommand(
-                    kind=kind,
-                    command=(runner, "run", script_name),
-                    source=f"package.json scripts.{script_name}",
-                    confidence="high",
-                    evidence=(
-                        f"{runner} inferred from lockfile" if runner != "npm" else "npm default",
-                    ),
+        if script_name not in scripts:
+            continue
+        body = scripts[script_name]
+        body = body if isinstance(body, str) else ""
+        confidence: Confidence = "high"
+        if kind == "test":
+            if _NODE_NO_TEST_SCRIPT.search(body):
+                warnings.append(
+                    f"package.json scripts.{script_name} only reports that no tests "
+                    "exist, so it is not a verification command"
                 )
+                continue
+            if not _NODE_TEST_RUNNERS.search(body):
+                # The script may well run tests, but nothing here demonstrates
+                # it, and confidence must reflect what was actually observed.
+                confidence = "medium"
+        found.append(
+            VerificationCommand(
+                kind=kind,
+                command=(runner, "run", script_name),
+                source=f"package.json scripts.{script_name}",
+                confidence=confidence,
+                evidence=(
+                    f"{runner} inferred from lockfile" if runner != "npm" else "npm default",
+                    f"scripts.{script_name} = {body!r}",
+                ),
             )
+        )
     return found, warnings
 
 
@@ -342,42 +447,151 @@ _TEST_GLOBS: tuple[str, ...] = (
     "*.spec.js",
     "*_test.rs",
 )
-_TEST_SCAN_DEPTH = 3
+#: How many directory levels below the root are searched. Go packages keep
+#: ``*_test.go`` beside the code in ``internal/a/b/``, and workspace monorepos
+#: keep ``packages/*/tests/``; stopping short of those told repositories with
+#: passing suites that they had no tests, which routed them to "cannot be
+#: evaluated honestly" — the exact inversion this product must never commit.
+_TEST_SCAN_DEPTH = 4
+#: Directories that never hold a repository's *own* tests but often hold
+#: thousands of vendored ones. Walking them is both slow and misleading.
+_TEST_SCAN_SKIP_DIRS: frozenset[str] = frozenset(
+    {
+        "node_modules",
+        "vendor",
+        "venv",
+        "env",
+        "target",
+        "dist",
+        "build",
+        "__pycache__",
+        "site-packages",
+        "third_party",
+        "testdata",
+    }
+)
+#: Ceiling on directories visited, so a pathological tree cannot make discovery
+#: slow. Discovery must stay cheap enough to run unconditionally.
+_TEST_SCAN_MAX_DIRS = 2000
+#: ``test_files`` is evidence a human reads, not an index of the suite.
+_TEST_REPORT_LIMIT = 5
+#: Suffixes a test runner could actually execute. A directory named ``test``
+#: holding only ``fixtures.txt`` is not test material, and counting it let a
+#: repository with no tests at all be declared evaluable. The list is
+#: deliberately broad across ecosystems rather than tied to ``_TEST_GLOBS``,
+#: whose naming conventions do not cover Ruby, Java, or Elixir suites.
+_TEST_CODE_SUFFIXES: frozenset[str] = frozenset(
+    {
+        ".py",
+        ".js",
+        ".jsx",
+        ".mjs",
+        ".cjs",
+        ".ts",
+        ".tsx",
+        ".go",
+        ".rs",
+        ".rb",
+        ".java",
+        ".kt",
+        ".scala",
+        ".cs",
+        ".php",
+        ".swift",
+        ".ex",
+        ".exs",
+        ".c",
+        ".cc",
+        ".cpp",
+        ".m",
+        ".mm",
+        ".sh",
+        ".bats",
+        ".feature",
+    }
+)
 
 
-def _find_test_files(root: Path) -> tuple[str, ...]:
-    """Return observed test locations, bounded so large repositories stay fast.
+def _is_test_filename(name: str) -> bool:
+    # fnmatchcase, not fnmatch: case folding is a property of the host
+    # filesystem, and the profile must not depend on which machine ran it.
+    return any(fnmatch.fnmatchcase(name, pattern) for pattern in _TEST_GLOBS)
+
+
+def _find_test_files(root: Path) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Return observed test locations and any subtree that could not be read.
 
     Existence of a runner in a manifest proves only intent. This looks for
     material the runner could actually execute.
+
+    Directories named ``tests``/``test``/``spec``/``__tests__`` are reported in
+    preference to individual files: they describe the layout more usefully and
+    keep the evidence short. Results are sorted so the reported value is a
+    function of the repository alone — ``os.scandir`` order differs between
+    filesystems, which would otherwise make the same commit profile differently
+    on a developer machine and on CI.
+
+    Unreadable directories are returned rather than dropped: ``os.walk``
+    swallows scandir errors by default, which would let "the tests are in a
+    subtree we were denied" be reported as "there are no tests".
     """
 
-    found: list[str] = []
-    for name in _TEST_DIRS:
-        candidate = root / name
-        if candidate.is_dir():
-            try:
-                if any(candidate.iterdir()):
-                    found.append(f"{name}/")
-            except OSError:
-                continue
-    if found:
-        return tuple(found)
+    test_dir_candidates: list[str] = []
+    dirs_holding_code: list[str] = []
+    test_files: list[str] = []
+    unreadable: list[str] = []
+    visited = 0
 
-    for depth in range(_TEST_SCAN_DEPTH):
-        prefix = "*/" * depth
-        for pattern in _TEST_GLOBS:
-            try:
-                match = next(root.glob(prefix + pattern), None)
-            except OSError:
-                continue
-            if match is not None:
-                try:
-                    found.append(str(match.relative_to(root)))
-                except ValueError:  # pragma: no cover - defensive
-                    found.append(match.name)
-                return tuple(found)
-    return ()
+    def _on_walk_error(exc: OSError) -> None:
+        target = getattr(exc, "filename", None) or str(exc)
+        try:
+            target = os.path.relpath(target, root)
+        except (OSError, ValueError):  # pragma: no cover - defensive
+            pass
+        unreadable.append(str(target))
+
+    for dirpath, dirnames, filenames in os.walk(root, onerror=_on_walk_error):
+        visited += 1
+        if visited > _TEST_SCAN_MAX_DIRS:
+            break
+        try:
+            relative = Path(dirpath).relative_to(root)
+        except ValueError:  # pragma: no cover - defensive
+            continue
+        parts = relative.parts
+        depth = len(parts)
+        prefix = f"{relative.as_posix()}/" if depth else ""
+
+        if depth and parts[-1] in _TEST_DIRS:
+            test_dir_candidates.append(prefix)
+        if any(Path(name).suffix.lower() in _TEST_CODE_SUFFIXES for name in filenames):
+            dirs_holding_code.append(prefix)
+        test_files.extend(prefix + name for name in filenames if _is_test_filename(name))
+
+        if depth >= _TEST_SCAN_DEPTH:
+            dirnames.clear()
+            continue
+        # Hidden directories are skipped, matching the previous glob-based
+        # search, which never matched a leading dot.
+        dirnames[:] = sorted(
+            name
+            for name in dirnames
+            if name not in _TEST_SCAN_SKIP_DIRS and not name.startswith(".")
+        )
+
+    # A test directory only counts when it (or something under it) holds a file
+    # a runner could execute. Requiring executable material rather than any
+    # entry at all is what stops a `test/` folder of fixtures from being
+    # reported as a test suite.
+    qualifying_dirs = [
+        candidate
+        for candidate in test_dir_candidates
+        if any(holder.startswith(candidate) for holder in dirs_holding_code)
+    ]
+    skipped = tuple(sorted(set(unreadable))[:_TEST_REPORT_LIMIT])
+    if qualifying_dirs:
+        return tuple(sorted(qualifying_dirs)[:_TEST_REPORT_LIMIT]), skipped
+    return tuple(sorted(test_files)[:_TEST_REPORT_LIMIT]), skipped
 
 
 def discover_verification(repo_path: str | Path) -> VerificationInventory:
@@ -407,7 +621,15 @@ def discover_verification(repo_path: str | Path) -> VerificationInventory:
     commands.extend(_discover_other_ecosystems(root))
     commands.extend(_discover_make(root))
 
-    test_files = _find_test_files(root)
+    test_files, unreadable = _find_test_files(root)
+    if unreadable:
+        # Named, not counted: the user has to be able to check the claim, and
+        # "we were denied here" is a different answer from "nothing is there".
+        warnings.append(
+            "could not read "
+            + ", ".join(unreadable)
+            + "; any tests below are invisible to this scan"
+        )
     if not any(command.kind == "test" for command in commands):
         warnings.append(
             "no test command discovered; a Fit experiment cannot verify task "

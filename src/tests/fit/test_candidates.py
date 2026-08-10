@@ -242,3 +242,20 @@ def test_candidate_payload_is_json_serializable_and_versioned(tmp_path: Path) ->
     assert first["schema"] == "ctx.fit.candidate-v1"
     assert first["configuration_hash"]
     assert first["role_intent"]
+
+
+def test_the_control_arm_runs_the_same_model_as_the_treatment_arms(tmp_path: Path) -> None:
+    """A baseline on a different model is a confound, not a control.
+
+    The baseline previously carried ``model=None`` while the recommended and
+    lean arms carried the campaign model, so every reported difference mixed
+    the capability effect with a model effect.
+    """
+
+    result = _generate(tmp_path, model="gpt-4o-mini")
+
+    models = {candidate.model for candidate in result.candidates}
+    assert models == {"gpt-4o-mini"}, (
+        f"candidates do not share one model: "
+        f"{ {c.candidate_id: c.model for c in result.candidates} }"
+    )

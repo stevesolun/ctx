@@ -128,6 +128,31 @@ def _git(repo: Path, *args: str) -> str | None:
     return completed.stdout
 
 
+def _has_parent(repo: Path, sha: str) -> bool:
+    """Can ``<sha>^`` be resolved at all?
+
+    A revert-and-reimplement task is prepared by laying down the state *before*
+    the commit, so the first commit in a history has nothing to revert to and
+    the trial dies as an infrastructure failure. Shallow clones make this the
+    common case rather than the exotic one.
+    """
+
+    return _git(repo, "rev-parse", "--verify", "--quiet", f"{sha}^") is not None
+
+
+def _paths_in_tree(repo: Path, treeish: str, paths: tuple[str, ...]) -> frozenset[str]:
+    """Which of ``paths`` exist in ``treeish``. Empty if the tree cannot be read.
+
+    ``-z`` because ``ls-tree`` otherwise quotes paths outside ASCII, which would
+    silently fail the membership test it exists to answer.
+    """
+
+    listing = _git(repo, "ls-tree", "-r", "--name-only", "-z", treeish, "--", *paths)
+    if listing is None:
+        return frozenset()
+    return frozenset(item for item in listing.split("\0") if item)
+
+
 def _is_test_path(path: str) -> bool:
     lowered = path.lower()
     return (
@@ -170,6 +195,8 @@ def derive_tasks(
 
     tasks: list[FitTask] = []
     considered = 0
+    non_python = 0
+    unpreparable = 0
 
     for sha in log.split():
         if len(tasks) >= limit:
@@ -183,12 +210,37 @@ def derive_tasks(
             continue
 
         python_files = [item for item in files if item.endswith(".py")]
+        if not python_files:
+            non_python += 1
         source_paths = tuple(item for item in python_files if not _is_test_path(item))
         test_paths = tuple(item for item in python_files if _is_test_path(item))
         if not source_paths or not test_paths:
             continue
 
         considered += 1
+
+        # A task that cannot be *prepared* is worse than no task. It is counted
+        # into task_count, priced into the plan the user approves, and then
+        # fails as infrastructure on every candidate — which blanks the whole
+        # campaign's cost and forces a permanent no-verdict. Preparation is
+        # "export <sha>, then export <sha>^ over the source paths", so both
+        # trees have to actually contain what the task names.
+        if not _has_parent(repo, sha):
+            unpreparable += 1
+            continue
+        before = _paths_in_tree(repo, f"{sha}^", source_paths)
+        if any(path not in before for path in source_paths):
+            # The commit added this source file. Reverting restores files from
+            # the parent; it cannot delete one the parent never had, so the
+            # implementation would still be sitting there for the agent to find.
+            unpreparable += 1
+            continue
+        if any(path not in _paths_in_tree(repo, sha, test_paths) for path in test_paths):
+            # The commit deleted the test, so the file that decides this task
+            # is not in the tree the trial would run against.
+            unpreparable += 1
+            continue
+
         subject = _git(repo, "log", "-1", "--format=%s", sha) or ""
         tasks.append(
             FitTask(
@@ -202,7 +254,21 @@ def derive_tasks(
             )
         )
 
+    if unpreparable:
+        warnings.append(
+            f"skipped {unpreparable} otherwise-suitable commit(s) that cannot be "
+            "reverted: they have no parent commit, or they added the source file "
+            "the task would have to remove"
+        )
     if not tasks:
+        if non_python and not considered:
+            # Task derivation reads Python only, while `is_fit_evaluable` does
+            # not — so a Jest repository is told it can be evaluated and then
+            # refused. Naming the restriction is the least this can do.
+            warnings.append(
+                "task derivation reads Python source only, and none of the "
+                f"{non_python} recent commit(s) examined changed a .py file"
+            )
         warnings.append(
             "no commit in recent history changed both source and tests in a small "
             "enough diff to make an unambiguous task"

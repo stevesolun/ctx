@@ -6,6 +6,7 @@ import pytest
 
 from ctx.fit.candidates import CandidateConfiguration
 from ctx.fit.execution import (
+    CandidateOutcome,
     ExecutionReport,
     TrialResult,
     TrialRunner,
@@ -413,8 +414,260 @@ def test_no_qualifying_candidate_yields_no_verdict() -> None:
 
 
 # --------------------------------------------------------------------------
+# A failure of ours is not the candidate's, in cost as well as in reliability.
+# --------------------------------------------------------------------------
+
+
+def _outcome(candidate_id: str, rows: list[tuple[str, float | None]]) -> CandidateOutcome:
+    return CandidateOutcome(
+        candidate_id=candidate_id,
+        trials=tuple(
+            TrialResult(candidate_id, f"t{index}", 0, outcome, cost_usd=cost)  # type: ignore[arg-type]
+            for index, (outcome, cost) in enumerate(rows)
+        ),
+        reliability_floor=1.0,
+    )
+
+
+def _by_task_runner(unusable_task: str, cost_by_candidate: dict[str, float]):
+    """Every candidate verifies, except on one task nothing can prepare."""
+
+    def run(candidate: CandidateConfiguration, task: FitTask, index: int) -> TrialResult:
+        if task.task_id == unusable_task:
+            return TrialResult(
+                candidate_id=candidate.candidate_id,
+                task_id=task.task_id,
+                trial_index=index,
+                outcome="infrastructure-failure",
+                detail="could not revert source paths: no parent commit",
+            )
+        return TrialResult(
+            candidate_id=candidate.candidate_id,
+            task_id=task.task_id,
+            trial_index=index,
+            outcome="verified",
+            cost_usd=cost_by_candidate[candidate.candidate_id],
+        )
+
+    return run
+
+
+def test_one_unusable_task_does_not_make_every_cost_unknown() -> None:
+    """FITBUG-012: a root commit no one can revert must not disqualify the field."""
+
+    candidates = (_candidate("baseline"), _candidate("lean", capabilities=1))
+    report = execute_trials(
+        candidates,
+        (_task("t1"), _task("unusable")),
+        _by_task_runner("unusable", {"baseline": 0.50, "lean": 0.10}),
+        trials_per_task=3,
+    )
+
+    costs = {outcome.candidate_id: outcome.total_cost_usd for outcome in report.outcomes}
+    assert costs == {"baseline": 1.5, "lean": 0.3}
+
+    result = recommend(report, candidates, task_count=2, trials_per_task=3)
+    assert result.verdict == "recommend-change"
+    assert result.winner_id == "lean"
+    assert any("infrastructure reasons" in item for item in result.limitations)
+
+
+def test_an_infrastructure_failure_does_not_halt_a_budgeted_campaign() -> None:
+    """It spent nothing, so there is no untracked spend to stop for."""
+
+    report = execute_trials(
+        (_candidate("baseline"),),
+        (_task("t1"), _task("unusable")),
+        _by_task_runner("unusable", {"baseline": 0.10}),
+        trials_per_task=3,
+        budget_usd=10.0,
+    )
+
+    assert report.budget_stop == ""
+    assert report.trials_run == 6
+    assert report.trials_skipped_budget == 0
+    assert report.spent_usd == 0.3
+
+
+def test_an_inconclusive_trial_is_not_scored_against_the_candidate() -> None:
+    """FITBUG-013: a timeout taught us nothing, so it cannot count as a failure."""
+
+    candidates = (_candidate("baseline"),)
+    seen = {"count": 0}
+
+    def run(candidate: CandidateConfiguration, task: FitTask, index: int) -> TrialResult:
+        seen["count"] += 1
+        outcome = "inconclusive" if seen["count"] == 1 else "verified"
+        return TrialResult(
+            candidate_id=candidate.candidate_id,
+            task_id=task.task_id,
+            trial_index=index,
+            outcome=outcome,  # type: ignore[arg-type]
+            cost_usd=0.10,
+            detail="verification did not complete: timed out" if outcome == "inconclusive" else "",
+        )
+
+    report = execute_trials(
+        candidates, (_task("t1"), _task("t2"), _task("t3")), run, trials_per_task=3
+    )
+    outcome = report.outcomes[0]
+
+    # The eight trials after the timeout still ran, and all of them verified.
+    assert report.trials_run == 9
+    assert report.trials_skipped == 0
+    assert outcome.reliability == 1.0
+    assert outcome.is_reliable is True
+
+    result = recommend(report, candidates, task_count=3, trials_per_task=3)
+    assert result.verdict != "no-verdict"
+    # Evidence was still lost, and the report says so rather than quietly
+    # reweighting.
+    assert any("inconclusively" in item for item in result.limitations)
+
+
+# --------------------------------------------------------------------------
+# Candidates are only compared when they were given the same chance.
+# --------------------------------------------------------------------------
+
+
+def test_a_budget_truncated_candidate_cannot_win_on_fewer_trials() -> None:
+    """One trial at $0.50 is not cheaper than nine at $0.50; it is less work."""
+
+    candidates = (_candidate("baseline"), _candidate("lean", capabilities=1))
+    report = execute_trials(
+        candidates,
+        (_task("t1"), _task("t2"), _task("t3")),
+        _fixed_runner({}, cost=0.50),
+        trials_per_task=3,
+        budget_usd=5.0,
+    )
+    lean = next(item for item in report.outcomes if item.candidate_id == "lean")
+    assert lean.budget_truncated is True
+
+    result = recommend(report, candidates, task_count=3, trials_per_task=3)
+    ranked_lean = next(item for item in result.ranked if item.candidate_id == "lean")
+
+    assert ranked_lean.qualified is False
+    assert ranked_lean.exclusion_reason is not None
+    assert "budget ran out" in ranked_lean.exclusion_reason
+    assert result.winner_id == "baseline"
+    assert result.verdict == "keep-current"
+    assert any("did not finish inside the authorized budget" in i for i in result.limitations)
+    assert not any("across the same tasks" in line for line in result.reasoning)
+
+
+# --------------------------------------------------------------------------
+# The report says which check actually failed, and prints in ranking order.
+# --------------------------------------------------------------------------
+
+
+def test_no_verdict_names_the_exclusion_that_actually_fired() -> None:
+    """FITBUG-046: every candidate verified every trial; reliability is not the reason."""
+
+    candidates = (_candidate("baseline"), _candidate("lean", capabilities=1))
+    report = ExecutionReport(
+        outcomes=(
+            _outcome("baseline", [("verified", 0.10), ("verified", None)]),
+            _outcome("lean", [("verified", 0.02), ("verified", None)]),
+        )
+    )
+
+    result = recommend(report, candidates, task_count=3, trials_per_task=2)
+
+    assert result.verdict == "no-verdict"
+    assert all(item.reliability == 1.0 for item in result.ranked)
+    joined = " ".join(result.reasoning)
+    assert "never measured" in joined
+    assert "reliability floor" not in joined
+
+
+def test_an_unreliable_field_is_still_reported_as_unreliable() -> None:
+    """The reliability sentence must survive: it is right when it is right."""
+
+    candidates = (_candidate("a"),)
+    report = ExecutionReport(outcomes=(_outcome("a", [("failed", 0.10), ("verified", 0.10)]),))
+
+    result = recommend(report, candidates, task_count=3, trials_per_task=2)
+
+    assert result.verdict == "no-verdict"
+    assert any("reliability floor" in line for line in result.reasoning)
+
+
+def test_the_table_is_ordered_by_the_rule_that_chose_the_winner() -> None:
+    """FITBUG-069: the winner cannot be printed below candidates it beat."""
+
+    free_field = (_candidate("baseline"), _candidate("local-free", capabilities=1))
+    free_report = ExecutionReport(
+        outcomes=(
+            _outcome("baseline", [("verified", 0.50), ("verified", 0.50)]),
+            _outcome("local-free", [("verified", 0.0), ("verified", 0.0)]),
+        )
+    )
+    free = recommend(free_report, free_field, task_count=3, trials_per_task=2)
+
+    assert free.winner_id == "local-free"
+    assert [item.candidate_id for item in free.ranked] == ["local-free", "baseline"]
+
+    tied_field = (_candidate("recommended", capabilities=5), _candidate("lean", capabilities=1))
+    tied_report = ExecutionReport(
+        outcomes=(
+            _outcome("recommended", [("verified", 0.09), ("verified", 0.09)]),
+            _outcome("lean", [("verified", 0.09), ("verified", 0.09)]),
+        )
+    )
+    tied = recommend(tied_report, tied_field, task_count=3, trials_per_task=2)
+
+    assert tied.winner_id == "lean"
+    assert [item.candidate_id for item in tied.ranked] == ["lean", "recommended"]
+
+
+def test_keep_current_names_the_setup_that_is_being_kept() -> None:
+    """FITBUG-070: a winner that is not the baseline contradicts the headline."""
+
+    candidates = (_candidate("baseline", capabilities=3), _candidate("lean", capabilities=1))
+    report = ExecutionReport(
+        outcomes=(
+            _outcome("baseline", [("verified", 0.10), ("verified", 0.10)]),
+            _outcome("lean", [("verified", 0.10), ("verified", 0.10)]),
+        )
+    )
+
+    result = recommend(report, candidates, task_count=3, trials_per_task=2)
+
+    assert result.verdict == "keep-current"
+    assert result.winner_id == "baseline"
+
+
+# --------------------------------------------------------------------------
 # Simulation must never masquerade as evidence.
 # --------------------------------------------------------------------------
+
+
+def test_a_single_simulated_trial_quarantines_the_whole_recommendation() -> None:
+    """FITBUG-065: the per-trial flag is the durable one, so it must be read."""
+
+    candidates = (_candidate("baseline"), _candidate("lean", capabilities=1))
+    report = ExecutionReport(
+        outcomes=(
+            CandidateOutcome(
+                candidate_id="baseline",
+                trials=(TrialResult("baseline", "t1", 0, "verified", cost_usd=0.50),),
+                reliability_floor=1.0,
+            ),
+            CandidateOutcome(
+                candidate_id="lean",
+                trials=(TrialResult("lean", "t1", 0, "verified", cost_usd=0.01, simulated=True),),
+                reliability_floor=1.0,
+            ),
+        ),
+        simulated=False,  # the caller's flag disagrees with the evidence
+    )
+
+    result = recommend(report, candidates, task_count=3, trials_per_task=1)
+
+    assert result.simulated is True
+    assert result.headline.startswith("SIMULATED")
+    assert result.confidence == "low"
 
 
 def test_simulated_results_are_labelled_everywhere() -> None:

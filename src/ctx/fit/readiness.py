@@ -28,6 +28,9 @@ subprocess.
 
 from __future__ import annotations
 
+import fnmatch
+import os
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -206,11 +209,18 @@ def _exists(root: Path, *names: str) -> str | None:
 
 
 def _glob_first(root: Path, pattern: str) -> str | None:
+    """First match by name, not by directory order.
+
+    ``Path.glob`` yields entries in ``os.scandir`` order, which is a property of
+    the filesystem rather than of the repository, so an unsorted pick published
+    a different value for the same commit on APFS and on ext4.
+    """
+
     try:
-        match = next(root.glob(pattern), None)
+        names = sorted(match.name for match in root.glob(pattern))
     except OSError:
         return None
-    return match.name if match else None
+    return names[0] if names else None
 
 
 # --------------------------------------------------------------------------
@@ -259,6 +269,33 @@ def _check_instructions_present(
     return "fail", ("no agent instruction file (AGENTS.md, CLAUDE.md, ...) found",)
 
 
+#: Ways an instruction file can name a test runner. Anchored on word
+#: boundaries because a bare ``test`` substring matched "latest", "fastest" and
+#: "contest", handing out the points for an ordinary English word and then
+#: asserting, as evidence, something the file does not say.
+_TEST_RUNNER_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"\bpytest\b",
+        r"\bpython\s+-m\s+unittest\b",
+        r"\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test\b",
+        r"\bcargo\s+test\b",
+        r"\bgo\s+test\b",
+        r"\bmake\s+test\b",
+        r"\btox\b",
+    )
+)
+
+
+def _discovered_command_pattern(command: tuple[str, ...]) -> re.Pattern[str] | None:
+    """Match the exact discovered command, whitespace-insensitively."""
+
+    if not command:
+        return None
+    body = r"\s+".join(re.escape(word) for word in command)
+    return re.compile(rf"(?<!\S){body}(?!\S)", re.IGNORECASE)
+
+
 def _check_instructions_mention_verification(
     profile: FitProfile, root: Path
 ) -> tuple[CheckState, tuple[str, ...]]:
@@ -268,34 +305,78 @@ def _check_instructions_mention_verification(
     test_command = profile.verification.best("test")
     if test_command is None:
         return "unassessable", ("no known test command to look for",)
-    needle = test_command.command[-1] if test_command.command else ""
-    tokens = {token for token in (needle, "pytest", "test", "npm test", "cargo test") if token}
+    discovered = _discovered_command_pattern(test_command.command)
+    patterns = ([discovered] if discovered is not None else []) + list(_TEST_RUNNER_PATTERNS)
     for name in files:
         try:
-            text = (root / name).read_text(encoding="utf-8", errors="replace").lower()
+            text = (root / name).read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        if any(token.lower() in text for token in tokens):
-            return "pass", (f"{name} references how to run tests",)
+        for pattern in patterns:
+            match = pattern.search(text)
+            if match is not None:
+                # Quote what actually matched, so the evidence is falsifiable
+                # by anyone reading the file.
+                return "pass", (f"{name} names a test command: {match.group(0).strip()!r}",)
     return "fail", (f"{', '.join(files)} never mention how to verify a change",)
+
+
+#: Files that pin resolved versions. ``requirements.txt`` is deliberately not
+#: here: it is a *request* list, and only counts once it actually pins.
+_LOCKFILES: tuple[str, ...] = (
+    "poetry.lock",
+    "uv.lock",
+    "Pipfile.lock",
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "Cargo.lock",
+    "go.sum",
+)
+
+
+def _requirements_pin_state(path: Path) -> tuple[CheckState, tuple[str, ...]]:
+    """Grade a requirements.txt by whether it pins anything.
+
+    The check's rationale is that a passing run has to be reproducible on
+    another machine. ``requests``/``flask`` on two lines provides none of that,
+    so it cannot earn the same marks as a real lockfile.
+    """
+
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return "unassessable", ("requirements.txt could not be read",)
+    entries = [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    if not entries:
+        return "partial", ("requirements.txt is committed but lists nothing",)
+    if any("--hash=" in entry for entry in entries):
+        return "pass", ("requirements.txt carries hashes, so resolution is reproducible",)
+    # Lines starting with '-' are pip options (-r, -e, --index-url), not pins.
+    requirements = [entry for entry in entries if not entry.startswith("-")]
+    unpinned = [entry for entry in requirements if "==" not in entry]
+    if not requirements:
+        return "partial", ("requirements.txt only references other files",)
+    if unpinned:
+        return "partial", (
+            f"requirements.txt is committed but {len(unpinned)} of "
+            f"{len(requirements)} entries are unpinned",
+        )
+    return "pass", ("requirements.txt pins every entry with ==",)
 
 
 def _check_lockfile(profile: FitProfile, root: Path) -> tuple[CheckState, tuple[str, ...]]:
     languages = {item.get("name") for item in profile.stack.get("languages", [])}
-    found = _exists(
-        root,
-        "poetry.lock",
-        "uv.lock",
-        "Pipfile.lock",
-        "requirements.txt",
-        "package-lock.json",
-        "pnpm-lock.yaml",
-        "yarn.lock",
-        "Cargo.lock",
-        "go.sum",
-    )
+    found = _exists(root, *_LOCKFILES)
     if found:
         return "pass", (f"{found} is committed",)
+    requirements = root / "requirements.txt"
+    if requirements.is_file():
+        return _requirements_pin_state(requirements)
     if not languages:
         return "unassessable", ("no language detected, so no lockfile convention applies",)
     return "fail", ("no dependency lockfile is committed",)
@@ -329,28 +410,212 @@ def _check_ci_configured(profile: FitProfile, root: Path) -> tuple[CheckState, t
     return "fail", ("no CI configuration found",)
 
 
-def _check_ci_runs_tests(profile: FitProfile, root: Path) -> tuple[CheckState, tuple[str, ...]]:
+#: Tokens that indicate a CI step actually runs the suite.
+_CI_TEST_TOKENS: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"\bpytest\b",
+        r"\bpython\s+-m\s+pytest\b",
+        r"\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test\b",
+        r"\bgo\s+test\b",
+        r"\bcargo\s+test\b",
+        r"\bmake\s+test\b",
+        r"\btox\b",
+    )
+)
+
+#: Commands that only *provision* a runner. A job that installs pytest and then
+#: lints enforces nothing an agent could fail, which is precisely the case C2
+#: exists to catch, so these must never be read as "CI runs the tests".
+#:
+#: Judged per shell command, never per line: ``npm ci && npm test`` is one step
+#: that both provisions and runs, and vetoing the whole line for it told the
+#: most ordinary Node workflow there is that its CI does not run tests.
+_CI_INSTALL_MARKERS: tuple[str, ...] = (
+    "pip install",
+    "pip3 install",
+    "pip download",
+    "uv pip install",
+    "uv sync",
+    "uv add",
+    "poetry install",
+    "poetry add",
+    "pipx install",
+    "conda install",
+    "npm ci",
+    "npm install",
+    "npm i ",
+    "yarn install",
+    "pnpm install",
+    "apt-get",
+    "apt install",
+    "brew install",
+    "cargo install",
+    "go install",
+    "requirements.txt",
+    "restore-keys",
+    "cache-dependency-path",
+)
+
+#: Shell separators that end one command and begin another inside a single
+#: ``run:`` line.
+_CI_COMMAND_SPLIT: re.Pattern[str] = re.compile(r"&&|\|\||;|\|")
+
+#: YAML keys whose value is data, not a command. A cache entry named
+#: ``pytest-cache-v1`` is not a test run, and claiming it is puts a quoted
+#: non-command in the evidence as proof the suite executes.
+_CI_DATA_KEYS: frozenset[str] = frozenset(
+    {
+        "cache",
+        "cache-dependency-path",
+        "container",
+        "id",
+        "if",
+        "image",
+        "key",
+        "labels",
+        "name",
+        "needs",
+        "path",
+        "paths",
+        "restore-keys",
+        "runs-on",
+        "uses",
+        "working-directory",
+    }
+)
+
+#: ``- key: value`` or ``key: value``, the only shapes where the key governs
+#: what the rest of the line means.
+_CI_YAML_KEY: re.Pattern[str] = re.compile(r"^(?:-\s*)?([A-Za-z_][\w.-]*)\s*:(?:\s|$)")
+
+
+def _ci_config_files(root: Path) -> list[Path]:
+    """Every CI definition C1 recognises, so C2 can inspect the same set."""
+
+    found: list[Path] = []
     workflows = root / ".github" / "workflows"
-    if not workflows.is_dir():
-        return "not_applicable", ("no GitHub Actions workflows to inspect",)
-    try:
-        files = [item for item in sorted(workflows.iterdir()) if item.is_file()][:16]
-    except OSError:
-        return "unassessable", ("workflow directory could not be read",)
+    if workflows.is_dir():
+        try:
+            found.extend(item for item in sorted(workflows.iterdir()) if item.is_file())
+        except OSError:
+            pass
+    for name in (".gitlab-ci.yml", ".gitlab-ci.yaml", "azure-pipelines.yml", "Jenkinsfile"):
+        candidate = root / name
+        if candidate.is_file():
+            found.append(candidate)
+    circleci = root / ".circleci"
+    if circleci.is_dir():
+        try:
+            found.extend(item for item in sorted(circleci.iterdir()) if item.is_file())
+        except OSError:
+            pass
+    return found[:16]
+
+
+def _ci_line_runs_tests(line: str) -> re.Match[str] | None:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        return None
+    key = _CI_YAML_KEY.match(stripped)
+    if key is not None and key.group(1).lower() in _CI_DATA_KEYS:
+        return None
+    # Per command, not per line: the install veto answers "is *this* command
+    # only provisioning?", and a chained step contains both answers.
+    for segment in _CI_COMMAND_SPLIT.split(stripped):
+        command = segment.strip()
+        if not command or command.startswith("#"):
+            continue
+        # Padded so a marker written with a trailing space ("npm i ") still
+        # matches a command that ends there.
+        padded = f" {command.lower()} "
+        if any(marker in padded for marker in _CI_INSTALL_MARKERS):
+            continue
+        for pattern in _CI_TEST_TOKENS:
+            match = pattern.search(command)
+            if match is not None:
+                return match
+    return None
+
+
+def _check_ci_runs_tests(profile: FitProfile, root: Path) -> tuple[CheckState, tuple[str, ...]]:
+    files = _ci_config_files(root)
+    if not files:
+        return "not_applicable", ("no CI configuration to inspect",)
+    readable = 0
     for item in files:
         try:
-            text = item.read_text(encoding="utf-8", errors="replace").lower()
+            text = item.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        if any(token in text for token in ("pytest", "npm test", "go test", "cargo test", "tox")):
-            return "pass", (f"{item.name} runs the test suite",)
-    return "fail", ("no workflow appears to run the test suite",)
+        readable += 1
+        for line in text.splitlines():
+            match = _ci_line_runs_tests(line)
+            if match is not None:
+                return "pass", (f"{item.name} runs the test suite: {line.strip()!r}",)
+    if not readable:
+        # CI exists but could not be read: unknown is not the same as absent,
+        # and scoring it zero would be the readiness analogue of treating
+        # unknown cost as free.
+        return "unassessable", ("CI configuration exists but could not be read",)
+    return "fail", ("no CI job appears to run the test suite",)
 
 
 def _check_version_control(_profile: FitProfile, root: Path) -> tuple[CheckState, tuple[str, ...]]:
-    if (root / ".git").exists():
-        return "pass", ("repository is under Git, so agent changes are reversible",)
-    return "fail", ("no .git directory: agent changes could not be reviewed or reverted",)
+    """Pass when the analysed directory is *inside* a repository.
+
+    Running ``ctx`` in ``repo/backend`` is ordinary, and containment is intact
+    there: every change is tracked by the repository above. Testing only the
+    argument directory reported "no .git directory" for a tracked subdirectory
+    and then advised initializing a nested repository, which is worse than the
+    situation it described.
+    """
+
+    try:
+        start = root.resolve()
+    except OSError:  # pragma: no cover - defensive
+        start = root
+    for candidate in (start, *start.parents):
+        if (candidate / ".git").exists():
+            if candidate == start:
+                return "pass", ("repository is under Git, so agent changes are reversible",)
+            # The directory name, not the absolute path: an absolute path makes
+            # the report differ between machines for the same repository, and
+            # the bare relative form ("..") named nothing the user could check.
+            depth = os.path.relpath(candidate, start)
+            name = candidate.name or str(candidate)
+            return "pass", (
+                f"under Git via the {name}/ repository at {depth}, so agent changes are reversible",
+            )
+    return "fail", ("no .git directory here or in any parent: agent changes could not be reverted",)
+
+
+def _gitignore_ignores(text: str, path: str) -> bool:
+    """Whether the .gitignore body would actually ignore ``path``.
+
+    A raw ``".env" in text`` test passed on ``.envrc`` (direnv), ``.env.example``
+    and even the negation ``!.env`` — so a repository holding real secrets in an
+    unignored ``.env`` got an affirmative all-clear on the one check that exists
+    to warn it. Git's rule is that the *last* matching pattern decides, which is
+    what this reproduces.
+    """
+
+    ignored = False
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        negated = line.startswith("!")
+        if negated:
+            line = line[1:]
+        pattern = line.strip().strip("/")
+        if pattern.startswith("**/"):
+            pattern = pattern[3:]
+        if not pattern:
+            continue
+        if fnmatch.fnmatchcase(path, pattern):
+            ignored = not negated
+    return ignored
 
 
 def _check_secret_hygiene(_profile: FitProfile, root: Path) -> tuple[CheckState, tuple[str, ...]]:
@@ -362,12 +627,12 @@ def _check_secret_hygiene(_profile: FitProfile, root: Path) -> tuple[CheckState,
         text = gitignore.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return "unassessable", (".gitignore could not be read",)
-    ignores_env = ".env" in text
+    ignores_env = _gitignore_ignores(text, ".env")
     if committed_env and not ignores_env:
         return "fail", ("a .env file is present and not ignored",)
     if ignores_env:
         return "pass", (".gitignore excludes .env",)
-    return "partial", (".gitignore exists but does not mention .env",)
+    return "partial", (".gitignore exists but does not ignore .env",)
 
 
 def _check_repo_tractable(profile: FitProfile, _root: Path) -> tuple[CheckState, tuple[str, ...]]:

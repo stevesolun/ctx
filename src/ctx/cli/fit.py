@@ -57,7 +57,10 @@ def register(sub: argparse._SubParsersAction) -> None:
     parser.add_argument(
         "--pr",
         action="store_true",
-        help="Prepare a branch and pull-request body. Never merges.",
+        help=(
+            "Print a pull-request body and a suggested branch name. Creates no "
+            "branch, commits nothing and never merges."
+        ),
     )
     parser.add_argument(
         "--yes",
@@ -198,12 +201,13 @@ def _format_dry_run(profile: FitProfile) -> str:
         "",
         "Dry run — a full Fit evaluation would:",
         "  1. profile this repository            (done; no cost)",
-        "  2. derive representative tasks        (not implemented yet)",
+        "  2. derive representative tasks        from recent commits (no cost)",
         f"  3. generate bounded candidates over   {', '.join(evaluable) or 'nothing evaluable'}",
         "  4. run each candidate against the baseline, repeated for reliability",
         "  5. verify every trial with the repository's own commands above",
         "  6. keep only candidates that reliably pass, then pick the cheapest",
-        "  7. open a PR containing the winning configuration",
+        "  7. write the winning configuration and print a pull-request body "
+        "(no branch is created and nothing is merged)",
         "",
         "The winner is the cheapest configuration that reliably works — "
         "reliability is a requirement, not a tie-break. If nothing beats your "
@@ -216,6 +220,14 @@ def _format_dry_run(profile: FitProfile) -> str:
 
 DEFAULT_MODEL = "gpt-4o-mini"
 
+#: What a single exchange with the agent is assumed to cost, mirroring
+#: ``plan_experiment``'s per-exchange defaults. They are restated here so the
+#: call site can scale them: one execution is a whole ``ctx run`` loop, not one
+#: exchange, and pricing it as one exchange let the budget gate approve a plan
+#: costing an order of magnitude more than the number the user was shown.
+EXCHANGE_INPUT_TOKENS = 20_000
+EXCHANGE_OUTPUT_TOKENS = 4_000
+
 
 def _build_plan(profile: FitProfile, budget: float | None, *, model: str = DEFAULT_MODEL) -> object:
     """Plan the experiment without calling a model or spending anything."""
@@ -223,6 +235,7 @@ def _build_plan(profile: FitProfile, budget: float | None, *, model: str = DEFAU
     from ctx.engine.planner import BoundedCapabilityPlanner
     from ctx.fit.candidates import CandidateSet, generate_candidates
     from ctx.fit.experiment import ModelPrice, plan_experiment
+    from ctx.fit.providers import DEFAULT_MAX_ITERATIONS
     from ctx.fit.release_catalog import open_release_candidate_source
     from ctx.fit.tasks import derive_tasks
 
@@ -249,6 +262,12 @@ def _build_plan(profile: FitProfile, budget: float | None, *, model: str = DEFAU
         task_count=len(tasks.tasks),
         budget_usd=budget,
         price=ModelPrice.from_litellm(model),
+        # The harness is launched with an iteration bound and every iteration
+        # resends the accumulated context, so the plan is priced for the loop
+        # the trial will actually run rather than for its first exchange. A
+        # spend gate that under-promises is worse than one that over-promises.
+        expected_input_tokens=EXCHANGE_INPUT_TOKENS * DEFAULT_MAX_ITERATIONS,
+        expected_output_tokens=EXCHANGE_OUTPUT_TOKENS * DEFAULT_MAX_ITERATIONS,
     )
 
 
@@ -274,6 +293,9 @@ def _format_plan(plan: object) -> str:
         lines.append("  Estimated cost:    not applicable — nothing would run")
     elif cost.is_known:
         lines.append(f"  Estimated cost:    ${cost.low_usd}-${cost.high_usd}")
+        # The basis is what makes the number checkable. Hiding it whenever the
+        # estimate succeeds leaves the user approving a figure they cannot audit.
+        lines.append(f"                     {cost.basis}")
     else:
         lines.append("  Estimated cost:    unknown")
         lines.append(f"                     {cost.basis}")
@@ -398,18 +420,47 @@ def _run_evaluation(
         budget_usd=None if simulated else args.budget,
         runner_for_budget=runner_for_budget,
     )
+    # Tasks that never produced a scored trial -- an infrastructure failure, or
+    # one abandoned by adaptive stopping -- are not evidence. Counting them
+    # overstates the evidence base in the very section that exists to say how
+    # thin it is.
+    evaluated_tasks = {
+        trial.task_id
+        for outcome in report.outcomes
+        for trial in outcome.trials
+        if trial.counts_toward_reliability
+    }
     recommendation = recommend(
-        report, candidates.candidates, task_count=len(tasks), trials_per_task=3
+        report, candidates.candidates, task_count=len(evaluated_tasks), trials_per_task=3
     )
 
-    banner = (
-        "No provider credentials found, so this ran in SIMULATION. It proves the "
-        "evaluation pipeline works end to end and proves nothing about this "
-        "repository. Set OPENAI_API_KEY or ANTHROPIC_API_KEY for a real run."
-        if simulated
-        else "Real execution is not wired yet; this run was simulated."
+    return recommendation, candidates.candidates, _banner(report, simulated=simulated), report
+
+
+def _banner(report: object, *, simulated: bool) -> str:
+    """The last line the user reads, which has to match what happened."""
+
+    from ctx.fit.execution import ExecutionReport
+
+    assert isinstance(report, ExecutionReport)
+    if simulated:
+        return (
+            "No provider credentials found, so this ran in SIMULATION. It proves the "
+            "evaluation pipeline works end to end and proves nothing about this "
+            "repository. Set OPENAI_API_KEY or ANTHROPIC_API_KEY for a real run."
+        )
+    # This arm used to claim the run was simulated, contradicting both the
+    # report and the JSON payload of the same run: real trials had executed and
+    # real money had been spent.
+    spend = (
+        f"${report.spent_usd} was spent"
+        if report.spent_usd is not None
+        else "total spend was not tracked"
     )
-    return recommendation, candidates.candidates, banner, report
+    return (
+        f"This was a real run: {report.trials_run} trial(s) executed against "
+        f"throwaway copies of this repository and {spend}."
+    )
 
 
 def _format_recommendation(recommendation: object) -> str:
@@ -457,10 +508,53 @@ def _format_budget_stop(report: object) -> str:
     )
 
 
+def _json_payload(
+    profile: FitProfile,
+    args: argparse.Namespace,
+    *,
+    plan: object | None = None,
+    recommendation: object | None = None,
+    report: object | None = None,
+) -> dict[str, object]:
+    """The one JSON document every ``--json`` path emits.
+
+    Each branch used to assemble its own, so a blocked plan silently dropped
+    ``readiness`` and ``dry_run`` while still declaring the same schema version.
+    A consumer's key set must depend on the schema and the flags, never on which
+    branch happened to produce the answer.
+    """
+
+    from ctx.fit.readiness import score_readiness
+
+    payload = profile.to_dict()
+    payload["readiness"] = score_readiness(profile).to_dict()
+    if plan is not None:
+        payload["plan"] = plan.to_dict()  # type: ignore[attr-defined]
+        payload["dry_run"] = bool(args.dry_run)
+    if recommendation is not None:
+        payload["recommendation"] = recommendation.to_dict()  # type: ignore[attr-defined]
+    if report is not None:
+        # What was actually spent against the authorization, and whether the
+        # campaign was cut short by it: a machine-readable consumer needs
+        # that as much as a human does.
+        payload["execution"] = report.to_dict()  # type: ignore[attr-defined]
+    return payload
+
+
 def cmd_fit(args: argparse.Namespace) -> int:
     """Run the Fit profiler. Returns a process exit code."""
 
     from ctx.fit.profile import build_fit_profile
+
+    if args.json and (args.apply or args.pr):
+        # The JSON branch returns before the apply handling, so honouring these
+        # would have meant claiming success for work that never happened.
+        print(
+            "error: --apply and --pr cannot be combined with --json. Re-run "
+            "without --json to review and write the winning configuration.",
+            file=sys.stderr,
+        )
+        return 2
 
     try:
         profile = build_fit_profile(args.repo, max_depth=args.max_depth)
@@ -469,6 +563,7 @@ def cmd_fit(args: argparse.Namespace) -> int:
         return 2
 
     wants_plan = bool(args.dry_run or args.budget is not None or args.test)
+    plan = _build_plan(profile, args.budget) if wants_plan else None
 
     # Evaluation is the only step that can spend, so it is gated twice: an
     # explicit --test, and a budget the plan must fit.
@@ -478,43 +573,52 @@ def cmd_fit(args: argparse.Namespace) -> int:
     banner = ""
     report: object | None = None
     if evaluating:
-        plan = _build_plan(profile, args.budget)
+        assert plan is not None
         if not plan.can_execute:  # type: ignore[attr-defined]
             if not args.json:
                 print(_format_profile(profile))
                 print(_format_plan(plan))
                 print("\nNothing was run and nothing was spent.")
             else:
-                payload = profile.to_dict()
-                payload["plan"] = plan.to_dict()  # type: ignore[attr-defined]
-                print(json.dumps(payload, indent=2, sort_keys=True))
+                print(json.dumps(_json_payload(profile, args, plan=plan), indent=2, sort_keys=True))
             return 1
-        recommendation, candidates, banner, report = _run_evaluation(profile, args)
+
+        # Imported here rather than at the top of the function: a bare profile
+        # run must not pay for the provider stack it will never touch.
+        from ctx.fit.providers import ProviderUnavailable
+
+        try:
+            recommendation, candidates, banner, report = _run_evaluation(profile, args)
+        except ProviderUnavailable as exc:
+            # Credentials are present, so a real run is what was asked for.
+            # Falling back to simulation would answer a different question, and
+            # letting this escape printed a traceback out of a product whose
+            # contract is to refuse cleanly.
+            print(f"error: a real evaluation cannot run here: {exc}", file=sys.stderr)
+            print(
+                "Nothing was run and nothing was spent. Install CTX so `ctx` is on "
+                "PATH, or unset the provider credentials to run in simulation.",
+                file=sys.stderr,
+            )
+            return 1
 
     if args.json:
-        from ctx.fit.readiness import score_readiness
-
-        payload = profile.to_dict()
-        payload["readiness"] = score_readiness(profile).to_dict()
-        if wants_plan:
-            plan = _build_plan(profile, args.budget)
-            payload["plan"] = plan.to_dict()  # type: ignore[attr-defined]
-            payload["dry_run"] = bool(args.dry_run)
-        if recommendation is not None:
-            payload["recommendation"] = recommendation.to_dict()  # type: ignore[attr-defined]
-        if report is not None:
-            # What was actually spent against the authorization, and whether the
-            # campaign was cut short by it: a machine-readable consumer needs
-            # that as much as a human does.
-            payload["execution"] = report.to_dict()  # type: ignore[attr-defined]
-        print(json.dumps(payload, indent=2, sort_keys=True))
+        print(
+            json.dumps(
+                _json_payload(
+                    profile, args, plan=plan, recommendation=recommendation, report=report
+                ),
+                indent=2,
+                sort_keys=True,
+            )
+        )
         return 0
 
     print(_format_profile(profile))
     if args.dry_run:
         print(_format_dry_run(profile))
-    if wants_plan and not evaluating:
-        print(_format_plan(_build_plan(profile, args.budget)))
+    if plan is not None and not evaluating:
+        print(_format_plan(plan))
 
     if recommendation is not None:
         print(_format_recommendation(recommendation))
@@ -551,12 +655,18 @@ def _handle_apply(
     for artifact in plan.artifacts:
         print(f"  {artifact.action}: {artifact.path} ({artifact.reason})")
     if args.pr:
-        print(f"\nBranch: {plan.branch}")
-        print(f"PR:     {plan.pr_title}")
+        # Nothing here runs git. Printing "Branch: x" as a statement of fact led
+        # a reader to believe the write was isolated on a branch they could
+        # delete, when --apply modifies the working tree they are standing in.
+        print(f"\nSuggested branch (not created): {plan.branch}")
+        print(f"PR title:                       {plan.pr_title}")
         print("\n--- pull request body ---")
         print(plan.pr_body)
         print("--- end ---")
-        print("\nCTX Fit never merges. Review before merging.")
+        print(
+            "\nCTX Fit creates no branch, commits nothing and never merges: any "
+            "changes below land in your working tree on the current branch."
+        )
 
     if not args.apply:
         return 0

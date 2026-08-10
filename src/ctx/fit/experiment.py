@@ -18,6 +18,7 @@ be the most damaging possible bug in a product whose objective is "cheapest".
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Literal
 
@@ -36,15 +37,21 @@ CostCompleteness = Literal["known", "partial", "unknown"]
 PlanDecision = Literal[
     "ready",
     "blocked-no-budget",
+    "blocked-invalid-budget",
     "blocked-unknown-cost",
     "blocked-over-budget",
     "blocked-not-evaluable",
+    "blocked-no-candidates",
     "blocked-no-tasks",
 ]
 
 DECISION_EXPLANATION: dict[PlanDecision, str] = {
     "ready": "the plan fits the budget and can be executed",
     "blocked-no-budget": ("execution needs an explicit budget; CTX Fit never spends without one"),
+    "blocked-invalid-budget": (
+        "the budget is not a finite number of dollars, so nothing can be checked "
+        "against it; supply a real amount such as --budget 5"
+    ),
     "blocked-unknown-cost": (
         "the cost of this plan cannot be derived, so it cannot be checked against a "
         "budget; supply pricing or run without a budget to see the plan only"
@@ -52,6 +59,9 @@ DECISION_EXPLANATION: dict[PlanDecision, str] = {
     "blocked-over-budget": "the estimated cost exceeds the budget",
     "blocked-not-evaluable": (
         "this repository has no runnable tests, so no candidate could be verified"
+    ),
+    "blocked-no-candidates": (
+        "no candidate configuration could be proposed, so there is nothing to compare"
     ),
     "blocked-no-tasks": (
         "no representative task could be derived, so an experiment would run zero "
@@ -148,6 +158,14 @@ class ExperimentPlan:
     budget_usd: float | None
     decision: PlanDecision
     warnings: tuple[str, ...] = ()
+    cause: str = ""
+    """The specific cause behind ``decision``, when one was actually observed.
+
+    A decision is a category; the cause is what happened. Where the two differ
+    the user needs the cause, because that is the thing they can act on — being
+    told to add tests to a repository that has them sends them to fix something
+    that is not broken (FITBUG-014).
+    """
 
     @property
     def can_execute(self) -> bool:
@@ -155,7 +173,7 @@ class ExperimentPlan:
 
     @property
     def explanation(self) -> str:
-        return DECISION_EXPLANATION[self.decision]
+        return self.cause or DECISION_EXPLANATION[self.decision]
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -245,14 +263,31 @@ def plan_experiment(
         )
 
     decision: PlanDecision
-    if not profile.is_fit_evaluable or candidates.abstained:
+    cause = ""
+    if not profile.is_fit_evaluable:
         decision = "blocked-not-evaluable"
+    elif candidates.abstained:
+        # Abstention has several causes — an unopenable catalog, nothing in it
+        # relevant to this repository, nothing a trial could actually apply —
+        # and none of them is "this repository has no tests". Collapsing them
+        # into blocked-not-evaluable made the output contradict itself three
+        # lines apart, so the observed reason is carried through instead.
+        decision = "blocked-no-candidates"
+        cause = candidates.abstention_reason or ""
     elif task_count <= 0:
         # Zero tasks means zero executions. Such a plan trivially "fits" any
         # budget while proving nothing, so it must never be reported runnable.
         decision = "blocked-no-tasks"
     elif budget_usd is None:
         decision = "blocked-no-budget"
+    elif not math.isfinite(budget_usd):
+        # Every comparison against NaN is False, so an unchecked NaN budget
+        # walks straight past the over-budget test into "ready": the one gate
+        # before real spend, failing open. Infinity is refused with it — a
+        # budget that no cost can exceed is not a bound on spending, and this
+        # module's whole promise is that an unenforceable number is blocked
+        # rather than waved through.
+        decision = "blocked-invalid-budget"
     elif not cost.is_known:
         # A budget cannot be enforced against a number that does not exist.
         decision = "blocked-unknown-cost"
@@ -280,6 +315,7 @@ def plan_experiment(
         budget_usd=budget_usd,
         decision=decision,
         warnings=tuple(warnings),
+        cause=cause,
     )
 
 
