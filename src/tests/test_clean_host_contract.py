@@ -153,6 +153,25 @@ class RecordingRunner(CommandRunner):
                     encoding="utf-8",
                 )
             return CompletedCommand(call, cwd, 0, "claude preflight\n", "")
+        elif (
+            call
+            and Path(call[0]).name.startswith("ctx")
+            and (len(call) == 1 or call[1] in {"fit", "doctor"})
+        ):
+            # The product surface. These tests pin the command SEQUENCE, so the
+            # stub only has to look like the real thing; whether the installed
+            # wheel can actually run it is what the real contract run proves.
+            if "--json" in call:
+                return CompletedCommand(
+                    call, cwd, 0, json.dumps({"schema": "ctx.fit.profile-v1"}), ""
+                )
+            if len(call) > 1 and call[1] == "doctor":
+                return CompletedCommand(
+                    call, cwd, 0, "CTX Fit diagnostics\nprovider ...\ncatalog ...\n", ""
+                )
+            return CompletedCommand(
+                call, cwd, 0, "Repository: /tmp/tiny\n\nAI agent readiness\n  7/100\n", ""
+            )
         stdout = '{"stop_reason": "tool_denied"}' if "--deny-tool" in call else ""
         rc = 2 if "--deny-tool" in call else 0
         return CompletedCommand(call, cwd, rc, stdout, "")

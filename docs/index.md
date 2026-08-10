@@ -257,7 +257,7 @@ ones are flagged. New ones self-ingest.
     ---
 
     Current main is **v1.0.21** — MIT, CI-matrixed (Ubuntu 3.12 plus Windows/macOS 3.11/3.12),
-    8,354 test inventory. Adds enterprise OpenTelemetry-ready telemetry and
+    8,398 test inventory. Adds enterprise OpenTelemetry-ready telemetry and
     ships seven console scripts led by `ctx` and `ctx-init`. The maintenance
     tools are still shipped and still work, now via `python -m`:
     `ctx_monitor serve` (local dashboard with graph + wiki + load/unload for

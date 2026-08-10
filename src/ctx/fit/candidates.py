@@ -62,6 +62,21 @@ ROLE_INTENT: dict[CandidateRole, str] = {
 #: adding much information at the sample sizes Fit can afford.
 MAX_CANDIDATES = 4
 
+#: The capability kinds a Fit trial can genuinely put in front of the agent.
+#:
+#: A skill reaches the model as context attached to the request, which the
+#: trial driver can reproduce exactly. An agent needs a second model role, and
+#: an MCP server needs a process attached to the run; the driver has a channel
+#: for neither, and pasting a description of a tool is not attaching the tool.
+#:
+#: Anything else must therefore be left out of the experiment rather than
+#: carried into it. A candidate that differs from the baseline only in
+#: something the trial cannot vary is the same run under a different name, and
+#: reporting the two as compared would invent the comparison (FITBUG-002).
+#: :mod:`ctx.fit.providers` enforces the same rule at the seam, so a candidate
+#: built elsewhere cannot smuggle one through.
+APPLICABLE_CAPABILITY_KINDS = frozenset({"skill"})
+
 
 @dataclass(frozen=True, slots=True)
 class CandidateConfiguration:
@@ -247,8 +262,35 @@ def generate_candidates(
             warnings=tuple(warnings),
         )
 
-    ranked = list(plan.selections)
-    considered = len(ranked)
+    considered = len(plan.selections)
+    ranked = [item for item in plan.selections if item.kind in APPLICABLE_CAPABILITY_KINDS]
+
+    if inapplicable := tuple(
+        item.capability_id
+        for item in plan.selections
+        if item.kind not in APPLICABLE_CAPABILITY_KINDS
+    ):
+        warnings.append(
+            "excluded from the comparison because a trial cannot actually apply "
+            f"{'them' if len(inapplicable) > 1 else 'it'}: {', '.join(inapplicable)}"
+        )
+
+    if not ranked:
+        # Every arm would now be the baseline wearing a different name. Saying
+        # nothing is honest; charging for that comparison and reporting a winner
+        # is not.
+        return CandidateSet(
+            candidates=(baseline,),
+            abstained=True,
+            abstention_reason=(
+                "every capability relevant to this repository is of a kind a trial "
+                "cannot apply, so no candidate would differ from your current setup "
+                "in anything that actually runs"
+            ),
+            considered=considered,
+            warnings=tuple(warnings),
+        )
+
     top_ids = tuple(item.capability_id for item in ranked)
 
     candidates: list[CandidateConfiguration] = [baseline]
@@ -318,6 +360,7 @@ def _describe_selection(selection: object) -> str:
 
 
 __all__ = [
+    "APPLICABLE_CAPABILITY_KINDS",
     "CANDIDATE_SCHEMA",
     "MAX_CANDIDATES",
     "ROLE_INTENT",

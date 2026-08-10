@@ -883,6 +883,34 @@ def run_contract(
     if not stack_profile.exists():
         raise AssertionError("ctx-scan-repo did not write stack profile")
 
+    # The product itself, on the installed wheel. Asserting on OUTPUT and not
+    # only on the exit code is deliberate: bare `ctx` exited 0 while dying of
+    # ModuleNotFoundError, so an exit-code check alone proved nothing. This
+    # block is what would have caught ctx.fit being absent from the wheel.
+    for surface, surface_argv, needle in (
+        ("bare ctx", [str(ctx)], "AI agent readiness"),
+        ("ctx fit", [str(ctx), "fit", str(paths.tiny_repo)], "Repository:"),
+        ("ctx doctor", [str(ctx), "doctor"], "CTX Fit diagnostics"),
+    ):
+        product = runner.run(surface_argv, cwd=paths.tiny_repo, env=run_env)
+        if "Traceback (most recent call last)" in (product.stdout + product.stderr):
+            raise AssertionError(f"{surface} raised on a clean install:\n{product.stderr[-1500:]}")
+        if needle not in product.stdout:
+            raise AssertionError(
+                f"{surface} did not produce its expected output "
+                f"({needle!r} missing); got:\n{product.stdout[-1500:]}"
+            )
+
+    fit_json = runner.run(
+        [str(ctx), "fit", str(paths.tiny_repo), "--json"], cwd=paths.tiny_repo, env=run_env
+    )
+    try:
+        json.loads(fit_json.stdout)
+    except json.JSONDecodeError as exc:
+        raise AssertionError(
+            f"ctx fit --json did not emit valid JSON on a clean install: {exc}"
+        ) from exc
+
     runner.run(
         [
             str(ctx),

@@ -164,8 +164,11 @@ def _format_profile(profile: FitProfile) -> str:
             "agent's own claim."
         )
         lines.append(
-            "We can compare capability sets, instructions and models here — not "
-            "coding agents, because only one is currently supported."
+            "What varies between candidates here is the capability set. The model "
+            "is one global choice applied to every candidate, the instruction files "
+            "are the repository's own and identical across candidates, and only one "
+            "coding agent is currently supported — so none of those three is being "
+            "compared."
         )
     else:
         lines.append(
@@ -230,7 +233,11 @@ def _build_plan(profile: FitProfile, budget: float | None, *, model: str = DEFAU
             abstention_reason="the capability catalog could not be opened",
         )
     else:
-        candidates = generate_candidates(profile, BoundedCapabilityPlanner(source=source))
+        # The candidates must carry the model the plan is priced against, or the
+        # estimate quotes one model while the trials silently run another.
+        candidates = generate_candidates(
+            profile, BoundedCapabilityPlanner(source=source), model=model
+        )
 
     test_command = profile.verification.best("test")
     verify = test_command.command if test_command else ("python", "-m", "pytest", "-q")
@@ -310,14 +317,19 @@ def _provider_available() -> bool:
 
 def _run_evaluation(
     profile: FitProfile, args: argparse.Namespace
-) -> tuple[object, tuple[object, ...], str]:
-    """Run the full evaluation loop. Returns (recommendation, candidates, banner)."""
+) -> tuple[object, tuple[object, ...], str, object]:
+    """Run the full evaluation loop. Returns (recommendation, candidates, banner, report)."""
 
     from dataclasses import replace
 
     from ctx.engine.planner import BoundedCapabilityPlanner
     from ctx.fit.candidates import CandidateSet, generate_candidates
-    from ctx.fit.execution import execute_trials, make_simulated_runner
+    from ctx.fit.execution import (
+        BudgetedRunnerFactory,
+        TrialRunner,
+        execute_trials,
+        make_simulated_runner,
+    )
     from ctx.fit.recommend import recommend
     from ctx.fit.release_catalog import open_release_candidate_source
     from ctx.fit.tasks import derive_tasks
@@ -328,7 +340,10 @@ def _run_evaluation(
             abstained=True, abstention_reason="the capability catalog could not be opened"
         )
     else:
-        candidates = generate_candidates(profile, BoundedCapabilityPlanner(source=source))
+        # Same model the plan was priced against, for the same reason.
+        candidates = generate_candidates(
+            profile, BoundedCapabilityPlanner(source=source), model=DEFAULT_MODEL
+        )
 
     test_command = profile.verification.best("test")
     verify = test_command.command if test_command else ("python", "-m", "pytest", "-q")
@@ -338,6 +353,7 @@ def _run_evaluation(
     # test against the reverted tree; in simulation there is nothing to observe,
     # so tasks are accepted only under the simulated banner.
     simulated = not _provider_available()
+    runner_for_budget: BudgetedRunnerFactory | None = None
     if simulated:
         # Nothing is executed, so redness cannot be observed; tasks are accepted
         # only under the simulated banner, which claims nothing.
@@ -350,7 +366,24 @@ def _run_evaluation(
         from ctx.fit.providers import build_agent_driver
 
         tasks = tuple(replace(task, starts_red=True) for task in derived.tasks)
+        # Built once here so an unusable harness is reported before any
+        # workspace exists rather than partway through a paid campaign.
         runner = make_live_runner(profile.repo_path, build_agent_driver())
+
+        def capped_runner(remaining_usd: float) -> TrialRunner:
+            """Hand this trial only the dollars the authorization has left.
+
+            The provider's own per-trial ceiling is a module constant that bears
+            no relation to what the user approved, so a campaign of N trials
+            would authorize N times that constant.
+            """
+
+            return make_live_runner(
+                profile.repo_path, build_agent_driver(per_trial_budget_usd=remaining_usd)
+            )
+
+        if args.budget is not None:
+            runner_for_budget = capped_runner
 
     report = execute_trials(
         candidates.candidates,
@@ -358,6 +391,12 @@ def _run_evaluation(
         runner,
         trials_per_task=3,
         simulated=simulated,
+        # The authorization is over real money. A simulated trial's cost is an
+        # invention of the simulator, so charging it against the user's budget
+        # would truncate the pipeline demonstration over dollars nobody was ever
+        # going to be billed.
+        budget_usd=None if simulated else args.budget,
+        runner_for_budget=runner_for_budget,
     )
     recommendation = recommend(
         report, candidates.candidates, task_count=len(tasks), trials_per_task=3
@@ -370,7 +409,7 @@ def _run_evaluation(
         if simulated
         else "Real execution is not wired yet; this run was simulated."
     )
-    return recommendation, candidates.candidates, banner
+    return recommendation, candidates.candidates, banner, report
 
 
 def _format_recommendation(recommendation: object) -> str:
@@ -396,6 +435,28 @@ def _format_recommendation(recommendation: object) -> str:
     return "\n".join(lines)
 
 
+def _format_budget_stop(report: object) -> str:
+    """Say that the campaign stopped early, and what that costs the comparison."""
+
+    from ctx.fit.execution import ExecutionReport
+
+    assert isinstance(report, ExecutionReport)
+    if not report.budget_stop:
+        return ""
+    return "\n".join(
+        [
+            "",
+            f"Stopped on budget: ${report.spent_usd} of the ${report.budget_usd} "
+            f"authorized was spent and {report.trials_skipped_budget} trial(s) "
+            "never ran.",
+            f"  Reason: {report.budget_stop}.",
+            "  Candidates did not all get the same number of trials, so the "
+            "comparison above rests on truncated evidence. Re-run with a larger "
+            "--budget to finish it.",
+        ]
+    )
+
+
 def cmd_fit(args: argparse.Namespace) -> int:
     """Run the Fit profiler. Returns a process exit code."""
 
@@ -415,6 +476,7 @@ def cmd_fit(args: argparse.Namespace) -> int:
     recommendation: object | None = None
     candidates: tuple[object, ...] = ()
     banner = ""
+    report: object | None = None
     if evaluating:
         plan = _build_plan(profile, args.budget)
         if not plan.can_execute:  # type: ignore[attr-defined]
@@ -427,7 +489,7 @@ def cmd_fit(args: argparse.Namespace) -> int:
                 payload["plan"] = plan.to_dict()  # type: ignore[attr-defined]
                 print(json.dumps(payload, indent=2, sort_keys=True))
             return 1
-        recommendation, candidates, banner = _run_evaluation(profile, args)
+        recommendation, candidates, banner, report = _run_evaluation(profile, args)
 
     if args.json:
         from ctx.fit.readiness import score_readiness
@@ -440,6 +502,11 @@ def cmd_fit(args: argparse.Namespace) -> int:
             payload["dry_run"] = bool(args.dry_run)
         if recommendation is not None:
             payload["recommendation"] = recommendation.to_dict()  # type: ignore[attr-defined]
+        if report is not None:
+            # What was actually spent against the authorization, and whether the
+            # campaign was cut short by it: a machine-readable consumer needs
+            # that as much as a human does.
+            payload["execution"] = report.to_dict()  # type: ignore[attr-defined]
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
 
@@ -451,6 +518,8 @@ def cmd_fit(args: argparse.Namespace) -> int:
 
     if recommendation is not None:
         print(_format_recommendation(recommendation))
+        if report is not None and (stopped := _format_budget_stop(report)):
+            print(stopped)
         if banner:
             print(f"\n{banner}")
         if args.apply or args.pr:

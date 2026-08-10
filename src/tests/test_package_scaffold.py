@@ -33,6 +33,7 @@ _EXPECTED_SUBPACKAGES: tuple[str, ...] = (
     "ctx.core.resolve",
     "ctx.core.bundle",
     "ctx.engine",
+    "ctx.fit",
     "ctx.runtime",
     "ctx.adapters",
     "ctx.adapters.claude_code",
@@ -131,9 +132,14 @@ def test_every_subpackage_has_docstring() -> None:
 
 
 def test_pyproject_declares_all_subpackages() -> None:
-    """pyproject.toml's packages list must include every scaffolded
-    subpackage. A package that exists on disk but isn't declared won't
-    ship in the wheel."""
+    """pyproject.toml's packages list must include every subpackage on disk.
+
+    This walks the source tree rather than the hand-maintained
+    ``_EXPECTED_SUBPACKAGES`` tuple. Comparing two hand-maintained lists to
+    each other cannot catch a package nobody remembered to add to either one,
+    which is exactly how ``ctx.fit`` -- the whole product -- was omitted from
+    the wheel while every packaging lane stayed green.
+    """
     try:
         import tomllib  # py 3.11+
     except ImportError:
@@ -144,9 +150,21 @@ def test_pyproject_declares_all_subpackages() -> None:
         data = tomllib.load(fh)
 
     declared = set(data["tool"]["setuptools"]["packages"])
-    expected = set(_EXPECTED_SUBPACKAGES)
-    missing = expected - declared
-    assert not missing, f"pyproject.toml packages list is missing: {sorted(missing)}"
+    source_root = root / "src"
+    on_disk = {
+        ".".join(init.parent.relative_to(source_root).parts)
+        for init in source_root.rglob("__init__.py")
+        if "tests" not in init.parts
+    }
+    on_disk.discard("")  # the src/ root itself is not a package
+
+    missing = on_disk - declared
+    assert not missing, (
+        f"these packages exist on disk but would not ship in the wheel: {sorted(missing)}"
+    )
+    assert set(_EXPECTED_SUBPACKAGES) <= declared, (
+        f"pyproject.toml packages list is missing: {sorted(set(_EXPECTED_SUBPACKAGES) - declared)}"
+    )
 
 
 def test_runtime_availability_json_is_declared_as_package_data() -> None:

@@ -190,6 +190,7 @@ packages = [
     "ctx.core.resolve",
     "ctx.core.bundle",
     "ctx.engine",
+    "ctx.fit",
     "ctx.runtime",
     "ctx.adapters",
     "ctx.adapters.claude_code",

@@ -45,6 +45,31 @@ class _Source:
 
 
 @dataclass(frozen=True)
+class _KindedSource:
+    """A source whose entries span capability kinds, not just skills."""
+
+    kinds: tuple[tuple[str, str], ...]
+
+    def catalog_snapshot_digest(self) -> str:
+        return _digest("kinded")
+
+    def retrieve(self, _observation: object) -> tuple[CapabilityCandidate, ...]:
+        return tuple(
+            CapabilityCandidate(
+                capability_id=f"{kind}:{name}",
+                kind=kind,
+                name=name,
+                source_digest=_digest(name),
+                normalized_score_ppm=900_000 - index * 1_000,
+                matching_signals=("python",),
+                reason_codes=("graph-match",),
+                actionability="load",
+            )
+            for index, (kind, name) in enumerate(self.kinds)
+        )
+
+
+@dataclass(frozen=True)
 class _EmptySource:
     def catalog_snapshot_digest(self) -> str:
         return _digest("empty")
@@ -158,6 +183,55 @@ def test_no_relevant_capability_abstains(tmp_path: Path) -> None:
     assert result.abstained is True
     assert result.abstention_reason is not None
     assert [candidate.role for candidate in result.candidates] == ["baseline"]
+
+
+# ── FITBUG-002: a candidate may only carry what a trial can actually apply ──
+
+
+def test_capabilities_a_trial_cannot_apply_are_excluded_and_named(tmp_path: Path) -> None:
+    """Carrying one would make an arm the baseline under a different name.
+
+    An MCP server needs a process attached to the run and an agent needs a
+    second model role; a trial has neither, so a candidate holding one differs
+    from the control in the report only.
+    """
+
+    result = _generate(
+        tmp_path,
+        source=_KindedSource(
+            kinds=(
+                ("skill", "ctx-python-testing"),
+                ("mcp-server", "ctx-core"),
+                ("agent", "ctx-python-reviewer"),
+            )
+        ),
+    )
+
+    proposed = {
+        capability_id
+        for candidate in result.candidates
+        for capability_id in candidate.capability_ids
+    }
+    assert proposed == {"skill:ctx-python-testing"}
+    warnings = " ".join(result.warnings)
+    assert "mcp-server:ctx-core" in warnings
+    assert "agent:ctx-python-reviewer" in warnings
+
+
+def test_only_inapplicable_capabilities_abstains_rather_than_inventing_arms(
+    tmp_path: Path,
+) -> None:
+    """Silence is acceptable here; a comparison that cannot be run is not."""
+
+    result = _generate(
+        tmp_path,
+        source=_KindedSource(kinds=(("mcp-server", "ctx-core"), ("agent", "ctx-python-reviewer"))),
+    )
+
+    assert result.abstained is True
+    assert [candidate.role for candidate in result.candidates] == ["baseline"]
+    assert result.abstention_reason is not None
+    assert "cannot apply" in result.abstention_reason
 
 
 def test_candidate_payload_is_json_serializable_and_versioned(tmp_path: Path) -> None:

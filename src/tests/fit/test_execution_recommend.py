@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from ctx.fit.candidates import CandidateConfiguration
 from ctx.fit.execution import (
+    ExecutionReport,
     TrialResult,
+    TrialRunner,
     execute_trials,
     make_simulated_runner,
 )
@@ -160,6 +164,177 @@ def test_unknown_cost_poisons_the_total_and_blocks_ranking() -> None:
     assert entry.qualified is False
     assert entry.exclusion_reason is not None
     assert "cost is incomplete" in entry.exclusion_reason
+
+
+# --------------------------------------------------------------------------
+# The authorization bounds the campaign, not one trial.
+# --------------------------------------------------------------------------
+
+
+def _outcomes_of(report: ExecutionReport, candidate_id: str) -> list[str]:
+    outcome = next(item for item in report.outcomes if item.candidate_id == candidate_id)
+    return [trial.outcome for trial in outcome.trials]
+
+
+def test_campaign_stops_once_cumulative_spend_reaches_the_authorization() -> None:
+    """Six trials at $0.10 must not run under a $0.25 authorization."""
+
+    candidates = (_candidate("spender"),)
+    report = execute_trials(
+        candidates,
+        (_task("t1"), _task("t2")),
+        _fixed_runner({"spender": "verified"}, cost=0.10),
+        trials_per_task=3,
+        budget_usd=0.25,
+    )
+
+    assert report.trials_run == 3
+    assert report.trials_skipped_budget == 3
+    assert report.spent_usd == 0.3
+    assert report.budget_stop == "the authorized budget was spent"
+    assert any("did not run" in warning for warning in report.warnings)
+
+
+def test_without_a_budget_nothing_stops_the_campaign() -> None:
+    """The unbounded path is what FITBUG-001 was: keep it visible in the suite."""
+
+    report = execute_trials(
+        (_candidate("spender"),),
+        (_task("t1"), _task("t2")),
+        _fixed_runner({"spender": "verified"}, cost=0.10),
+        trials_per_task=3,
+    )
+
+    assert report.trials_run == 6
+    assert report.trials_skipped_budget == 0
+    assert report.budget_stop == ""
+    assert report.spent_usd is None
+
+
+def test_a_trial_stopped_by_the_budget_is_not_blamed_on_the_candidate() -> None:
+    """Running out of money says nothing about whether a configuration works."""
+
+    candidates = (_candidate("spender"),)
+    report = execute_trials(
+        candidates,
+        (_task("t1"), _task("t2")),
+        _fixed_runner({"spender": "verified"}, cost=0.10),
+        trials_per_task=3,
+        budget_usd=0.25,
+    )
+    outcome = report.outcomes[0]
+
+    assert _outcomes_of(report, "spender").count("skipped-budget") == 3
+    assert "failed" not in _outcomes_of(report, "spender")
+    # Unrun trials are neither scored against reliability nor counted as
+    # unmeasured spend: they are absent spend.
+    assert len(outcome.scored_trials) == 3
+    assert outcome.reliability == 1.0
+    assert outcome.total_cost_usd == 0.3
+
+
+def test_the_authorization_covers_the_campaign_not_each_candidate() -> None:
+    """A spent budget cannot be renewed by moving on to the next candidate."""
+
+    candidates = (_candidate("first"), _candidate("second"), _candidate("third"))
+    report = execute_trials(
+        candidates,
+        (_task("t1"),),
+        _fixed_runner({}, cost=0.10),
+        trials_per_task=2,
+        budget_usd=0.20,
+    )
+
+    assert report.trials_run == 2
+    assert _outcomes_of(report, "second") == ["skipped-budget", "skipped-budget"]
+    assert _outcomes_of(report, "third") == ["skipped-budget", "skipped-budget"]
+
+    result = recommend(report, candidates, task_count=1, trials_per_task=2)
+    unrun = next(item for item in result.ranked if item.candidate_id == "third")
+    assert unrun.qualified is False
+
+
+def test_each_trial_is_capped_by_what_the_authorization_has_left() -> None:
+    """The cap must shrink as the campaign spends, not repeat a constant."""
+
+    caps: list[float] = []
+
+    def runner_for_budget(remaining: float) -> TrialRunner:
+        caps.append(remaining)
+        # Spend exactly half of whatever this trial was authorized.
+        return _fixed_runner({}, cost=round(remaining / 2, 6))
+
+    report = execute_trials(
+        (_candidate("halver"),),
+        (_task("t1"), _task("t2")),
+        _fixed_runner({}, cost=0.10),
+        trials_per_task=3,
+        budget_usd=1.0,
+        runner_for_budget=runner_for_budget,
+    )
+
+    assert caps == [1.0, 0.5, 0.25, 0.125, 0.0625, 0.03125]
+    assert report.trials_run == 6
+    # Six trials, and the authorization was never exceeded.
+    assert report.spent_usd is not None and report.spent_usd < 1.0
+
+
+def test_a_trial_with_unknown_cost_halts_the_campaign() -> None:
+    """Spend that cannot be measured cannot be counted; continuing is blind."""
+
+    report = execute_trials(
+        (_candidate("mystery"),),
+        (_task("t1"), _task("t2")),
+        _fixed_runner({}, cost=None),
+        trials_per_task=3,
+        budget_usd=100.0,
+    )
+
+    assert report.trials_run == 1
+    assert report.trials_skipped_budget == 5
+    assert "no cost" in report.budget_stop
+
+
+def test_an_authorization_of_nothing_runs_nothing() -> None:
+    """$0 approved means $0 spendable, not "the first trial is free"."""
+
+    report = execute_trials(
+        (_candidate("spender"),),
+        (_task("t1"),),
+        _fixed_runner({}, cost=0.10),
+        trials_per_task=2,
+        budget_usd=0.0,
+    )
+
+    assert report.trials_run == 0
+    assert report.trials_skipped_budget == 2
+    assert report.spent_usd == 0.0
+
+
+def test_a_per_trial_cap_without_an_authorization_is_refused() -> None:
+    with pytest.raises(ValueError, match="budget_usd"):
+        execute_trials(
+            (_candidate("a"),),
+            (_task("t1"),),
+            _fixed_runner({}),
+            runner_for_budget=lambda remaining: _fixed_runner({}),
+        )
+
+
+def test_the_report_states_what_was_authorized_and_what_was_spent() -> None:
+    report = execute_trials(
+        (_candidate("spender"),),
+        (_task("t1"), _task("t2")),
+        _fixed_runner({"spender": "verified"}, cost=0.10),
+        trials_per_task=3,
+        budget_usd=0.25,
+    )
+    payload = json.loads(json.dumps(report.to_dict(), sort_keys=True))
+
+    assert payload["budget_usd"] == 0.25
+    assert payload["spent_usd"] == 0.3
+    assert payload["trials_skipped_budget"] == 3
+    assert payload["budget_stop"]
 
 
 # --------------------------------------------------------------------------
