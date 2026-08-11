@@ -314,6 +314,35 @@ _TEST_DECLARATION = re.compile(
 #: command slow for no gain: one real test is enough to answer the question.
 _TEST_FILES_INSPECTED = 40
 
+#: Build caches and vendored trees are not the repository's own test material.
+#: Mirrors ``ctx.fit.verification._TEST_SCAN_SKIP_DIRS``; the duplication is
+#: deliberate for now and disappears when verification owns this question.
+_TEST_SCAN_SKIP_DIRS: frozenset[str] = frozenset(
+    {
+        "__pycache__",
+        "build",
+        "dist",
+        "env",
+        "node_modules",
+        "site-packages",
+        "target",
+        "testdata",
+        "third_party",
+        "vendor",
+        "venv",
+    }
+)
+
+#: Compiled artefacts and binaries cannot declare a test and decoding them
+#: wastes the inspection budget.
+_UNREADABLE_SUFFIXES: frozenset[str] = frozenset(
+    {".pyc", ".pyo", ".so", ".dylib", ".dll", ".o", ".a", ".class", ".jar", ".wasm"}
+)
+
+#: A filename that looks like it holds tests, in the conventions this rubric
+#: can see. Used only to order a bounded scan, never to decide the answer.
+_TEST_SHAPED = re.compile(r"(?:^|[._-])tests?(?:[._-]|$)|_test\.|\.test\.|^test", re.IGNORECASE)
+
 
 # --------------------------------------------------------------------------
 # Rubric checks. Each predicate is pure with respect to the repository: it only
@@ -359,7 +388,7 @@ def _declared_tests(root: Path, test_files: tuple[str, ...]) -> tuple[bool, tupl
         entry = root / name
         if entry.is_dir():
             try:
-                candidates = sorted(item for item in entry.rglob("*") if item.is_file())
+                candidates = _inspectable(entry)
             except OSError:
                 unreadable.append(name)
                 continue
@@ -378,6 +407,28 @@ def _declared_tests(root: Path, test_files: tuple[str, ...]) -> tuple[bool, tupl
             if _TEST_DECLARATION.search(text):
                 return True, ()
     return False, tuple(unreadable)
+
+
+def _inspectable(directory: Path) -> list[Path]:
+    """Source files under ``directory``, most test-shaped first.
+
+    Two filters, both learned the hard way. Build caches and vendored trees are
+    skipped: ``sorted(rglob("*"))`` puts ``__pycache__`` first alphabetically,
+    so on this repository 39 of the first 40 entries were ``.pyc`` files and the
+    inspection budget was spent before one real test was opened -- CTX told its
+    own 604-test suite to "add a test suite". Then the survivors are ordered by
+    how test-shaped their names are, so a bounded budget is spent on the files
+    most likely to answer the question rather than on whatever sorts first.
+    """
+
+    files: list[Path] = []
+    for item in directory.rglob("*"):
+        if not item.is_file() or item.suffix in _UNREADABLE_SUFFIXES:
+            continue
+        if any(part in _TEST_SCAN_SKIP_DIRS or part.startswith(".") for part in item.parts):
+            continue
+        files.append(item)
+    return sorted(files, key=lambda path: (not _TEST_SHAPED.search(path.name), str(path)))
 
 
 def _check_static_analysis(profile: FitProfile, _root: Path) -> tuple[CheckState, tuple[str, ...]]:

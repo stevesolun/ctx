@@ -489,3 +489,24 @@ def test_a_tests_directory_is_expanded_rather_than_read_as_a_file(tmp_path: Path
     assert "tests/" in profile.verification.test_files
     v1 = next(check for check in _score(repo).checks if check.check_id == "V1")
     assert v1.state == "pass", v1.evidence
+
+
+def test_a_build_cache_does_not_exhaust_the_test_inspection_budget(tmp_path: Path) -> None:
+    """Real tests must be found past a __pycache__ that sorts ahead of them.
+
+    `sorted(rglob("*"))` puts `__pycache__` first alphabetically. On CTX's own
+    repository 39 of the first 40 entries under the test directory were `.pyc`
+    files, so the inspection budget was spent before a single real test was
+    opened, and the product told its own 604-test suite to "add a test suite"
+    while printing the working test command as the evidence.
+    """
+
+    repo = _repo(tmp_path, tests=True)
+    cache = repo / "tests" / "__pycache__"
+    cache.mkdir()
+    for index in range(60):
+        (cache / f"test_{index:03d}.cpython-312-pytest.pyc").write_bytes(b"\x00\x01binary")
+
+    v1 = next(check for check in _score(repo).checks if check.check_id == "V1")
+
+    assert v1.state == "pass", v1.evidence
