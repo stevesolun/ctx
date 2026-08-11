@@ -3,7 +3,7 @@
 skill_install.py -- Install a skill from the wiki into the live skills directory.
 
 Target UX: a new user clones the ``ctx`` repo, runs
-``ctx-skill-install <slug>``, and the skill lands under
+``python -m ctx.adapters.claude_code.install.skill_install <slug>``, and the skill lands under
 ``~/.claude/skills/<slug>/`` where Claude Code auto-loads it. No git
 clone per skill, no registry lookup — the wiki is the single source of
 truth.
@@ -26,10 +26,10 @@ This is the reverse of ``skill_unload.py``: it adds a ``load`` entry to
 frontmatter to ``installed``, and emits a ``load`` telemetry event.
 
 Usage:
-    ctx-skill-install --slug accessibility-compliance
-    ctx-skill-install --slugs "accessibility-compliance,python-testing"
-    ctx-skill-install --slug fastapi-pro --prefer original
-    ctx-skill-install --slug fastapi-pro --force   # overwrite existing local copy
+    python -m ctx.adapters.claude_code.install.skill_install --slug accessibility-compliance
+    python -m ctx.adapters.claude_code.install.skill_install --slugs "accessibility-compliance,python-testing"
+    python -m ctx.adapters.claude_code.install.skill_install --slug fastapi-pro --prefer original
+    python -m ctx.adapters.claude_code.install.skill_install --slug fastapi-pro --force   # overwrite existing local copy
 """
 
 from __future__ import annotations
@@ -425,7 +425,7 @@ def _split_slugs(args: argparse.Namespace) -> list[str]:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="ctx-skill-install",
+        prog="python -m ctx.adapters.claude_code.install.skill_install",
         description=(
             "Install a skill from the wiki into ~/.claude/skills/. "
             "Source: <wiki>/converted/<slug>/SKILL.md (or SKILL.md.original "

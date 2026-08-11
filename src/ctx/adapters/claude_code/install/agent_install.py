@@ -16,10 +16,10 @@ stage structure. The install is therefore a one-file copy plus:
   - telemetry ``load`` event emitted
 
 Usage:
-    ctx-agent-install --slug accessibility-expert
-    ctx-agent-install --slugs "accessibility-expert,architect"
-    ctx-agent-install --slug architect --force
-    ctx-agent-install --slug architect --dry-run
+    python -m ctx.adapters.claude_code.install.agent_install --slug accessibility-expert
+    python -m ctx.adapters.claude_code.install.agent_install --slugs "accessibility-expert,architect"
+    python -m ctx.adapters.claude_code.install.agent_install --slug architect --force
+    python -m ctx.adapters.claude_code.install.agent_install --slug architect --dry-run
 """
 
 from __future__ import annotations
@@ -94,7 +94,9 @@ def install_agent(
             slug=slug,
             status="not-in-wiki",
             installed_path=None,
-            message=(f"no mirrored body at {source}. Run ctx-agent-mirror first to populate."),
+            message=(
+                f"no mirrored body at {source}. Run python -m agent_mirror first to populate."
+            ),
         )
 
     dest = agents_dir / f"{slug}.md"
@@ -154,11 +156,11 @@ def _split_slugs(args: argparse.Namespace) -> list[str]:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="ctx-agent-install",
+        prog="python -m ctx.adapters.claude_code.install.agent_install",
         description=(
             "Install an agent from the wiki into ~/.claude/agents/. "
             "Source: <wiki>/converted-agents/<slug>.md (run "
-            "ctx-agent-mirror once to populate that dir from the live "
+            "python -m agent_mirror once to populate that dir from the live "
             "agents if you haven't yet)."
         ),
     )

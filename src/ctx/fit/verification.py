@@ -114,10 +114,14 @@ class VerificationInventory:
 
 
 def _read_text(path: Path) -> str | None:
+    # utf-8-sig, not utf-8: a leading byte-order mark is a routine artefact of
+    # Windows editors, and a config file is not unreadable for carrying one.
+    # scan_repo.py already reads the same files this way, so the two halves of
+    # one `ctx fit` run must not disagree about whether a file is parseable.
     try:
         if not path.is_file() or path.stat().st_size > _MAX_READ_BYTES:
             return None
-        return path.read_text(encoding="utf-8", errors="replace")
+        return path.read_text(encoding="utf-8-sig", errors="replace")
     except OSError:
         return None
 
@@ -129,6 +133,12 @@ def _load_toml(path: Path) -> tuple[dict[str, object], str | None]:
     is none. Collapsing "empty", "too large to read" and "invalid syntax" into
     a bare ``{}`` made the product tell users with a zero-byte pyproject.toml —
     which is perfectly valid TOML — to go fix a parse error that did not exist.
+
+    The bytes are decoded here rather than handed to ``tomllib.load``, which
+    decodes as strict UTF-8 and therefore rejects a leading BOM as invalid
+    syntax. That single character used to delete *every* pyproject-derived
+    command at once — pytest, ruff, mypy and the build backend — and told the
+    user a file every other tool accepts was malformed.
     """
 
     try:
@@ -136,10 +146,15 @@ def _load_toml(path: Path) -> tuple[dict[str, object], str | None]:
             return {}, None
         if path.stat().st_size > _MAX_READ_BYTES:
             return {}, f"{path.name} is larger than {_MAX_READ_BYTES // 1024} KB and was not read"
-        with path.open("rb") as handle:
-            loaded = tomllib.load(handle)
+        raw = path.read_bytes()
     except OSError:
         return {}, f"{path.name} exists but could not be read"
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return {}, f"{path.name} is not valid UTF-8, so it could not be parsed as TOML"
+    try:
+        loaded = tomllib.loads(text)
     except tomllib.TOMLDecodeError as exc:
         return {}, f"{path.name} is not valid TOML: {exc}"
     if not isinstance(loaded, dict):  # pragma: no cover - tomllib always yields a table
@@ -181,6 +196,30 @@ def _tox_pytest_evidence(root: Path) -> tuple[Confidence, str] | None:
     return None
 
 
+_SETUP_CFG_PYTEST_SECTION = re.compile(r"^\s*\[tool:pytest\]", re.MULTILINE)
+
+
+def _setup_cfg_pytest_evidence(root: Path) -> str | None:
+    """Whether setup.cfg carries pytest's own configuration section.
+
+    setup.cfg is the oldest and still most common place to configure pytest,
+    and ``[tool:pytest]`` is unambiguous — pytest rejects a bare ``[pytest]``
+    there, so unlike tox.ini the section cannot belong to some other tool.
+    Skipping the file made the product report "no pytest config" about a file
+    that *is* pytest config: it downgraded the test command to a low-confidence
+    guess, and in a repository whose tests do not live in a root ``tests/``
+    directory it produced no test command at all, which routes a repository
+    with a passing suite to "cannot be evaluated honestly".
+    """
+
+    text = _read_text(root / "setup.cfg")
+    if text is None:
+        return None
+    if _SETUP_CFG_PYTEST_SECTION.search(text):
+        return "setup.cfg declares a [tool:pytest] section"
+    return None
+
+
 def _mypy_target(root: Path, pyproject: dict[str, object]) -> str | None:
     """Pick a target that exists, rather than assuming a src/ layout.
 
@@ -208,8 +247,14 @@ def _discover_python(root: Path) -> tuple[list[VerificationCommand], list[str]]:
     tools = pyproject.get("tool")
     tools = tools if isinstance(tools, dict) else {}
 
+    setup_cfg_evidence = _setup_cfg_pytest_evidence(root)
     tox_evidence = _tox_pytest_evidence(root)
-    if "pytest" in tools or (root / "pytest.ini").is_file() or tox_evidence is not None:
+    if (
+        "pytest" in tools
+        or (root / "pytest.ini").is_file()
+        or setup_cfg_evidence is not None
+        or tox_evidence is not None
+    ):
         if "pytest" in tools:
             source = "pyproject.toml [tool.pytest]"
             confidence: Confidence = "high"
@@ -218,6 +263,12 @@ def _discover_python(root: Path) -> tuple[list[VerificationCommand], list[str]]:
             source = "pytest.ini"
             confidence = "high"
             detail = "pytest.ini declares pytest configuration"
+        elif setup_cfg_evidence is not None:
+            # Ranked above tox.ini because [tool:pytest] can only mean pytest,
+            # whereas tox.ini's weaker rung fires on the word alone.
+            source = "setup.cfg [tool:pytest]"
+            confidence = "high"
+            detail = setup_cfg_evidence
         else:
             assert tox_evidence is not None
             source = "tox.ini"
@@ -475,6 +526,18 @@ _TEST_SCAN_SKIP_DIRS: frozenset[str] = frozenset(
 _TEST_SCAN_MAX_DIRS = 2000
 #: ``test_files`` is evidence a human reads, not an index of the suite.
 _TEST_REPORT_LIMIT = 5
+#: Rust's dominant convention puts unit tests *inside* the module they test,
+#: behind a ``#[cfg(test)]`` gate in an ordinary ``src/*.rs`` file. No filename
+#: pattern can see them, so a crate whose ``cargo test`` runs and passes was
+#: reported as having no tests at all and routed to "cannot be evaluated".
+#: Anchored at line start so a ``#[cfg(test)]`` quoted inside a ``///`` doc
+#: comment or a string literal is not counted as a test.
+_RUST_INLINE_TEST = re.compile(r"^\s*#!?\[\s*(?:cfg\s*\(\s*test\s*\)|test)\s*\]", re.MULTILINE)
+#: Ceiling on Rust sources opened. Detecting inline tests needs file contents,
+#: so it is bounded like the directory walk: discovery runs unconditionally and
+#: must stay cheap. Sources are inspected in sorted order so a crate over the
+#: ceiling still profiles identically on every machine.
+_RUST_SOURCE_SCAN_LIMIT = 400
 #: Suffixes a test runner could actually execute. A directory named ``test``
 #: holding only ``fixtures.txt`` is not test material, and counting it let a
 #: repository with no tests at all be declared evaluable. The list is
@@ -518,6 +581,27 @@ def _is_test_filename(name: str) -> bool:
     return any(fnmatch.fnmatchcase(name, pattern) for pattern in _TEST_GLOBS)
 
 
+def _rust_inline_test_files(root: Path, sources: list[str]) -> list[str]:
+    """Rust sources that declare tests inline, named so a human can check.
+
+    Only the paths the pruned walk already collected are considered, so the
+    vendored trees skipped there stay skipped here — a content scan that
+    reached into ``target/`` or ``vendor/`` would recreate the mirror-image
+    bug of counting somebody else's tests as this repository's own.
+    """
+
+    found: list[str] = []
+    for relative in sorted(sources)[:_RUST_SOURCE_SCAN_LIMIT]:
+        text = _read_text(root / relative)
+        if text is None:
+            continue
+        if _RUST_INLINE_TEST.search(text):
+            found.append(relative)
+            if len(found) >= _TEST_REPORT_LIMIT:
+                break
+    return found
+
+
 def _find_test_files(root: Path) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """Return observed test locations and any subtree that could not be read.
 
@@ -539,6 +623,8 @@ def _find_test_files(root: Path) -> tuple[tuple[str, ...], tuple[str, ...]]:
     test_dir_candidates: list[str] = []
     dirs_holding_code: list[str] = []
     test_files: list[str] = []
+    rust_sources: list[str] = []
+    cargo_manifest_seen = False
     unreadable: list[str] = []
     visited = 0
 
@@ -567,6 +653,8 @@ def _find_test_files(root: Path) -> tuple[tuple[str, ...], tuple[str, ...]]:
         if any(Path(name).suffix.lower() in _TEST_CODE_SUFFIXES for name in filenames):
             dirs_holding_code.append(prefix)
         test_files.extend(prefix + name for name in filenames if _is_test_filename(name))
+        cargo_manifest_seen = cargo_manifest_seen or "Cargo.toml" in filenames
+        rust_sources.extend(prefix + name for name in filenames if name.endswith(".rs"))
 
         if depth >= _TEST_SCAN_DEPTH:
             dirnames.clear()
@@ -591,7 +679,12 @@ def _find_test_files(root: Path) -> tuple[tuple[str, ...], tuple[str, ...]]:
     skipped = tuple(sorted(set(unreadable))[:_TEST_REPORT_LIMIT])
     if qualifying_dirs:
         return tuple(sorted(qualifying_dirs)[:_TEST_REPORT_LIMIT]), skipped
-    return tuple(sorted(test_files)[:_TEST_REPORT_LIMIT]), skipped
+    # Reading file contents is the expensive rung, so it is reached only when
+    # names and directories found nothing — which is exactly the shape of an
+    # idiomatic crate: no tests/ directory, no *_test.rs, tests inline in src/.
+    if cargo_manifest_seen and not test_files:
+        test_files.extend(_rust_inline_test_files(root, rust_sources))
+    return tuple(sorted(set(test_files))[:_TEST_REPORT_LIMIT]), skipped
 
 
 def discover_verification(repo_path: str | Path) -> VerificationInventory:

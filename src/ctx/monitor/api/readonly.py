@@ -1,4 +1,4 @@
-"""Read-only JSON route payloads for ctx-monitor."""
+"""Read-only JSON route payloads for the ctx dashboard."""
 
 from __future__ import annotations
 

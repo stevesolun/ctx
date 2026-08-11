@@ -14,14 +14,14 @@ What it does:
      ``backups/``).
   2. Copies the shipped starter config if ``skill-system-config.json``
      is missing (otherwise leaves the user's config alone).
-  3. Seeds the starter toolboxes via ``ctx-toolbox init`` if the
+  3. Seeds the starter toolboxes via ``python -m toolbox init`` if the
      global toolboxes file is empty.
   4. In a terminal, guides first-time users through hooks, graph install,
      per-kind install consent, model profile, and harness recommendation setup. Automation can
      keep the non-interactive path by passing explicit flags such as
      ``--model-mode skip``; ``--wizard`` forces the prompts.
   5. Optionally: injects PostToolUse + Stop hooks via
-     ``ctx-install-hooks``. Skipped unless the wizard or ``--hooks`` asks
+     ``python -m ctx.adapters.claude_code.inject_hooks``. Skipped unless the wizard or ``--hooks`` asks
      for it, so the user has to opt in to modifying
      ``~/.claude/settings.json``.
   6. Optionally: installs the initial graph/wiki archive if missing.
@@ -2123,7 +2123,7 @@ def _harness_frontmatter_from_wiki(slug: str) -> dict[str, Any]:
 def _load_harness_recommendation_graph() -> Any:
     """Load a tiny harness-only graph for interactive onboarding.
 
-    ``ctx-init`` and ``ctx-harness-install --recommend`` are user-facing
+    ``ctx-init`` and ``python -m harness_install --recommend`` are user-facing
     wizard paths. Loading the full 100k-node graph there is unnecessary and
     can take tens of seconds on slower hosts; harness fit only needs harness
     entity metadata.
@@ -2308,7 +2308,7 @@ def _harness_plan_command(
     harness_requirements: dict[str, str],
 ) -> str:
     parts = [
-        "ctx-harness-install --recommend",
+        "python -m harness_install --recommend",
         f"--goal {json.dumps(goal or model or 'custom model work')}",
     ]
     if model_provider:
@@ -2518,7 +2518,7 @@ def run_model_onboarding(args: argparse.Namespace, claude: Path) -> int:
             fit = float(row.get("fit_score") or row.get("normalized_score") or 0.0)
             name = row.get("name")
             print(f"       - {name} (fit {fit:.2f})")
-            print(f"         install: ctx-harness-install {name} --dry-run")
+            print(f"         install: python -m harness_install {name} --dry-run")
     elif goal or mode == "custom":
         print("  [info] no harness recommendations matched yet")
         print(
@@ -2839,16 +2839,19 @@ def main(argv: list[str] | None = None) -> int:
     if rc != 0 and final_rc == 0:
         final_rc = rc
 
+    # Label first, command second: the surviving invocations are `python -m`
+    # module paths, and trailing `# comment` columns can no longer be aligned
+    # across them without running past the line limit.
     print("\nctx-init: done. Next steps:")
-    print("  - ctx-toolbox list                 # see starter toolboxes")
-    print("  - ctx-skill-health dashboard       # baseline health scan")
-    print("  - ctx-monitor serve                # local dashboard at :8765")
+    print("  - starter toolboxes:  python -m toolbox list")
+    print("  - baseline health:    python -m ctx.adapters.claude_code.skill_health dashboard")
+    print("  - local dashboard:    python -m ctx_monitor serve   (http://127.0.0.1:8765)")
     if not args.hooks:
-        print("  - ctx-init --hooks                 # wire live observation")
+        print("  - live observation:   ctx-init --hooks")
     if not args.codex_hooks:
-        print("  - ctx-init --codex-hooks           # register Codex prompt hook")
+        print("  - Codex prompt hook:  ctx-init --codex-hooks")
     if not args.graph and args.knowledge_mode != "local":
-        print("  - ctx-init --graph                 # install knowledge graph")
+        print("  - knowledge graph:    ctx-init --graph")
     return final_rc
 
 

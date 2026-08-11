@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 import scan_repo
+from ctx.cli.fit import cmd_fit, default_namespace
 from ctx.fit.profile import build_fit_profile
 from ctx.fit.readiness import score_readiness
 from ctx.fit.verification import discover_verification
@@ -277,6 +278,246 @@ def test_an_invalid_pyproject_still_says_so(tmp_path: Path) -> None:
     warnings = discover_verification(tmp_path).warnings
 
     assert any("pyproject.toml is not valid TOML" in warning for warning in warnings)
+
+
+# --------------------------------------------------------------------------
+# "Can this repository be evaluated at all" must match the repository
+# (FITBUG-026, FITBUG-027, FITBUG-058, FITBUG-059).
+#
+# This verdict gates the whole product, so each case below asserts on the
+# sentence `ctx fit` prints to the user, not only on a helper's return value.
+# --------------------------------------------------------------------------
+
+_CAN_BE_EVALUATED = "This repository can be evaluated"
+_CANNOT_BE_EVALUATED = "This repository cannot yet be evaluated honestly"
+
+
+def _fit_output(repo: Path, capsys: pytest.CaptureFixture[str]) -> str:
+    """What a bare `ctx fit` actually prints about this repository."""
+
+    assert cmd_fit(default_namespace(str(repo))) == 0
+    return capsys.readouterr().out
+
+
+def _cargo_crate(root: Path) -> Path:
+    """A crate laid out the way `cargo new --lib` lays one out.
+
+    The unit test lives inline in the module it tests, behind `#[cfg(test)]`.
+    `cargo test` compiles and runs it; no file here is named `*_test.rs` and
+    there is no `tests/` directory, because the dominant Rust convention needs
+    neither.
+    """
+
+    _write(
+        root / "Cargo.toml",
+        '[package]\nname = "widget"\nversion = "0.1.0"\nedition = "2021"\n\n[dependencies]\n',
+    )
+    _write(
+        root / "src" / "lib.rs",
+        "pub fn add(a: i32, b: i32) -> i32 {\n"
+        "    a + b\n"
+        "}\n"
+        "\n"
+        "#[cfg(test)]\n"
+        "mod tests {\n"
+        "    use super::*;\n"
+        "\n"
+        "    #[test]\n"
+        "    fn add_sums_two_numbers() {\n"
+        "        assert_eq!(add(2, 2), 4);\n"
+        "    }\n"
+        "}\n",
+    )
+    return root
+
+
+def test_a_crate_with_inline_cfg_test_tests_is_evaluable(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`#[cfg(test)] mod tests` is how Rust writes unit tests, and no filename shows it."""
+
+    repo = _cargo_crate(tmp_path)
+
+    inventory = discover_verification(repo)
+
+    assert inventory.test_files == ("src/lib.rs",)
+    assert inventory.has_deterministic_verification is True
+    assert not any("no test files were found" in warning for warning in inventory.warnings)
+    assert build_fit_profile(repo).is_fit_evaluable is True
+    assert _CAN_BE_EVALUATED in _fit_output(repo, capsys)
+
+
+def test_a_crate_with_no_tests_at_all_is_still_not_evaluable(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Inline detection must read code, not prose: a doc example is not a suite."""
+
+    _write(
+        tmp_path / "Cargo.toml",
+        '[package]\nname = "widget"\nversion = "0.1.0"\nedition = "2021"\n',
+    )
+    _write(
+        tmp_path / "src" / "lib.rs",
+        "/// Tests for this crate live behind `#[cfg(test)]`, once somebody writes them.\n"
+        "///\n"
+        "/// ```ignore\n"
+        "/// #[cfg(test)]\n"
+        "/// mod tests {}\n"
+        "/// ```\n"
+        "pub fn add(a: i32, b: i32) -> i32 {\n"
+        "    a + b\n"
+        "}\n",
+    )
+
+    assert discover_verification(tmp_path).test_files == ()
+    assert build_fit_profile(tmp_path).is_fit_evaluable is False
+    assert _CANNOT_BE_EVALUATED in _fit_output(tmp_path, capsys)
+
+
+def test_tests_belonging_to_a_dependency_are_not_this_repositorys_tests(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An installed node_modules is somebody else's suite, however test-shaped."""
+
+    _write(
+        tmp_path / "package.json",
+        json.dumps(
+            {
+                "name": "app",
+                "version": "1.0.0",
+                "scripts": {"test": "jest"},
+                "devDependencies": {"jest": "^29.0.0"},
+            }
+        ),
+    )
+    _write(tmp_path / "index.js", "module.exports = () => 1;\n")
+    _write(
+        tmp_path / "node_modules" / "left-pad" / "package.json",
+        json.dumps({"name": "left-pad", "version": "1.3.0", "main": "index.js"}),
+    )
+    _write(
+        tmp_path / "node_modules" / "left-pad" / "index.test.js",
+        "test('pads', () => { expect(1).toBe(1); });\n",
+    )
+
+    inventory = discover_verification(tmp_path)
+
+    assert inventory.declares_test_command is True
+    assert inventory.test_files == ()
+    assert build_fit_profile(tmp_path).is_fit_evaluable is False
+    assert _CANNOT_BE_EVALUATED in _fit_output(tmp_path, capsys)
+
+
+def test_vendored_rust_sources_are_not_this_repositorys_tests(tmp_path: Path) -> None:
+    """Reading file contents must not reach where the directory walk refuses to."""
+
+    _write(
+        tmp_path / "Cargo.toml",
+        '[package]\nname = "widget"\nversion = "0.1.0"\nedition = "2021"\n',
+    )
+    _write(tmp_path / "src" / "lib.rs", "pub fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n")
+    _cargo_crate(tmp_path / "vendor" / "serde")
+
+    assert discover_verification(tmp_path).test_files == ()
+    assert build_fit_profile(tmp_path).is_fit_evaluable is False
+
+
+def test_a_byte_order_mark_does_not_erase_every_pyproject_command(tmp_path: Path) -> None:
+    """One invisible character used to delete pytest, ruff, mypy and the build at once."""
+
+    (tmp_path / "pyproject.toml").write_text(
+        "[build-system]\n"
+        'requires = ["setuptools"]\n'
+        'build-backend = "setuptools.build_meta"\n\n'
+        "[project]\n"
+        'name = "demo"\n'
+        'version = "0.1.0"\n\n'
+        "[tool.pytest.ini_options]\n"
+        'addopts = "-q"\n\n'
+        "[tool.ruff]\n"
+        "line-length = 100\n\n"
+        "[tool.mypy]\n"
+        "strict = true\n",
+        encoding="utf-8-sig",
+    )
+    _write(tmp_path / "src" / "demo" / "__init__.py", "")
+    _write(tmp_path / "tests" / "test_demo.py", "def test_ok():\n    assert True\n")
+
+    inventory = discover_verification(tmp_path)
+
+    assert not any("pyproject.toml" in warning for warning in inventory.warnings)
+    test_command = inventory.best("test")
+    assert test_command is not None
+    assert test_command.source == "pyproject.toml [tool.pytest]"
+    assert test_command.confidence == "high"
+    assert {command.kind for command in inventory.commands} == {
+        "test",
+        "lint",
+        "typecheck",
+        "build",
+    }
+
+
+def test_a_file_that_is_not_utf8_is_reported_as_such_not_as_bad_toml(tmp_path: Path) -> None:
+    """Tolerating a BOM must not turn an undecodable file into a silent empty table."""
+
+    (tmp_path / "pyproject.toml").write_bytes(b"[project]\nname = '\xff\xfe not utf8'\n")
+
+    warnings = discover_verification(tmp_path).warnings
+
+    assert any("pyproject.toml is not valid UTF-8" in warning for warning in warnings)
+
+
+def test_setup_cfg_pytest_configuration_is_recognised(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """[tool:pytest] in setup.cfg is pytest config, and the tests are not in tests/."""
+
+    _write(
+        tmp_path / "setup.cfg",
+        "[metadata]\nname = legacy\nversion = 0.1.0\n\n"
+        "[tool:pytest]\ntestpaths = t\naddopts = -q\n",
+    )
+    _write(tmp_path / "t" / "test_a.py", "def test_a():\n    assert True\n")
+
+    command = discover_verification(tmp_path).best("test")
+
+    assert command is not None
+    assert command.source == "setup.cfg [tool:pytest]"
+    assert command.confidence == "high"
+    assert not any("no pytest config" in line for line in command.evidence)
+    assert build_fit_profile(tmp_path).is_fit_evaluable is True
+    assert _CAN_BE_EVALUATED in _fit_output(tmp_path, capsys)
+
+
+def test_a_byte_order_mark_does_not_hide_setup_cfg_pytest_configuration(tmp_path: Path) -> None:
+    """A BOM'd setup.cfg is what a Windows editor produces, and pytest reads it fine."""
+
+    (tmp_path / "setup.cfg").write_text(
+        "[tool:pytest]\naddopts = -q\n",
+        encoding="utf-8-sig",
+    )
+    _write(tmp_path / "t" / "test_a.py", "def test_a():\n    assert True\n")
+
+    command = discover_verification(tmp_path).best("test")
+
+    assert command is not None
+    assert command.source == "setup.cfg [tool:pytest]"
+
+
+def test_setup_cfg_without_pytest_does_not_claim_pytest_configuration(tmp_path: Path) -> None:
+    """Every setup.cfg has a [metadata] section; that is not a pytest declaration."""
+
+    _write(
+        tmp_path / "setup.cfg",
+        "[metadata]\nname = legacy\n\n[flake8]\nmax-line-length = 100\n",
+    )
+    _write(tmp_path / "t" / "test_a.py", "def test_a():\n    assert True\n")
+
+    inventory = discover_verification(tmp_path)
+
+    assert not any(command.source.startswith("setup.cfg") for command in inventory.commands)
+    assert inventory.declares_test_command is False
 
 
 # --------------------------------------------------------------------------

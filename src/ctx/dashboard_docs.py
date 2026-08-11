@@ -1,4 +1,4 @@
-"""Dashboard documentation rendering for ``ctx-monitor``.
+"""Documentation rendering for the ctx dashboard.
 
 This module owns the local docs index, MkDocs-flavored Markdown rendering,
 sanitization, link rewriting, and docs HTML cache.  ``ctx_monitor`` supplies

@@ -36,7 +36,7 @@ touch.
 ## Self-healing
 
 ```bash
-ctx-skill-health heal
+python -m ctx.adapters.claude_code.skill_health heal
 ```
 
 - drops orphaned entries from `skill-manifest.json`
@@ -50,16 +50,16 @@ If nothing needs healing, prints `[heal] nothing to do.` and exits 0.
 
 ```bash
 # Emit a full JSON report
-ctx-skill-health scan
+python -m ctx.adapters.claude_code.skill_health scan
 
 # Pretty dashboard
-ctx-skill-health dashboard
+python -m ctx.adapters.claude_code.skill_health dashboard
 
 # CI gate: exit 2 if any error-severity issue or drift is present
-ctx-skill-health check --strict
+python -m ctx.adapters.claude_code.skill_health check --strict
 
 # Apply safe autofixes to manifest + pending
-ctx-skill-health heal
+python -m ctx.adapters.claude_code.skill_health heal
 ```
 
 ## Data model

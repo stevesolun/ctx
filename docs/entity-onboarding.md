@@ -14,7 +14,7 @@ After adding any entity, drain the durable wiki queue when you want the local
 runtime graph to see it immediately:
 
 ```bash
-ctx-wiki-worker --wiki ~/.claude/skill-wiki --limit 1
+python -m ctx.core.wiki.wiki_queue_worker --wiki ~/.claude/skill-wiki --limit 1
 ctx-scan-repo --repo . --recommend
 ```
 
@@ -90,7 +90,7 @@ type before promotion.
 For a manual attach dry-run against an existing vector index:
 
 ```bash
-ctx-incremental-attach attach \
+python -m ctx.core.graph.incremental_attach attach \
   --index-dir ~/.claude/skill-wiki/.embedding-cache/graph/vector-index \
   --overlay ~/.claude/skill-wiki/graphify-out/entity-overlays.jsonl \
   --node-id skill:fastapi-review \
@@ -108,7 +108,7 @@ Validate the attach quality before relying on a new ANN backend or changed
 threshold:
 
 ```bash
-ctx-incremental-shadow \
+python -m ctx.core.graph.incremental_shadow \
   --index-dir ~/.claude/skill-wiki/.embedding-cache/graph/vector-index \
   --graph ~/.claude/skill-wiki/graphify-out/graph.json \
   --sample-size 100 \
@@ -126,7 +126,7 @@ If the worker says `incremental attach skipped (no vector index)`, build the
 persisted semantic index once:
 
 ```bash
-ctx-wiki-graphify \
+python -m ctx.core.wiki.wiki_graphify \
   --wiki-dir ~/.claude/skill-wiki \
   --incremental \
   --graph-only \
@@ -141,7 +141,7 @@ should be shadow-gated before release use.
 Then process pending entity updates:
 
 ```bash
-ctx-wiki-worker --wiki ~/.claude/skill-wiki
+python -m ctx.core.wiki.wiki_queue_worker --wiki ~/.claude/skill-wiki
 ```
 
 That is the supported "attach pending" flow today: the queue is durable, so
@@ -189,18 +189,18 @@ Use this flow for every entity type:
 Examples:
 
 ```bash
-ctx-skill-add --skill-path ./SKILL.md --name fastapi-review
-ctx-skill-add --skill-path ./SKILL.md --name fastapi-review --update-existing
+python -m skill_add --skill-path ./SKILL.md --name fastapi-review
+python -m skill_add --skill-path ./SKILL.md --name fastapi-review --update-existing
 
-ctx-agent-add --agent-path ./code-reviewer.md --name code-reviewer
-ctx-agent-add --agent-path ./code-reviewer.md --name code-reviewer --update-existing
+python -m agent_add --agent-path ./code-reviewer.md --name code-reviewer
+python -m agent_add --agent-path ./code-reviewer.md --name code-reviewer --update-existing
 
-ctx-mcp-add --from-json ./github-mcp.json
-ctx-mcp-fetch --source pulsemcp --limit 50 | ctx-mcp-add --from-stdin
-ctx-mcp-add --from-json ./github-mcp.json --update-existing
+python -m mcp_add --from-json ./github-mcp.json
+python -m mcp_fetch --source pulsemcp --limit 50 | python -m mcp_add --from-stdin
+python -m mcp_add --from-json ./github-mcp.json --update-existing
 
-ctx-harness-add --from-json ./text-to-cad-harness.json
-ctx-harness-add --from-json ./text-to-cad-harness.json --update-existing
+python -m harness_add --from-json ./text-to-cad-harness.json
+python -m harness_add --from-json ./text-to-cad-harness.json --update-existing
 ```
 
 `python -m harness_install --update` is different: it refreshes an installed harness
@@ -234,7 +234,7 @@ After deleting an entity page, drain or rebuild before trusting recommendation
 results:
 
 ```bash
-ctx-wiki-worker --wiki ~/.claude/skill-wiki --limit 1
+python -m ctx.core.wiki.wiki_queue_worker --wiki ~/.claude/skill-wiki --limit 1
 ctx-scan-repo --repo . --recommend
 ```
 
@@ -249,7 +249,7 @@ Use this when you have a local `SKILL.md` that should be installed under
 `~/.claude/skills/<name>/SKILL.md` and mirrored into the wiki.
 
 ```bash
-ctx-skill-add \
+python -m skill_add \
   --skill-path ./SKILL.md \
   --name fastapi-review
 ```
@@ -270,7 +270,7 @@ What happens:
 Use this when you have a local Claude Code agent markdown file.
 
 ```bash
-ctx-agent-add \
+python -m agent_add \
   --agent-path ./code-reviewer.md \
   --name code-reviewer
 ```
@@ -278,7 +278,7 @@ ctx-agent-add \
 Batch-add every top-level `.md` file in a directory:
 
 ```bash
-ctx-agent-add --scan-dir ./agents --skip-existing
+python -m agent_add --scan-dir ./agents --skip-existing
 ```
 
 Agents are copied into `~/.claude/agents/` and mirrored into
@@ -307,7 +307,7 @@ Create `github-mcp.json`:
 Add it:
 
 ```bash
-ctx-mcp-add --from-json ./github-mcp.json
+python -m mcp_add --from-json ./github-mcp.json
 ```
 
 MCP pages live under `entities/mcp-servers/<shard>/<slug>.md`. The add command
@@ -335,7 +335,7 @@ browser-automation runners, evaluation loops, and local-model workbenches.
 Example: add `earthtojake/text-to-cad` as a harness recommendation.
 
 ```bash
-ctx-harness-add \
+python -m harness_add \
   --repo https://github.com/earthtojake/text-to-cad \
   --name "Text to CAD" \
   --description "Harness for turning text prompts into CAD artifacts." \
@@ -365,7 +365,7 @@ Or load one JSON record:
 ```
 
 ```bash
-ctx-harness-add --from-json ./text-to-cad-harness.json
+python -m harness_add --from-json ./text-to-cad-harness.json
 ```
 
 Harness pages live under `entities/harnesses/<slug>.md`. Setup and verification
@@ -375,10 +375,10 @@ decide before running anything.
 To inspect and install a harness:
 
 ```bash
-ctx-harness-install text-to-cad --dry-run
-ctx-harness-install text-to-cad
-ctx-harness-install text-to-cad --update --dry-run
-ctx-harness-install text-to-cad --uninstall --dry-run
+python -m harness_install text-to-cad --dry-run
+python -m harness_install text-to-cad
+python -m harness_install text-to-cad --update --dry-run
+python -m harness_install text-to-cad --uninstall --dry-run
 ```
 
 The installer clones or copies the harness into `~/.claude/harnesses/<slug>` and
@@ -387,10 +387,10 @@ unless you pass `--approve-commands`, and it does not run verification commands
 unless you also pass `--run-verify`.
 
 ```bash
-ctx-harness-install text-to-cad --approve-commands --run-verify
-ctx-harness-install text-to-cad --update --approve-commands --run-verify
-ctx-harness-install text-to-cad --uninstall
-ctx-harness-install text-to-cad --uninstall --keep-files
+python -m harness_install text-to-cad --approve-commands --run-verify
+python -m harness_install text-to-cad --update --approve-commands --run-verify
+python -m harness_install text-to-cad --uninstall
+python -m harness_install text-to-cad --uninstall --keep-files
 ```
 
 ## Initialize Model Choice

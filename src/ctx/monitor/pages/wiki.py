@@ -1,4 +1,4 @@
-"""Wiki index rendering helpers for ctx-monitor."""
+"""Wiki index rendering helpers for the ctx dashboard."""
 
 from __future__ import annotations
 

@@ -14,16 +14,16 @@ writes each body verbatim to ``<wiki>/converted-agents/<slug>.md`` —
 a parallel structure to ``<wiki>/converted/<slug>/`` which already
 holds the canonical skill bodies.
 
-The CLI is a one-shot admin operation. ``ctx-agent-install`` consumes
+The CLI is a one-shot admin operation. ``python -m ctx.adapters.claude_code.install.agent_install`` consumes
 the mirrored files at install time.
 
 Usage:
-    ctx-agent-mirror                     # mirror everything that changed
-    ctx-agent-mirror --slug X            # mirror one slug
-    ctx-agent-mirror --force             # overwrite even unchanged bodies
-    ctx-agent-mirror --prune             # delete mirrored bodies whose
+    python -m agent_mirror                     # mirror everything that changed
+    python -m agent_mirror --slug X            # mirror one slug
+    python -m agent_mirror --force             # overwrite even unchanged bodies
+    python -m agent_mirror --prune             # delete mirrored bodies whose
                                          # live source has disappeared
-    ctx-agent-mirror --dry-run           # report without writing
+    python -m agent_mirror --dry-run           # report without writing
 """
 
 from __future__ import annotations
@@ -353,10 +353,10 @@ def _summarize(results: list[MirrorResult]) -> dict[str, int]:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="ctx-agent-mirror",
+        prog="python -m agent_mirror",
         description=(
             "Mirror agent bodies from ~/.claude/agents/ into "
-            "<wiki>/converted-agents/<slug>.md. Unblocks ctx-agent-install "
+            "<wiki>/converted-agents/<slug>.md. Unblocks python -m ctx.adapters.claude_code.install.agent_install "
             "by giving the wiki the actual agent prompt, not just the card."
         ),
     )

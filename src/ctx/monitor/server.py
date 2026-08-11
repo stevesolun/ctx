@@ -1,4 +1,4 @@
-"""Threaded stdlib HTTP server helpers for ctx-monitor."""
+"""Threaded stdlib HTTP server helpers for the ctx dashboard."""
 
 from __future__ import annotations
 
@@ -79,7 +79,7 @@ def build_monitor_handler(deps: MonitorHandlerDeps) -> type[BaseHTTPRequestHandl
     """Create the stdlib request handler bound to monitor route callbacks."""
 
     class MonitorHandler(BaseHTTPRequestHandler):
-        # Silence the per-request access log spam. Users running ctx-monitor get
+        # Silence the per-request access log spam. Users running the dashboard get
         # a clean stdout; errors still surface via log_error() below.
         def log_message(self, fmt: str, *args: Any) -> None:
             return

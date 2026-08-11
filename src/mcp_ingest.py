@@ -21,16 +21,16 @@ reliability win that actually matters for large ingests.
 Usage
 -----
     # Stream from a source, checkpointed per-source:
-    ctx-mcp-fetch --source awesome-mcp | ctx-mcp-ingest --source awesome-mcp
+    python -m mcp_fetch --source awesome-mcp | python -m mcp_ingest --source awesome-mcp
 
     # Replay a JSONL file one line at a time (idempotent re-runs skip already-processed):
-    ctx-mcp-ingest --source pulsemcp --from-jsonl records.jsonl
+    python -m mcp_ingest --source pulsemcp --from-jsonl records.jsonl
 
     # Retry only the failures from the prior run:
-    ctx-mcp-ingest --source pulsemcp --retry-failures --from-stdin
+    python -m mcp_ingest --source pulsemcp --retry-failures --from-stdin
 
     # Inspect progress without creating a missing wiki path:
-    ctx-mcp-ingest --source pulsemcp --status
+    python -m mcp_ingest --source pulsemcp --status
 
 Checkpoint
 ----------
@@ -436,7 +436,7 @@ def _iter_records_from(
     """Yield record dicts from whichever input arg was supplied.
 
     We don't pre-read the whole stream — that would defeat the point
-    of streaming from ``ctx-mcp-fetch | ctx-mcp-ingest``. JSONL readers
+    of streaming from ``python -m mcp_fetch | python -m mcp_ingest``. JSONL readers
     yield per line; the JSON-object reader is a single-record degenerate.
     """
 
@@ -512,7 +512,7 @@ def _print_status(wiki_path: Path, source: str) -> None:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="ctx-mcp-ingest",
+        prog="python -m mcp_ingest",
         description=(
             "Resume-safe MCP ingest. Checkpoints per source so a "
             "crashed or interrupted run picks up where it left off."
@@ -589,7 +589,7 @@ def _force_utf8_stdio() -> None:
 
 
 def main() -> None:
-    """Entry point for the ``ctx-mcp-ingest`` console script."""
+    """Entry point for the ``python -m mcp_ingest`` console script."""
     _force_utf8_stdio()
     parser = _build_parser()
     args = parser.parse_args()

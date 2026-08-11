@@ -1,4 +1,4 @@
-"""Recommendation selection page renderer for ctx-monitor."""
+"""Recommendation selection page renderer for the ctx dashboard."""
 
 from __future__ import annotations
 

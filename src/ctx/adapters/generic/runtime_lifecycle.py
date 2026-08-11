@@ -1813,7 +1813,7 @@ def _security_scan_state(
             "scanner": "skillspector",
             "required": False,
             "summary": ("No SkillSpector scan proof was provided by the host for this skill load."),
-            "recommended_command": f"ctx-skill-install {slug} --security-scan-required",
+            "recommended_command": f"python -m ctx.adapters.claude_code.install.skill_install {slug} --security-scan-required",
         }
 
     status = _validate_choice(

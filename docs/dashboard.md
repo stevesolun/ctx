@@ -8,9 +8,9 @@ logs; generic-harness validation/escalation state; a live event stream;
 and harness wiki/graph browsing.
 
 ```bash
-ctx-monitor serve              # http://127.0.0.1:8765
-ctx-monitor serve --port 8888  # custom port
-ctx-monitor serve --host 0.0.0.0 --port 8888 --allow-non-loopback  # LAN read-only
+python -m ctx_monitor serve              # http://127.0.0.1:8765
+python -m ctx_monitor serve --port 8888  # custom port
+python -m ctx_monitor serve --host 0.0.0.0 --port 8888 --allow-non-loopback  # LAN read-only
 ```
 
 Zero Python dependencies added by the dashboard. Everything runs on
@@ -46,7 +46,7 @@ only stdlib HTTP calls against a running `python -m ctx_monitor` instance and ch
 core pages plus graph/wiki/catalog APIs.
 
 ```bash
-ctx-monitor serve
+python -m ctx_monitor serve
 python scripts/dashboard_smoke.py --warm
 ```
 
@@ -93,7 +93,7 @@ the full wiki pages and start the local dashboard:
 
 ```bash
 ctx-init --graph --graph-install-mode full --model-mode skip
-ctx-monitor serve
+python -m ctx_monitor serve
 ```
 
 Then use:

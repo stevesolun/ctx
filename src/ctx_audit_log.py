@@ -34,7 +34,7 @@ Schema (per line):
 The log is append-only. Rotation is by day (``ctx-audit.jsonl`` is current;
 ``ctx-audit-YYYY-MM-DD.jsonl`` are historical). Callers never truncate.
 
-Readers (``ctx-monitor`` dashboard, postmortem scripts) consume the log;
+Readers (the ctx dashboard, postmortem scripts) consume the log;
 they never mutate it.
 """
 

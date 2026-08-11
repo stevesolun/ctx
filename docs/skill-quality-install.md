@@ -71,7 +71,7 @@ window is retried on the next session end.
 Run once after install so every installed skill has a baseline score:
 
 ```bash
-ctx-skill-quality recompute --all
+python -m skill_quality recompute --all
 ```
 
 This walks `~/.claude/skills/*/SKILL.md` and `~/.claude/agents/*.md`,
@@ -82,19 +82,19 @@ corpus size and disk.
 
 ```bash
 # Full recompute (use sparingly; the Stop hook handles incrementals).
-ctx-skill-quality recompute --all
+python -m skill_quality recompute --all
 
 # One slug.
-ctx-skill-quality recompute --slug python-testing
+python -m skill_quality recompute --slug python-testing
 
 # Show the most recent score.
-ctx-skill-quality show python-testing
+python -m skill_quality show python-testing
 
 # Signal-by-signal breakdown with evidence.
-ctx-skill-quality explain python-testing
+python -m skill_quality explain python-testing
 
 # List every slug with its grade, filtered.
-ctx-skill-quality list --grade D
+python -m skill_quality list --grade D
 ```
 
 All verbs accept `--json` for piping into other tools.

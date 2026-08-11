@@ -76,7 +76,7 @@ class TestInstallAgent:
             agents_dir=agents_dir,
         )
         assert r.status == "not-in-wiki"
-        assert "ctx-agent-mirror" in r.message
+        assert "python -m agent_mirror" in r.message
 
     def test_rejects_symlinked_wiki_source(
         self,

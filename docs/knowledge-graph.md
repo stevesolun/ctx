@@ -170,7 +170,7 @@ quality clusters for the recommendation use case.
 ### Via the dashboard
 
 ```bash
-ctx-monitor serve              # http://127.0.0.1:8765
+python -m ctx_monitor serve              # http://127.0.0.1:8765
 ```
 
 Then open `/graph?slug=<entity-slug>&type=<entity-type>` for the
@@ -308,7 +308,7 @@ new base snapshot.
 To stage a coordinated graph+wiki compaction without mutating the active wiki:
 
 ```bash
-ctx-pack-compact compact \
+python -m ctx.core.wiki.pack_compaction compact \
   --wiki-path ~/.claude/skill-wiki \
   --base-export-id <new-export-id> \
   --staging-dir /tmp/ctx-pack-stage \
@@ -321,7 +321,7 @@ graph pack manifest, wiki pack manifest, checksums, matching export IDs, and
 graph/wiki entity consistency before replacing active packs:
 
 ```bash
-ctx-pack-compact validate \
+python -m ctx.core.wiki.pack_compaction validate \
   --staged-graph-packs-dir /tmp/ctx-pack-stage/graph-packs \
   --staged-wiki-packs-dir /tmp/ctx-pack-stage/wiki-packs \
   --require-compaction-manifest \
@@ -329,7 +329,7 @@ ctx-pack-compact validate \
 ```
 
 ```bash
-ctx-pack-compact promote \
+python -m ctx.core.wiki.pack_compaction promote \
   --wiki-path ~/.claude/skill-wiki \
   --staged-graph-packs-dir /tmp/ctx-pack-stage/graph-packs \
   --staged-wiki-packs-dir /tmp/ctx-pack-stage/wiki-packs \
@@ -341,15 +341,15 @@ Use `--graph-store-db <path>` to refresh a non-default store, or
 `--no-graph-store-refresh` only when you plan to rebuild it separately:
 
 ```bash
-ctx-pack-compact validate \
+python -m ctx.core.wiki.pack_compaction validate \
   --wiki-path ~/.claude/skill-wiki \
   --json
 
-ctx-graph-store build \
+python -m ctx.core.graph.graph_store build \
   --graph-dir ~/.claude/skill-wiki/graphify-out \
   --db ~/.claude/skill-wiki/graphify-out/graph-store.sqlite3
 
-ctx-graph-store validate \
+python -m ctx.core.graph.graph_store validate \
   --db ~/.claude/skill-wiki/graphify-out/graph-store.sqlite3
 ```
 
@@ -367,7 +367,7 @@ vendor its code or assets.
 After you add a skill, agent, MCP server, or harness entity page:
 
 ```bash
-ctx-wiki-worker --wiki ~/.claude/skill-wiki --limit 1
+python -m ctx.core.wiki.wiki_queue_worker --wiki ~/.claude/skill-wiki --limit 1
 ```
 
 The `entity-upsert` worker path validates the queued page hash, updates the
@@ -384,10 +384,10 @@ pack tombstone hides that relative path.
 For manual review or debugging:
 
 ```bash
-ctx-incremental-attach calibrate \
+python -m ctx.core.graph.incremental_attach calibrate \
   --graph ~/.claude/skill-wiki/graphify-out/graph.json
 
-ctx-incremental-attach attach \
+python -m ctx.core.graph.incremental_attach attach \
   --index-dir ~/.claude/skill-wiki/.embedding-cache/graph/vector-index \
   --overlay ~/.claude/skill-wiki/graphify-out/entity-overlays.jsonl \
   --node-id skill:fastapi-review \
@@ -401,7 +401,7 @@ Shadow-gate a persisted index before trusting a new ANN backend, changed
 thresholds, or a large attach workflow:
 
 ```bash
-ctx-incremental-shadow \
+python -m ctx.core.graph.incremental_shadow \
   --index-dir ~/.claude/skill-wiki/.embedding-cache/graph/vector-index \
   --graph ~/.claude/skill-wiki/graphify-out/graph.json \
   --sample-size 100 \
@@ -417,7 +417,7 @@ rebuild before shipping.
 If the vector index is missing, rebuild it without repacking artifacts:
 
 ```bash
-ctx-wiki-graphify \
+python -m ctx.core.wiki.wiki_graphify \
   --wiki-dir ~/.claude/skill-wiki \
   --incremental \
   --graph-only \
@@ -431,7 +431,7 @@ Then drain pending entity-upsert work with `python -m ctx.core.wiki.wiki_queue_w
 Before publishing graph artifacts, run the full rebuild/export path:
 
 ```bash
-ctx-wiki-graphify          # rebuild entity graph + communities
+python -m ctx.core.wiki.wiki_graphify          # rebuild entity graph + communities
 ```
 
 The pre-commit hook (`.githooks/pre-commit`) does **not** rebuild or

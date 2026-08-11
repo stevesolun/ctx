@@ -1,4 +1,4 @@
-"""Wiki entity/detail rendering helpers for ctx-monitor."""
+"""Wiki entity/detail rendering helpers for the ctx dashboard."""
 
 from __future__ import annotations
 
@@ -517,8 +517,8 @@ def render_runtime_entity_action(
             "<h2>Install harness</h2>"
             "<p class='muted'>Harnesses are installed through the harness CLI so ctx can "
             "collect the model, goal, and verification details before wiring recommendations.</p>"
-            f"<pre><code>ctx-harness-install {escaped_slug} --dry-run\n"
-            f"ctx-harness-install {escaped_slug}</code></pre>"
+            f"<pre><code>python -m harness_install {escaped_slug} --dry-run\n"
+            f"python -m harness_install {escaped_slug}</code></pre>"
             "</div>"
         )
 

@@ -117,7 +117,7 @@ unload.
       "name": "github",
       "type": "mcp",
       "reason": ".github/workflows exists and the repo uses GitHub Actions",
-      "install_command": "ctx-mcp-add ..."
+      "install_command": "python -m mcp_add ..."
     }
   ],
   "warnings": []

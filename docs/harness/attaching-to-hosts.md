@@ -436,7 +436,7 @@ If no catalog harness fits, generate a build handoff instead of forcing a weak
 match:
 
 ```bash
-ctx-harness-install --recommend \
+python -m harness_install --recommend \
   --goal "build a private CAD workflow with a local model" \
   --model-provider ollama \
   --model ollama/llama3.1 \
@@ -480,7 +480,7 @@ you're on the MCP path, library path, or `ctx run` CLI.
 To inspect lifecycle state for a specific skill:
 
 ```bash
-ctx-skill-quality explain fastapi-pro
+python -m skill_quality explain fastapi-pro
 ```
 
 Or from Python:

@@ -1,4 +1,4 @@
-"""Filesystem state locations for ctx-monitor."""
+"""Filesystem state locations for the ctx dashboard."""
 
 from __future__ import annotations
 

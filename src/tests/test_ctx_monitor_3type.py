@@ -617,7 +617,7 @@ class TestRenderLoaded3Type:
     def test_unload_buttons_carry_entity_type(self, monkeypatch):
         """Unload buttons must carry data-etype for live-action entity types.
 
-        Harnesses are managed by ctx-harness-install because they own target
+        Harnesses are managed by python -m harness_install because they own target
         directories and setup commands, so the dashboard shows the CLI handoff
         instead of a misleading live unload button.
         """
@@ -636,7 +636,7 @@ class TestRenderLoaded3Type:
         assert "data-etype='agent'" in html
         assert "data-etype='mcp-server'" in html
         assert "data-etype='harness'" not in html
-        assert "ctx-harness-install langgraph --uninstall --dry-run" in html
+        assert "python -m harness_install langgraph --uninstall --dry-run" in html
 
     def test_legacy_manifest_entry_defaults_to_skill(self, monkeypatch):
         """Pre-install_utils manifest entries had no entity_type field.
@@ -1015,7 +1015,7 @@ class TestPerformLoadByEntityType:
     def test_harness_type_hands_off_to_cli(self):
         ok, msg = _mt.perform_load("langgraph", entity_type="harness")
         assert not ok
-        assert "ctx-harness-install langgraph --dry-run" in msg
+        assert "python -m harness_install langgraph --dry-run" in msg
 
 
 # ────────────────────────────────────────────────────────────────────

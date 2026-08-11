@@ -1025,8 +1025,8 @@ def cmd_list(args: argparse.Namespace) -> int:
         for r in sorted(rows, key=lambda x: (x.get("grade", "Z"), x.get("slug", ""))):
             # Format: <slug>\t<grade>\tscore=N.NN
             # Slug-first matches the convention used by the existing
-            # ctx-skill-quality list and aligns with how users grep
-            # ("ctx-mcp-quality list | grep my-mcp").
+            # python -m skill_quality list and aligns with how users grep
+            # ("python -m mcp_quality list | grep my-mcp").
             print(
                 f"{r.get('slug', '?')}\t{r.get('grade', '?')}\tscore={float(r.get('score', 0)):.2f}"
             )
@@ -1045,7 +1045,7 @@ def _add_wiki_dir(parser: argparse.ArgumentParser) -> None:
     Lives on every subparser (not just the parent) so users can put the
     flag either before or after the verb -- argparse with subparsers
     requires parent flags to precede the verb, which trips up natural
-    `ctx-mcp-quality recompute --slug X --wiki-dir Y` usage.
+    `python -m mcp_quality recompute --slug X --wiki-dir Y` usage.
     """
     parser.add_argument(
         "--wiki-dir",
@@ -1058,7 +1058,7 @@ def _add_wiki_dir(parser: argparse.ArgumentParser) -> None:
 
 def build_argparser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="ctx-mcp-quality",
+        prog="python -m mcp_quality",
         description="Score and persist quality for MCP server catalog entries.",
     )
     _add_wiki_dir(p)
@@ -1093,7 +1093,7 @@ def build_argparser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Entry point for the ``ctx-mcp-quality`` console script."""
+    """Entry point for the ``python -m mcp_quality`` console script."""
     parser = build_argparser()
     args = parser.parse_args(argv)
     return int(args.func(args))

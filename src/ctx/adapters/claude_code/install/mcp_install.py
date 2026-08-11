@@ -6,7 +6,7 @@ Wraps Claude Code's native ``claude mcp add`` / ``claude mcp remove``
 with the wiki's entity metadata, so a user can approve a
 recommendation and have the MCP registered in one command:
 
-    ctx-mcp-install filesystem --cmd "npx -y @modelcontextprotocol/server-filesystem /data"
+    python -m ctx.adapters.claude_code.install.mcp_install filesystem --cmd "npx -y @modelcontextprotocol/server-filesystem /data"
 
 Flow on install:
 
@@ -34,11 +34,11 @@ from that CLI. Our manifest is a mirror for resolve/suggest to
 consult.
 
 Usage:
-    ctx-mcp-install filesystem --cmd "npx -y @modelcontextprotocol/server-filesystem /data"
-    ctx-mcp-install atlassian-cloud --cmd "uvx atlassian-mcp" --auto
-    ctx-mcp-install my-server --cmd-json '{"command":"npx","args":["-y","pkg"]}'
-    ctx-mcp-uninstall filesystem
-    ctx-mcp-install atlassian-cloud --dry-run   # card only, no install
+    python -m ctx.adapters.claude_code.install.mcp_install filesystem --cmd "npx -y @modelcontextprotocol/server-filesystem /data"
+    python -m ctx.adapters.claude_code.install.mcp_install atlassian-cloud --cmd "uvx atlassian-mcp" --auto
+    python -m ctx.adapters.claude_code.install.mcp_install my-server --cmd-json '{"command":"npx","args":["-y","pkg"]}'
+    python -m ctx.adapters.claude_code.install.mcp_install uninstall filesystem
+    python -m ctx.adapters.claude_code.install.mcp_install atlassian-cloud --dry-run   # card only, no install
 """
 
 from __future__ import annotations
@@ -747,7 +747,7 @@ def _manifest_load_entry(slug: str) -> dict | None:
 
 def _build_install_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="ctx-mcp-install",
+        prog="python -m ctx.adapters.claude_code.install.mcp_install",
         description=(
             "Install an MCP server from the wiki into Claude Code. "
             "Prints a 'why install' card then runs `claude mcp add`."
@@ -777,7 +777,7 @@ def _build_install_parser() -> argparse.ArgumentParser:
 
 def _build_uninstall_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="ctx-mcp-uninstall",
+        prog="python -m ctx.adapters.claude_code.install.mcp_install uninstall",
         description=(
             "Uninstall an MCP server. Runs `claude mcp remove` and resets the wiki entity status."
         ),
@@ -864,8 +864,8 @@ main = install_main
 def module_main(argv: list[str] | None = None) -> None:
     """Dispatch ``python -m`` between installing and uninstalling.
 
-    The ``ctx-mcp-install`` and ``ctx-mcp-uninstall`` console scripts bound
-    the two entry points by name. With those scripts gone, ``python -m`` is
+    Two console scripts used to bind the two entry points by name. With
+    those scripts retired, ``python -m`` is
     the only route left, and a module has just one. Uninstall is therefore
     reached with a leading ``uninstall`` word; everything else installs, so
     every previously valid invocation still means exactly what it meant.

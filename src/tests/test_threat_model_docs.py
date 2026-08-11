@@ -68,7 +68,7 @@ def test_monitor_docs_match_runtime_exposure_contract() -> None:
     non_loopback_commands = [
         line
         for line in dashboard.splitlines()
-        if "ctx-monitor serve" in line and ("--host 0.0.0.0" in line or "--host ::" in line)
+        if "ctx_monitor serve" in line and ("--host 0.0.0.0" in line or "--host ::" in line)
     ]
     assert non_loopback_commands
     assert all("--allow-non-loopback" in line for line in non_loopback_commands)

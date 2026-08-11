@@ -7,7 +7,7 @@ It is public and always reachable. The full live catalog runs locally inside
 !!! tip "Run the full local catalog"
     ```bash
     ctx-init --graph --graph-install-mode full --model-mode skip
-    ctx-monitor serve
+    python -m ctx_monitor serve
     ```
 
 <div class="ctx-catalog-app">

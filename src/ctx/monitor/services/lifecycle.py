@@ -1,4 +1,4 @@
-"""Load/unload lifecycle helpers for ctx-monitor entities."""
+"""Load/unload lifecycle helpers for ctx dashboard entities."""
 
 from __future__ import annotations
 

@@ -894,7 +894,7 @@ def render_catalog_cards(stats: Mapping[str, int | None]) -> str | None:
 def _append_badge_target_replacements(reps: list[Replacement]) -> None:
     # README badges are clicked from GitHub/Hugging Face, so they must point at
     # public documentation. The live searchable catalog remains
-    # http://127.0.0.1:8765/wiki?type=... after `ctx-monitor serve`.
+    # http://127.0.0.1:8765/wiki?type=... after `python -m ctx_monitor serve`.
     badge_targets = {
         "Tests": f"https://github.com/{_GITHUB_REPO}/actions/workflows/test.yml",
         "Graph": f"{_PUBLIC_DOCS_BASE_URL}/knowledge-graph/",

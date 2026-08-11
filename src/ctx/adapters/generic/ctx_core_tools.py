@@ -1076,7 +1076,7 @@ class CtxCoreToolbox:
             if graph.number_of_nodes() == 0:
                 return json.dumps(
                     {
-                        "error": "knowledge graph not available; run ctx-wiki-graphify",
+                        "error": "knowledge graph not available; run python -m ctx.core.wiki.wiki_graphify",
                         "results": [],
                     }
                 )
@@ -1202,7 +1202,7 @@ class CtxCoreToolbox:
         if graph.number_of_nodes() == 0:
             return json.dumps(
                 {
-                    "error": "knowledge graph not available; run ctx-wiki-graphify",
+                    "error": "knowledge graph not available; run python -m ctx.core.wiki.wiki_graphify",
                     "results": [],
                 }
             )
@@ -1269,7 +1269,7 @@ class CtxCoreToolbox:
         if graph.number_of_nodes() == 0:
             return json.dumps(
                 {
-                    "error": "knowledge graph not available; run ctx-wiki-graphify",
+                    "error": "knowledge graph not available; run python -m ctx.core.wiki.wiki_graphify",
                     "results": [],
                 }
             )

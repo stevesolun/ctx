@@ -722,7 +722,7 @@ def _render_attach_readme(record: HarnessRecord) -> str:
     modes = ", ".join(record.attach_modes)
     return f"""# ctx Attachment for {record.title}
 
-This harness was installed by `ctx-harness-install`.
+This harness was installed by `python -m harness_install`.
 
 Supported attach modes: {modes}
 
@@ -1085,7 +1085,7 @@ def print_recommendations(results: list[dict[str, Any]]) -> None:
         print(f"- {slug} (fit {score:.2f})")
         if reason:
             print(f"  reason: {reason}")
-        print(f"  install: ctx-harness-install {slug} --dry-run")
+        print(f"  install: python -m harness_install {slug} --dry-run")
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -1,4 +1,4 @@
-"""Public ctx-monitor entrypoint.
+"""Public ctx dashboard entrypoint.
 
 The dashboard implementation lives under :mod:`ctx.monitor`.  This flat module
 stays as the console-script and backwards-compatible import surface.

@@ -1,7 +1,7 @@
 # mypy: disable-error-code=attr-defined
 """Compatibility layer for the local ctx runtime and catalog dashboard.
 
-``ctx-monitor serve [--port 8765]`` starts a zero-dependency threaded HTTP server
+``python -m ctx_monitor serve [--port 8765]`` starts a zero-dependency threaded HTTP server
 (stdlib http.server) that renders the audit log + skill-events.jsonl +
 sidecars into a browser UI at http://localhost:8765/.
 
@@ -53,7 +53,7 @@ Design notes:
   an explicit flag to emphasize the local-dev-only intent.
 
 This is a minimal dashboard. Power users should pipe the audit log
-into Grafana / Loki / whatever; ``ctx-monitor`` is the zero-config
+into Grafana / Loki / whatever; the ctx dashboard is the zero-config
 starting point.
 """
 

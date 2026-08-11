@@ -1,4 +1,4 @@
-"""Config read/write helpers for ctx-monitor."""
+"""Config read/write helpers for the ctx dashboard."""
 
 from __future__ import annotations
 

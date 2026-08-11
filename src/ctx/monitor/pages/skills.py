@@ -1,4 +1,4 @@
-"""Quality sidecar list page renderer for ctx-monitor."""
+"""Quality sidecar list page renderer for the ctx dashboard."""
 
 from __future__ import annotations
 

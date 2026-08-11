@@ -538,7 +538,7 @@ def render_markdown(report: TagReport, *, top_n: int = 200) -> str:
     if not report.proposals:
         out.append("✓ No empty-tag entities found. Catalog is fully tagged.")
         return "\n".join(out)
-    out.append("## Proposals (apply with `ctx-tag-backfill --apply`)")
+    out.append("## Proposals (apply with `python -m ctx.core.quality.tag_backfill --apply`)")
     out.append("")
     for prop in report.proposals[:top_n]:
         out.append(f"### {prop.entity_type}: `{prop.slug}`")

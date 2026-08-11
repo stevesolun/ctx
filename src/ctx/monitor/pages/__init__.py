@@ -1,1 +1,1 @@
-"""Page renderers for ctx-monitor."""
+"""Page renderers for the ctx dashboard."""

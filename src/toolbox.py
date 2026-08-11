@@ -45,7 +45,7 @@ from toolbox_config import (
 
 # Location of the starter templates in the dev source tree. When the
 # package is installed via pip, this path does NOT exist — we fall back
-# to the inlined ``_EMBEDDED_TEMPLATES`` constant below so ``ctx-toolbox
+# to the inlined ``_EMBEDDED_TEMPLATES`` constant below so ``python -m toolbox
 # init`` works out of the box from PyPI without any data-file packaging.
 TEMPLATES_DIR = Path(__file__).parent.parent / "docs" / "toolbox" / "templates"
 
@@ -322,9 +322,9 @@ def cmd_run(args: argparse.Namespace) -> int:
     """Fire a toolbox trigger event — thin alias to toolbox_hooks.run_trigger.
 
     Exists because the README / docs / playbook all reference
-    ``ctx-toolbox run --event pre-commit``, but the trigger runner lives
+    ``python -m toolbox run --event pre-commit``, but the trigger runner lives
     in ``toolbox_hooks.py``. Keeping a user-facing ``run`` subcommand
-    here means the top-level ``ctx-toolbox`` CLI is the single entry
+    here means the top-level ``python -m toolbox`` CLI is the single entry
     point for every toolbox operation.
     """
     from toolbox_hooks import run_trigger  # local import — avoids circular

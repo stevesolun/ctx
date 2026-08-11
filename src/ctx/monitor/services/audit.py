@@ -1,4 +1,4 @@
-"""Dashboard audit logging helpers for ctx-monitor."""
+"""Audit logging helpers for the ctx dashboard."""
 
 from __future__ import annotations
 

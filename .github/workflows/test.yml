@@ -835,6 +835,72 @@ jobs:
             "$cmd" --help >/dev/null
           done < ctx-console-help.txt
 
+      # `--help` is the one path that never imports ctx.fit: the parser is
+      # built from ctx/cli/fit.py, whose only ctx.fit reference sits under
+      # `if TYPE_CHECKING`. That is why a wheel with no ctx/fit/ package
+      # passed this lane. Run the product itself and assert on OUTPUT --
+      # bare `ctx` exited 0 while dying of ModuleNotFoundError, so an
+      # exit-code check alone proves nothing. Same checks as
+      # scripts/clean_host_contract.py.
+      - name: Product smoke on the installed wheel
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            . .venv-smoke/Scripts/activate
+          else
+            . .venv-smoke/bin/activate
+          fi
+          # A repository of our own, so the checkout's size and contents
+          # cannot change what the product reports.
+          rm -rf smoke-repo && mkdir -p smoke-repo
+          printf 'def health():\n    return "ok"\n' > smoke-repo/app.py
+          printf 'def test_health():\n    assert True\n' > smoke-repo/test_app.py
+          # Isolate from any ~/.claude state the runner image may carry.
+          export HOME="$PWD/smoke-home"
+          mkdir -p "$HOME"
+          cd smoke-repo
+          python - <<'PY'
+          import json
+          import subprocess
+          import sys
+
+          CHECKS = (
+              ("bare ctx", ["ctx"], "AI agent readiness"),
+              ("ctx fit", ["ctx", "fit", "."], "Repository:"),
+              ("ctx doctor", ["ctx", "doctor"], "CTX Fit diagnostics"),
+          )
+
+          failures = []
+          for label, argv, needle in CHECKS:
+              proc = subprocess.run(argv, capture_output=True, text=True, timeout=600)
+              blob = proc.stdout + proc.stderr
+              if "Traceback (most recent call last)" in blob:
+                  failures.append(f"{label}: raised on a clean install\n{proc.stderr[-1500:]}")
+                  continue
+              if needle not in proc.stdout:
+                  failures.append(
+                      f"{label}: exit={proc.returncode}, {needle!r} missing from stdout\n"
+                      f"{proc.stdout[-1500:]}"
+                  )
+              else:
+                  print(f"ok: {label}")
+
+          proc = subprocess.run(
+              ["ctx", "fit", ".", "--json"], capture_output=True, text=True, timeout=600
+          )
+          try:
+              json.loads(proc.stdout)
+          except json.JSONDecodeError as exc:
+              failures.append(
+                  f"ctx fit --json: not valid JSON on a clean install: {exc}\n"
+                  f"{proc.stdout[-1500:]}\n{proc.stderr[-1500:]}"
+              )
+          else:
+              print("ok: ctx fit --json")
+
+          if failures:
+              sys.exit("wheel product smoke failed:\n" + "\n\n".join(failures))
+          PY
+
   clean-host-contract:
     name: "Clean host contract"
     needs: classify

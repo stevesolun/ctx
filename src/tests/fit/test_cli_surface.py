@@ -39,6 +39,75 @@ def test_help_advertises_only_the_product_surface() -> None:
     assert "==SUPPRESS==" not in result.stdout
 
 
+def test_unknown_command_error_does_not_leak_the_hidden_surface() -> None:
+    """Mistyping a command is how users go looking. It must not answer.
+
+    Hiding a command takes three edits, not two: dropping ``help=`` clears the
+    listing and the metavar override clears the usage line, but argparse
+    renders ``action.choices`` verbatim in its invalid-choice error -- so
+    ``ctx nosuchcmd`` printed the full hidden list right back.
+    """
+
+    result = _ctx("nosuchcmd")
+
+    assert result.returncode == 2
+    combined = result.stdout + result.stderr
+    assert "invalid choice: 'nosuchcmd'" in combined
+    for command in ADVERTISED:
+        assert command in combined, combined
+    for command in HIDDEN_BUT_WORKING:
+        assert command not in combined, f"{command} leaked in the error: {combined}"
+
+
+def test_unrelated_invalid_choice_errors_are_untouched() -> None:
+    """Only the subcommand error is rewritten, not every `choose from`.
+
+    The rewrite is anchored on the subcommand action's metavar. Without that
+    anchor it would overwrite the choices of every other flag in the CLI.
+    """
+
+    result = _ctx("advanced", "run", "--task", "x", "--ctx-engine-mode", "bogus")
+
+    assert result.returncode == 2
+    combined = result.stdout + result.stderr
+    assert "argument --ctx-engine-mode: invalid choice: 'bogus'" in combined
+    assert "(choose from legacy, shadow, recommend)" in combined
+
+
+def test_bare_advanced_is_a_usage_error_not_a_success() -> None:
+    """`ctx advanced` supplies no command, so it must exit 2, not 0.
+
+    The help was printed by ``parser.parse_args(["advanced", "--help"])``,
+    which raises SystemExit(0) from inside argparse: the ``return 2`` after it
+    was unreachable and ``ctx advanced && echo ok`` printed ok.
+    """
+
+    for argv in (("advanced",), ("advanced", "--")):
+        result = _ctx(*argv)
+
+        assert result.returncode == 2, f"{argv} exited {result.returncode}: {result.stdout}"
+        # The help that gets printed must be the advanced parser's own, and it
+        # has to name the commands it actually offers.
+        assert "usage: ctx advanced" in result.stdout, result.stdout
+        for command in HIDDEN_BUT_WORKING:
+            assert command in result.stdout, f"{command} missing from: {result.stdout}"
+
+
+def test_unknown_advanced_command_is_attributed_to_advanced() -> None:
+    """`ctx advanced bogus` must say which level rejected the word.
+
+    Dispatch re-entered ``main(rest)`` with a parser whose prog is ``ctx``, so
+    the error named the top-level argument and never mentioned ``advanced``.
+    """
+
+    result = _ctx("advanced", "bogus")
+
+    assert result.returncode == 2
+    combined = result.stdout + result.stderr
+    assert "usage: ctx advanced" in combined, combined
+    assert "ctx advanced: error: invalid choice: 'bogus'" in combined, combined
+
+
 @pytest.mark.parametrize("command", HIDDEN_BUT_WORKING)
 def test_historical_commands_keep_working(command: str) -> None:
     """Hiding a command from help must not break scripts that still call it."""

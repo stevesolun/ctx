@@ -38,7 +38,7 @@ import time
 from dataclasses import replace
 from fnmatch import fnmatchcase
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 from ctx import __version__
 from ctx.adapters.generic.adaptive_runtime import AdaptiveRuntimeController, SelectedSkill
@@ -1819,6 +1819,56 @@ def _loop_result_outcome(result: Any) -> tuple[str, str | None]:
 
 # ── Main entry ─────────────────────────────────────────────────────────────
 
+#: The product surface. Everything else the parser accepts still works but is
+#: not advertised, so this tuple drives the metavar AND the invalid-choice
+#: error -- hiding a command in one place and not the other is what leaked the
+#: harness commands back out.
+_ADVERTISED_COMMANDS: tuple[str, ...] = ("fit", "doctor", "advanced")
+_SUBCOMMAND_METAVAR = "{" + ",".join(_ADVERTISED_COMMANDS) + "}"
+
+#: What `ctx advanced` offers. Listed in its own help and in its own errors.
+_ADVANCED_COMMANDS: tuple[str, ...] = ("run", "resume", "sessions")
+
+#: argparse renders ``action.choices`` verbatim in its invalid-choice error, so
+#: dropping ``help=`` and overriding the metavar is not enough to hide a
+#: command -- mistyping one, the most likely way a user goes looking, printed
+#: the whole hidden list back. Anchored on the subcommand action's own metavar
+#: so unrelated ``choose from`` clauses (``--provider``, ``--mode``, ...) are
+#: left exactly as argparse wrote them.
+_HIDDEN_CHOICE_RE = re.compile(
+    r"(argument " + re.escape(_SUBCOMMAND_METAVAR) + r": invalid choice: .*?)\(choose from [^)]*\)"
+)
+
+
+class _ProductParser(argparse.ArgumentParser):
+    """Top-level parser that keeps hidden commands out of its error text."""
+
+    def error(self, message: str) -> NoReturn:
+        advertised = ", ".join(_ADVERTISED_COMMANDS)
+        super().error(_HIDDEN_CHOICE_RE.sub(rf"\1(choose from {advertised})", message))
+
+
+def _subcommand_parser(parser: argparse.ArgumentParser, name: str) -> argparse.ArgumentParser:
+    """Return the sub-parser registered under *name*.
+
+    argparse offers no public route from a parser back to its sub-parsers, and
+    ``ctx advanced`` with no command has to print the *advanced* parser's help:
+    printing the top-level one would describe the product surface the user just
+    stepped past.
+    """
+    for action in parser._actions:  # noqa: SLF001 - no public accessor exists
+        if isinstance(action, argparse._SubParsersAction):  # noqa: SLF001
+            return action.choices[name]
+    raise KeyError(name)  # pragma: no cover - the parser always has subparsers
+
+
+def _subcommand_choices(parser: argparse.ArgumentParser) -> frozenset[str]:
+    """Every command the parser accepts, advertised or not."""
+    for action in parser._actions:  # noqa: SLF001 - no public accessor exists
+        if isinstance(action, argparse._SubParsersAction):  # noqa: SLF001
+            return frozenset(action.choices)
+    return frozenset()  # pragma: no cover
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
@@ -1831,8 +1881,23 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_fit(default_namespace())
     if args.command == "advanced":
         rest = [item for item in (args.rest or []) if item != "--"]
+        advanced = _subcommand_parser(parser, "advanced")
         if not rest:
-            parser.parse_args(["advanced", "--help"])
+            # Printing help via `parser.parse_args(["advanced", "--help"])`
+            # raised SystemExit(0) from inside argparse, so the `return 2`
+            # never ran and a usage error exited 0.
+            advanced.print_help()
+            return 2
+        head = rest[0]
+        if not head.startswith("-") and head not in _subcommand_choices(parser):
+            # Recursing into main() would report the error against the
+            # top-level parser, whose prog is `ctx`, so the user could not
+            # tell which level rejected the word they typed.
+            sys.stderr.write(advanced.format_usage())
+            sys.stderr.write(
+                f"ctx advanced: error: invalid choice: {head!r} "
+                f"(choose from {', '.join(_ADVANCED_COMMANDS)})\n"
+            )
             return 2
         return main(rest)
     try:
@@ -1865,7 +1930,7 @@ def _is_missing_harness_extra_error(exc: RuntimeError) -> bool:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
+    p = _ProductParser(
         prog="ctx",
         description=(
             "ctx — find the cheapest AI coding setup that actually works on "
@@ -1880,7 +1945,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # The product promise is one command, so typing it must do something useful.
     # The metavar lists only the advertised surface; the harness commands remain
     # valid but hidden, so `ctx --help` shows a product rather than a toolbox.
-    sub = p.add_subparsers(dest="command", required=False, metavar="{fit,doctor,advanced}")
+    sub = p.add_subparsers(dest="command", required=False, metavar=_SUBCOMMAND_METAVAR)
 
     # fit — repository-specific AI coding stack analysis. Registered from its
     # own module so the Fit product layer stays out of the harness CLI.
@@ -1899,8 +1964,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "advanced",
         help="Lower-level harness commands (run, resume, sessions).",
         description=(
-            "Expert commands beneath the product surface. `ctx advanced run ...` "
-            "is equivalent to the historical `ctx run ...`."
+            "Expert commands beneath the product surface: "
+            + ", ".join(_ADVANCED_COMMANDS)
+            + ". `ctx advanced run ...` is equivalent to the historical "
+            "`ctx run ...`. Run `ctx advanced <command> --help` for a "
+            "command's own options."
         ),
     )
     advanced.add_argument(

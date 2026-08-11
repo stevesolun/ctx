@@ -1,4 +1,4 @@
-"""Mutation route payloads for ctx-monitor."""
+"""Mutation route payloads for the ctx dashboard."""
 
 from __future__ import annotations
 

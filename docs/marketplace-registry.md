@@ -61,10 +61,10 @@ packed into the shipped runtime.
 name: github-entity-repos
 type: git
 entrypoints:
-  skills: ctx-skill-add
-  agents: ctx-agent-add
-  mcp: ctx-mcp-add
-  harnesses: ctx-harness-add
+  skills: python -m skill_add
+  agents: python -m agent_add
+  mcp: python -m mcp_add
+  harnesses: python -m harness_add
 refresh: on-demand
 priority: 4
 ```
@@ -80,8 +80,8 @@ needed.
 name: mcp-and-harness-sources
 type: curated-source
 entrypoints:
-  mcp: ctx-mcp-fetch, ctx-mcp-add
-  harnesses: ctx-harness-add, ctx-harness-install
+  mcp: python -m mcp_fetch, python -m mcp_add
+  harnesses: python -m harness_add, python -m harness_install
 refresh: on-demand
 priority: 5
 ```

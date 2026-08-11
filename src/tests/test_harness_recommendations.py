@@ -532,4 +532,4 @@ def test_ctx_init_prints_harness_install_handoff_for_custom_model(
 
     output = capsys.readouterr().out
     assert "recommended harnesses" in output
-    assert "ctx-harness-install langgraph --dry-run" in output
+    assert "python -m harness_install langgraph --dry-run" in output

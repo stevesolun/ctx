@@ -91,7 +91,7 @@ python -m intent_interview init --preset docs-heavy --apply
 python -m intent_interview init --preset security-first --apply
 
 # Activate a specific starter directly
-ctx-toolbox activate ship-it
+python -m toolbox activate ship-it
 ```
 
 See [Intent interview](intent-interview.md) for the full flow.

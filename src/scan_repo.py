@@ -949,7 +949,7 @@ def _print_recommendations(repo: str, profile: dict) -> None:
                 score_text += f"  norm={norm:.2f}"
             print(f"  {m['name']:<40s}  {score_text}  via={shared_tag_text}")
     else:
-        # The ctx-mcp-fetch / ctx-mcp-add console scripts were retired when the
+        # The python -m mcp_fetch / python -m mcp_add console scripts were retired when the
         # public surface collapsed to `ctx`; the modules behind them still run
         # via `python -m`, so the hint has to name that form or it cannot be
         # followed.

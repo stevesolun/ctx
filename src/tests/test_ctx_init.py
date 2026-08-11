@@ -2036,7 +2036,7 @@ def test_main_custom_model_no_fit_points_to_harness_plan(
     assert rc == 0
     output = capsys.readouterr().out
     assert "no harness recommendations matched yet" in output
-    assert "ctx-harness-install --recommend" in output
+    assert "python -m harness_install --recommend" in output
     assert '--model-provider "ollama"' in output
     assert '--harness-runtime "linux server"' in output
     assert '--harness-tools "filesystem shell"' in output

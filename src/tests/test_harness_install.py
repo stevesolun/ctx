@@ -965,7 +965,7 @@ def test_recommend_mode_prints_install_handoff(
     assert calls[0]["model"] == "openai/gpt-5.5"
     output = capsys.readouterr().out
     assert "Recommended harnesses" in output
-    assert "ctx-harness-install text-to-cad --dry-run" in output
+    assert "python -m harness_install text-to-cad --dry-run" in output
 
 
 def test_recommend_mode_passes_structured_harness_requirements(

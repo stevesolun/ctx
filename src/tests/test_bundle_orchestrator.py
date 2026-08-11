@@ -141,9 +141,12 @@ class TestRenderBundleMessage:
             ("c", "mcp-server", 70),
         )
         msg = _bo.render_bundle_message(sugs, [], [], top_k=5)
-        assert "ctx-skill-install <slug> --security-scan-required" in msg
-        assert "ctx-agent-install" in msg
-        assert "ctx-mcp-install" in msg
+        assert (
+            "python -m ctx.adapters.claude_code.install.skill_install <slug> --security-scan-required"
+            in msg
+        )
+        assert "python -m ctx.adapters.claude_code.install.agent_install" in msg
+        assert "python -m ctx.adapters.claude_code.install.mcp_install" in msg
 
     def test_harness_only_suggestion_is_ignored(self):
         sugs = self._sug(("langgraph", "harness", 88))

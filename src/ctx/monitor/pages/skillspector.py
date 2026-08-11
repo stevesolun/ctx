@@ -1,4 +1,4 @@
-"""SkillSpector and sidecar detail pages for ctx-monitor."""
+"""SkillSpector and sidecar detail pages for the ctx dashboard."""
 
 from __future__ import annotations
 

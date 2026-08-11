@@ -1,4 +1,4 @@
-"""Loaded-entity page renderer for ctx-monitor."""
+"""Loaded-entity page renderer for the ctx dashboard."""
 
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ def render_loaded(
         if mutations_enabled
         else (
             "<div class='card'><strong>Read-only mode.</strong> "
-            "Load/unload actions are disabled because ctx-monitor is not "
+            "Load/unload actions are disabled because the dashboard is not "
             "bound to a loopback address.</div>"
         )
     )
@@ -54,7 +54,7 @@ def render_loaded(
             f"<code>{html.escape(slug)}</code></a>"
         )
         action = (
-            f"<td class='muted'><code>ctx-harness-install {html.escape(slug)} "
+            f"<td class='muted'><code>python -m harness_install {html.escape(slug)} "
             f"--uninstall --dry-run</code></td>"
             if entity_type == "harness"
             else (

@@ -3,20 +3,20 @@
 mcp_fetch.py -- Dispatcher for MCP catalog sources.
 
 Emits one JSON record per line on stdout so the output pipes directly into
-``ctx-mcp-add --from-stdin``.  The dispatcher knows nothing about specific
+``python -m mcp_add --from-stdin``.  The dispatcher knows nothing about specific
 catalog shapes; it resolves a source by name from
 :data:`mcp_sources.SOURCES`, calls its ``fetch`` method, and serialises
 each yielded dict as JSONL.
 
 Usage
 -----
-    ctx-mcp-fetch --source awesome-mcp [--limit N] [--refresh]
-    ctx-mcp-fetch --source all [--limit N]
-    ctx-mcp-fetch --list-sources
+    python -m mcp_fetch --source awesome-mcp [--limit N] [--refresh]
+    python -m mcp_fetch --source all [--limit N]
+    python -m mcp_fetch --list-sources
 
 Downstream pipe
 ---------------
-    ctx-mcp-fetch --source awesome-mcp --limit 5 | ctx-mcp-add --from-stdin
+    python -m mcp_fetch --source awesome-mcp --limit 5 | python -m mcp_add --from-stdin
 """
 
 from __future__ import annotations
@@ -100,7 +100,7 @@ def _list_sources() -> int:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="ctx-mcp-fetch",
+        prog="python -m mcp_fetch",
         description=(
             "Fetch MCP server records from a registered catalog source "
             "and emit them as JSONL on stdout."
@@ -190,7 +190,7 @@ def _force_utf8_stdio() -> None:
 
 
 def main() -> None:
-    """Entry point for the ``ctx-mcp-fetch`` console script."""
+    """Entry point for the ``python -m mcp_fetch`` console script."""
     _force_utf8_stdio()
     parser = _build_parser()
     args = parser.parse_args()

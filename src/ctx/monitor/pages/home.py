@@ -1,4 +1,4 @@
-"""Home page renderer for ctx-monitor."""
+"""Home page renderer for the ctx dashboard."""
 
 from __future__ import annotations
 

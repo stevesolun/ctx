@@ -1,4 +1,4 @@
-"""Client-side graph explorer script for ctx-monitor."""
+"""Client-side graph explorer script for the ctx dashboard."""
 
 from __future__ import annotations
 

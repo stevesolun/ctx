@@ -57,7 +57,7 @@ The `2` exit from `pre-commit` is what actually blocks `git commit`.
 ```bash
 # .githooks/pre-commit
 #!/bin/sh
-ctx-toolbox run --event pre-commit
+python -m toolbox run --event pre-commit
 ```
 
 Then `git config core.hooksPath .githooks`.

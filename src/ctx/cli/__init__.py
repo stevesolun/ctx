@@ -4,12 +4,12 @@ Each entrypoint here is a thin wrapper that parses argv and delegates to
 the appropriate adapter. No business logic lives here.
 
 Existing CLIs (CC-facing):
-  ctx-skill-install
-  ctx-agent-install
-  ctx-mcp-install / ctx-mcp-uninstall
-  ctx-wiki-graphify
-  ctx-mcp-enrich
-  ctx-mcp-quality
+  python -m ctx.adapters.claude_code.install.skill_install
+  python -m ctx.adapters.claude_code.install.agent_install
+  python -m ctx.adapters.claude_code.install.mcp_install [uninstall]
+  python -m ctx.core.wiki.wiki_graphify
+  python -m mcp_enrich
+  python -m mcp_quality
 
 New CLIs (harness-facing, added H7):
   ctx run        - drive any model autonomously against a task

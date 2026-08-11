@@ -9,7 +9,9 @@ Three rules shape the design.
 what to do. Every check therefore carries a human-readable rationale answering
 "how does this help an agent produce safer or more verifiable work?", and a
 metric that cannot answer it does not belong in the rubric — a test enforces
-this, so it cannot rot.
+this, so it cannot rot. The rule binds the predicates too: a check grades what a
+file *says*, never that the file exists, because a score two ``touch`` commands
+can raise tells someone their repository improved when nothing about it did.
 
 **Unassessable is not zero.** A dimension CTX could not evaluate is excluded
 from the denominator rather than scored zero. Silently converting "unknown" to
@@ -223,24 +225,159 @@ def _glob_first(root: Path, pattern: str) -> str | None:
     return names[0] if names else None
 
 
+def _has_content(path: Path) -> bool | None:
+    """Whether ``path`` holds anything but whitespace; None if it cannot be read.
+
+    Existence is not substance. A zero-byte lockfile pins nothing and an empty
+    workflow directory runs nothing, so a check that stops at ``is_file()``
+    reports a capability the repository does not have.
+    """
+
+    try:
+        return bool(path.read_text(encoding="utf-8", errors="replace").strip())
+    except OSError:
+        return None
+
+
+#: Markdown structure a generated stub consists of: headings, bullets, numbered
+#: list markers, quote markers, table pipes and horizontal rules.
+_MARKDOWN_SCAFFOLD: re.Pattern[str] = re.compile(r"^\s*(?:[#>*+|=-]+|\d+[.)])\s*")
+
+#: A token counts only if it says something; ``---`` and ``##`` do not.
+_CARRIES_INFORMATION: re.Pattern[str] = re.compile(r"[A-Za-z0-9]")
+
+
+def _content_words(text: str) -> int:
+    """Count the words that carry information, ignoring Markdown scaffolding.
+
+    Headings, bullets and rules are structure, and structure is exactly what an
+    empty stub is made of — counting it would let the stub clear the bar it
+    exists to fail.
+    """
+
+    total = 0
+    for raw in text.splitlines():
+        line = _MARKDOWN_SCAFFOLD.sub("", raw.strip())
+        total += sum(1 for word in line.split() if _CARRIES_INFORMATION.search(word))
+    return total
+
+
+def _file_content_words(path: Path) -> int | None:
+    """Content words in ``path``, or None if it could not be read."""
+
+    try:
+        return _content_words(path.read_text(encoding="utf-8", errors="replace"))
+    except OSError:
+        return None
+
+
+#: Below this a document is a placeholder and is graded as if it were absent.
+#: Ten content words is the shortest sentence that says anything operational at
+#: all — "Run pytest -q before committing; source lives in src/" is ten — so a
+#: file under it has not managed to state even one thing an agent could act on.
+#: `touch AGENTS.md README.md` moved the headline score by 24 points, the
+#: largest single move in the rubric, and a score that rewards `touch` tells
+#: someone their repository improved when nothing about it did.
+_STUB_CONTENT_WORDS = 10
+
+#: Full marks for I1. Its remedy asks for three things — what the project is,
+#: the conventions it holds to, and how to verify a change — and three short
+#: sentences of technical prose run about thirty words. The bar is therefore
+#: "answered the remedy", not "wrote an essay"; between the two thresholds the
+#: file is real but thin, which is precisely what `partial` means.
+_INSTRUCTIONS_CONTENT_WORDS = 30
+
+#: Full marks for X2. A README's job in this rubric is narrower — the project's
+#: purpose and its entry points, two claims — so its bar sits below I1's.
+_README_CONTENT_WORDS = 20
+
+#: A test declaration in the languages this rubric can see. V1 is the rubric's
+#: largest check (18 points, blocking), and it used to pass on the mere
+#: existence of a test-shaped filename: `touch tests/test_demo.py` bought 16
+#: points on an otherwise-empty repository. A file that declares no test cannot
+#: distinguish a configuration that solved a task from one that claimed to,
+#: which is the entire reason this check is blocking.
+_TEST_DECLARATION = re.compile(
+    r"""
+    ^\s*(?:async\s+)?def\s+test\w*        # Python: def test_x / async def test_x
+    | ^\s*class\s+Test\w*                 # Python: unittest.TestCase subclasses
+    | ^\s*\#\[(?:test|cfg\(test\))       # Rust: #[test] / #[cfg(test)]
+    | ^\s*func\s+Test\w*                  # Go
+    | ^\s*@Test\b                         # Java / Kotlin
+    | \b(?:it|test|describe)\s*\(         # JS/TS test frameworks
+    | ^\s*it\s+['"]                       # RSpec
+    """,
+    re.MULTILINE | re.VERBOSE,
+)
+
+#: Reading every test file in a large repository would make a free, read-only
+#: command slow for no gain: one real test is enough to answer the question.
+_TEST_FILES_INSPECTED = 40
+
+
 # --------------------------------------------------------------------------
 # Rubric checks. Each predicate is pure with respect to the repository: it only
 # reads. None of them executes anything.
 # --------------------------------------------------------------------------
 
 
-def _check_tests_runnable(profile: FitProfile, _root: Path) -> tuple[CheckState, tuple[str, ...]]:
+def _check_tests_runnable(profile: FitProfile, root: Path) -> tuple[CheckState, tuple[str, ...]]:
     verification = profile.verification
     if verification.has_deterministic_verification:
         command = verification.best("test")
         assert command is not None
-        return "pass", (
+        declared, unreadable = _declared_tests(root, verification.test_files)
+        if declared:
+            return "pass", (
+                f"`{' '.join(command.command)}` from {command.source}",
+                f"test material: {', '.join(verification.test_files)}",
+            )
+        if unreadable:
+            return "unassessable", (f"{', '.join(unreadable)} could not be read",)
+        return "partial", (
             f"`{' '.join(command.command)}` from {command.source}",
-            f"test material: {', '.join(verification.test_files)}",
+            "the test files found declare no test case, so the suite cannot fail "
+            "and cannot tell a working configuration from a broken one",
         )
     if verification.declares_test_command:
         return "partial", ("a test command is declared but no test files were found",)
     return "fail", ("no test command could be discovered",)
+
+
+def _declared_tests(root: Path, test_files: tuple[str, ...]) -> tuple[bool, tuple[str, ...]]:
+    """Whether any discovered test material declares a test, and what was unreadable.
+
+    ``test_files`` holds whatever discovery found, which may be a directory
+    (``tests/``) as readily as a file, so each entry is expanded before it is
+    read. Treating a directory as a file made this check report every
+    ``testpaths``-style repository unassessable.
+    """
+
+    unreadable: list[str] = []
+    inspected = 0
+    for name in sorted(test_files):
+        entry = root / name
+        if entry.is_dir():
+            try:
+                candidates = sorted(item for item in entry.rglob("*") if item.is_file())
+            except OSError:
+                unreadable.append(name)
+                continue
+        else:
+            candidates = [entry]
+
+        for candidate in candidates:
+            if inspected >= _TEST_FILES_INSPECTED:
+                break
+            inspected += 1
+            try:
+                text = candidate.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                unreadable.append(str(candidate.relative_to(root)))
+                continue
+            if _TEST_DECLARATION.search(text):
+                return True, ()
+    return False, tuple(unreadable)
 
 
 def _check_static_analysis(profile: FitProfile, _root: Path) -> tuple[CheckState, tuple[str, ...]]:
@@ -261,12 +398,35 @@ def _check_build(profile: FitProfile, _root: Path) -> tuple[CheckState, tuple[st
 
 
 def _check_instructions_present(
-    profile: FitProfile, _root: Path
+    profile: FitProfile, root: Path
 ) -> tuple[CheckState, tuple[str, ...]]:
     files = profile.existing_ai_config.instruction_files
-    if files:
-        return "pass", (f"found {', '.join(files)}",)
-    return "fail", ("no agent instruction file (AGENTS.md, CLAUDE.md, ...) found",)
+    if not files:
+        return "fail", ("no agent instruction file (AGENTS.md, CLAUDE.md, ...) found",)
+    counted: list[tuple[str, int]] = []
+    for name in files:
+        words = _file_content_words(root / name)
+        if words is not None:
+            counted.append((name, words))
+    if not counted:
+        return "unassessable", (f"{', '.join(files)} could not be read",)
+    # Graded on the richest file rather than the sum: CLAUDE.md is routinely a
+    # one-line `@AGENTS.md` include, and adding it to a real AGENTS.md adds no
+    # instruction. Ranked so the verdict never depends on discovery order.
+    counted.sort(key=lambda item: (-item[1], item[0]))
+    name, words = counted[0]
+    if words == 0:
+        return "fail", (f"{name} exists but is empty, so it tells an agent nothing",)
+    if words < _STUB_CONTENT_WORDS:
+        return "fail", (
+            f"{name} holds {words} words, which is a placeholder rather than instructions",
+        )
+    if words < _INSTRUCTIONS_CONTENT_WORDS:
+        return "partial", (
+            f"{name} holds {words} words: real, but too few to cover the project, "
+            "its conventions, and how to verify a change",
+        )
+    return "pass", (f"found {', '.join(files)}; {name} holds {words} words of instructions",)
 
 
 #: Ways an instruction file can name a test runner. Anchored on word
@@ -353,7 +513,10 @@ def _requirements_pin_state(path: Path) -> tuple[CheckState, tuple[str, ...]]:
         if line.strip() and not line.strip().startswith("#")
     ]
     if not entries:
-        return "partial", ("requirements.txt is committed but lists nothing",)
+        # Nothing requested is nothing pinned, so it cannot outscore the repo
+        # that never wrote the file — half marks for `touch` is the same
+        # existence-only reward this check was rewritten to remove.
+        return "fail", ("requirements.txt is committed but lists nothing",)
     if any("--hash=" in entry for entry in entries):
         return "pass", ("requirements.txt carries hashes, so resolution is reproducible",)
     # Lines starting with '-' are pip options (-r, -e, --index-url), not pins.
@@ -373,6 +536,12 @@ def _check_lockfile(profile: FitProfile, root: Path) -> tuple[CheckState, tuple[
     languages = {item.get("name") for item in profile.stack.get("languages", [])}
     found = _exists(root, *_LOCKFILES)
     if found:
+        content = _has_content(root / found)
+        if content is None:
+            return "unassessable", (f"{found} could not be read",)
+        if not content:
+            # A zero-byte lockfile resolves nothing; the file name is not the pin.
+            return "fail", (f"{found} is committed but empty, so nothing is pinned",)
         return "pass", (f"{found} is committed",)
     requirements = root / "requirements.txt"
     if requirements.is_file():
@@ -382,32 +551,50 @@ def _check_lockfile(profile: FitProfile, root: Path) -> tuple[CheckState, tuple[
     return "fail", ("no dependency lockfile is committed",)
 
 
+#: A version pin has to name a version. ``.python-version`` holding "3.12" or
+#: ``runtime.txt`` holding "python-3.11.4" pin; an empty file pins nothing.
+_VERSION_TOKEN: re.Pattern[str] = re.compile(r"\d+(?:\.\d+)*")
+
+#: ``requires-python = ">=3.11"``. Matched with its value rather than as a bare
+#: substring so that the word appearing in a comment cannot earn the points.
+_REQUIRES_PYTHON: re.Pattern[str] = re.compile(
+    r"""requires-python\s*=\s*["']([^"']*)["']""", re.IGNORECASE
+)
+
+
 def _check_declared_python_version(
     profile: FitProfile, root: Path
 ) -> tuple[CheckState, tuple[str, ...]]:
     languages = {item.get("name") for item in profile.stack.get("languages", [])}
     if "python" not in languages:
         return "not_applicable", ("not a Python repository",)
-    found = _exists(root, ".python-version", "runtime.txt")
-    if found:
-        return "pass", (f"{found} pins the interpreter",)
-    text = None
+    unpinned: list[str] = []
+    for name in (".python-version", "runtime.txt"):
+        candidate = root / name
+        if not candidate.is_file():
+            continue
+        try:
+            text = candidate.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return "unassessable", (f"{name} could not be read",)
+        version = _VERSION_TOKEN.search(text)
+        if version is not None:
+            # Quote the pin, so the claim is falsifiable by anyone opening the file.
+            return "pass", (f"{name} pins the interpreter at {version.group(0)}",)
+        # Saying an empty .python-version "pins the interpreter" was a claim
+        # about the repository that the repository does not support.
+        unpinned.append(name)
+    manifest = None
     try:
-        text = (root / "pyproject.toml").read_text(encoding="utf-8", errors="replace")
+        manifest = (root / "pyproject.toml").read_text(encoding="utf-8", errors="replace")
     except OSError:
         pass
-    if text and "requires-python" in text:
-        return "pass", ("pyproject.toml declares requires-python",)
+    requires = _REQUIRES_PYTHON.search(manifest) if manifest else None
+    if requires is not None and _VERSION_TOKEN.search(requires.group(1)):
+        return "pass", (f"pyproject.toml declares requires-python {requires.group(1)}",)
+    if unpinned:
+        return "fail", (f"{', '.join(unpinned)} names no version, so nothing is pinned",)
     return "fail", ("no interpreter version is pinned",)
-
-
-def _check_ci_configured(profile: FitProfile, root: Path) -> tuple[CheckState, tuple[str, ...]]:
-    if (root / ".github" / "workflows").is_dir():
-        return "pass", (".github/workflows is present",)
-    found = _exists(root, ".gitlab-ci.yml", ".circleci", "azure-pipelines.yml", "Jenkinsfile")
-    if found:
-        return "pass", (f"{found} is present",)
-    return "fail", ("no CI configuration found",)
 
 
 #: Tokens that indicate a CI step actually runs the suite.
@@ -511,6 +698,54 @@ def _ci_config_files(root: Path) -> list[Path]:
         except OSError:
             pass
     return found[:16]
+
+
+def _repo_relative(path: Path, root: Path) -> str:
+    """``.github/workflows/ci.yml``, never an absolute path.
+
+    An absolute path makes the same commit produce a different report on a
+    different machine, which the readiness document is diffed across.
+    """
+
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:  # pragma: no cover - defensive
+        return path.name
+
+
+def _check_ci_configured(_profile: FitProfile, root: Path) -> tuple[CheckState, tuple[str, ...]]:
+    """Pass on a CI *definition*, not on the directory that would hold one.
+
+    Testing ``.github/workflows`` with ``is_dir()`` awarded all seven points to
+    an empty directory, and then C2 reported "no CI configuration to inspect"
+    for the same repository — one report claiming both that CI is configured and
+    that there is none. Both checks now read the same set of files.
+    """
+
+    files = _ci_config_files(root)
+    if not files:
+        empty_dirs = [
+            _repo_relative(item, root)
+            for item in (root / ".github" / "workflows", root / ".circleci")
+            if item.is_dir()
+        ]
+        if empty_dirs:
+            return "fail", (f"{', '.join(empty_dirs)} holds no workflow file",)
+        return "fail", ("no CI configuration found",)
+    empty: list[str] = []
+    unreadable = 0
+    for item in files:
+        content = _has_content(item)
+        if content is None:
+            unreadable += 1
+            continue
+        if content:
+            return "pass", (f"{_repo_relative(item, root)} defines CI",)
+        empty.append(_repo_relative(item, root))
+    if unreadable:
+        # CI exists but could not be read: unknown is not the same as absent.
+        return "unassessable", ("CI configuration exists but could not be read",)
+    return "fail", (f"{', '.join(empty)} is present but empty, so no CI job is defined",)
 
 
 def _ci_line_runs_tests(line: str) -> re.Match[str] | None:
@@ -632,6 +867,10 @@ def _check_secret_hygiene(_profile: FitProfile, root: Path) -> tuple[CheckState,
         return "fail", ("a .env file is present and not ignored",)
     if ignores_env:
         return "pass", (".gitignore excludes .env",)
+    if not text.strip():
+        # An empty .gitignore excludes exactly what no .gitignore excludes, so
+        # it cannot score above the repository that has none.
+        return "fail", (".gitignore is empty, so it excludes nothing",)
     return "partial", (".gitignore exists but does not ignore .env",)
 
 
@@ -646,9 +885,20 @@ def _check_repo_tractable(profile: FitProfile, _root: Path) -> tuple[CheckState,
 
 def _check_docs(profile: FitProfile, root: Path) -> tuple[CheckState, tuple[str, ...]]:
     found = _exists(root, "README.md", "README.rst", "README") or _glob_first(root, "README*")
-    if found:
-        return "pass", (f"{found} gives an agent project context",)
-    return "fail", ("no README: an agent has no project overview",)
+    if not found:
+        return "fail", ("no README: an agent has no project overview",)
+    words = _file_content_words(root / found)
+    if words is None:
+        return "unassessable", (f"{found} could not be read",)
+    if words == 0:
+        return "fail", (f"{found} is empty, so it gives an agent no project context",)
+    if words < _STUB_CONTENT_WORDS:
+        return "fail", (f"{found} holds {words} words, which is a title rather than an overview",)
+    if words < _README_CONTENT_WORDS:
+        return "partial", (
+            f"{found} holds {words} words: it names the project but not what it is for",
+        )
+    return "pass", (f"{found} gives an agent project context in {words} words",)
 
 
 RUBRIC: tuple[Check, ...] = (

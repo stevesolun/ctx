@@ -1,4 +1,4 @@
-"""Manifest read/write helpers for ctx-monitor loaded entity state."""
+"""Manifest read/write helpers for ctx dashboard loaded entity state."""
 
 from __future__ import annotations
 

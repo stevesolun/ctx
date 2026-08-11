@@ -1,4 +1,4 @@
-"""Page/API route dispatch for ctx-monitor."""
+"""Page/API route dispatch for the ctx dashboard."""
 
 from __future__ import annotations
 
