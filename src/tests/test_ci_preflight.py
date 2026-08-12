@@ -619,3 +619,30 @@ def test_preflight_runs_browser_and_similarity_when_classified() -> None:
     assert 'os.environ.get("GITHUB_EVENT_NAME") == "pull_request"' in graph_resolver_script
     assert "release_asset_wait_seconds = 0" in graph_resolver_script
     assert 'env.setdefault("GIT_LFS_CONCURRENTTRANSFERS", "1")' in graph_resolver_script
+
+
+def test_every_workflow_parses_under_the_strict_loader() -> None:
+    """GitHub rejects duplicate mapping keys; ``yaml.safe_load`` does not.
+
+    A merge once left ``clean-host-contract`` declared twice in test.yml, the
+    first with an empty ``steps:``. Every test that reads the workflow used
+    ``yaml.safe_load``, which silently keeps the last duplicate, so 8500 tests
+    stayed green on a workflow GitHub Actions would have refused to run --
+    leaving a contributor with no green to reach and no way to tell it was not
+    their fault. ``_WorkflowLoader`` already fails on duplicate keys; this makes
+    every workflow go through it.
+    """
+
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+    from ci_no_test_policy import _WorkflowLoader
+
+    workflows = sorted((Path(__file__).resolve().parents[2] / ".github/workflows").glob("*.yml"))
+    assert workflows, "no workflows found to validate"
+
+    for workflow in workflows:
+        try:
+            yaml.load(workflow.read_text(encoding="utf-8"), Loader=_WorkflowLoader)
+        except yaml.YAMLError as exc:
+            raise AssertionError(f"{workflow.name} is not valid for GitHub Actions: {exc}") from exc

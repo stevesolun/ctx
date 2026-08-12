@@ -8,22 +8,64 @@ Thank you for your interest in contributing.
 git clone https://github.com/stevesolun/ctx && cd ctx
 python -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[dev,browser,embeddings]" -r requirements-docs.txt build twine
+python -m playwright install chromium
+git config core.hooksPath .githooks
 ```
 
-To also run the similarity/embedding tests (requires ~100 MB model download):
+`".[dev]"` alone is not enough to reproduce the pre-PR gate. The `browser`
+extra supplies Playwright (plus the `playwright install chromium` browser
+download) for the browser lane; `embeddings` supplies sentence-transformers for
+the similarity tests and pulls a ~100 MB model on first use; `twine` and the
+MkDocs pins in `requirements-docs.txt` are not in any extra, so they must be
+installed separately. This is the dependency set CI installs in
+`.github/workflows/m5-local-fast.yml` (that workflow installs non-editable;
+`-e` is for local work).
 
-```bash
-pip install -e ".[dev,embeddings]"
-```
+`git config core.hooksPath .githooks` enables `.githooks/pre-commit`, which
+re-runs `src/update_repo_stats.py` and re-stages the refreshed `README.md`,
+`docs/index.md`, `docs/knowledge-graph.md`, and `docs/catalog.md` whenever a
+commit touches `src/tests/*.py` or the other stat sources. The `repo stats`
+check in `scripts/ci_preflight.py` is unconditional — it runs on every profile
+— and it fails when those files are stale. Since the no-test policy pushes
+nearly every PR to add or change tests, and changing the test count changes the
+README inventory badge, skipping the hook means fixing the badge by hand on
+almost every PR.
 
 ## Running tests
 
+Use the CI selection as your inner loop:
+
 ```bash
-pytest -q                          # fast suite (skips integration)
-pytest -q -m 'not integration'     # same, explicit
-pytest -q -m integration           # embedding precision/recall tests
-pytest --cov=src -q                # with coverage report
+pytest -q -m "not browser and not integration" --no-cov \
+  -n auto --dist=loadfile --max-worker-restart=0
+```
+
+That is the selection CI's unit job and `ci_preflight.py`'s `unit-linux
+equivalent` check run, minus coverage — both add
+`--cov=src --cov-report=term-missing --cov-fail-under=40`, which you want
+before pushing but not on every iteration.
+
+Plain `pytest -q` is **not** a fast suite. There is no `addopts` anywhere in
+this repo — not in `pyproject.toml`, and there is no `pytest.ini` or
+`setup.cfg` — so it selects everything and runs it in a single process. On one
+developer machine, measured back to back on the same checkout:
+
+| Command | Wall time |
+| --- | --- |
+| the CI selection above | 4m41s |
+| `pytest -q` | 11m57s |
+
+The marker filter is not what makes the first one fast: it deselects only 14 of
+the 8,524 collected tests. The speedup is `-n auto`, which fans the suite
+across cores via pytest-xdist (already in the `dev` extra). `--dist=loadfile`
+keeps all tests from one file on one worker.
+
+```bash
+pytest -q -m integration              # embedding precision/recall tests
+pytest -q -m browser                  # Playwright tests (needs the browser extra)
+pytest --cov=src -q                   # with coverage report
+pytest -q src/tests/test_package_scaffold.py   # one file, fastest of all
 ```
 
 Before opening a PR, run the local fast gate on committed branch history:
@@ -47,6 +89,21 @@ treats source, workflows, `pyproject.toml`, `scripts/ci_*`, maintainer graph/syn
 scripts, and `.no-mistakes.yaml` as contract files; include focused
 `src/tests/...` coverage unless the diff is a proven version or stats-only
 release metadata update.
+
+## Design decisions
+
+CTX Fit has a decision log. Before proposing a change to how Fit works, read it
+— fourteen ADRs (ADR-001 through ADR-014) are `ACCEPTED`, and they are not
+open for re-litigation without new evidence.
+
+- [`docs/ctx-fit/DECISIONS.md`](docs/ctx-fit/DECISIONS.md) — the ADRs
+  themselves, each recorded once with its evidence.
+- [`docs/ctx-fit/MAP.md`](docs/ctx-fit/MAP.md) — a wayfinding index of what is
+  settled, what is a precise open question, what is still unknown, and what is
+  deliberately out of scope.
+
+If you have new evidence against a settled decision, record the evidence in
+`DECISIONS.md` rather than quietly reversing the decision in code.
 
 ## Package-layout migration
 

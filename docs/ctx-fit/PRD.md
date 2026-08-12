@@ -5,15 +5,18 @@ Status: draft v1, 2026-08-09. Owner: coordinator. Supersedes the earlier
 
 ## 1. One sentence
 
-> Connect your GitHub repository. CTX Fit finds the cheapest AI coding setup
-> that reliably works on your codebase, then opens a PR containing the winning
-> configuration.
+> Point CTX Fit at your repository. It finds the cheapest AI coding setup that
+> reliably works on your codebase, writes the winning configuration into your
+> working tree, and hands you a pull-request body to open yourself.
 
 Headline: **Find the cheapest AI coding setup that actually works on your repo.**
 
+CTX Fit runs no git *write* commands: it reads history to derive tasks, but creates no branch, commits nothing, pushes nothing and never merges. `ctx fit --pr` prints a PR body and a suggested
+branch name; it creates no branch, commits nothing and never merges.
+
 Three words carry the whole product. *Cheapest* is the objective. *Reliably* is
-the constraint that makes cheapest meaningful. *PR* is the deliverable — the
-product is not finished when it produces a report.
+the constraint that makes cheapest meaningful. *Configuration* is the
+deliverable — the product is not finished when it produces a report.
 
 ## 2. The problem
 
@@ -45,9 +48,9 @@ ctx fit --test     verify       — controlled experiments           (costs mone
 ctx fit --apply    act          — generate the configuration       (reviewable)
 ```
 
-Supporting flags: `--explain`, `--budget N`, `--local`, `--dry-run`,
-`--rollback <run-id>`, `--pr`, `--verbose`. Diagnostics live in `ctx doctor`.
-Anything else must justify its existence.
+Supporting flags, as shipped: `--budget USD`, `--dry-run`, `--pr`, `--yes`,
+`--json`, `--max-depth`. Diagnostics live in `ctx doctor`. Anything else must
+justify its existence; run `ctx fit --help` for the current surface.
 
 ## 5. Scope
 
@@ -134,10 +137,14 @@ answer is **keep your current setup** — a success, not a failure.
 | M7 | Verification | Structured evidence per candidate/task | money |
 | M8 | Recommendation | First complete Fit result | money |
 | M9 | Apply | Generate config, preview, rollback | none |
-| M10 | PR | Branch and PR with evidence | none |
+| M10 | PR | PR body and suggested branch, with evidence | none |
 
-**M1 and M2 are already implemented** (`src/ctx/fit/`, `src/ctx/cli/fit.py`,
-11 tests). M3 is the next build.
+**M1 through M10 have all shipped**: each milestone has landed code with tests
+(`src/ctx/fit/`, `src/ctx/cli/fit.py`, `src/tests/fit/` — 273 tests passing).
+M10 shipped as *prepare* a pull request rather than *open* one: CTX Fit runs no
+git commands. Individual follow-up tasks remain open, but the per-task board in
+[`planned_tasks.md`](planned_tasks.md) is a stale M0 snapshot and is not a
+record of which — read the code.
 
 ## 9. Definition of done
 
@@ -173,7 +180,8 @@ reject; review is not ceremonial.
 | **Security** | Credentials, repository boundaries, command execution, workspace isolation, artifact storage, telemetry, cleanup. The engine executes code; treat it accordingly. |
 | **QA** | Test quality and coverage, integration across the full path, adversarial cases, regression, flakiness, reproducibility. |
 
-Milestone reports are stored under `docs/ctx-fit/milestones/`.
+Milestone reports are stored under `docs/ctx-fit/milestones/`, which currently
+holds the M0 audit and the M1 spike friction log.
 
 ## 12. Risks
 

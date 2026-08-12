@@ -1,8 +1,20 @@
-# CTX Fit — Current State Audit
+# CTX Fit — Current State Audit (snapshot of 2026-08-09)
 
-Milestone 0 deliverable. This document records what CTX already has, what must
-change, and what is genuinely absent, so that CTX Fit is built as an evolution
-of CTX rather than a second parallel implementation.
+> **This is a dated snapshot, not a description of the repository today.** It
+> records what CTX contained on 2026-08-09, before CTX Fit was built, and it
+> has not been updated since. Many rows below marked **Absent** or `MISSING`
+> have shipped: readiness, candidate generation, experiment planning, execution,
+> verification states, recommendation, apply, and pull-request preparation all
+> live in `src/ctx/fit/` with tests in `src/tests/fit/`. Row 14 in particular —
+> "Prepare a GitHub PR" — shipped as *preparation only*: `ctx fit --pr` prints
+> a PR body and a suggested branch name. CTX Fit runs no git *write* commands: it reads history to derive tasks, but creates no branch, commits nothing, pushes nothing and never merges, so
+> it creates no branch, commits nothing and never merges. Read the code and
+> `git log --oneline -- src/ctx/fit` for the current state; read this document
+> for the reasoning that shaped it.
+
+Milestone 0 deliverable. This document recorded what CTX already had, what had
+to change, and what was genuinely absent, so that CTX Fit was built as an
+evolution of CTX rather than a second parallel implementation.
 
 - Audited: 2026-08-09
 - Audited tree: the current working tree (broadly untracked and in-flight; see

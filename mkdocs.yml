@@ -22,9 +22,14 @@ strict: true
 not_in_nav: |
   SKILL.md
 
-# Local phase plans are ignored workspace notes, not public documentation.
+# Workspace notes, not public documentation. `ctx-fit/` holds the M0-era
+# planning and audit documents for the CTX Fit rebuild; their statuses are a
+# snapshot that the shipped code has moved past, so they stay in the repository
+# for contributors reading the source tree rather than being deployed as
+# public claims.
 exclude_docs: |
   plans/
+  ctx-fit/
 
 theme:
   name: material

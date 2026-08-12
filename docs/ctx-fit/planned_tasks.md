@@ -1,7 +1,29 @@
-# CTX Fit — Planned Tasks
+# CTX Fit — Planned Tasks (M0 planning snapshot — statuses are stale)
+
+> **The per-task statuses below are stale. Do not read them as a claim about
+> what is unbuilt, and do not claim work from them.** They are the snapshot
+> taken during M0 planning, before the milestones were built, and they were
+> never updated as the work landed. Milestones M3 through M10 are marked
+> `NOT_STARTED` below and have in fact shipped, with implementation and tests:
+> `200840ca` (M3 readiness), `ff78774e` (M4 candidate generation), `fae07e1f`
+> (M5 experiment planning and budget gate), `3665cf41` (M6–M8 execution,
+> verification states and recommendation), `78aa6f8a` (M9–M10 apply and
+> pull-request preparation).
+>
+> **What is real is the code and its tests**, not this file:
+> `src/ctx/fit/`, `src/ctx/cli/fit.py`, and `src/tests/fit/` — 273 tests, all
+> passing. `ctx fit --help` and `ctx doctor --help` show the shipped command
+> surface. `git log --oneline -- src/ctx/fit` shows how it got there.
+>
+> One correction worth carrying forward: M10 shipped as *prepare* a pull
+> request, not *open* one. CTX Fit runs no git *write* commands: it reads history to derive tasks, but creates no branch, commits nothing, pushes nothing and never merges. `ctx fit --pr` prints
+> a PR body and a suggested branch name; it creates no branch, commits nothing
+> and never merges.
+>
+> Kept as the planning record of intent and rationale, which is still accurate.
 
 Jira-style backlog. Companion to [`PRD.md`](PRD.md) (what and why),
-[`CURRENT_STATE.md`](CURRENT_STATE.md) (what exists), and
+[`CURRENT_STATE.md`](CURRENT_STATE.md) (what existed at audit time), and
 [`CTX_AUDIT.md`](CTX_AUDIT.md) (keep/adapt/archive/delete).
 
 **Status values:** `NOT_STARTED` · `IN_PROGRESS` · `BLOCKED` · `REVIEW` · `DONE`
@@ -11,22 +33,6 @@ evidence. Code existing is not DONE.
 
 **Every task carries a Worker and a Reviewer.** For milestone-closing tasks the
 reviewer set is Product + Architecture + Security + QA.
-
-## Board summary
-
-| Milestone | Tasks | Done | Status |
-| --- | --- | --- | --- |
-| M0 Audit | 4 | 2 | IN_PROGRESS |
-| M1 Product skeleton | 2 | 2 | DONE |
-| M2 Repository profile | 3 | 2 | IN_PROGRESS |
-| M3 Readiness | 4 | 0 | NOT_STARTED |
-| M4 Candidate selection | 4 | 0 | NOT_STARTED |
-| M5 Experiment planning | 3 | 0 | NOT_STARTED |
-| M6 Execution | 3 | 0 | BLOCKED (budget authorization) |
-| M7 Verification | 2 | 0 | NOT_STARTED |
-| M8 Recommendation | 4 | 0 | NOT_STARTED |
-| M9 Apply | 3 | 0 | NOT_STARTED |
-| M10 PR | 2 | 0 | NOT_STARTED |
 
 ---
 
@@ -101,7 +107,7 @@ reviewer set is Product + Architecture + Security + QA.
 
 ---
 
-## M3 — Readiness *(next build)*
+## M3 — Readiness
 
 ### FIT-030 · Readiness dimension model
 - **User story:** As an engineering leader, I want to know how suitable my repo is for AI agents and exactly what to fix.
@@ -238,13 +244,13 @@ reviewer set is Product + Architecture + Security + QA.
 ### FIT-100 · Branch and PR preparation
 - **Priority:** **P0** · **Depends on:** FIT-090 · **Reviewer:** security + product
 - **Status:** `NOT_STARTED`
-- **Notes:** ADR-014 makes the PR part of the product promise, not polish: "…then opens a PR containing the winning configuration." Priority raised from P1. The PR contains evidence, not marketing, and is never auto-merged.
+- **Notes:** ADR-014 makes the PR part of the product promise, not polish. Priority raised from P1. The PR contains evidence, not marketing, and is never auto-merged.
 
 ### FIT-101 · GitHub-first entry
 - **User story:** As a user, I connect a GitHub repository rather than only running CTX inside a local checkout.
 - **Priority:** P1 · **Depends on:** FIT-100 · **Reviewer:** security + product
 - **Status:** `NOT_STARTED`
-- **Notes:** The promise opens with "Connect your GitHub repository." Local-first stays fully supported (ADR: local-first is not crippled); this adds the hosted-repo entry path. Credential handling is a security-review gate.
+- **Notes:** Genuinely not started — `ctx fit [repo]` accepts a local path only. Local-first stays fully supported (ADR: local-first is not crippled); this would add the hosted-repo entry path. Credential handling is a security-review gate.
 
 ---
 

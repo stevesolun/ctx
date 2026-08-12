@@ -835,14 +835,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-
-  clean-host-contract:
-    name: "Clean host contract"
-    needs: classify
-    if: ${{ github.event_name != 'pull_request' || (needs.classify.outputs.docs_only != 'true' && needs.classify.outputs.graph_only != 'true') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    steps:
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:

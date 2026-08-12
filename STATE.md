@@ -1,25 +1,40 @@
-# CTX Unified Capability Engine — Working State
+# CTX Unified Capability Engine — Working State (HISTORICAL / SUPERSEDED)
 
-This file is the canonical resume checkpoint for the long-running unified CTX
-engine implementation. Read it together with
-[`docs/plans/unified-capability-engine.md`](docs/plans/unified-capability-engine.md)
-and `AGENTS.md` before continuing work.
-
-The plan defines where the product is going. This file records where the work
-actually is. Update this file whenever a slice is independently accepted, a
-material risk is discovered, the critical path changes, or validation evidence
-becomes stale.
+> **Superseded. Do not resume work from this file.**
+>
+> This is a frozen checkpoint of the *unified capability engine* goal, taken on
+> 2026-08-08. That goal was superseded by the CTX Fit pivot — see ADR-001 and
+> ADR-002 in [`docs/ctx-fit/DECISIONS.md`](docs/ctx-fit/DECISIONS.md). ADR-010
+> additionally puts the event-sourced consent/activation lifecycle described
+> below out of scope for the product.
+>
+> Nothing in this file describes the current product, the current critical
+> path, or the current next actions. For those, read `AGENTS.md` and
+> `docs/ctx-fit/`. This file is retained only as a record of what was built,
+> what was accepted, and on what evidence — it is a real engineering log and is
+> useful when working on the code under `src/ctx/engine/` and
+> `src/ctx/runtime/`, which still exists.
+>
+> Everything from "## Checkpoint" onward is preserved as written on 2026-08-08
+> and is not maintained, apart from two factual corrections marked
+> `[CORRECTED]`.
+> Statements in it are true as of that date and no later; in particular the
+> "Next actions" list is abandoned work, not a backlog, and the branch,
+> commit, and working-tree lines describe the tree as it was then.
 
 ## Checkpoint
 
 - Updated: 2026-08-08 (Asia/Jerusalem)
 - Branch: `codex/benchmark-runtime-fairness`
 - Base commit observed: `3e24e397b07c73b948abfb3a374bee9963b995d9`
-- Goal status: active; the complete product objective is **not achieved**
+- Goal status: **[CORRECTED]** active on 2026-08-08 and never completed;
+  **abandoned** since, when the CTX Fit pivot superseded this goal
 - Working tree: broadly dirty and intentionally uncommitted; preserve unrelated
   and user-owned changes
-- Persistence status: this checkpoint exists on disk but is currently untracked
-  by Git; it is not portable to another clone until intentionally committed
+- Persistence status: **[CORRECTED]** this file was untracked when the
+  checkpoint was written; it has since been committed (`e8af9554`, "chore:
+  baseline the working tree before the CTX Fit rebuild") and is tracked by Git
+  today — `git ls-files --error-unmatch STATE.md` succeeds
 - Current critical path: receipts/activation → lifecycle → host cutover →
   product proof. The signed-consent-execution focused suite is now fully green
   (see the 2026-08-08 evidence and the reopened signed-slice status below); the

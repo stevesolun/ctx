@@ -8,6 +8,70 @@ Status values: `ACCEPTED` · `SUPERSEDED` · `PROPOSED`
 
 ---
 
+## ADR-015 — A trial stopped by a CTX-imposed bound is inconclusive, except the iteration cap · `ACCEPTED`
+
+**Context.** The verdict branch in `src/ctx/fit/live_runner.py` reads only the
+test exit code: anything non-zero becomes `outcome="failed"`, which
+`counts_toward_reliability`. The harness's `stop_reason`, carried on
+`AgentOutcome.detail` (`providers.py:338-339`), is never consulted there. So a
+trial CTX itself cut short at the $2.00 per-trial budget cap
+(`providers.py:44`) or at 25 iterations (`providers.py:40`) is recorded as the
+candidate failing. The 900-second subprocess timeout is **not** in that set:
+`subprocess.TimeoutExpired` is a `SubprocessError`, so the driver returns
+`completed=False` with no tokens and no cost, and `live_runner`'s
+spent-nothing guard already records `infrastructure-failure` with
+`counts_toward_reliability False`.
+
+**Decision.** The verdict is attributed by what stopped the run, in three parts:
+
+1. **Budget caps are inconclusive.** A trial cut off by the per-trial
+   budget cap — the one remaining case, since timeouts and provider errors
+   already record `infrastructure-failure`
+   did not test the candidate; it tested a bound CTX imposed on itself. It is
+   recorded `inconclusive` and does not count toward reliability.
+2. **The iteration cap is a real candidate failure.** An agent that burned its
+   iteration allowance and real tokens without finishing has been shown to fail
+   the task. That stays `failed` and counts.
+3. **Every outcome keeps its `stop_reason` and its logs**, whatever the verdict,
+   so any attribution can be re-derived and audited rather than taken on trust.
+
+**Rationale.** Reliability is a constraint, not a metric (ADR-014), so a
+candidate excluded by the floor is excluded absolutely — with the default floor
+of 1.0, one mis-attributed trial disqualifies it and adaptive stopping abandons
+the rest. Blaming a candidate for CTX's own ceiling therefore corrupts the one
+gate the recommendation rests on. But "spending nothing while failing to finish
+is the signature of a harness fault; burning tokens and still not finishing is a
+real candidate failure" is already this module's rule, and it is correct. The
+line is drawn at whether the bound truncated a productive run (budget, wall
+clock) or recorded an unproductive one (iterations exhausted).
+
+**Evidence.** FITBUG-040, confirmed by execution. A stand-in harness returned
+`stop_reason="cost_budget"` having spent the full $2.00 without finishing; the
+trial was recorded `outcome="failed"`, `cost 2.0`,
+`counts_toward_reliability True`. A genuine provider failure is **not**
+affected: `providers.py`'s "harness could not run" `OSError`/`SubprocessError`
+spends nothing, so the spent-nothing guard already routes it to
+`infrastructure-failure` and it is excluded from reliability. Only the two caps
+above reach the `failed` branch.
+
+**Consequences.**
+
+- **`live_runner` must read `agent.detail`, not just the exit code.** This is
+  delivered as ARCH-5 in `ARCHITECTURE_CANDIDATES.md`.
+- **The existing test is preserved, not weakened.**
+  `test_an_agent_that_burned_tokens_without_finishing_is_a_real_failure`
+  (`src/tests/fit/test_live_runner.py:511`) asserts the `max_iterations` case is
+  `failed`; part 2 above is what keeps it green.
+- **The reason must be read, not the `completed` flag.** A `cost_budget` stop
+  arrives as `completed=True` with the stop reason smuggled into `detail`, so an
+  implementation that branches on `completed` gets this case wrong.
+- **Inconclusive trials must stay visible.** Because ADR-014 requires the
+  confidence model to report how many trials backed a result, an attribution
+  that removes a trial from the reliability count cannot also remove it from the
+  record.
+
+---
+
 ## ADR-014 — The objective is "cheapest that reliably works" · `ACCEPTED`
 
 **Product definition (authoritative).**
