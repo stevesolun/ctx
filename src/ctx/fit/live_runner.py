@@ -161,10 +161,18 @@ def _export_tree(
             destination.mkdir(parents=True, exist_ok=True)
             with tarfile.open(bundle) as archive:
                 written = frozenset(item.name for item in archive.getmembers() if item.isfile())
-                if hasattr(tarfile, "data_filter"):
-                    archive.extractall(destination, filter="data")
-                else:  # pragma: no cover - Python without extraction filters
-                    archive.extractall(destination)
+                if not hasattr(tarfile, "data_filter"):
+                    # Refuse rather than extract unfiltered. Without the data
+                    # filter, a crafted member could write outside the
+                    # destination; a trial that cannot be isolated must not run
+                    # at all. Every supported interpreter (CPython 3.11.4+)
+                    # ships the filter, so this is a guard, not a code path.
+                    return (
+                        "this interpreter has no tar extraction filter, so an "
+                        "isolated workspace cannot be created safely",
+                        frozenset(),
+                    )
+                archive.extractall(destination, filter="data")
         except (OSError, tarfile.TarError) as exc:
             return f"workspace could not be created: {exc}", frozenset()
     return None, written
