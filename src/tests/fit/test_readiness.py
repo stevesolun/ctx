@@ -510,3 +510,106 @@ def test_a_build_cache_does_not_exhaust_the_test_inspection_budget(tmp_path: Pat
     v1 = next(check for check in _score(repo).checks if check.check_id == "V1")
 
     assert v1.state == "pass", v1.evidence
+
+
+# --------------------------------------------------------------------------
+# V1 consumes verification's answer rather than deriving its own (ARCH-2), and
+# a blocker must lead with the reason it did not pass.
+# --------------------------------------------------------------------------
+
+
+def test_the_reason_a_blocker_did_not_pass_is_the_first_evidence(tmp_path: Path) -> None:
+    """The CLI renders only ``evidence[0]``, so evidence[0] must be the reason.
+
+    V1's partial branch used to put the working test command first, so the page
+    printed "Tests are runnable: `python -m pytest -q` from pyproject.toml" as
+    though a discovered command were the complaint, and the sentence that
+    explained the problem never reached the user at all.
+    """
+
+    repo = _repo(tmp_path, tests=True)
+    (repo / "tests" / "test_demo.py").write_text("", encoding="utf-8")
+
+    v1 = _check(_score(repo), "V1")
+
+    assert v1.state == "partial"
+    assert "declare no test case" in v1.evidence[0]
+
+
+def test_the_printed_blocker_says_why(tmp_path: Path, capsys) -> None:
+    """The same guarantee at the surface the user actually reads."""
+
+    repo = _repo(tmp_path, tests=True)
+    (repo / "tests" / "test_demo.py").write_text("", encoding="utf-8")
+
+    assert ctx_main(["fit", str(repo)]) == 0
+    printed = capsys.readouterr().out
+
+    blocking = printed.split("Blocking", 1)[1].splitlines()[1]
+    assert "declare no test case" in blocking
+
+
+def test_no_failing_check_leads_with_a_quoted_command(tmp_path: Path) -> None:
+    """A backtick-quoted command is a fact about the repository, never a reason.
+
+    The rubric-wide form of the bug above: whatever a check puts first is the
+    only line the CLI shows for it, so leading with a command tells the user
+    what works instead of what does not.
+    """
+
+    hollow = _repo(tmp_path, tests=True, name="hollow")
+    (hollow / "tests" / "test_demo.py").write_text("", encoding="utf-8")
+    barren = tmp_path / "barren"
+    barren.mkdir()
+
+    for repo in (hollow, barren, _repo(tmp_path, tests=False, name="runnerless")):
+        for result in _score(repo).checks:
+            if result.state in {"fail", "partial"}:
+                assert result.evidence, f"{result.check_id} must say why"
+                assert not result.evidence[0].lstrip().startswith("`"), (
+                    f"{result.check_id} leads with a command instead of a reason: "
+                    f"{result.evidence[0]}"
+                )
+
+
+def test_v1_does_not_walk_the_repository_a_second_time(tmp_path: Path) -> None:
+    """The deletion test for ``_declared_tests``: V1 reads the profile, not the disk.
+
+    Scoring against a root that does not exist is the cheapest proof that the
+    duplicate walk is gone. While readiness owned its own content scan this
+    returned ``unassessable`` -- a second, weaker answer to a question the
+    profile in hand had already answered.
+    """
+
+    repo = _repo(tmp_path, tests=True)
+    profile = build_fit_profile(repo)
+
+    v1 = next(
+        item
+        for item in score_readiness(profile, tmp_path / "nowhere").checks
+        if item.check_id == "V1"
+    )
+
+    assert v1.state == "pass", v1.evidence
+
+
+def test_readiness_no_longer_carries_a_copy_of_the_test_scan() -> None:
+    """Guard: the duplicated machinery must not grow back.
+
+    Each of these existed only to answer verification's question a second time,
+    and ``_TEST_SCAN_SKIP_DIRS`` was a hand-copy of verification's own set whose
+    comment promised it would disappear with exactly this change.
+    """
+
+    from ctx.fit import readiness
+
+    for name in (
+        "_declared_tests",
+        "_inspectable",
+        "_TEST_SCAN_SKIP_DIRS",
+        "_UNREADABLE_SUFFIXES",
+        "_TEST_SHAPED",
+        "_TEST_DECLARATION",
+        "_TEST_FILES_INSPECTED",
+    ):
+        assert not hasattr(readiness, name), f"readiness still defines {name}"

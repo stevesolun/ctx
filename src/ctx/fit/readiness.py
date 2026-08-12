@@ -291,144 +291,54 @@ _INSTRUCTIONS_CONTENT_WORDS = 30
 #: purpose and its entry points, two claims — so its bar sits below I1's.
 _README_CONTENT_WORDS = 20
 
-#: A test declaration in the languages this rubric can see. V1 is the rubric's
-#: largest check (18 points, blocking), and it used to pass on the mere
-#: existence of a test-shaped filename: `touch tests/test_demo.py` bought 16
-#: points on an otherwise-empty repository. A file that declares no test cannot
-#: distinguish a configuration that solved a task from one that claimed to,
-#: which is the entire reason this check is blocking.
-_TEST_DECLARATION = re.compile(
-    r"""
-    ^\s*(?:async\s+)?def\s+test\w*        # Python: def test_x / async def test_x
-    | ^\s*class\s+Test\w*                 # Python: unittest.TestCase subclasses
-    | ^\s*\#\[(?:test|cfg\(test\))       # Rust: #[test] / #[cfg(test)]
-    | ^\s*func\s+Test\w*                  # Go
-    | ^\s*@Test\b                         # Java / Kotlin
-    | \b(?:it|test|describe)\s*\(         # JS/TS test frameworks
-    | ^\s*it\s+['"]                       # RSpec
-    """,
-    re.MULTILINE | re.VERBOSE,
-)
-
-#: Reading every test file in a large repository would make a free, read-only
-#: command slow for no gain: one real test is enough to answer the question.
-_TEST_FILES_INSPECTED = 40
-
-#: Build caches and vendored trees are not the repository's own test material.
-#: Mirrors ``ctx.fit.verification._TEST_SCAN_SKIP_DIRS``; the duplication is
-#: deliberate for now and disappears when verification owns this question.
-_TEST_SCAN_SKIP_DIRS: frozenset[str] = frozenset(
-    {
-        "__pycache__",
-        "build",
-        "dist",
-        "env",
-        "node_modules",
-        "site-packages",
-        "target",
-        "testdata",
-        "third_party",
-        "vendor",
-        "venv",
-    }
-)
-
-#: Compiled artefacts and binaries cannot declare a test and decoding them
-#: wastes the inspection budget.
-_UNREADABLE_SUFFIXES: frozenset[str] = frozenset(
-    {".pyc", ".pyo", ".so", ".dylib", ".dll", ".o", ".a", ".class", ".jar", ".wasm"}
-)
-
-#: A filename that looks like it holds tests, in the conventions this rubric
-#: can see. Used only to order a bounded scan, never to decide the answer.
-_TEST_SHAPED = re.compile(r"(?:^|[._-])tests?(?:[._-]|$)|_test\.|\.test\.|^test", re.IGNORECASE)
-
-
 # --------------------------------------------------------------------------
 # Rubric checks. Each predicate is pure with respect to the repository: it only
 # reads. None of them executes anything.
 # --------------------------------------------------------------------------
 
 
-def _check_tests_runnable(profile: FitProfile, root: Path) -> tuple[CheckState, tuple[str, ...]]:
+def _check_tests_runnable(profile: FitProfile, _root: Path) -> tuple[CheckState, tuple[str, ...]]:
+    """Report verification's answer; never derive a second one.
+
+    "Does this repository have tests that can judge an agent?" is one question,
+    and it belongs to ``VerificationInventory``, which already owns the pruned
+    walk, the skip set, the visit ceiling and the file reads. This check used to
+    re-answer it from a weaker walk of its own, and on CTX's own repository the
+    two answers printed four lines apart: a Blocking "Add a test suite" above
+    "This repository can be evaluated: it has deterministic tests".
+
+    Evidence is ordered reason-first throughout. The CLI renders only
+    ``evidence[0]`` for a blocker, so leading with the discovered command
+    printed a working command as though it were the complaint and left the
+    reason unread.
+    """
+
     verification = profile.verification
+    command = verification.best("test")
     if verification.has_deterministic_verification:
-        command = verification.best("test")
-        assert command is not None
-        declared, unreadable = _declared_tests(root, verification.test_files)
-        if declared:
-            return "pass", (
-                f"`{' '.join(command.command)}` from {command.source}",
-                f"test material: {', '.join(verification.test_files)}",
-            )
-        if unreadable:
-            return "unassessable", (f"{', '.join(unreadable)} could not be read",)
-        return "partial", (
+        assert command is not None and verification.test_declaration is not None
+        return "pass", (
             f"`{' '.join(command.command)}` from {command.source}",
-            "the test files found declare no test case, so the suite cannot fail "
-            "and cannot tell a working configuration from a broken one",
+            f"{verification.test_declaration} declares a test case",
         )
-    if verification.declares_test_command:
-        return "partial", ("a test command is declared but no test files were found",)
-    return "fail", ("no test command could be discovered",)
-
-
-def _declared_tests(root: Path, test_files: tuple[str, ...]) -> tuple[bool, tuple[str, ...]]:
-    """Whether any discovered test material declares a test, and what was unreadable.
-
-    ``test_files`` holds whatever discovery found, which may be a directory
-    (``tests/``) as readily as a file, so each entry is expanded before it is
-    read. Treating a directory as a file made this check report every
-    ``testpaths``-style repository unassessable.
-    """
-
-    unreadable: list[str] = []
-    inspected = 0
-    for name in sorted(test_files):
-        entry = root / name
-        if entry.is_dir():
-            try:
-                candidates = _inspectable(entry)
-            except OSError:
-                unreadable.append(name)
-                continue
-        else:
-            candidates = [entry]
-
-        for candidate in candidates:
-            if inspected >= _TEST_FILES_INSPECTED:
-                break
-            inspected += 1
-            try:
-                text = candidate.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                unreadable.append(str(candidate.relative_to(root)))
-                continue
-            if _TEST_DECLARATION.search(text):
-                return True, ()
-    return False, tuple(unreadable)
-
-
-def _inspectable(directory: Path) -> list[Path]:
-    """Source files under ``directory``, most test-shaped first.
-
-    Two filters, both learned the hard way. Build caches and vendored trees are
-    skipped: ``sorted(rglob("*"))`` puts ``__pycache__`` first alphabetically,
-    so on this repository 39 of the first 40 entries were ``.pyc`` files and the
-    inspection budget was spent before one real test was opened -- CTX told its
-    own 604-test suite to "add a test suite". Then the survivors are ordered by
-    how test-shaped their names are, so a bounded budget is spent on the files
-    most likely to answer the question rather than on whatever sorts first.
-    """
-
-    files: list[Path] = []
-    for item in directory.rglob("*"):
-        if not item.is_file() or item.suffix in _UNREADABLE_SUFFIXES:
-            continue
-        if any(part in _TEST_SCAN_SKIP_DIRS or part.startswith(".") for part in item.parts):
-            continue
-        files.append(item)
-    return sorted(files, key=lambda path: (not _TEST_SHAPED.search(path.name), str(path)))
+    if command is None:
+        return "fail", ("no test command could be discovered",)
+    if verification.unreadable_test_material:
+        # Unknown is not bad: a subtree we were denied is a different answer
+        # from a subtree with nothing in it, and only one of them is a failure.
+        return "unassessable", (
+            f"{', '.join(verification.unreadable_test_material)} could not be read",
+        )
+    if not verification.test_files:
+        return "partial", (
+            "a test command is declared but no test files were found",
+            f"`{' '.join(command.command)}` from {command.source}",
+        )
+    return "partial", (
+        "the test files found declare no test case, so the suite cannot fail "
+        "and cannot tell a working configuration from a broken one",
+        f"`{' '.join(command.command)}` from {command.source}",
+    )
 
 
 def _check_static_analysis(profile: FitProfile, _root: Path) -> tuple[CheckState, tuple[str, ...]]:

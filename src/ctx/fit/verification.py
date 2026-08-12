@@ -65,6 +65,14 @@ class VerificationInventory:
     warnings: tuple[str, ...] = ()
     test_files: tuple[str, ...] = ()
     """Observed test locations. A declared runner is not evidence of tests."""
+    test_declaration: str | None = None
+    """The first test file observed to *declare* a test case, named so a human
+    can open it and check. ``None`` when the material declares none, or when it
+    could not be read — ``unreadable_test_material`` distinguishes the two."""
+    unreadable_test_material: tuple[str, ...] = ()
+    """Test material that could not be read while the question was still open.
+    Empty once a declaration is found, because nothing still unread could
+    change the answer. "We were denied here" is not "there is nothing there"."""
 
     @property
     def kinds(self) -> tuple[VerificationKind, ...]:
@@ -81,18 +89,39 @@ class VerificationInventory:
         return any(command.kind == "test" for command in self.commands)
 
     @property
-    def has_deterministic_verification(self) -> bool:
-        """True only when a test command is declared **and** tests exist.
+    def has_executable_tests(self) -> bool:
+        """Whether the observed test material declares a test a runner can fail.
 
-        Declaring a runner is not the same as having tests. A repository whose
-        manifest configures pytest but contains no test files would run the
-        command successfully against nothing, so treating it as evaluable would
-        state an inference as a fact — the exact failure this product must not
-        commit. Lint, typecheck, and build are useful regression signals but
-        none demonstrates that a task was accomplished.
+        A fact about the material alone, independent of any runner. A file named
+        ``test_demo.py`` that declares no test case is not a test suite: pytest
+        collects nothing from it and exits happy, so it cannot distinguish a
+        configuration that solved a task from one that claimed to.
         """
 
-        return self.declares_test_command and bool(self.test_files)
+        return self.test_declaration is not None
+
+    @property
+    def has_deterministic_verification(self) -> bool:
+        """True only when a test command is declared **and** real tests exist.
+
+        This is the product's single answer to "does this repository have tests
+        that can judge an agent?", composed from the runner side
+        (``declares_test_command``) and the material side
+        (``has_executable_tests``). It is deliberately answered from what the
+        material *says* rather than from what it is named: a repository whose
+        manifest configures pytest but whose test files declare nothing would
+        run the command successfully against nothing, so treating it as
+        evaluable would state an inference as a fact — the exact failure this
+        product must not commit. Lint, typecheck, and build are useful
+        regression signals but none demonstrates that a task was accomplished.
+
+        Readiness check V1 asks the same question and must consume this rather
+        than re-derive it. When it had its own weaker answer the two printed
+        four lines apart on one screen, one saying the repository could be
+        evaluated and the other blocking on the absence of a test suite.
+        """
+
+        return self.declares_test_command and self.has_executable_tests
 
     def best(self, kind: VerificationKind) -> VerificationCommand | None:
         order = {"high": 0, "medium": 1, "low": 2}
@@ -108,6 +137,8 @@ class VerificationInventory:
             "kinds": list(self.kinds),
             "declares_test_command": self.declares_test_command,
             "test_files": list(self.test_files),
+            "test_declaration": self.test_declaration,
+            "has_executable_tests": self.has_executable_tests,
             "has_deterministic_verification": self.has_deterministic_verification,
             "warnings": list(self.warnings),
         }
@@ -531,8 +562,11 @@ _TEST_REPORT_LIMIT = 5
 #: pattern can see them, so a crate whose ``cargo test`` runs and passes was
 #: reported as having no tests at all and routed to "cannot be evaluated".
 #: Anchored at line start so a ``#[cfg(test)]`` quoted inside a ``///`` doc
-#: comment or a string literal is not counted as a test.
-_RUST_INLINE_TEST = re.compile(r"^\s*#!?\[\s*(?:cfg\s*\(\s*test\s*\)|test)\s*\]", re.MULTILINE)
+#: comment or a string literal is not counted as a test. The ``#`` is escaped
+#: so the same source can be embedded in a ``re.VERBOSE`` pattern, where a bare
+#: ``#`` would start a comment and swallow the rest of the expression.
+_RUST_INLINE_TEST_PATTERN = r"^\s*\#!?\[\s*(?:cfg\s*\(\s*test\s*\)|test)\s*\]"
+_RUST_INLINE_TEST = re.compile(_RUST_INLINE_TEST_PATTERN, re.MULTILINE)
 #: Ceiling on Rust sources opened. Detecting inline tests needs file contents,
 #: so it is bounded like the directory walk: discovery runs unconditionally and
 #: must stay cheap. Sources are inspected in sorted order so a crate over the
@@ -573,6 +607,38 @@ _TEST_CODE_SUFFIXES: frozenset[str] = frozenset(
         ".feature",
     }
 )
+
+#: A test *declaration* in the languages this module can read. Names and
+#: directories only establish where a suite would live; this establishes that
+#: one is there. ``touch tests/test_demo.py`` produces a file the walk above
+#: finds, that pytest collects nothing from, and that therefore cannot fail —
+#: and a suite that cannot fail cannot tell a working configuration from a
+#: broken one.
+_TEST_DECLARATION = re.compile(
+    r"""
+    ^\s*(?:async\s+)?def\s+test\w*        # Python: def test_x / async def test_x
+    | ^\s*class\s+Test\w*                 # Python: unittest.TestCase subclasses
+    | ^\s*func\s+Test\w*                  # Go
+    | ^\s*@Test\b                         # Java / Kotlin
+    | \b(?:it|test|describe)\s*\(         # JS/TS test frameworks
+    | ^\s*it\s+['"]                       # RSpec
+    """
+    # Rust reuses the pattern the inline scan searches for. Two spellings of
+    # "this file declares a Rust test" would eventually disagree, and a crate
+    # accepted by one and rejected by the other would be reported both as
+    # having tests and as having none.
+    "|" + _RUST_INLINE_TEST_PATTERN,
+    re.MULTILINE | re.VERBOSE,
+)
+
+#: A filename that looks like it holds tests. Used only to order a bounded
+#: scan, never to decide the answer.
+_TEST_SHAPED = re.compile(r"(?:^|[._-])tests?(?:[._-]|$)|_test\.|\.test\.|^test", re.IGNORECASE)
+
+#: Ceiling on files opened looking for a declaration. Reading every test file in
+#: a large repository would make a free, read-only command slow for no gain:
+#: one real test answers the question.
+_TEST_DECLARATION_SCAN_LIMIT = 40
 
 
 def _is_test_filename(name: str) -> bool:
@@ -687,6 +753,97 @@ def _find_test_files(root: Path) -> tuple[tuple[str, ...], tuple[str, ...]]:
     return tuple(sorted(set(test_files))[:_TEST_REPORT_LIMIT]), skipped
 
 
+def _inspectable(directory: Path) -> list[Path]:
+    """Source files under ``directory``, most test-shaped first.
+
+    Two filters, both learned the hard way. Build caches and vendored trees are
+    skipped: ``sorted(rglob("*"))`` puts ``__pycache__`` first alphabetically,
+    so on this repository 39 of the first 40 entries were ``.pyc`` files and the
+    inspection budget was spent before one real test was opened — CTX told its
+    own 604-test suite to "add a test suite". Then the survivors are ordered by
+    how test-shaped their names are, so a bounded budget is spent on the files
+    most likely to answer the question rather than on whatever sorts first.
+
+    Both filters are applied to the path *below* ``directory``. Testing the
+    absolute path instead meant a hidden directory anywhere above the
+    repository — ``~/.local/src/app``, a ``.worktrees/`` checkout — skipped
+    every file in it, and now that this answer gates evaluability that would
+    refuse a whole real suite.
+
+    ``_TEST_CODE_SUFFIXES`` is the same definition of "material a runner could
+    execute" that qualifies a directory as test material in the first place, so
+    a file cannot count towards a suite there and be invisible here.
+    """
+
+    files: list[Path] = []
+    for item in directory.rglob("*"):
+        relative = item.relative_to(directory)
+        if any(part in _TEST_SCAN_SKIP_DIRS or part.startswith(".") for part in relative.parts):
+            continue
+        if item.suffix.lower() not in _TEST_CODE_SUFFIXES or not item.is_file():
+            continue
+        files.append(item)
+    return sorted(files, key=lambda path: (not _TEST_SHAPED.search(path.name), str(path)))
+
+
+def _find_test_declaration(
+    root: Path, test_files: tuple[str, ...]
+) -> tuple[str | None, tuple[str, ...]]:
+    """The first test file observed to declare a test case, and what was unreadable.
+
+    ``test_files`` holds whatever the walk found, which may be a directory
+    (``tests/``) as readily as a file, so each entry is expanded before it is
+    read. Treating a directory as a file made every ``testpaths``-style
+    repository — the common case — report as unreadable.
+
+    Stops at the first declaration, which is why ``unreadable`` comes back empty
+    on success: once the answer is known, nothing still unread could change it.
+    """
+
+    unreadable: list[str] = []
+    inspected = 0
+    for name in sorted(test_files):
+        entry = root / name
+        if entry.is_dir():
+            try:
+                candidates = _inspectable(entry)
+            except OSError:
+                unreadable.append(name)
+                continue
+        else:
+            candidates = [entry]
+
+        for candidate in candidates:
+            if inspected >= _TEST_DECLARATION_SCAN_LIMIT:
+                break
+            inspected += 1
+            relative = _relative_to(candidate, root)
+            try:
+                # utf-8-sig for the same reason _read_text uses it, and no size
+                # ceiling: a generated but genuine test file is not unreadable
+                # for being large, and calling it so would refuse a real suite.
+                text = candidate.read_text(encoding="utf-8-sig", errors="replace")
+            except OSError:
+                unreadable.append(relative)
+                continue
+            if _TEST_DECLARATION.search(text):
+                return relative, ()
+    return None, tuple(sorted(set(unreadable))[:_TEST_REPORT_LIMIT])
+
+
+def _relative_to(path: Path, root: Path) -> str:
+    """``tests/test_demo.py``, never an absolute path.
+
+    An absolute path would make the same commit profile differently on a
+    developer machine and on CI, in a field documented as reproducible.
+    """
+
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:  # pragma: no cover - defensive
+        return path.name
+
+
 def discover_verification(repo_path: str | Path) -> VerificationInventory:
     """Inspect a repository and report how it can verify itself.
 
@@ -715,6 +872,11 @@ def discover_verification(repo_path: str | Path) -> VerificationInventory:
     commands.extend(_discover_make(root))
 
     test_files, unreadable = _find_test_files(root)
+    # Reading the material is the expensive rung and it runs unconditionally,
+    # because the answer it produces is what decides whether this repository can
+    # be evaluated at all. It is bounded by _TEST_DECLARATION_SCAN_LIMIT and by
+    # the pruned set of paths the walk above already vouched for.
+    test_declaration, unreadable_material = _find_test_declaration(root, test_files)
     if unreadable:
         # Named, not counted: the user has to be able to check the claim, and
         # "we were denied here" is a different answer from "nothing is there".
@@ -734,11 +896,22 @@ def discover_verification(repo_path: str | Path) -> VerificationInventory:
             "command would run against nothing, so this repository is not "
             "evaluable until tests exist"
         )
+    elif test_declaration is None and not unreadable_material:
+        # Named, not counted, and stated as the reason rather than as a count:
+        # the user has to be able to open these files and see for themselves
+        # that nothing in them asserts anything.
+        warnings.append(
+            "the test material found (" + ", ".join(test_files) + ") declares no test case; "
+            "the declared command would pass without proving anything, so this "
+            "repository is not evaluable until a real test exists"
+        )
 
     return VerificationInventory(
         commands=tuple(commands),
         warnings=tuple(warnings),
         test_files=test_files,
+        test_declaration=test_declaration,
+        unreadable_test_material=unreadable_material,
     )
 
 

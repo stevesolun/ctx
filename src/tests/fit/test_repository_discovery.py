@@ -877,3 +877,117 @@ def test_the_recommender_hint_names_commands_that_still_exist(monkeypatch, capsy
     assert "ctx-mcp-add" not in printed
     assert "python -m mcp_fetch" in printed
     assert "python -m mcp_add" in printed
+
+
+# --------------------------------------------------------------------------
+# "Does this repository have tests that can judge an agent?" is ONE question,
+# and it is verification's (ARCH-2). It used to be answered twice, at two
+# fidelities, by two modules, and the two answers printed contradicting each
+# other four lines apart on one screen of `ctx fit` output.
+# --------------------------------------------------------------------------
+
+
+def test_test_files_that_declare_no_test_case_are_not_executable_tests(tmp_path: Path) -> None:
+    """A file named like a test that declares none is a runner running on nothing.
+
+    This is the deliberate product change in ARCH-2: evaluability is now decided
+    by what the test material *says*, not by what it is named. `pytest -q`
+    against an empty `tests/test_demo.py` collects zero tests and exits happy,
+    which cannot tell a configuration that solved a task from one that claimed
+    to -- the one inference this product may never make.
+    """
+
+    repo = _python_repo(tmp_path)
+    _write(repo / "tests" / "test_demo.py", "")
+
+    inventory = discover_verification(repo)
+
+    assert inventory.declares_test_command is True
+    assert inventory.test_files == ("tests/",)  # named like tests, and found
+    assert inventory.has_executable_tests is False
+    assert inventory.has_deterministic_verification is False
+    assert build_fit_profile(repo).is_fit_evaluable is False
+
+
+def test_one_screen_never_both_blocks_on_tests_and_promises_evaluation(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The ARCH-2 friction itself, asserted on the printed page.
+
+    `ctx fit` printed, four lines apart on this very repository: a Blocking
+    entry saying "Tests are runnable ... fix: Add a test suite", and "This
+    repository can be evaluated: it has deterministic tests". Both sentences
+    answer the same question, so at most one of them may ever appear.
+    """
+
+    repo = _python_repo(tmp_path)
+    _write(repo / "tests" / "test_demo.py", "")
+
+    printed = _fit_output(repo, capsys)
+
+    assert _CAN_BE_EVALUATED not in printed
+    assert _CANNOT_BE_EVALUATED in printed
+    assert "Tests are runnable" in printed  # still blocking, and now consistently
+
+
+def test_a_real_test_case_keeps_the_repository_evaluable(tmp_path: Path) -> None:
+    """The other half of the change: tightening must not refuse a real suite."""
+
+    repo = _python_repo(tmp_path)
+    _write(repo / "tests" / "test_demo.py", "def test_ok():\n    assert True\n")
+
+    inventory = discover_verification(repo)
+
+    assert inventory.has_executable_tests is True
+    assert inventory.has_deterministic_verification is True
+    assert inventory.test_declaration == "tests/test_demo.py"
+
+
+def test_inline_rust_tests_are_read_the_same_way_twice(tmp_path: Path) -> None:
+    """Discovery and the declaration scan must not disagree about Rust.
+
+    Finding `src/lib.rs` with one spelling of `#[cfg(test)]` and then rejecting
+    it with a stricter second spelling would report the same crate as having
+    tests and as having none. rustfmt writes it tight; a human may not.
+    """
+
+    _write(
+        tmp_path / "Cargo.toml",
+        '[package]\nname = "widget"\nversion = "0.1.0"\nedition = "2021"\n',
+    )
+    _write(
+        tmp_path / "src" / "lib.rs",
+        "pub fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n"
+        "\n"
+        "#[ cfg ( test ) ]\n"
+        "mod tests {\n"
+        "    #[ test ]\n"
+        "    fn adds() { assert_eq!(add(2, 2), 4); }\n"
+        "}\n",
+    )
+
+    inventory = discover_verification(tmp_path)
+
+    assert inventory.test_files == ("src/lib.rs",)
+    assert inventory.has_executable_tests is True
+    assert build_fit_profile(tmp_path).is_fit_evaluable is True
+
+
+def test_a_repository_inside_a_hidden_directory_still_has_its_tests_read(
+    tmp_path: Path,
+) -> None:
+    """A hidden directory *above* the repository is not a hidden directory in it.
+
+    The declaration scan tested every component of each absolute path for a
+    leading dot, so a checkout under `~/.local/src/app` or a worktree under
+    `.worktrees/` had every one of its test files skipped -- and now that the
+    same answer gates evaluability, a whole real suite would be refused.
+    """
+
+    repo = _python_repo(tmp_path / ".worktrees" / "app")
+    _write(repo / "tests" / "test_demo.py", "def test_ok():\n    assert True\n")
+
+    inventory = discover_verification(repo)
+
+    assert inventory.has_executable_tests is True
+    assert build_fit_profile(repo).is_fit_evaluable is True
