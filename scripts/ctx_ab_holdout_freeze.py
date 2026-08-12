@@ -21,12 +21,12 @@ from typing import Any
 
 from scripts import ctx_ab_benchmark as benchmark
 from scripts import ctx_ab_exposure_ledger as exposure_ledger
+from scripts import ctx_ab_failure_evidence as failure_evidence
 from scripts import ctx_ab_holdout as holdout
 
 
 ROOT = Path(__file__).resolve().parents[1]
 PRIVATE_ROOT = ROOT / ".gate" / "ctx-ab-private"
-_IS_WINDOWS = os.name == "nt"
 V1_PROTOCOL_PATH = ROOT / "benchmarks" / "ctx_ab" / "holdout-protocol-v1.json"
 V1_PROTOCOL_SHA256 = "14c3e623b6a3dced3b41769a9e8b60faed5c921aa4f1456d4bde907f1f8a60fa"
 PROTOCOL_ID = "production-graph-holdout-v2"
@@ -483,11 +483,7 @@ def _read_regular_bytes(path: Path, *, label: str, private: bool) -> bytes:
         if (
             not stat.S_ISREG(metadata.st_mode)
             or metadata.st_nlink != 1
-            or (
-                private
-                and os.name != "nt"
-                and stat.S_IMODE(metadata.st_mode) & (stat.S_IRWXG | stat.S_IRWXO)
-            )
+            or (private and stat.S_IMODE(metadata.st_mode) & (stat.S_IRWXG | stat.S_IRWXO))
         ):
             raise FreezeError(f"{label} must be an owner-only single-link regular file")
         if private:
@@ -527,11 +523,7 @@ def _regular_file_sha256(path: Path, *, label: str, private: bool) -> str:
         if (
             not stat.S_ISREG(metadata.st_mode)
             or metadata.st_nlink != 1
-            or (
-                private
-                and os.name != "nt"
-                and stat.S_IMODE(metadata.st_mode) & (stat.S_IRWXG | stat.S_IRWXO)
-            )
+            or (private and stat.S_IMODE(metadata.st_mode) & (stat.S_IRWXG | stat.S_IRWXO))
         ):
             raise FreezeError(f"{label} must be an owner-only single-link regular file")
         if private:
@@ -693,7 +685,15 @@ def _validate_source_bundle_closure(source: SourceBundle) -> None:
                 label="private source bundle future-history audit",
             )
             unreachable = benchmark._checked_git(
-                ["fsck", "--full", "--strict", "--unreachable", "--no-reflogs"],
+                [
+                    "-c",
+                    "fsck.zeroPaddedFilemode=ignore",
+                    "fsck",
+                    "--full",
+                    "--strict",
+                    "--unreachable",
+                    "--no-reflogs",
+                ],
                 cwd=workspace,
                 label="private source bundle object audit",
                 timeout=1800,
@@ -1270,7 +1270,7 @@ def _ensure_output_parent(path: Path, *, private: bool) -> None:
         path.parent.mkdir(mode=0o700 if private else 0o755, parents=True, exist_ok=True)
     except OSError as exc:
         raise FreezeError("output parent is unavailable") from exc
-    if private and os.name != "nt" and stat.S_IMODE(path.parent.stat().st_mode) != 0o700:
+    if private and stat.S_IMODE(path.parent.stat().st_mode) != 0o700:
         raise FreezeError("private output parent must be owner-only")
 
 
@@ -1278,8 +1278,7 @@ def _stage_bytes(path: Path, data: bytes, *, mode: int) -> Path:
     descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     temporary_path = Path(temporary)
     try:
-        if not _IS_WINDOWS:
-            os.fchmod(descriptor, mode)
+        os.fchmod(descriptor, mode)
         with os.fdopen(descriptor, "wb") as handle:
             descriptor = -1
             handle.write(data)
@@ -1520,6 +1519,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--environment", type=Path, required=True)
     parser.add_argument("--schedule", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--failure-evidence-output", type=Path, required=True)
     parser.add_argument(
         "--expected-acquisition-protocol-sha256",
         required=True,
@@ -1529,6 +1529,13 @@ def main(argv: list[str] | None = None) -> int:
         default=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
     )
     args = parser.parse_args(argv)
+    try:
+        failure_evidence.validate_destination(
+            args.failure_evidence_output,
+            repository_root=ROOT,
+        )
+    except failure_evidence.FailureEvidenceError:
+        parser.exit(2, "execution freeze precondition failed; evidence=unavailable\n")
     try:
         hashes = freeze_protocol(
             protocol_path=args.protocol,
@@ -1545,8 +1552,21 @@ def main(argv: list[str] | None = None) -> int:
             frozen_at=args.frozen_at,
             expected_acquisition_protocol_sha256=args.expected_acquisition_protocol_sha256,
         )
-    except (FreezeError, ValueError, OSError, KeyError, TypeError) as exc:
-        parser.exit(2, f"execution freeze failed ({type(exc).__name__})\n")
+    except BaseException as exc:
+        try:
+            failure_evidence.publish_failure(
+                destination=args.failure_evidence_output,
+                operation="holdout-execution-freeze",
+                exc=exc,
+                repository_root=ROOT,
+            )
+            evidence_status = "preserved"
+        except BaseException:
+            evidence_status = "unavailable"
+        parser.exit(
+            2,
+            f"execution freeze failed ({type(exc).__name__}); evidence={evidence_status}\n",
+        )
     print(
         "execution-frozen "
         + " ".join(

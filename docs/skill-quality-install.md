@@ -42,7 +42,7 @@ its last run, collects every slug that appeared, and calls
 incremental (touched skills only), not a full 2,000-page sweep.
 
 Edit `~/.claude/settings.json` and add, replacing `<REPO>` with the
-absolute path to this checkout (use forward slashes on Windows):
+absolute path to this checkout:
 
 ```json
 {

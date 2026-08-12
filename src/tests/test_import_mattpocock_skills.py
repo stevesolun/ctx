@@ -5,7 +5,7 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import pytest
 
@@ -86,37 +86,9 @@ def _hardlink_or_skip(link: Path, target: Path) -> None:
         pytest.skip(f"hard links unavailable: {exc}")
 
 
-def _enable_checked_path_fallback(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    on_guard: Callable[[Path], None] | None = None,
-) -> None:
-    monkeypatch.setattr(importer, "_supports_directory_fds", lambda: False)
-    if importer.os.name == "nt" and on_guard is None:
-        return
-
-    next_handle = 0
-
-    def open_guard(path: Path) -> int:
-        nonlocal next_handle
-        if on_guard is not None:
-            on_guard(path)
-        next_handle += 1
-        return next_handle
-
-    monkeypatch.setattr(importer, "_supports_windows_path_guards", lambda: True)
-    monkeypatch.setattr(importer, "_open_windows_directory_guard", open_guard)
-    monkeypatch.setattr(importer, "_close_windows_directory_guard", lambda _handle: None)
-
-
 def _transaction_artifacts(root: Path) -> list[Path]:
     suffixes = (".tmp", ".rollback", ".recovery", ".rejected")
     return [path for path in root.rglob("*") if path.name.endswith(suffixes)]
-
-
-def _create_fallback_destination_parents(import_tree: ImportTree) -> None:
-    skill_dir = import_tree.target / "mattpocock-fixture-skill"
-    (skill_dir / "assets").mkdir(parents=True)
 
 
 def test_dry_run_reports_changes_without_writing(
@@ -212,65 +184,23 @@ def test_install_copies_attribution_and_support_files(
     assert "Next steps:" in output
 
 
-def test_checked_path_fallback_stages_and_installs_all_entry_writes(
+def test_install_fails_closed_when_staged_mode_cannot_be_applied(
     import_tree: ImportTree,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _create_fallback_destination_parents(import_tree)
-    _enable_checked_path_fallback(monkeypatch)
-
-    destination, changed, support_paths = importer.deploy_entry(
-        import_tree.entry,
-        import_tree.manifest,
-        import_tree.target,
-        dry_run=False,
-    )
-
-    assert changed is True
-    assert import_tree.source_body in destination.read_text(encoding="utf-8")
-    assert (destination.parent / "NOTICE.txt").read_text(encoding="utf-8") == "support notice\n"
-    assert (destination.parent / "assets" / "helper.bin").read_bytes() == (
-        b"\x00fixture-support\xff"
-    )
-    assert support_paths == [
-        import_tree.source_skill.parent / "NOTICE.txt",
-        import_tree.source_skill.parent / "assets" / "helper.bin",
-    ]
-    assert not [path for path in destination.parent.rglob("*") if path.name.endswith(".tmp")]
-
-
-@pytest.mark.parametrize("writer", ["native", "fallback"])
-def test_install_does_not_require_fchmod(
-    import_tree: ImportTree,
-    monkeypatch: pytest.MonkeyPatch,
-    writer: str,
-) -> None:
-    if writer == "native" and not importer._supports_directory_fds():
+    if not importer._supports_directory_fds():
         pytest.skip("directory-relative writer is unavailable on this platform")
-    if writer == "fallback":
-        _create_fallback_destination_parents(import_tree)
-        _enable_checked_path_fallback(monkeypatch)
-    monkeypatch.delattr(importer.os, "fchmod", raising=False)
+    monkeypatch.setattr(importer.os, "fchmod", lambda _fd, _mode: None)
 
-    destination, changed, _ = importer.deploy_entry(
-        import_tree.entry,
-        import_tree.manifest,
-        import_tree.target,
-        dry_run=False,
-    )
+    with pytest.raises(PermissionError, match="staged payload mode mismatch"):
+        importer.deploy_entry(
+            import_tree.entry,
+            import_tree.manifest,
+            import_tree.target,
+            dry_run=False,
+        )
 
-    assert changed is True
-    assert import_tree.source_body in destination.read_text(encoding="utf-8")
     assert not _transaction_artifacts(import_tree.target)
-
-    _, changed_again, _ = importer.deploy_entry(
-        import_tree.entry,
-        import_tree.manifest,
-        import_tree.target,
-        dry_run=False,
-    )
-
-    assert changed_again is False
 
 
 def test_install_fails_closed_without_safe_filesystem_primitives(
@@ -278,7 +208,6 @@ def test_install_fails_closed_without_safe_filesystem_primitives(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(importer, "_supports_directory_fds", lambda: False)
-    monkeypatch.setattr(importer, "_supports_windows_path_guards", lambda: False)
 
     with pytest.raises(RuntimeError, match="secure source read unavailable"):
         importer.deploy_entry(
@@ -289,68 +218,6 @@ def test_install_fails_closed_without_safe_filesystem_primitives(
         )
 
     assert not import_tree.target.exists()
-
-
-def test_checked_path_fallback_creates_missing_destination_directories(
-    import_tree: ImportTree,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _enable_checked_path_fallback(monkeypatch)
-
-    destination, changed, support_paths = importer.deploy_entry(
-        import_tree.entry,
-        import_tree.manifest,
-        import_tree.target,
-        dry_run=False,
-    )
-
-    assert changed is True
-    assert import_tree.source_body in destination.read_text(encoding="utf-8")
-    assert (destination.parent / "NOTICE.txt").read_text(encoding="utf-8") == "support notice\n"
-    assert (destination.parent / "assets" / "helper.bin").read_bytes() == (
-        b"\x00fixture-support\xff"
-    )
-    assert support_paths == [
-        import_tree.source_skill.parent / "NOTICE.txt",
-        import_tree.source_skill.parent / "assets" / "helper.bin",
-    ]
-
-
-def test_native_path_guard_capability_tracks_windows() -> None:
-    assert importer._supports_windows_path_guards() is (importer.os.name == "nt")
-
-
-def test_checked_path_fallback_detects_parent_swap_while_acquiring_guards(
-    import_tree: ImportTree,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    skill_dir = import_tree.target / "mattpocock-fixture-skill"
-    (skill_dir / "assets").mkdir(parents=True)
-    sentinel = skill_dir / "SKILL.md"
-    sentinel.write_text("stale skill\n", encoding="utf-8")
-    moved = import_tree.target / "moved-skill"
-    swapped = False
-
-    def swap_skill_parent(path: Path) -> None:
-        nonlocal swapped
-        if path == skill_dir and not swapped:
-            skill_dir.rename(moved)
-            skill_dir.mkdir()
-            swapped = True
-
-    _enable_checked_path_fallback(monkeypatch, on_guard=swap_skill_parent)
-
-    with pytest.raises(ValueError, match="changed while acquiring guard"):
-        importer.deploy_entry(
-            import_tree.entry,
-            import_tree.manifest,
-            import_tree.target,
-            dry_run=False,
-        )
-
-    assert swapped is True
-    assert (moved / "SKILL.md").read_text(encoding="utf-8") == "stale skill\n"
-    assert not (skill_dir / "SKILL.md").exists()
 
 
 def test_reinstall_is_idempotent(import_tree: ImportTree) -> None:
@@ -580,39 +447,6 @@ def test_source_file_swap_after_resolution_is_rejected(
 
     assert swapped is True
     assert outside.read_text(encoding="utf-8") == "outside payload\n"
-    assert not import_tree.target.exists()
-
-
-def test_checked_path_source_parent_swap_while_acquiring_guard_is_rejected(
-    import_tree: ImportTree,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    source_dir = import_tree.source_skill.parent
-    moved = import_tree.import_root / "moved-fixture-skill"
-    outside = tmp_path / "outside-source-parent"
-    outside.mkdir()
-    (outside / "SKILL.md").write_text("# Outside skill\n", encoding="utf-8")
-    swapped = False
-
-    def swap_source_parent(path: Path) -> None:
-        nonlocal swapped
-        if path == source_dir and not swapped:
-            source_dir.rename(moved)
-            _symlink_or_skip(source_dir, outside, target_is_directory=True)
-            swapped = True
-
-    _enable_checked_path_fallback(monkeypatch, on_guard=swap_source_parent)
-
-    with pytest.raises(ValueError, match="source parent: .*changed while acquiring guard"):
-        importer.deploy_entry(
-            import_tree.entry,
-            import_tree.manifest,
-            import_tree.target,
-            dry_run=True,
-        )
-
-    assert swapped is True
     assert not import_tree.target.exists()
 
 
@@ -1070,16 +904,12 @@ def test_regular_file_support_parent_fails_before_any_destination_mutation(
     assert _snapshot_files(import_tree.target) == before
 
 
-@pytest.mark.parametrize("writer", ["native", "fallback"])
 def test_staging_failure_does_not_commit_any_destination(
     import_tree: ImportTree,
     monkeypatch: pytest.MonkeyPatch,
-    writer: str,
 ) -> None:
-    if writer == "native" and not importer._supports_directory_fds():
+    if not importer._supports_directory_fds():
         pytest.skip("directory-relative writer is unavailable on this platform")
-    if writer == "fallback":
-        _enable_checked_path_fallback(monkeypatch)
     skill_dir = import_tree.target / "mattpocock-fixture-skill"
     (skill_dir / "assets").mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text("stale skill\n", encoding="utf-8")
@@ -1247,8 +1077,7 @@ def test_temp_swap_inside_replace_is_removed_or_restores_previous_destination(
     assert not _transaction_artifacts(import_tree.target)
 
 
-@pytest.mark.skipif(importer.os.name == "nt", reason="POSIX permission bits are required")
-def test_mode_tamper_inside_replace_restores_previous_destination_without_fchmod(
+def test_mode_tamper_inside_replace_restores_previous_destination(
     import_tree: ImportTree,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1258,7 +1087,6 @@ def test_mode_tamper_inside_replace_restores_previous_destination_without_fchmod
     previous_mode = destination.stat().st_mode & 0o777
     original_replace = importer._replace_name
     tampered = False
-    monkeypatch.delattr(importer.os, "fchmod", raising=False)
 
     def change_mode_after_replace(
         staged: importer._StagedWrite,

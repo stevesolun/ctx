@@ -56,9 +56,8 @@ DEFAULT_CACHE_ROOT = Path(os.path.expanduser("~/.claude/skills/_embeddings"))
 # via crafted skill/agent IDs.
 _SUBJECT_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_\-\.]{0,127}$")
 
-# Backend names like "sentence-transformers:all-MiniLM-L6-v2" contain
-# characters (":", "/") that are illegal on Windows, so we slugify
-# before using the name as a directory component.
+# Backend names like "sentence-transformers:all-MiniLM-L6-v2" contain path
+# separators and punctuation, so slugify before using them as directories.
 _BACKEND_UNSAFE_RE = re.compile(r"[^a-zA-Z0-9_\-\.]")
 
 # 64 bits of content hash in the filename. Within a single subject_id

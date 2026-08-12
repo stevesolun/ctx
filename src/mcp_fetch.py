@@ -163,15 +163,7 @@ def _configure_logging(verbosity: int) -> None:
 
 
 def _force_utf8_stdio() -> None:
-    """Reconfigure stdout/stderr to UTF-8 on platforms that default to
-    something narrower (Windows cp1252).
-
-    The JSONL output uses ``ensure_ascii=False`` so non-ASCII names,
-    descriptions, and emoji flow through verbatim — which crashes the
-    default Windows console with ``UnicodeEncodeError: 'charmap' codec``
-    the moment a record contains a non-Latin-1 character. Real pulsemcp
-    records routinely include CJK, emoji, and accented characters, so
-    this is guaranteed to fire on any non-trivial run on Windows.
+    """Keep non-ASCII source data deterministic across terminals and logs.
 
     ``reconfigure`` is a best-effort call: if the stream has already been
     replaced (e.g. in tests that capture stdout) or if the platform's

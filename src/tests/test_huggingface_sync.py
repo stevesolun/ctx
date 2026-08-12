@@ -150,7 +150,8 @@ def test_hf_publish_docs_use_hardened_sync_script_without_inline_token() -> None
     assert "scripts/sync_huggingface.py" in text
     assert '$env:HF_TOKEN = "<' not in text
     assert "api.upload_folder" not in text
-    assert 'Read-Host "HF write token"' in text
+    assert 'read -rsp "HF write token: " HF_TOKEN' in text
+    assert "trap 'unset HF_TOKEN' EXIT" in text
 
 
 def test_hf_sync_workflow_uses_secret_and_hardened_script() -> None:

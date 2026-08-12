@@ -1031,10 +1031,9 @@ def build_argparser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    # Force UTF-8 on stdout/stderr so the Unicode arrows in
-    # ``TransitionPlan.describe()`` don't crash on Windows' default
-    # cp1252 console. No-op on POSIX. We use errors='replace' as a
-    # belt-and-braces fallback for any legacy-codepage edge case.
+    # Force UTF-8 so the Unicode arrows in ``TransitionPlan.describe()``
+    # render consistently in terminals and captured logs. Use
+    # errors='replace' as a fallback for narrow output sinks.
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if callable(reconfigure):

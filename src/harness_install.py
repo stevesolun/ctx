@@ -32,19 +32,13 @@ from ctx_config import cfg
 
 _COMMAND_ENV_ALLOWLIST = {
     "CI",
-    "COMSPEC",
     "HOME",
     "LANG",
     "PATH",
-    "PATHEXT",
     "PYTHONPATH",
-    "SYSTEMDRIVE",
-    "SYSTEMROOT",
     "TEMP",
     "TMP",
-    "USERPROFILE",
     "VIRTUAL_ENV",
-    "WINDIR",
 }
 _SECRET_NAME_MARKERS = ("API", "KEY", "SECRET", "TOKEN", "PASSWORD", "CREDENTIAL")
 _REDACTION = "[redacted]"
@@ -396,18 +390,8 @@ def _run_command(command: str, *, cwd: Path) -> dict[str, Any]:
     }
 
 
-def _split_command(command: str, *, windows: bool | None = None) -> list[str]:
-    use_windows_rules = os.name == "nt" if windows is None else windows
-    parts = shlex.split(command, posix=not use_windows_rules)
-    if use_windows_rules:
-        parts = [_strip_surrounding_quotes(part) for part in parts]
-    return parts
-
-
-def _strip_surrounding_quotes(value: str) -> str:
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-        return value[1:-1]
-    return value
+def _split_command(command: str) -> list[str]:
+    return shlex.split(command, posix=True)
 
 
 def _resolve_command_executable(command: str, env: dict[str, str]) -> str:
@@ -979,7 +963,7 @@ def render_no_fit_harness_plan(
                 f"- Goal: {goal_text}",
                 f"- Model provider: {provider}",
                 f"- Model: {model_name}",
-                "- Target operating systems: Windows, macOS, and Linux unless narrowed by the user",
+                "- Target operating systems: Linux and macOS unless narrowed by the user",
                 *requirement_lines,
                 "",
                 "## Required Interview Before Building",
@@ -1008,7 +992,7 @@ def render_no_fit_harness_plan(
                 "",
                 "## Acceptance Tests",
                 "",
-                "- Fresh install on Windows, macOS, and Linux can start the harness without secrets printed in logs.",
+                "- Fresh install on Linux and macOS can start the harness without secrets printed in logs.",
                 "- A sample task triggers no more than five ctx skill/agent/MCP recommendations.",
                 "- A selected recommendation is recorded as used with evidence.",
                 "- An unused loaded entity produces an unload proposal and respects a user skip.",

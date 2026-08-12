@@ -450,10 +450,9 @@ def test_selector_cli_writes_owner_only_evidence(tmp_path: Path) -> None:
         )
         == 0
     )
-    if os.name != "nt":
-        assert stat.S_IMODE(ledger_path.stat().st_mode) == 0o600
-        assert stat.S_IMODE(selection_path.stat().st_mode) == 0o600
-        assert stat.S_IMODE(ledger_path.parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE(ledger_path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(selection_path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(ledger_path.parent.stat().st_mode) == 0o700
     assert len(ledger_path.read_text(encoding="utf-8").splitlines()) == len(source) + 1
     selection = json.loads(selection_path.read_bytes())
     assert selection_path.read_bytes() == selector._canonical_json_bytes(selection)
@@ -474,8 +473,7 @@ def test_selector_cli_writes_owner_only_evidence(tmp_path: Path) -> None:
         )
         == 0
     )
-    if os.name != "nt":
-        assert stat.S_IMODE(selection_path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(selection_path.stat().st_mode) == 0o600
 
 
 def test_selector_cli_rejects_path_collisions_and_tracked_output(tmp_path: Path) -> None:
@@ -517,26 +515,6 @@ def test_selector_cli_rejects_symlink_output(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="regular file"):
         selector._private_text_handle(link)
     assert target.read_text(encoding="utf-8") == "preserve"
-
-
-@pytest.mark.parametrize(
-    "module",
-    [selector, acquire],
-    ids=["selector", "acquisition"],
-)
-def test_private_text_handle_does_not_require_fchmod_on_windows(
-    module: Any,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    output = tmp_path / module.__name__ / "private.json"
-    monkeypatch.setattr(module, "_IS_WINDOWS", True)
-    monkeypatch.delattr(module.os, "fchmod", raising=False)
-
-    with module._private_text_handle(output) as handle:
-        handle.write("private")
-
-    assert output.read_text(encoding="utf-8") == "private"
 
 
 def test_selector_cli_rejects_hard_link_output(tmp_path: Path) -> None:
@@ -672,23 +650,6 @@ with open(output, "w", encoding="utf-8") as handle:
             compressed.write(script.encode())
 
 
-@pytest.fixture
-def portable_fake_duckdb(monkeypatch: pytest.MonkeyPatch) -> None:
-    if os.name != "nt":
-        return
-    native_run = subprocess.run
-
-    def run_fake_cli(
-        command: list[str],
-        **kwargs: Any,
-    ) -> subprocess.CompletedProcess[str]:
-        if command and Path(command[0]).name == "duckdb":
-            command = [sys.executable, *command]
-        return native_run(command, **kwargs)
-
-    monkeypatch.setattr(acquire.subprocess, "run", run_fake_cli)
-
-
 def test_acquisition_canonicalizer_is_byte_stable() -> None:
     protocol = json.loads(PROTOCOL_PATH.read_text(encoding="utf-8"))
     columns = protocol["universe"]["required_columns"]
@@ -729,7 +690,6 @@ def test_v2_acquisition_authenticates_exact_protocol_bytes() -> None:
 
 def test_acquisition_runs_pinned_cli_and_verifies_frozen_rerun(
     tmp_path: Path,
-    portable_fake_duckdb: None,
 ) -> None:
     protocol = json.loads(PROTOCOL_PATH.read_text(encoding="utf-8"))
     protocol["stage"] = "acquisition-preregistered"
@@ -771,9 +731,8 @@ def test_acquisition_runs_pinned_cli_and_verifies_frozen_rerun(
 
     assert acquire.main(arguments) == 0
     assert output.read_bytes() == first
-    if os.name != "nt":
-        assert stat.S_IMODE(output.stat().st_mode) == 0o600
-        assert stat.S_IMODE(output.parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    assert stat.S_IMODE(output.parent.stat().st_mode) == 0o700
 
 
 @pytest.mark.parametrize(
@@ -788,7 +747,6 @@ def test_acquisition_rejects_frozen_hash_mismatch(
     tmp_path: Path,
     field: str,
     message: str,
-    portable_fake_duckdb: None,
 ) -> None:
     protocol = json.loads(PROTOCOL_PATH.read_text(encoding="utf-8"))
     protocol["universe"]["expected_rows"] = 5

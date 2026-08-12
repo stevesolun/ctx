@@ -23,7 +23,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -32,7 +31,7 @@ import secrets
 import stat
 import sys
 from pathlib import Path
-from typing import Iterator, NoReturn
+from typing import NoReturn
 
 import yaml  # type: ignore[import-untyped]
 
@@ -419,38 +418,9 @@ def _read_source_text(source_rel: str, *, expected_sha256: str) -> tuple[Path, s
         finally:
             os.close(parent_fd)
 
-    if _supports_windows_path_guards():
-        with _guard_windows_directories(trusted_root, source.parent, create_missing=False):
-            source_metadata = _lstat_optional(source)
-            if source_metadata is None:
-                raise FileNotFoundError(f"Source design missing: {source}")
-            if (
-                stat.S_ISLNK(source_metadata.st_mode)
-                or _is_reparse_point(source, source_metadata)
-                or not stat.S_ISREG(source_metadata.st_mode)
-            ):
-                raise ValueError(f"{source}: source is not a regular file")
-            fd = os.open(source, os.O_RDONLY)
-            try:
-                opened = os.fstat(fd)
-                if not stat.S_ISREG(opened.st_mode) or not os.path.samestat(
-                    source_metadata, opened
-                ):
-                    raise ValueError(f"{source}: source path changed while opening")
-                with os.fdopen(fd, "rb") as handle:
-                    fd = -1
-                    return source, _verified_source_text(
-                        source,
-                        handle.read(),
-                        expected_sha256,
-                    )
-            finally:
-                if fd != -1:
-                    os.close(fd)
-
     raise RuntimeError(
-        "secure source read unavailable: this platform must provide directory-relative "
-        "filesystem operations or Windows directory handles"
+        "secure source read unavailable: this POSIX platform must provide "
+        "directory-relative filesystem operations"
     )
 
 
@@ -575,159 +545,16 @@ def _validate_real_directory(path: Path, *, label: str) -> bool:
     return True
 
 
-def _read_destination_text_path(
-    skill_dir: Path,
-    target_dir: Path,
-    destination: Path,
-) -> tuple[str | None, int]:
-    if not _validate_real_directory(target_dir, label="target directory"):
-        return None, 0
-    if not _validate_real_directory(skill_dir, label="destination parent"):
-        return None, 0
-    _require_target_containment(destination, target_dir, label=f"SKILL.md {destination}")
-    try:
-        metadata = _lstat_optional(destination)
-    except OSError as exc:
-        raise ValueError(f"destination {destination} must be a regular file: {exc}") from None
-    if metadata is None:
-        return None, 0
-    if (
-        stat.S_ISLNK(metadata.st_mode)
-        or _is_reparse_point(destination, metadata)
-        or not stat.S_ISREG(metadata.st_mode)
-    ):
-        raise ValueError(f"destination {destination} must be a regular file")
-    try:
-        fd = os.open(destination, os.O_RDONLY)
-    except OSError as exc:
-        raise ValueError(f"destination {destination} must be a regular file: {exc}") from None
-    try:
-        opened = os.fstat(fd)
-        if not stat.S_ISREG(opened.st_mode) or not os.path.samestat(metadata, opened):
-            raise ValueError(f"destination {destination} changed while opening")
-        with os.fdopen(fd, "r", encoding="utf-8") as handle:
-            fd = -1
-            return handle.read(), opened.st_nlink
-    finally:
-        if fd != -1:
-            os.close(fd)
-
-
-def _supports_windows_path_guards() -> bool:
-    return os.name == "nt"
-
-
-def _open_windows_directory_guard(path: Path) -> int:  # pragma: no cover - Windows only
-    import ctypes
-
-    kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
-    create_file = kernel32.CreateFileW
-    create_file.argtypes = (
-        ctypes.c_wchar_p,
-        ctypes.c_uint32,
-        ctypes.c_uint32,
-        ctypes.c_void_p,
-        ctypes.c_uint32,
-        ctypes.c_uint32,
-        ctypes.c_void_p,
-    )
-    create_file.restype = ctypes.c_void_p
-    handle = create_file(
-        str(path),
-        0x80,  # FILE_READ_ATTRIBUTES
-        0x1 | 0x2,  # FILE_SHARE_READ | FILE_SHARE_WRITE; deliberately no DELETE share
-        None,
-        3,  # OPEN_EXISTING
-        0x02000000 | 0x00200000,  # BACKUP_SEMANTICS | OPEN_REPARSE_POINT
-        None,
-    )
-    if handle in (None, ctypes.c_void_p(-1).value):
-        error = getattr(ctypes, "get_last_error")()
-        message = getattr(ctypes, "FormatError")(error)
-        raise OSError(error, f"cannot guard directory {path}: {message}")
-    return int(handle)
-
-
-def _close_windows_directory_guard(handle: int) -> None:  # pragma: no cover - Windows only
-    import ctypes
-
-    kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
-    close_handle = kernel32.CloseHandle
-    close_handle.argtypes = (ctypes.c_void_p,)
-    close_handle.restype = ctypes.c_int
-    close_handle(ctypes.c_void_p(handle))
-
-
-def _windows_guard_paths(target_dir: Path, skill_dir: Path) -> list[Path]:
-    absolute_target = Path(os.path.abspath(target_dir))
-    paths = [Path(absolute_target.anchor)]
-    for component in absolute_target.parts[1:]:
-        paths.append(paths[-1] / component)
-    try:
-        relative_skill = skill_dir.relative_to(absolute_target)
-    except ValueError as exc:
-        raise ValueError(f"guarded directory {skill_dir} is outside {absolute_target}") from exc
-    for component in relative_skill.parts:
-        paths.append(paths[-1] / component)
-    return paths
-
-
-@contextmanager
-def _guard_windows_directories(
-    target_dir: Path,
-    skill_dir: Path,
-    *,
-    create_missing: bool = True,
-) -> Iterator[None]:
-    """Pin every parent without DELETE sharing before a path-based replace."""
-    handles: list[int] = []
-    try:
-        for path in _windows_guard_paths(target_dir, skill_dir):
-            if not _validate_real_directory(path, label="target directory"):
-                if not create_missing:
-                    raise ValueError(f"target directory {path} must be a real directory")
-                path.mkdir()
-                _validate_real_directory(path, label="target directory")
-            handles.append(_open_windows_directory_guard(path))
-            _validate_real_directory(path, label="target directory")
-        yield
-    finally:
-        for handle in reversed(handles):
-            _close_windows_directory_guard(handle)
-
-
-def _atomic_write_text_windows(destination: Path, content: str) -> None:
-    metadata = _lstat_optional(destination)
-    if metadata is not None and (
-        stat.S_ISLNK(metadata.st_mode)
-        or _is_reparse_point(destination, metadata)
-        or not stat.S_ISREG(metadata.st_mode)
-    ):
-        raise ValueError(f"destination {destination} must be a regular file")
-    mode = 0o666 if metadata is None else stat.S_IMODE(metadata.st_mode)
-    temporary = destination.with_name(f".{destination.name}.{secrets.token_hex(8)}")
-    try:
-        with temporary.open("x", encoding="utf-8") as handle:
-            if metadata is not None:
-                os.chmod(temporary, mode)
-            handle.write(content)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, destination)
-    finally:
-        try:
-            temporary.unlink()
-        except FileNotFoundError:
-            pass
-
-
 def _read_deployed_text(
     skill_dir: Path,
     target_dir: Path,
     destination: Path,
 ) -> tuple[str | None, int]:
     if not _supports_directory_fds():
-        return _read_destination_text_path(skill_dir, target_dir, destination)
+        raise RuntimeError(
+            "secure destination read unavailable: this POSIX platform must provide "
+            "directory-relative filesystem operations"
+        )
 
     skill_fd = _open_skill_directory(skill_dir, target_dir, create=False)
     try:
@@ -756,17 +583,9 @@ def _install_if_changed(
             return True, existed
         finally:
             os.close(skill_fd)
-    if _supports_windows_path_guards():
-        with _guard_windows_directories(target_dir, skill_dir):
-            existing, link_count = _read_destination_text_path(skill_dir, target_dir, destination)
-            existed = existing is not None
-            if existing == content and link_count <= 1:
-                return False, existed
-            _atomic_write_text_windows(destination, content)
-            return True, existed
     raise RuntimeError(
-        "secure install unavailable: this platform must provide directory-relative "
-        "filesystem operations or Windows directory handles"
+        "secure install unavailable: this POSIX platform must provide "
+        "directory-relative filesystem operations"
     )
 
 

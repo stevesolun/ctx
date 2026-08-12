@@ -16,7 +16,7 @@ from typing import Any
 import numpy as np
 
 from ctx.utils._file_lock import file_lock
-from ctx.utils._fs_utils import _replace_with_retry, atomic_write_json
+from ctx.utils._fs_utils import _replace_atomically, atomic_write_json
 
 _INDEX_VERSION = 1
 _META_NAME = "vector-index.meta.json"
@@ -161,7 +161,7 @@ class HnswlibVectorIndex(NumpyFlatVectorIndex):
             _save_numpy_data(cache_dir / _NUMPY_NAME, self)
             tmp = cache_dir / f".{_HNSW_NAME}.tmp"
             self._hnsw_index.save_index(str(tmp))
-            _replace_with_retry(str(tmp), cache_dir / _HNSW_NAME)
+            _replace_atomically(tmp, cache_dir / _HNSW_NAME)
             atomic_write_json(meta_path, asdict(self.meta))
 
 
@@ -491,7 +491,7 @@ def _save_numpy_data(path: Path, index: NumpyFlatVectorIndex) -> None:
         vecs=index.vectors.astype("float32"),
     )
     tmp_real = tmp_stem.with_name(tmp_stem.name + ".npz")
-    _replace_with_retry(str(tmp_real), path)
+    _replace_atomically(tmp_real, path)
 
 
 def _load_numpy_data(path: Path) -> tuple[list[str], list[str], np.ndarray]:

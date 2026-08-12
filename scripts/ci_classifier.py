@@ -20,7 +20,6 @@ OUTPUT_NAMES = (
     "similarity_changed",
     "source_changed",
     "telemetry_changed",
-    "windows_changed",
 )
 
 DOCS_PATTERNS = (
@@ -114,45 +113,6 @@ TELEMETRY_PATTERNS = (
     "src/tests/test_mcp_server.py",
     "src/tests/test_public_api.py",
 )
-WINDOWS_PATTERNS = (
-    ".github/workflows/test.yml",
-    "scripts/ctx_ab_benchmark.py",
-    "scripts/ctx_ab_swebench.py",
-    "scripts/ci_classifier.py",
-    "scripts/ci_required.py",
-    "src/ctx/runtime/agent_file.py",
-    "src/ctx/runtime/_query_attempt_posix.py",
-    "src/ctx/runtime/_skill_cas_posix.py",
-    "src/ctx/runtime/authenticated_benefit.py",
-    "src/ctx/runtime/benefit_closure.py",
-    "src/ctx/runtime/composition.py",
-    "src/ctx/runtime/eligible_catalog.py",
-    "src/ctx/runtime/install_execution.py",
-    "src/ctx/runtime/production_catalog.py",
-    "src/ctx/runtime/query_delivery.py",
-    "src/ctx/runtime/query_vocabulary.py",
-    "src/ctx/runtime/query_work.py",
-    "src/ctx/runtime/skill_cas.py",
-    "src/ctx/assets/*.json",
-    "src/ctx/cli/run.py",
-    "src/import_designdotmd_skills.py",
-    "src/import_mattpocock_skills.py",
-    "src/import_strix_skills.py",
-    "src/tests/test_import_designdotmd_skills.py",
-    "src/tests/test_import_mattpocock_skills.py",
-    "src/tests/test_import_strix_skills.py",
-    "src/tests/test_ctx_ab_benchmark.py",
-    "src/tests/test_ctx_ab_swebench.py",
-    "src/tests/runtime/test_agent_file.py",
-    "src/tests/runtime/test_composition.py",
-    "src/tests/runtime/test_eligible_catalog.py",
-    "src/tests/runtime/test_install_execution.py",
-    "src/tests/runtime/test_production_catalog.py",
-    "src/tests/runtime/test_query_delivery_windows.py",
-    "src/tests/runtime/test_skill_cas.py",
-    "src/tests/runtime/test_skill_cas_posix.py",
-    "src/tests/test_harness_cli_run.py",
-)
 
 
 def _matches(path: str, patterns: Iterable[str]) -> bool:
@@ -189,7 +149,6 @@ def classify_paths(paths: Iterable[str]) -> dict[str, bool]:
         "source_changed": ci_changed or any(_matches(path, SOURCE_PATTERNS) for path in files),
         "telemetry_changed": ci_changed
         or any(_matches(path, TELEMETRY_PATTERNS) for path in files),
-        "windows_changed": any(_matches(path, WINDOWS_PATTERNS) for path in files),
     }
 
 

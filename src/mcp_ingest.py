@@ -247,9 +247,8 @@ class _GracefulExit:
 
     def install(self) -> None:
         signal.signal(signal.SIGINT, self._handle)
-        # SIGTERM isn't deliverable on Windows the same way (Python only
-        # surfaces SIGBREAK/SIGINT there), but signal.signal on an
-        # unsupported signal is a no-op on Windows so this is safe.
+        # Some embedded runtimes may reject SIGTERM registration, so keep
+        # graceful SIGINT handling even when that optional hook is unavailable.
         try:
             signal.signal(signal.SIGTERM, self._handle)
         except (ValueError, OSError):
@@ -573,10 +572,8 @@ def _build_parser() -> argparse.ArgumentParser:
 def _force_utf8_stdio() -> None:
     """Reconfigure stdout/stderr to UTF-8.
 
-    Mirror of the same helper in mcp_fetch. Needed here because non-ASCII
-    slugs, descriptions, or error messages would crash Windows' default
-    cp1252 console the moment a record with CJK / emoji / accented text
-    flows through the per-record progress printer.
+    Mirror of the same helper in mcp_fetch. It keeps non-ASCII slugs,
+    descriptions, and errors deterministic across terminals and log sinks.
     """
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)

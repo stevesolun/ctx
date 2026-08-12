@@ -2687,7 +2687,6 @@ class TestRecommendBundle:
         assert not legacy_path.exists()
         assert store.recommendation_checkpoint_path.is_file()
 
-    @pytest.mark.skipif(os.name == "nt", reason="POSIX ownership modes and symlinks")
     def test_rejection_index_rejects_symlinks_and_keeps_state_private(
         self,
         tmp_path: Path,

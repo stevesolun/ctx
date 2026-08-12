@@ -92,6 +92,46 @@ def _wait_until(predicate: Any, *, timeout: float = 2.0) -> None:
 
 
 class TestClientLifecycle:
+    def test_processes_start_in_a_posix_session(self) -> None:
+        assert mcp_router._popen_process_group_kwargs() == {"start_new_session": True}
+
+    @pytest.mark.parametrize(
+        ("force", "expected_signal"),
+        [(False, mcp_router.signal.SIGTERM), (True, mcp_router.signal.SIGKILL)],
+    )
+    def test_stop_signals_the_posix_process_group(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        force: bool,
+        expected_signal: int,
+    ) -> None:
+        calls: list[tuple[int, int]] = []
+
+        class RunningProcess:
+            pid = 4312
+
+            @staticmethod
+            def poll() -> None:
+                return None
+
+            @staticmethod
+            def kill() -> None:
+                pytest.fail("process fallback should not be used")
+
+            @staticmethod
+            def terminate() -> None:
+                pytest.fail("process fallback should not be used")
+
+        monkeypatch.setattr(
+            mcp_router.os,
+            "killpg",
+            lambda pid, sig: calls.append((pid, sig)),
+        )
+
+        mcp_router._signal_process_tree(RunningProcess(), force=force)  # type: ignore[arg-type]
+
+        assert calls == [(4312, expected_signal)]
+
     def test_start_and_stop(self) -> None:
         client = McpClient(_make_config())
         client.start()
@@ -126,7 +166,7 @@ class TestClientLifecycle:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        resolved = tmp_path / ("npx.cmd" if sys.platform == "win32" else "npx")
+        resolved = tmp_path / "npx"
         resolved.write_text("", encoding="utf-8")
         monkeypatch.setattr(
             mcp_router.shutil,

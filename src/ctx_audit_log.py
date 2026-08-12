@@ -105,8 +105,8 @@ Actor = Literal["hook", "cli", "lifecycle", "user", "scheduler"]
 
 
 # Single shared lock per process keeps concurrent write-within-process safe.
-# Cross-process safety comes from O_APPEND semantics on POSIX + the atomic
-# write-then-fsync pattern below on Windows.
+# Cross-process safety comes from append semantics plus the write-then-fsync
+# pattern below; the in-process lock also keeps local writers serialized.
 _LOCK = threading.Lock()
 _MAX_SAFE_DEPTH = 8
 
@@ -223,10 +223,8 @@ def log(
         with _LOCK:
             target.parent.mkdir(parents=True, exist_ok=True)
             # Append-only. O_APPEND is atomic per-write for writes up to
-            # PIPE_BUF bytes on POSIX; our records are well under that.
-            # On Windows we accept best-effort — concurrent writers may
-            # still interleave beyond PIPE_BUF, which is acceptable for
-            # an audit log (each record is a valid JSON document).
+            # PIPE_BUF bytes on supported POSIX hosts; our records are well
+            # under that, preserving each append as one JSON record.
             with open(target, "a", encoding="utf-8") as f:
                 f.write(line)
     except Exception:  # noqa: BLE001

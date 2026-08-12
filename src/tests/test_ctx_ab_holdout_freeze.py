@@ -3,7 +3,6 @@ from __future__ import annotations
 from copy import deepcopy
 import hashlib
 import json
-import os
 from pathlib import Path
 import shutil
 import stat
@@ -54,6 +53,138 @@ def _canonical(value: object, *, newline: bool = False) -> bytes:
 
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def _literal_tree_bundle(
+    tmp_path: Path,
+    *,
+    directory: str,
+    mode: bytes,
+    name: bytes,
+) -> tuple[Path, str, str, Path]:
+    source = tmp_path / directory
+    source.mkdir()
+    subprocess.run(["git", "init", "-q", "--initial-branch=main"], cwd=source, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "ctx@example.test"],
+        cwd=source,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "ctx benchmark"],
+        cwd=source,
+        check=True,
+    )
+    blob = (
+        subprocess.run(
+            ["git", "hash-object", "-w", "--stdin"],
+            cwd=source,
+            input=b"literal tree fixture\n",
+            check=True,
+            capture_output=True,
+        )
+        .stdout.decode()
+        .strip()
+    )
+    tree = (
+        subprocess.run(
+            ["git", "hash-object", "-t", "tree", "--literally", "-w", "--stdin"],
+            cwd=source,
+            input=mode + b" " + name + b"\0" + bytes.fromhex(blob),
+            check=True,
+            capture_output=True,
+        )
+        .stdout.decode()
+        .strip()
+    )
+    commit = (
+        subprocess.run(
+            ["git", "commit-tree", tree],
+            cwd=source,
+            input=b"literal tree fixture\n",
+            check=True,
+            capture_output=True,
+        )
+        .stdout.decode()
+        .strip()
+    )
+    subprocess.run(
+        ["git", "update-ref", "refs/heads/base", commit],
+        cwd=source,
+        check=True,
+    )
+    bundle = tmp_path / f"{directory}.bundle"
+    subprocess.run(
+        ["git", "bundle", "create", str(bundle), "refs/heads/base"],
+        cwd=source,
+        check=True,
+    )
+    bundle.chmod(0o600)
+    return source, commit, tree, bundle
+
+
+def test_source_bundle_closure_accepts_legacy_zero_padded_tree_mode(tmp_path: Path) -> None:
+    source, commit, tree, bundle = _literal_tree_bundle(
+        tmp_path,
+        directory="legacy-source",
+        mode=b"0100644",
+        name=b"source.py",
+    )
+    strict = subprocess.run(
+        ["git", "fsck", "--full", "--strict", "--unreachable", "--no-reflogs"],
+        cwd=source,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert strict.returncode != 0
+    assert "zeroPaddedFilemode" in strict.stderr
+
+    freezer._validate_source_bundle_closure(
+        freezer.SourceBundle(
+            base_commit=commit,
+            bundle_path=bundle,
+            bundle_sha256=_sha256(bundle.read_bytes()),
+            tree_sha1=tree,
+        )
+    )
+
+
+def test_source_bundle_closure_rejects_unrelated_strict_fsck_error(tmp_path: Path) -> None:
+    source, commit, tree, bundle = _literal_tree_bundle(
+        tmp_path,
+        directory="invalid-source",
+        mode=b"120000",
+        name=b".gitmodules",
+    )
+    scoped = subprocess.run(
+        [
+            "git",
+            "-c",
+            "fsck.zeroPaddedFilemode=ignore",
+            "fsck",
+            "--full",
+            "--strict",
+            "--unreachable",
+            "--no-reflogs",
+        ],
+        cwd=source,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert scoped.returncode != 0
+    assert "gitmodulesSymlink" in scoped.stderr
+
+    with pytest.raises(freezer.FreezeError, match="closure validation failed"):
+        freezer._validate_source_bundle_closure(
+            freezer.SourceBundle(
+                base_commit=commit,
+                bundle_path=bundle,
+                bundle_sha256=_sha256(bundle.read_bytes()),
+                tree_sha1=tree,
+            )
+        )
 
 
 def test_committed_v1_protocol_checkout_preserves_authenticated_bytes() -> None:
@@ -500,9 +631,8 @@ def test_freeze_binds_all_inputs_and_emits_runner_ready_private_outputs(
 
     schedule_bytes = paths["schedule_path"].read_bytes()
     frozen = json.loads(paths["output_path"].read_bytes())
-    if os.name != "nt":
-        assert stat.S_IMODE(paths["schedule_path"].stat().st_mode) == 0o600
-        assert stat.S_IMODE(paths["output_path"].stat().st_mode) == 0o644
+    assert stat.S_IMODE(paths["schedule_path"].stat().st_mode) == 0o600
+    assert stat.S_IMODE(paths["output_path"].stat().st_mode) == 0o644
     assert frozen["stage"] == "execution-frozen"
     assert frozen["execution_frozen_at"] == "2026-07-30T09:34:56Z"
     assert frozen["exposure_ledger_sha256"] == documents["protocol"]["exposure_ledger_sha256"]
@@ -1140,8 +1270,6 @@ def test_freeze_rejects_non_private_symlink_hardlink_and_missing_inputs(
         _, paths = _fixture_paths(case)
         source = paths["environment_path"]
         if kind == "public":
-            if os.name == "nt":
-                continue
             source.chmod(0o644)
         elif kind == "symlink":
             target = source.with_suffix(".target")
@@ -1157,19 +1285,6 @@ def test_freeze_rejects_non_private_symlink_hardlink_and_missing_inputs(
 
         assert not paths["schedule_path"].exists()
         assert not paths["output_path"].exists()
-
-
-def test_stage_bytes_does_not_require_fchmod_on_windows(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    output = tmp_path / "schedule.json"
-    monkeypatch.setattr(freezer, "_IS_WINDOWS", True)
-    monkeypatch.delattr(freezer.os, "fchmod", raising=False)
-
-    staged = freezer._stage_bytes(output, b"{}\n", mode=0o600)
-
-    assert staged.read_bytes() == b"{}\n"
 
 
 def test_freeze_rejects_invalid_timestamp_and_aliasing_paths(tmp_path: Path) -> None:
@@ -1246,3 +1361,61 @@ def test_output_install_failure_rolls_back_private_schedule(
 
     assert not paths["schedule_path"].exists()
     assert not paths["output_path"].exists()
+
+
+def test_cli_preserves_private_failure_details_without_printing_them(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def fail(**_kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("private-task-id and private freeze detail")
+
+    monkeypatch.setattr(freezer, "freeze_protocol", fail)
+    failure_root = tmp_path / "freeze-failure-evidence"
+    argv = [
+        "--protocol",
+        str(tmp_path / "protocol"),
+        "--exposure-ledger",
+        str(tmp_path / "exposure"),
+        "--selection",
+        str(tmp_path / "selection"),
+        "--scenario-pack",
+        str(tmp_path / "scenario-pack"),
+        "--source-map",
+        str(tmp_path / "source-map"),
+        "--collision",
+        str(tmp_path / "collision"),
+        "--reconstructed",
+        str(tmp_path / "reconstructed"),
+        "--controls",
+        str(tmp_path / "controls"),
+        "--environment",
+        str(tmp_path / "environment"),
+        "--schedule",
+        str(tmp_path / "schedule"),
+        "--output",
+        str(tmp_path / "execution-protocol"),
+        "--expected-acquisition-protocol-sha256",
+        "0" * 64,
+        "--failure-evidence-output",
+        str(failure_root),
+    ]
+
+    with pytest.raises(SystemExit) as raised:
+        freezer.main(argv)
+
+    captured = capsys.readouterr()
+    assert raised.value.code == 2
+    assert captured.out == ""
+    assert captured.err == "execution freeze failed (RuntimeError); evidence=preserved\n"
+    assert "private-task" not in captured.err
+    failure = json.loads((failure_root / "failure.json").read_text(encoding="utf-8"))
+    assert failure["operation"] == "holdout-execution-freeze"
+    assert failure["exception_chain"] == [
+        {
+            "message": "private-task-id and private freeze detail",
+            "type": "RuntimeError",
+        }
+    ]
+    assert (failure_root / "artifact-manifest.json").is_file()

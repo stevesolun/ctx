@@ -112,7 +112,6 @@ _BANNED_INTERPRETER_ARGS: dict[str, frozenset[str]] = {
     # npx / uvx / bunx intentionally unrestricted — they ARE the
     # package-launcher pattern MCP servers are expected to use.
 }
-_WINDOWS_EXEC_SUFFIXES = (".exe", ".cmd", ".bat", ".ps1")
 
 
 def _rejects_banned_args(tokens: list[str]) -> str | None:
@@ -153,11 +152,7 @@ def _rejects_banned_args(tokens: list[str]) -> str | None:
 
 
 def _normalized_executable(value: str) -> str:
-    name = Path(value).name.lower()
-    for suffix in _WINDOWS_EXEC_SUFFIXES:
-        if name.endswith(suffix):
-            return name[: -len(suffix)]
-    return name
+    return Path(value).name.lower()
 
 
 def _find_json_inline_secret_arg(parsed_config: object) -> str | None:
@@ -646,18 +641,8 @@ def install_mcp(
     )
 
 
-def _split_install_command(command: str, *, windows: bool | None = None) -> list[str]:
-    use_windows_rules = os.name == "nt" if windows is None else windows
-    tokens = shlex.split(command, posix=not use_windows_rules)
-    if use_windows_rules:
-        tokens = [_strip_surrounding_quotes(token) for token in tokens]
-    return tokens
-
-
-def _strip_surrounding_quotes(value: str) -> str:
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-        return value[1:-1]
-    return value
+def _split_install_command(command: str) -> list[str]:
+    return shlex.split(command, posix=True)
 
 
 def uninstall_mcp(
@@ -795,8 +780,7 @@ def _build_uninstall_parser() -> argparse.ArgumentParser:
 
 
 def _force_utf8_stdio() -> None:
-    """Mirror of mcp_fetch/mcp_ingest helper — card output includes
-    ``═`` box-drawing characters that crash Windows' cp1252 stdout."""
+    """Mirror mcp_fetch/mcp_ingest: always render card output as UTF-8."""
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is None:

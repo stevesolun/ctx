@@ -66,14 +66,9 @@ _CLIENT_INFO = {"name": "ctx-harness", "version": "0.1"}
 _SAFE_PARENT_ENV_KEYS = frozenset(
     {
         "PATH",
-        "PATHEXT",
-        "SYSTEMROOT",
-        "WINDIR",
-        "COMSPEC",
         "TMP",
         "TEMP",
         "HOME",
-        "USERPROFILE",
         "LANG",
     }
 )
@@ -379,8 +374,6 @@ def _expand_config_args(config: "McpServerConfig", env: dict[str, str]) -> tuple
 
 
 def _popen_process_group_kwargs() -> dict[str, Any]:
-    if os.name == "nt":
-        return {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
     return {"start_new_session": True}
 
 
@@ -391,34 +384,9 @@ def _signal_process_tree(
 ) -> None:
     if proc.poll() is not None:
         return
-    if os.name == "nt":
-        args = ["taskkill", "/PID", str(proc.pid), "/T"]
-        if force:
-            args.append("/F")
-        try:
-            subprocess.run(
-                args,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=2.0,
-                check=False,
-            )
-        except Exception:  # noqa: BLE001
-            if force:
-                proc.kill()
-        return
-
-    killpg = getattr(os, "killpg", None)
-    if killpg is None:
-        if force:
-            proc.kill()
-        else:
-            proc.terminate()
-        return
-
-    sig = getattr(signal, "SIGKILL", signal.SIGTERM) if force else signal.SIGTERM
+    sig = signal.SIGKILL if force else signal.SIGTERM
     try:
-        killpg(proc.pid, sig)
+        os.killpg(proc.pid, sig)
     except ProcessLookupError:
         return
     except Exception:  # noqa: BLE001
@@ -429,13 +397,7 @@ def _signal_process_tree(
 
 
 def _resolve_executable(command: str, env: dict[str, str]) -> str:
-    """Resolve bare commands through PATH/PATHEXT before spawning.
-
-    Windows does not let ``subprocess.Popen(["npx", ...])`` find
-    ``npx.cmd`` reliably in all environments. ``shutil.which`` applies
-    PATHEXT and gives us the actual executable path while leaving
-    explicit paths untouched.
-    """
+    """Resolve bare commands through PATH before spawning."""
     if not command.strip():
         raise ValueError("MCP command is empty")
     if os.path.isabs(command) or any(sep in command for sep in ("/", "\\")):
@@ -462,7 +424,7 @@ class McpServerConfig:
 
     ``env`` is the explicit child overlay. Parent secrets are not
     inherited by default; only a small process-basics allowlist
-    (PATH, temp/home, locale, Windows runtime vars) is passed through.
+    (PATH, temp/home, and locale) is passed through.
     ``credential_env`` names specific parent env vars to copy into the
     child without enabling full environment inheritance.
     Set ``inherit_env=True`` only for trusted local servers that need

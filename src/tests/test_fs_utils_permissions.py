@@ -2,12 +2,9 @@
 tests/test_fs_utils_permissions.py -- Phase 6a regression: atomic_write_* sets 0o600.
 
 Phase 2.5 security reviewer flagged that ``tempfile.mkstemp`` defaults to
-0o600 on POSIX but ``os.replace`` can inherit the destination's more
-permissive mode. Phase 6a adds an explicit chmod before the replace to
-pin the mode across platforms. This test pins that invariant.
-
-On Windows the chmod is a best-effort no-op (unix bits aren't mapped),
-so the permission assertions skip on that platform.
+0o600 but ``os.replace`` can inherit the destination's more permissive mode.
+Phase 6a adds an explicit chmod before the replace to pin the mode. These tests
+pin that invariant and require mode hardening to fail closed.
 """
 
 from __future__ import annotations
@@ -24,12 +21,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from ctx.utils._fs_utils import atomic_write_bytes, atomic_write_json, atomic_write_text  # noqa: E402
-
-
-_POSIX_ONLY = pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="Windows filesystems don't honour unix permission bits",
-)
+import ctx.utils._fs_utils as fs_utils  # noqa: E402
 
 
 def _mode_bits(p: Path) -> int:
@@ -37,28 +29,24 @@ def _mode_bits(p: Path) -> int:
     return stat.S_IMODE(p.stat().st_mode)
 
 
-@_POSIX_ONLY
 def test_atomic_write_text_creates_file_with_0o600(tmp_path: Path) -> None:
     target = tmp_path / "secret.txt"
     atomic_write_text(target, "shhh")
     assert _mode_bits(target) == 0o600
 
 
-@_POSIX_ONLY
 def test_atomic_write_bytes_creates_file_with_0o600(tmp_path: Path) -> None:
     target = tmp_path / "blob.bin"
     atomic_write_bytes(target, b"\x00\x01\x02")
     assert _mode_bits(target) == 0o600
 
 
-@_POSIX_ONLY
 def test_atomic_write_json_creates_file_with_0o600(tmp_path: Path) -> None:
     target = tmp_path / "data.json"
     atomic_write_json(target, {"hello": "world"})
     assert _mode_bits(target) == 0o600
 
 
-@_POSIX_ONLY
 def test_overwrite_pins_permissions_to_0o600(tmp_path: Path) -> None:
     # Regression for the exact Phase 2.5 finding: os.replace onto an
     # existing, more-permissive file must result in 0o600, not the
@@ -75,12 +63,18 @@ def test_overwrite_pins_permissions_to_0o600(tmp_path: Path) -> None:
     )
 
 
-def test_atomic_write_text_still_works_on_windows_without_chmod_error(
+def test_atomic_write_fails_closed_when_private_mode_cannot_be_set(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Cross-platform smoke: the write must succeed even though Windows
-    # ignores most unix permission bits. The chmod attempt must not
-    # raise — the helper catches OSError silently.
-    target = tmp_path / "smoke.txt"
-    atomic_write_text(target, "cross-platform works")
-    assert target.read_text(encoding="utf-8") == "cross-platform works"
+    target = tmp_path / "secret.txt"
+
+    def reject_chmod(_path: str, _mode: int) -> None:
+        raise OSError("chmod unavailable")
+
+    monkeypatch.setattr(fs_utils.os, "chmod", reject_chmod)
+
+    with pytest.raises(OSError, match="chmod unavailable"):
+        atomic_write_text(target, "secret")
+
+    assert not target.exists()

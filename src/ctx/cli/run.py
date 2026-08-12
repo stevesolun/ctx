@@ -878,16 +878,7 @@ def _apply_mcp_env_overlays(
 
 def _split_mcp_invocation(invocation: str) -> list[str]:
     """Split an MCP command string without invoking a shell."""
-    parts = shlex.split(invocation, posix=os.name != "nt")
-    if os.name == "nt":
-        parts = [_strip_surrounding_quotes(part) for part in parts]
-    return parts
-
-
-def _strip_surrounding_quotes(value: str) -> str:
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-        return value[1:-1]
-    return value
+    return shlex.split(invocation, posix=True)
 
 
 _MCP_PRESETS: dict[str, McpServerConfig] = {

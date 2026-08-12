@@ -474,7 +474,7 @@ class TestParseMcpSpec:
         assert cfg.command == "npx"
         assert cfg.args == ("-y", "pkg", r"C:\My Project")
 
-    def test_windows_style_split_preserves_backslashes(self) -> None:
+    def test_quoted_argument_preserves_literal_backslashes(self) -> None:
         assert _split_mcp_invocation(r'cmd "C:\My Project"') == [
             "cmd",
             r"C:\My Project",

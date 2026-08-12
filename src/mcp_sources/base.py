@@ -133,7 +133,7 @@ def write_cache(source_name: str, basename: str, content: str) -> Path:
     """Atomically write *content* to the cache slot for *(source_name, basename)*.
 
     Delegates to :func:`_fs_utils.atomic_write_text` so the cache cannot end
-    up half-written on a crash or on Windows AV-induced rename races.
+    up half-written after a crash or transient rename race.
     """
     path = cache_path(source_name, basename)
     atomic_write_text(path, content)

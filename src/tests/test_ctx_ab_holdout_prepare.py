@@ -4,7 +4,6 @@ from copy import deepcopy
 import hashlib
 import inspect
 import json
-import os
 from pathlib import Path
 import shutil
 import stat
@@ -511,28 +510,12 @@ def test_atomic_private_write_is_canonical_owner_only_and_no_overwrite(
     prepare._atomic_private_write(output, data)
 
     assert output.read_bytes() == b'{"a":1,"b":2}'
-    if os.name != "nt":
-        assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    assert stat.S_IMODE(output.stat().st_mode) == 0o600
     assert output.stat().st_nlink == 1
     with pytest.raises(prepare.PrepareError, match="exists"):
         prepare._atomic_private_write(output, data)
 
 
-def test_atomic_private_write_does_not_require_fchmod_on_windows(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    output = tmp_path / "private" / "artifact.json"
-    monkeypatch.setattr(prepare, "_IS_WINDOWS", True)
-    monkeypatch.delattr(prepare.os, "fchmod", raising=False)
-
-    prepare._atomic_private_write(output, b"{}")
-
-    assert output.read_bytes() == b"{}"
-    assert output.stat().st_nlink == 1
-
-
-@pytest.mark.skipif(os.name == "nt", reason="POSIX permission contract")
 def test_atomic_private_write_rejects_unsafe_parent(tmp_path: Path) -> None:
     parent = tmp_path / "unsafe"
     parent.mkdir(mode=0o755)
@@ -654,8 +637,7 @@ def test_create_protocol_writes_authenticated_canonical_output(
     assert document["product_inputs"]["origin_main_revision"] == REVISION
     assert document["product_inputs"]["codex_binary_sha256"] == codex.sha256
     assert document["exposure_ledger_sha256"] == _sha256(exposure_path.read_bytes())
-    if os.name != "nt":
-        assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    assert stat.S_IMODE(output.stat().st_mode) == 0o600
 
 
 def test_probe_verifier_rejects_runtime_drift(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -813,7 +795,7 @@ def test_execution_python_probe_accepts_real_copied_venv(tmp_path: Path) -> None
             capture_output=True,
             text=True,
         )
-        candidate = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        candidate = venv / "bin/python"
         if result.returncode == 0 and candidate.is_file() and not candidate.is_symlink():
             launcher = candidate
             break
@@ -846,6 +828,47 @@ def test_command_runner_requires_descendant_containment(
     assert observed["timeout"] == 5
 
 
+def test_command_runner_preserves_bounded_private_failure_diagnostics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = prepare.swebench.CommandResult(
+        17,
+        "private stdout",
+        "private stderr",
+        0.25,
+        reaped_descendants=2,
+        residual_descendants=(101, 202),
+    )
+    monkeypatch.setattr(prepare.swebench, "_run_process", lambda *_args, **_kwargs: result)
+
+    with pytest.raises(prepare.PrepareError) as raised:
+        prepare._command_bytes(["git", "fsck"], cwd=tmp_path, timeout=5)
+
+    prefix = "authenticated preparation command failed; private_result="
+    assert str(raised.value).startswith(prefix)
+    evidence = json.loads(str(raised.value).removeprefix(prefix))
+    assert evidence == {
+        "elapsed_seconds": 0.25,
+        "reaped_descendants": 2,
+        "residual_descendants": [101, 202],
+        "returncode": 17,
+        "stderr": {
+            "bytes": 14,
+            "sha256": _sha256(b"private stderr"),
+            "text": "private stderr",
+            "truncated": False,
+        },
+        "stdout": {
+            "bytes": 14,
+            "sha256": _sha256(b"private stdout"),
+            "text": "private stdout",
+            "truncated": False,
+        },
+        "timed_out": False,
+    }
+
+
 def _git(cwd: Path, *argv: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", *argv],
@@ -854,6 +877,84 @@ def _git(cwd: Path, *argv: str, check: bool = True) -> subprocess.CompletedProce
         capture_output=True,
         text=True,
     )
+
+
+def _literal_tree_source(
+    tmp_path: Path,
+    *,
+    directory: str,
+    mode: bytes,
+    name: bytes,
+) -> tuple[Path, str, str]:
+    source = tmp_path / directory
+    source.mkdir()
+    _git(source, "init", "--quiet", "--initial-branch=main")
+    _git(source, "config", "user.name", "Fixture")
+    _git(source, "config", "user.email", "fixture@example.com")
+    blob = (
+        subprocess.run(
+            ["git", "hash-object", "-w", "--stdin"],
+            cwd=source,
+            input=b"literal tree fixture\n",
+            check=True,
+            capture_output=True,
+        )
+        .stdout.decode()
+        .strip()
+    )
+    tree = (
+        subprocess.run(
+            ["git", "hash-object", "-t", "tree", "--literally", "-w", "--stdin"],
+            cwd=source,
+            input=mode + b" " + name + b"\0" + bytes.fromhex(blob),
+            check=True,
+            capture_output=True,
+        )
+        .stdout.decode()
+        .strip()
+    )
+    commit = (
+        subprocess.run(
+            ["git", "commit-tree", tree],
+            cwd=source,
+            input=b"literal tree fixture\n",
+            check=True,
+            capture_output=True,
+        )
+        .stdout.decode()
+        .strip()
+    )
+    _git(source, "update-ref", "refs/heads/main", commit)
+    return source, commit, tree
+
+
+def _replace_github_fetch_with_local_source(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    source: Path,
+    commit: str,
+) -> None:
+    original_command = prepare._command_bytes
+
+    def command(argv: list[str], **kwargs: Any) -> bytes:
+        if "fetch" in argv and "origin" in argv:
+            repository = argv[argv.index("-C") + 1]
+            argv = [
+                "git",
+                "-C",
+                repository,
+                "-c",
+                "protocol.file.allow=always",
+                "fetch",
+                "--quiet",
+                "--force",
+                "--no-tags",
+                source.as_uri(),
+                f"{commit}:refs/heads/base",
+            ]
+        return original_command(argv, **kwargs)
+
+    monkeypatch.setattr(prepare, "_command_bytes", command)
 
 
 def test_authenticated_bundle_excludes_future_gold_refs_objects_and_remotes(
@@ -952,6 +1053,80 @@ def test_authenticated_bundle_excludes_future_gold_refs_objects_and_remotes(
     )
 
 
+def test_authenticated_bundle_accepts_legacy_zero_padded_tree_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, commit, tree = _literal_tree_source(
+        tmp_path,
+        directory="legacy-source",
+        mode=b"0100644",
+        name=b"legacy.py",
+    )
+    strict = _git(
+        source,
+        "fsck",
+        "--full",
+        "--strict",
+        "--unreachable",
+        "--no-reflogs",
+        check=False,
+    )
+    assert strict.returncode != 0
+    assert "zeroPaddedFilemode" in strict.stderr
+
+    destination = tmp_path / "bundles" / "base.bundle"
+    destination.parent.mkdir()
+    _replace_github_fetch_with_local_source(monkeypatch, source=source, commit=commit)
+
+    observed_tree, bundle_sha256 = prepare._create_authenticated_bundle(
+        url="https://github.com/owner/legacy-repo.git",
+        commit=commit,
+        destination=destination,
+    )
+
+    assert observed_tree == tree
+    assert bundle_sha256 == _sha256(destination.read_bytes())
+
+
+def test_authenticated_bundle_rejects_unrelated_strict_fsck_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, commit, _tree = _literal_tree_source(
+        tmp_path,
+        directory="invalid-source",
+        mode=b"120000",
+        name=b".gitmodules",
+    )
+    scoped = _git(
+        source,
+        "-c",
+        "fsck.zeroPaddedFilemode=ignore",
+        "fsck",
+        "--full",
+        "--strict",
+        "--unreachable",
+        "--no-reflogs",
+        check=False,
+    )
+    assert scoped.returncode != 0
+    assert "gitmodulesSymlink" in scoped.stderr
+
+    destination = tmp_path / "invalid-bundles" / "base.bundle"
+    destination.parent.mkdir()
+    _replace_github_fetch_with_local_source(monkeypatch, source=source, commit=commit)
+
+    with pytest.raises(prepare.PrepareError, match="authenticated preparation command failed"):
+        prepare._create_authenticated_bundle(
+            url="https://github.com/owner/invalid-repo.git",
+            commit=commit,
+            destination=destination,
+        )
+
+    assert not destination.exists()
+
+
 def test_prepare_sources_bundles_in_bounded_parallel_and_writes_deterministic_map(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1018,8 +1193,7 @@ def test_prepare_sources_bundles_in_bounded_parallel_and_writes_deterministic_ma
         for value in repositories.values()
     )
     assert digest == _sha256(output.read_bytes())
-    if os.name != "nt":
-        assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    assert stat.S_IMODE(output.stat().st_mode) == 0o600
 
 
 def test_prepare_sources_reconstructs_exposure_filtered_replacement(
@@ -1502,8 +1676,7 @@ def test_write_environment_matches_freezer_contract(
         "executable_sha256": python.sha256,
         "version": python.version,
     }
-    if os.name != "nt":
-        assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    assert stat.S_IMODE(output.stat().st_mode) == 0o600
 
 
 def test_write_environment_rejects_runtime_drift(
@@ -1642,6 +1815,8 @@ def test_cli_forwards_source_workers_and_prints_no_private_identifiers(
                 str(tmp_path / "map"),
                 "--workers",
                 "7",
+                "--failure-evidence-output",
+                str(tmp_path / "unused-failure-evidence"),
             ]
         )
         == 0
@@ -1663,9 +1838,10 @@ def test_cli_suppresses_private_failure_details(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     def fail(**_kwargs: Any) -> str:
-        raise prepare.PrepareError("private-task-id and private task text")
+        raise KeyboardInterrupt("private-task-id and private task text")
 
     monkeypatch.setattr(prepare, "prepare_sources", fail)
+    failure_root = tmp_path / "prepare-failure-evidence"
 
     with pytest.raises(SystemExit) as raised:
         prepare.main(
@@ -1685,11 +1861,122 @@ def test_cli_suppresses_private_failure_details(
                 str(tmp_path / "cache"),
                 "--output",
                 str(tmp_path / "map"),
+                "--failure-evidence-output",
+                str(failure_root),
             ]
         )
 
     captured = capsys.readouterr()
     assert raised.value.code == 2
     assert captured.out == ""
-    assert captured.err == "benchmark preparation failed (PrepareError)\n"
+    assert captured.err == "benchmark preparation failed (KeyboardInterrupt); evidence=preserved\n"
     assert "private-task" not in captured.err
+    failure = json.loads((failure_root / "failure.json").read_text(encoding="utf-8"))
+    assert failure["operation"] == "holdout-prepare-sources"
+    assert failure["exception_chain"] == [
+        {"message": "private-task-id and private task text", "type": "KeyboardInterrupt"}
+    ]
+    assert (failure_root / "artifact-manifest.json").is_file()
+
+
+def test_cli_privately_bounds_oversized_command_failure_details(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    private_stdout = "private-task-id-" + "x" * prepare.PRIVATE_COMMAND_TEXT_LIMIT
+    private_stderr = "private-task-error-" + "y" * prepare.PRIVATE_COMMAND_TEXT_LIMIT
+    result = prepare.swebench.CommandResult(19, private_stdout, private_stderr, 0.5)
+    monkeypatch.setattr(prepare.swebench, "_run_process", lambda *_args, **_kwargs: result)
+
+    def fail(**_kwargs: Any) -> str:
+        prepare._command_bytes(["git", "fsck"], cwd=tmp_path, timeout=5)
+        raise AssertionError("unreachable")
+
+    monkeypatch.setattr(prepare, "prepare_sources", fail)
+    failure_root = tmp_path / "oversized-command-failure"
+
+    with pytest.raises(SystemExit) as raised:
+        prepare.main(
+            [
+                "sources",
+                "--protocol",
+                str(tmp_path / "protocol"),
+                "--expected-acquisition-protocol-sha256",
+                "0" * 64,
+                "--exposure-ledger",
+                str(tmp_path / "exposure"),
+                "--rows",
+                str(tmp_path / "rows"),
+                "--selection",
+                str(tmp_path / "selection"),
+                "--cache-root",
+                str(tmp_path / "cache"),
+                "--output",
+                str(tmp_path / "map"),
+                "--failure-evidence-output",
+                str(failure_root),
+            ]
+        )
+
+    captured = capsys.readouterr()
+    assert raised.value.code == 2
+    assert captured.out == ""
+    assert captured.err == "benchmark preparation failed (PrepareError); evidence=preserved\n"
+    assert "private-task" not in captured.err
+    failure = json.loads((failure_root / "failure.json").read_text(encoding="utf-8"))
+    message = failure["exception_chain"][0]["message"]
+    prefix = "authenticated preparation command failed; private_result="
+    evidence = json.loads(message.removeprefix(prefix))
+    for stream, raw in (("stdout", private_stdout), ("stderr", private_stderr)):
+        stream_evidence = evidence[stream]
+        encoded = raw.encode()
+        assert stream_evidence["bytes"] == len(encoded)
+        assert stream_evidence["sha256"] == _sha256(encoded)
+        assert len(stream_evidence["text"].encode()) == prepare.PRIVATE_COMMAND_TEXT_LIMIT
+        assert stream_evidence["truncated"] is True
+    assert (failure_root / "artifact-manifest.json").is_file()
+
+
+def test_cli_rejects_used_failure_destination_before_private_work(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    calls: list[str] = []
+
+    def sources(**_kwargs: Any) -> str:
+        calls.append("called")
+        return "f" * 64
+
+    monkeypatch.setattr(prepare, "prepare_sources", sources)
+    failure_root = tmp_path / "used-failure-evidence"
+    failure_root.mkdir()
+    argv = [
+        "sources",
+        "--protocol",
+        str(tmp_path / "protocol"),
+        "--expected-acquisition-protocol-sha256",
+        "0" * 64,
+        "--exposure-ledger",
+        str(tmp_path / "exposure"),
+        "--rows",
+        str(tmp_path / "rows"),
+        "--selection",
+        str(tmp_path / "selection"),
+        "--cache-root",
+        str(tmp_path / "cache"),
+        "--output",
+        str(tmp_path / "map"),
+        "--failure-evidence-output",
+        str(failure_root),
+    ]
+
+    with pytest.raises(SystemExit) as raised:
+        prepare.main(argv)
+
+    captured = capsys.readouterr()
+    assert raised.value.code == 2
+    assert calls == []
+    assert captured.out == ""
+    assert captured.err == ("benchmark preparation precondition failed; evidence=unavailable\n")

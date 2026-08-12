@@ -1,5 +1,5 @@
 """
-_file_lock.py -- Cross-platform advisory file lock.
+_file_lock.py -- POSIX advisory file lock.
 
 Used by the toolbox and skill-health modules to serialize read-modify-write
 cycles on shared config/manifest files (e.g. ~/.claude/skill-manifest.json,
@@ -16,17 +16,16 @@ Usage:
 The lock is advisory -- it only blocks other callers that also use ``file_lock``.
 It does not protect against processes that ignore locking.
 
-On POSIX we use fcntl.flock (whole-file exclusive). On Windows we use
-msvcrt.locking on the companion .lock file so we don't hold a handle to the
-file the caller is about to replace.
+Uses ``fcntl.flock`` (whole-file exclusive) on the companion lock file so the
+target itself remains replaceable by callers.
 """
 
 from __future__ import annotations
 
 import hashlib
 import os
+import fcntl
 import stat
-import sys
 import tempfile
 import time
 from contextlib import contextmanager
@@ -37,11 +36,6 @@ from ctx.utils._fs_utils import secure_directory, supports_secure_directory_fds
 
 _SECURE_LOCK_OPEN_ATTEMPTS = 8
 _SECURE_LOCK_OPEN_RETRY_SECONDS = 0.005
-
-if sys.platform == "win32":
-    import msvcrt  # type: ignore[import-not-found]
-else:
-    import fcntl  # type: ignore[import-not-found]
 
 
 @contextmanager
@@ -60,23 +54,20 @@ def file_lock(target: Path, timeout: float = 10.0) -> Iterator[None]:
     target.parent.mkdir(parents=True, exist_ok=True)
     lock_path = target.with_suffix(target.suffix + ".lock")
     deadline = time.monotonic() + max(0.0, timeout)
-    stable_fd = -1
-    if sys.platform != "win32":
-        stable_fd = _open_stable_path_lock(target)
-        try:
-            _acquire(stable_fd, max(0.0, deadline - time.monotonic()))
-        except BaseException:
-            os.close(stable_fd)
-            raise
+    stable_fd = _open_stable_path_lock(target)
+    try:
+        _acquire(stable_fd, max(0.0, deadline - time.monotonic()))
+    except BaseException:
+        os.close(stable_fd)
+        raise
     directory_fd = -1
     try:
-        if sys.platform != "win32":
-            directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
-            directory_fd = os.open(str(target.parent), directory_flags)
-            opened_directory = os.fstat(directory_fd)
-            current_directory = os.stat(target.parent)
-            if not os.path.samestat(opened_directory, current_directory):
-                raise ValueError("file lock directory changed while acquiring the lock")
+        directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+        directory_fd = os.open(str(target.parent), directory_flags)
+        opened_directory = os.fstat(directory_fd)
+        current_directory = os.stat(target.parent)
+        if not os.path.samestat(opened_directory, current_directory):
+            raise ValueError("file lock directory changed while acquiring the lock")
         flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
         fd = os.open(str(lock_path), flags, 0o600)
         try:
@@ -208,11 +199,7 @@ def _acquire(fd: int, timeout: float) -> None:
     deadline = time.monotonic() + max(0.0, timeout)
     while True:
         try:
-            if sys.platform == "win32":
-                # Lock 1 byte at offset 0 non-blockingly.
-                msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
-            else:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             return
         except (OSError, BlockingIOError):
             if time.monotonic() >= deadline:
@@ -222,13 +209,6 @@ def _acquire(fd: int, timeout: float) -> None:
 
 def _release(fd: int) -> None:
     try:
-        if sys.platform == "win32":
-            try:
-                os.lseek(fd, 0, os.SEEK_SET)
-                msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
-            except OSError:
-                pass
-        else:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+        fcntl.flock(fd, fcntl.LOCK_UN)
     except OSError:
         pass

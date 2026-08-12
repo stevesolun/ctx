@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "analysis_role": "descriptive_non_confirmatory",
+  "causal_interpretation": "unsupported",
+  "used_by_primary_verdict": false,
+  "thresholds": null,
+  "population": {
+    "arm_records": "every authenticated final frozen assignment, including failed and harness-error outcomes",
+    "expected_arm_count": 60,
+    "expected_pair_count": 30,
+    "outcome_filtering": "none",
+    "duplicate_assignment_policy": "schema_error"
+  },
+  "raw_arm_record": {
+    "schema_version_field": "descriptive_record_schema_version",
+    "schema_version_value": 1,
+    "completed_shell_command_executions": {
+      "trace_complete_field": "descriptive_trace_complete",
+      "trace_complete_when": "every nonblank record is a JSON object with a nonempty string event type, every item.completed has an object item with a nonempty string item type, and the final event is turn.completed",
+      "definition": "item.completed records whose item.type is command_execution; not all tool families",
+      "calls_field": "tool_command_count",
+      "exit_code_known_calls_field": "tool_command_exit_code_known_count",
+      "failed_calls_field": "tool_failure_count",
+      "failed_calls_known_when": "every completed command execution has a non-boolean integer exit_code",
+      "output_bytes_field": "tool_output_bytes",
+      "output_bytes_known_when": "every completed command execution has a string aggregated_output",
+      "output_encoding": "UTF-8",
+      "repeated_calls_field": "repeated_tool_command_count",
+      "repeated_calls_known_when": "every completed command execution has a string command",
+      "command_normalization": "collapse whitespace only; preserve case and punctuation"
+    },
+    "ctx_funnel": {
+      "scope": "ctx-light only",
+      "recommendation_invocation": "recommendation_invocation_verified",
+      "candidates": "length(candidate_ids) after verified recommendation invocation",
+      "selected": "length(selected_ids) after verified delivery or verified policy abstention",
+      "delivered": "length(delivered_ids) after verified delivery; verified abstention is zero",
+      "semantic_use": "length(used_ids) only when semantic_context_use_verified is true; verified abstention is zero",
+      "delivery_is_not_use": true
+    },
+    "lifecycle": {
+      "scope": "ctx-light only",
+      "actions": [
+        "load_applied",
+        "used",
+        "unload_applied"
+      ],
+      "known_when": "lifecycle digest is valid, actions end in session_end, session status is present, and final_loaded is empty",
+      "unit": "event count"
+    },
+    "errors": {
+      "harness_error": "status is harness_error rather than passed or failed",
+      "agent_timeout": "agent_timed_out is a boolean",
+      "agent_nonzero_returncode": "agent_returncode is a non-boolean integer and is not zero",
+      "verifier_nonzero_returncode": "verification_returncode is a non-boolean integer and is not zero",
+      "overlap_policy": "report independently; do not add categories"
+    }
+  },
+  "aggregation": {
+    "arm": [
+      "assigned_n",
+      "known_n",
+      "missing_n",
+      "total",
+      "median"
+    ],
+    "paired_numeric": "within frozen scenario and trial, include only pairs where both arm values are known; report median ctx-minus-baseline and lower/equal/higher counts",
+    "paired_binary": "within frozen scenario and trial, report the four boolean cells",
+    "missing_is_zero": false,
+    "outlier_removal": "none",
+    "significance_testing": "none"
+  },
+  "publication": {
+    "release_when": "all 60 expected arm records are authenticated, sealed, unique, and present",
+    "partial_release": "withhold the complete descriptive_metrics block",
+    "granularity": "two whole-arm aggregates, whole-campaign pairs, and ctx-light funnel/lifecycle aggregates only"
+  },
+  "privacy": {
+    "allow": "fixed labels, fixed enums, aggregate counts, medians, and differences",
+    "deny": [
+      "scenario or repository identifiers",
+      "tasks or prompts",
+      "commands or command output",
+      "return-code values or error text",
+      "exceptions, incidents, stack traces, patches, tests, paths, or timestamps",
+      "entity identifiers or slugs",
+      "per-run hashes"
+    ]
+  }
+}

@@ -1,7 +1,7 @@
 # ctx
 
 [![CI](https://github.com/stevesolun/ctx/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
-[![Tests](https://img.shields.io/badge/Tests-8535_inventory-blue.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
+[![Tests](https://img.shields.io/badge/Tests-8516_inventory-blue.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
 
 **Find the cheapest AI coding setup that actually works on your repo.**
@@ -50,6 +50,16 @@ Requires Python 3.11 or newer. Add `--json` for machine-readable output, or
 **Release status:** [v1.0.20](https://github.com/stevesolun/ctx/releases/tag/v1.0.20)
 is the current GitHub and [PyPI](https://pypi.org/project/claude-ctx/) release;
 this source tree declares `1.0.21` for unreleased work.
+
+## Install
+
+Requires CPython 3.11 or newer. Linux and macOS are the tested host platforms;
+other POSIX systems are best-effort. Native Windows and PowerShell are not
+supported. On a Windows machine, run ctx inside WSL2 as a Linux installation.
+
+```bash
+pip install claude-ctx
+```
 
 ## Recommendation surface (existing)
 

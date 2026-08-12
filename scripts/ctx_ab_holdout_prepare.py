@@ -29,6 +29,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts import ctx_ab_benchmark as benchmark  # noqa: E402
+from scripts import ctx_ab_failure_evidence as failure_evidence  # noqa: E402
 from scripts import ctx_ab_holdout as holdout  # noqa: E402
 from scripts import ctx_ab_holdout_freeze as freezer  # noqa: E402
 from scripts import ctx_ab_swebench as swebench  # noqa: E402
@@ -45,7 +46,7 @@ PAIR_COUNT = 30
 TRIALS_PER_SCENARIO = freezer.TRIALS_PER_SCENARIO
 PRIVATE_FILE_MODE = 0o600
 PRIVATE_DIRECTORY_MODE = 0o700
-_IS_WINDOWS = os.name == "nt"
+PRIVATE_COMMAND_TEXT_LIMIT = 64 * 1024
 
 
 class PrepareError(RuntimeError):
@@ -117,6 +118,17 @@ def _json_object(data: bytes, *, label: str) -> dict[str, Any]:
     return value
 
 
+def _bounded_private_command_text(value: str) -> dict[str, Any]:
+    raw = value.encode("utf-8", errors="replace")
+    excerpt = raw[:PRIVATE_COMMAND_TEXT_LIMIT]
+    return {
+        "bytes": len(raw),
+        "sha256": _sha256(raw),
+        "text": excerpt.decode("utf-8", errors="replace"),
+        "truncated": len(excerpt) != len(raw),
+    }
+
+
 def _command_bytes(
     argv: Sequence[str],
     *,
@@ -135,7 +147,19 @@ def _command_bytes(
     except (OSError, subprocess.SubprocessError, swebench.SWEbenchVerificationError) as exc:
         raise PrepareError("authenticated preparation command failed") from exc
     if result.returncode or result.timed_out or result.residual_descendants:
-        raise PrepareError("authenticated preparation command failed")
+        private_result = {
+            "elapsed_seconds": result.elapsed,
+            "reaped_descendants": result.reaped_descendants,
+            "residual_descendants": list(result.residual_descendants),
+            "returncode": result.returncode,
+            "stderr": _bounded_private_command_text(result.stderr),
+            "stdout": _bounded_private_command_text(result.stdout),
+            "timed_out": result.timed_out,
+        }
+        raise PrepareError(
+            "authenticated preparation command failed; private_result="
+            + _canonical_bytes(private_result).decode("utf-8")
+        )
     return result.stdout.encode("utf-8")
 
 
@@ -269,11 +293,7 @@ def _read_regular_bytes(
             raise PrepareError(f"{label} must be a single-link regular file")
         if executable and not os.access(resolved, os.X_OK):
             raise PrepareError(f"{label} must be executable")
-        if (
-            private
-            and os.name != "nt"
-            and stat.S_IMODE(metadata.st_mode) & (stat.S_IRWXG | stat.S_IRWXO)
-        ):
+        if private and stat.S_IMODE(metadata.st_mode) & (stat.S_IRWXG | stat.S_IRWXO):
             raise PrepareError(f"{label} must be owner-only")
         with os.fdopen(descriptor, "rb") as handle:
             descriptor = -1
@@ -300,9 +320,7 @@ def _private_parent(path: Path) -> Path:
     if parent != candidate.parent or not parent.is_dir():
         raise PrepareError("preparation output parent must not use symlinks")
     metadata = parent.stat()
-    if os.name != "nt" and (
-        stat.S_IMODE(metadata.st_mode) != PRIVATE_DIRECTORY_MODE or metadata.st_uid != os.getuid()
-    ):
+    if stat.S_IMODE(metadata.st_mode) != PRIVATE_DIRECTORY_MODE or metadata.st_uid != os.getuid():
         raise PrepareError("preparation output parent must be owner-only")
     return candidate
 
@@ -324,8 +342,7 @@ def _atomic_private_write(path: Path, data: bytes) -> Path:
     temporary = Path(temporary_name)
     installed = False
     try:
-        if not _IS_WINDOWS:
-            os.fchmod(descriptor, PRIVATE_FILE_MODE)
+        os.fchmod(descriptor, PRIVATE_FILE_MODE)
         with os.fdopen(descriptor, "wb") as handle:
             descriptor = -1
             handle.write(data)
@@ -341,7 +358,7 @@ def _atomic_private_write(path: Path, data: bytes) -> Path:
         if (
             not stat.S_ISREG(metadata.st_mode)
             or metadata.st_nlink != 1
-            or (os.name != "nt" and stat.S_IMODE(metadata.st_mode) != PRIVATE_FILE_MODE)
+            or stat.S_IMODE(metadata.st_mode) != PRIVATE_FILE_MODE
         ):
             raise PrepareError("preparation output permissions are unsafe")
         return destination
@@ -995,9 +1012,7 @@ def _ensure_private_directory_parent(path: Path) -> Path:
     if parent != candidate.parent:
         raise PrepareError("source cache parent must not use symlinks")
     metadata = parent.stat()
-    if os.name != "nt" and (
-        stat.S_IMODE(metadata.st_mode) != PRIVATE_DIRECTORY_MODE or metadata.st_uid != os.getuid()
-    ):
+    if stat.S_IMODE(metadata.st_mode) != PRIVATE_DIRECTORY_MODE or metadata.st_uid != os.getuid():
         raise PrepareError("source cache parent must be owner-only")
     return candidate
 
@@ -1156,6 +1171,8 @@ def _create_authenticated_bundle(
                 "git",
                 "-C",
                 str(repository),
+                "-c",
+                "fsck.zeroPaddedFilemode=ignore",
                 "fsck",
                 "--full",
                 "--strict",
@@ -1264,6 +1281,8 @@ def _create_authenticated_bundle(
                 "git",
                 "-C",
                 str(validation),
+                "-c",
+                "fsck.zeroPaddedFilemode=ignore",
                 "fsck",
                 "--full",
                 "--strict",
@@ -1673,6 +1692,10 @@ def _add_verifier_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--docker-host", required=True)
 
 
+def _add_failure_evidence_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--failure-evidence-output", type=Path, required=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -1684,6 +1707,7 @@ def main(argv: list[str] | None = None) -> int:
     protocol_parser.add_argument("--exposure-ledger", type=Path, required=True)
     protocol_parser.add_argument("--frozen-at", default=_default_timestamp())
     _add_verifier_arguments(protocol_parser)
+    _add_failure_evidence_argument(protocol_parser)
 
     sources_parser = subparsers.add_parser("sources")
     sources_parser.add_argument("--protocol", type=Path, required=True)
@@ -1694,6 +1718,7 @@ def main(argv: list[str] | None = None) -> int:
     sources_parser.add_argument("--cache-root", type=Path, required=True)
     sources_parser.add_argument("--output", type=Path, required=True)
     sources_parser.add_argument("--workers", type=int, choices=range(1, 9), default=4)
+    _add_failure_evidence_argument(sources_parser)
 
     environment_parser = subparsers.add_parser("environment")
     environment_parser.add_argument("--protocol", type=Path, required=True)
@@ -1715,8 +1740,16 @@ def main(argv: list[str] | None = None) -> int:
     environment_parser.add_argument("--codex", type=Path, required=True)
     environment_parser.add_argument("--python", type=Path, default=Path(sys.executable))
     _add_verifier_arguments(environment_parser)
+    _add_failure_evidence_argument(environment_parser)
 
     args = parser.parse_args(argv)
+    try:
+        failure_evidence.validate_destination(
+            args.failure_evidence_output,
+            repository_root=ROOT,
+        )
+    except failure_evidence.FailureEvidenceError:
+        parser.exit(2, "benchmark preparation precondition failed; evidence=unavailable\n")
     try:
         if args.command == "protocol":
             digest = create_protocol(
@@ -1764,8 +1797,21 @@ def main(argv: list[str] | None = None) -> int:
                 docker_host=args.docker_host,
             )
             print(f"prepared execution environment sha256={digest}")
-    except Exception as exc:
-        parser.exit(2, f"benchmark preparation failed ({type(exc).__name__})\n")
+    except BaseException as exc:
+        try:
+            failure_evidence.publish_failure(
+                destination=args.failure_evidence_output,
+                operation=f"holdout-prepare-{args.command}",
+                exc=exc,
+                repository_root=ROOT,
+            )
+            evidence_status = "preserved"
+        except BaseException:
+            evidence_status = "unavailable"
+        parser.exit(
+            2,
+            f"benchmark preparation failed ({type(exc).__name__}); evidence={evidence_status}\n",
+        )
     return 0
 
 

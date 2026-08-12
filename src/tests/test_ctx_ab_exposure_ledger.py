@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-import os
 from pathlib import Path
 
 import pytest
@@ -105,8 +104,7 @@ def test_builder_merges_private_sources_without_revealing_identities(
     stdout = capsys.readouterr().out
     assert stdout.strip() == hashlib.sha256(payload).hexdigest()
     assert "synthetic-" not in stdout
-    if os.name != "nt":
-        assert output.stat().st_mode & 0o077 == 0
+    assert output.stat().st_mode & 0o077 == 0
 
 
 @pytest.mark.parametrize("failure", ["duplicate-hash", "unsorted", "noncanonical"])

@@ -7,7 +7,7 @@ agents, MCP servers, and harnesses.
 
 - The project is migrating from legacy flat modules to the `ctx` package. Both
   layouts are intentional until the migration phase removes the old one.
-- Integration, browser, graph, native-Windows, and release checks have different
+- Integration, browser, graph, platform, and release checks have different
   dependencies and costs. Select checks from the changed surface; validation,
   platform, and package-migration contracts live in `CONTRIBUTING.md`.
 

@@ -25,6 +25,7 @@ from scripts.clean_host_contract import (
     isolated_env,
     make_paths,
     run_contract,
+    venv_python,
     venv_script,
     write_fake_claude_cli,
     write_fake_codex_cli,
@@ -73,12 +74,11 @@ class RecordingRunner(CommandRunner):
             outdir.mkdir(parents=True, exist_ok=True)
             (outdir / "claude_ctx-0.0.0-py3-none-any.whl").write_bytes(b"wheel")
         elif call[:3] == (sys.executable, "-m", "venv"):
-            scripts = self.venv / ("Scripts" if os.name == "nt" else "bin")
+            scripts = self.venv / "bin"
             scripts.mkdir(parents=True, exist_ok=True)
-            (scripts / ("python.exe" if os.name == "nt" else "python")).write_text("")
+            (scripts / "python").write_text("")
             for name in ("ctx-init", "ctx-scan-repo", "ctx"):
-                suffix = ".exe" if os.name == "nt" else ""
-                (scripts / f"{name}{suffix}").write_text("")
+                (scripts / name).write_text("")
         elif call and Path(call[0]).name.startswith("ctx-init"):
             home = Path(os.environ.get("CTX_TEST_HOME_OVERRIDE", ""))
             if home:
@@ -231,17 +231,14 @@ def test_assert_inside_rejects_escape(tmp_path: Path) -> None:
         assert_inside(tmp_path.parent, tmp_path)
 
 
-def test_venv_script_prefers_platform_entrypoint(tmp_path: Path) -> None:
+def test_venv_entrypoints_use_posix_bin_directory(tmp_path: Path) -> None:
     venv = tmp_path / "venv"
-    if os.name == "nt":
-        scripts = venv / "Scripts"
-        expected = scripts / "ctx-init.exe"
-    else:
-        scripts = venv / "bin"
-        expected = scripts / "ctx-init"
+    scripts = venv / "bin"
+    expected = scripts / "ctx-init"
     scripts.mkdir(parents=True)
     expected.write_text("", encoding="utf-8")
 
+    assert venv_python(venv) == scripts / "python"
     assert venv_script(venv, "ctx-init") == expected
 
 
@@ -486,7 +483,7 @@ def test_live_claude_gate_runs_only_when_acknowledged(
 ) -> None:
     paths = make_paths(tmp_path)
     runner = RecordingRunner(paths.venv)
-    claude_bin = tmp_path / ("claude.exe" if os.name == "nt" else "claude")
+    claude_bin = tmp_path / "claude"
     monkeypatch.setenv("CTX_TEST_HOME_OVERRIDE", str(paths.home))
     monkeypatch.setenv(LIVE_CLAUDE_ACK_ENV, LIVE_CLAUDE_ACK_VALUE)
 
