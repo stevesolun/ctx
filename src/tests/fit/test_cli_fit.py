@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -22,20 +21,24 @@ import ctx.fit.live_runner as live_runner_module
 import ctx.fit.providers as providers_module
 import ctx.fit.recommend as recommend_module
 import ctx.fit.release_catalog as release_catalog_module
+import ctx.fit.tasks as tasks_module
 from ctx.cli.fit import (
-    DEFAULT_MODEL,
-    EXCHANGE_INPUT_TOKENS,
-    EXCHANGE_OUTPUT_TOKENS,
-    _build_plan,
+    _banner,
     _format_dry_run,
     _handle_apply,
-    _run_evaluation,
     cmd_fit,
     default_namespace,
 )
 from ctx.fit.candidates import CandidateConfiguration
 from ctx.fit.execution import CandidateOutcome, ExecutionReport, TrialResult
-from ctx.fit.experiment import ModelPrice
+from ctx.fit.experiment import (
+    DEFAULT_MODEL,
+    EXCHANGE_INPUT_TOKENS,
+    EXCHANGE_OUTPUT_TOKENS,
+    ModelPrice,
+    resolve_experiment,
+    run_experiment,
+)
 from ctx.fit.profile import build_fit_profile
 from ctx.fit.providers import DEFAULT_MAX_ITERATIONS, ProviderUnavailable
 from ctx.fit.recommend import RankedCandidate, Recommendation
@@ -48,57 +51,10 @@ def _args(repo: Path, **overrides: Any) -> argparse.Namespace:
     return args
 
 
-def _git(repo: Path, *args: str) -> None:
-    subprocess.run(("git", "-C", str(repo), *args), check=True, capture_output=True, text=True)
-
-
-def _repo_with_history(tmp_path: Path, *, commits: int = 1) -> Path:
-    """A repository ``derive_tasks`` accepts: paired source and test changes.
-
-    ``commits`` counts the derivable ones. The scaffolding commit that lands the
-    module is extra: a task reverts to the commit before its own, so the source
-    file has to already exist there.
-    """
-
-    repo = tmp_path / "repo"
-    (repo / "src").mkdir(parents=True)
-    (repo / "tests").mkdir(parents=True)
-    repo.mkdir(parents=True, exist_ok=True)
-    _git(repo, "init", "-q")
-    _git(repo, "config", "user.email", "test@example.com")
-    _git(repo, "config", "user.name", "Test")
-
-    source = repo / "src" / "calc.py"
-    source.write_text("def add(a, b):\n    return 0\n", encoding="utf-8")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", "chore: scaffold the calc module")
-
-    source.write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
-    (repo / "tests" / "test_calc.py").write_text(
-        "from src.calc import add\n\n\ndef test_add():\n    assert add(1, 2) == 3\n",
-        encoding="utf-8",
-    )
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", "feat: add addition helper")
-
-    for index in range(1, commits):
-        with source.open("a", encoding="utf-8") as handle:
-            handle.write(f"\n\ndef op{index}(a, b):\n    return a + b + {index}\n")
-        (repo / "tests" / f"test_op{index}.py").write_text(
-            f"from src.calc import op{index}\n\n\n"
-            f"def test_op{index}():\n    assert op{index}(1, 1) == {2 + index}\n",
-            encoding="utf-8",
-        )
-        _git(repo, "add", "-A")
-        _git(repo, "commit", "-q", "-m", f"feat: add op{index}")
-    return repo
-
-
 @pytest.fixture
 def stubbed_evaluation(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Run the evaluation loop with every collaborator that costs money replaced."""
+    """Run a campaign with every collaborator that costs money replaced."""
 
-    monkeypatch.setattr("ctx.cli.fit._provider_available", lambda: True)
     monkeypatch.setattr(providers_module, "build_agent_driver", lambda **k: object())
     monkeypatch.setattr(live_runner_module, "make_live_runner", lambda *a, **k: object())
     monkeypatch.setattr(release_catalog_module, "open_release_candidate_source", lambda: None)
@@ -149,12 +105,12 @@ def test_json_mode_refuses_apply_rather_than_reporting_success(
 
 
 def test_a_blocked_plan_emits_the_same_json_keys_as_a_planned_one(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    repo_with_history, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A consumer's key set must not depend on which branch produced the answer."""
 
     pytest.importorskip("litellm")
-    repo = _repo_with_history(tmp_path)
+    repo = repo_with_history()
 
     assert cmd_fit(_args(repo, json=True, budget=50.0)) == 0
     planned = set(json.loads(capsys.readouterr().out))
@@ -167,7 +123,7 @@ def test_a_blocked_plan_emits_the_same_json_keys_as_a_planned_one(
 
 
 def test_an_unusable_harness_is_a_refusal_rather_than_a_traceback(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch, repo_with_history, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Credentials present but no harness: the product refuses, it does not crash."""
 
@@ -181,7 +137,7 @@ def test_an_unusable_harness_is_a_refusal_rather_than_a_traceback(
     monkeypatch.setattr("ctx.cli.fit._provider_available", lambda: True)
     monkeypatch.setattr(providers_module, "build_agent_driver", unavailable)
 
-    exit_code = cmd_fit(_args(_repo_with_history(tmp_path), test=True, budget=500.0))
+    exit_code = cmd_fit(_args(repo_with_history(), test=True, budget=500.0))
 
     assert exit_code == 1
     err = capsys.readouterr().err
@@ -189,7 +145,7 @@ def test_an_unusable_harness_is_a_refusal_rather_than_a_traceback(
     assert "nothing was spent" in err.lower()
 
 
-def test_the_budget_gate_prices_the_whole_agent_loop_not_one_exchange(tmp_path: Path) -> None:
+def test_the_budget_gate_prices_the_whole_agent_loop_not_one_exchange(repo_with_history) -> None:
     """One execution is a bounded agent loop, and the gate has to cover all of it.
 
     Priced as a single exchange, a budget two orders of magnitude short of the
@@ -199,29 +155,26 @@ def test_the_budget_gate_prices_the_whole_agent_loop_not_one_exchange(tmp_path: 
     pytest.importorskip("litellm")
     price = ModelPrice.from_litellm(DEFAULT_MODEL)
     assert price is not None
-    repo = _repo_with_history(tmp_path)
-    profile = build_fit_profile(repo)
+    profile = build_fit_profile(repo_with_history())
 
-    executions = _build_plan(profile, None).executions  # type: ignore[attr-defined]
+    executions = resolve_experiment(profile).plan.executions
     one_exchange_each = round(
         price.estimate(EXCHANGE_INPUT_TOKENS, EXCHANGE_OUTPUT_TOKENS) * executions * 1.6, 2
     )
-    plan = _build_plan(profile, one_exchange_each)
+    plan = resolve_experiment(profile, budget_usd=one_exchange_each).plan
 
     assert executions > 0
-    assert plan.decision == "blocked-over-budget"  # type: ignore[attr-defined]
+    assert plan.decision == "blocked-over-budget"
     assert (
         f"~{(EXCHANGE_INPUT_TOKENS + EXCHANGE_OUTPUT_TOKENS) * DEFAULT_MAX_ITERATIONS} tokens"
-        in (
-            plan.cost.basis  # type: ignore[attr-defined]
-        )
+        in plan.cost.basis
     )
 
 
-def test_the_dry_run_script_describes_what_the_product_actually_does(tmp_path: Path) -> None:
+def test_the_dry_run_script_describes_what_the_product_actually_does(repo_with_history) -> None:
     """The rehearsal has to match the performance: no PR is opened, and tasks are derived."""
 
-    script = _format_dry_run(build_fit_profile(_repo_with_history(tmp_path)))
+    script = _format_dry_run(build_fit_profile(repo_with_history()))
 
     assert "not implemented yet" not in script  # tasks are derived from history today
     assert "open a PR" not in script
@@ -254,9 +207,10 @@ def test_a_real_run_does_not_announce_itself_as_a_simulation(
         lambda *a, **k: ExecutionReport(trials_run=3, budget_usd=0.20, spent_usd=0.14),
     )
 
-    _, _, banner, _ = _run_evaluation(
-        build_fit_profile(tmp_path), _args(tmp_path, test=True, budget=0.20)
+    outcome = run_experiment(
+        resolve_experiment(build_fit_profile(tmp_path), budget_usd=0.20), live=True
     )
+    banner = _banner(outcome)
 
     assert "simulated" not in banner.lower()
     assert "3 trial(s)" in banner
@@ -264,7 +218,7 @@ def test_a_real_run_does_not_announce_itself_as_a_simulation(
 
 
 def test_only_tasks_that_produced_evidence_are_counted(
-    stubbed_evaluation: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    stubbed_evaluation: None, monkeypatch: pytest.MonkeyPatch, repo_with_history
 ) -> None:
     """A task abandoned or lost to infrastructure is not evidence about anything."""
 
@@ -290,8 +244,38 @@ def test_only_tasks_that_produced_evidence_are_counted(
     monkeypatch.setattr(execution_module, "execute_trials", lambda *a, **k: report)
     monkeypatch.setattr(recommend_module, "recommend", fake_recommend)
 
-    repo = _repo_with_history(tmp_path, commits=3)
-    _run_evaluation(build_fit_profile(repo), _args(repo, test=True, budget=0.20))
+    repo = repo_with_history(commits=3)
+    run_experiment(resolve_experiment(build_fit_profile(repo), budget_usd=0.20), live=True)
 
     # Three tasks were derived from this history; one produced a scored trial.
     assert recorded["task_count"] == 1
+
+
+def test_a_test_run_derives_its_tasks_once(
+    monkeypatch: pytest.MonkeyPatch, repo_with_history
+) -> None:
+    """The plan and the campaign are one experiment, so it is derived one time.
+
+    Task derivation walks Git history and is the slow half of a Fit run. It used
+    to happen twice per ``--test`` invocation -- once to price the experiment and
+    once to run it -- which is both a delay the user pays for and two chances for
+    the two to disagree about what the experiment is.
+    """
+
+    pytest.importorskip("litellm")
+    derivations: list[str] = []
+    real_derive = tasks_module.derive_tasks
+
+    def counting(repo_path, **kwargs):
+        derivations.append(str(repo_path))
+        return real_derive(repo_path, **kwargs)
+
+    monkeypatch.setattr(tasks_module, "derive_tasks", counting)
+    # Simulated, so the real catalog can supply candidates and the plan can
+    # reach "ready" without any provider stack being involved.
+    monkeypatch.setattr("ctx.cli.fit._provider_available", lambda: False)
+    monkeypatch.setattr(execution_module, "execute_trials", lambda *a, **k: ExecutionReport())
+
+    assert cmd_fit(_args(repo_with_history(), test=True, budget=500.0)) == 0
+
+    assert len(derivations) == 1

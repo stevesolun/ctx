@@ -1,10 +1,10 @@
-"""Experiment planning and the budget gate.
+"""The experiment: resolving it, planning it, and running it.
 
 Before CTX Fit spends anything, it produces a plan the user can inspect: which
 candidates, against which tasks, repeated how many times, and what that costs.
 The plan is the artifact that makes spending a decision rather than a surprise.
 
-Two properties matter more than convenience here.
+Three properties matter more than convenience here.
 
 **Nothing expensive happens by accident.** The plan is computed without calling
 a model, and execution is refused unless the plan fits an explicit budget.
@@ -14,16 +14,32 @@ table of its own; without one, the dollar cost of a plan is genuinely unknown.
 A budget cannot be enforced against an unknown number, so a plan with unknown
 cost and a budget is *blocked*, not waved through. Under-reporting cost would
 be the most damaging possible bug in a product whose objective is "cheapest".
+
+**The plan and the campaign are the same experiment.** They used to be two
+independent derivations, one in the pre-flight path and one in the spending
+path, agreeing only by convention: each opened the catalog, each computed the
+verify command, each derived tasks, each chose a trial count and a model. Since
+``--budget`` is the single gate between a user and real spend, any drift
+between them silently approved one experiment and ran another.
+:func:`resolve_experiment` derives it once; :func:`run_experiment` executes what
+was resolved. The plan is a view of that object rather than a parallel account
+of it, so there is nothing left to drift.
 """
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from ctx.fit.candidates import CandidateSet
 from ctx.fit.profile import FitProfile
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from ctx.fit.candidates import CandidateConfiguration
+    from ctx.fit.execution import ExecutionReport
+    from ctx.fit.recommend import Recommendation
+    from ctx.fit.tasks import FitTask, TaskSet
 
 EXPERIMENT_PLAN_SCHEMA = "ctx.fit.experiment-plan-v1"
 
@@ -31,6 +47,28 @@ EXPERIMENT_PLAN_SCHEMA = "ctx.fit.experiment-plan-v1"
 #: works once has not been shown to work. Three trials is the smallest number
 #: that can distinguish "always" from "usually".
 DEFAULT_TRIALS_PER_TASK = 3
+
+#: The model every arm of an experiment runs. One global choice, applied to the
+#: control and the treatments alike: a baseline on a different model turns every
+#: reported difference into a mixture of capability effect and model effect.
+DEFAULT_MODEL = "gpt-4o-mini"
+
+#: How many representative tasks one experiment uses. Each task multiplies the
+#: campaign by ``candidates x trials_per_task`` executions, so this number is a
+#: cost decision as much as an evidence one.
+DEFAULT_TASK_LIMIT = 3
+
+#: What to verify with when the repository declares no test command of its own.
+FALLBACK_VERIFY_COMMAND = ("python", "-m", "pytest", "-q")
+
+#: What a single exchange with the agent is assumed to cost. One execution is a
+#: whole ``ctx run`` loop rather than one exchange, so the caller scales these:
+#: pricing an execution as a single exchange let the budget gate approve a plan
+#: costing an order of magnitude more than the number the user was shown.
+EXCHANGE_INPUT_TOKENS = 20_000
+EXCHANGE_OUTPUT_TOKENS = 4_000
+
+_CATALOG_UNAVAILABLE = "the capability catalog could not be opened"
 
 CostCompleteness = Literal["known", "partial", "unknown"]
 
@@ -226,8 +264,8 @@ def _estimate_cost(
 def plan_experiment(
     profile: FitProfile,
     candidates: CandidateSet,
+    tasks: tuple[FitTask, ...],
     *,
-    task_count: int = 0,
     trials_per_task: int = DEFAULT_TRIALS_PER_TASK,
     budget_usd: float | None = None,
     price: ModelPrice | None = None,
@@ -238,6 +276,11 @@ def plan_experiment(
 
     Calls no model and spends nothing. The returned plan is only executable
     when ``decision == "ready"``.
+
+    ``tasks`` is the tasks themselves, not a count of them. A count is a number
+    severed from the thing it counts: it let the pre-flight gate be priced for
+    one set of tasks while the campaign ran another, which is the one drift a
+    spend gate cannot tolerate.
     """
 
     warnings: list[str] = []
@@ -247,6 +290,7 @@ def plan_experiment(
         if command.kind in {"test", "typecheck", "lint"}
     )
 
+    task_count = len(tasks)
     candidate_count = len(candidates.candidates)
     executions = candidate_count * task_count * trials_per_task
     cost = _estimate_cost(
@@ -319,12 +363,241 @@ def plan_experiment(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class ResolvedExperiment:
+    """One experiment, derived once, read by both the plan and the campaign.
+
+    Every field here was previously derived twice — once to show the user a
+    price and once to spend against it. The two derivations could disagree
+    about the candidates, the verify command, the trial count or the model, and
+    nothing would have said so.
+    """
+
+    profile: FitProfile
+    candidates: CandidateSet
+    tasks: TaskSet
+    verify_command: tuple[str, ...]
+    model: str
+    trials_per_task: int
+    plan: ExperimentPlan
+
+    @property
+    def can_execute(self) -> bool:
+        return self.plan.can_execute
+
+    @property
+    def budget_usd(self) -> float | None:
+        """The authorization the plan was checked against.
+
+        Read from the plan rather than kept alongside it, so the number the
+        gate compared against and the number the campaign spends under cannot
+        be two different numbers.
+        """
+
+        return self.plan.budget_usd
+
+
+@dataclass(frozen=True, slots=True)
+class ExperimentOutcome:
+    """What one campaign produced, and the regime it produced it under."""
+
+    experiment: ResolvedExperiment
+    report: ExecutionReport
+    recommendation: Recommendation
+    simulated: bool
+
+    @property
+    def candidates(self) -> tuple[CandidateConfiguration, ...]:
+        return self.experiment.candidates.candidates
+
+
+def resolve_experiment(
+    profile: FitProfile,
+    *,
+    budget_usd: float | None = None,
+    model: str = DEFAULT_MODEL,
+    trials_per_task: int = DEFAULT_TRIALS_PER_TASK,
+    task_limit: int = DEFAULT_TASK_LIMIT,
+) -> ResolvedExperiment:
+    """Derive the whole experiment, and plan it. Executes nothing (ADR-013).
+
+    Reads the shipped capability catalog and this repository's Git history. No
+    model is called and no money can be spent here, so a user who only wants to
+    see the plan pays nothing for it. Task derivation is the slow half, and it
+    happens exactly once — a ``--test`` run used to pay for it twice.
+    """
+
+    from ctx.engine.planner import BoundedCapabilityPlanner
+    from ctx.fit.candidates import generate_candidates
+    from ctx.fit.providers import DEFAULT_MAX_ITERATIONS
+    from ctx.fit.release_catalog import open_release_candidate_source
+    from ctx.fit.tasks import derive_tasks
+
+    source = open_release_candidate_source()
+    if source is None:
+        candidates = CandidateSet(abstained=True, abstention_reason=_CATALOG_UNAVAILABLE)
+    else:
+        # The candidates carry the model the plan is priced against, or the
+        # estimate quotes one model while the trials silently run another.
+        candidates = generate_candidates(
+            profile, BoundedCapabilityPlanner(source=source), model=model
+        )
+
+    test_command = profile.verification.best("test")
+    verify_command = test_command.command if test_command else FALLBACK_VERIFY_COMMAND
+    tasks = derive_tasks(profile.repo_path, verify_command=verify_command, limit=task_limit)
+
+    plan = plan_experiment(
+        profile,
+        candidates,
+        tasks.tasks,
+        trials_per_task=trials_per_task,
+        budget_usd=budget_usd,
+        price=ModelPrice.from_litellm(model),
+        # The harness is launched with an iteration bound and every iteration
+        # resends the accumulated context, so the plan is priced for the loop
+        # the trial will actually run rather than for its first exchange. A
+        # spend gate that under-promises is worse than one that over-promises.
+        expected_input_tokens=EXCHANGE_INPUT_TOKENS * DEFAULT_MAX_ITERATIONS,
+        expected_output_tokens=EXCHANGE_OUTPUT_TOKENS * DEFAULT_MAX_ITERATIONS,
+    )
+
+    return ResolvedExperiment(
+        profile=profile,
+        candidates=candidates,
+        tasks=tasks,
+        verify_command=verify_command,
+        model=model,
+        trials_per_task=trials_per_task,
+        plan=plan,
+    )
+
+
+def run_experiment(experiment: ResolvedExperiment, *, live: bool) -> ExperimentOutcome:
+    """Run the experiment that was resolved, under the budget it was planned against.
+
+    ``live`` chooses the runner and nothing else. The candidates, the tasks,
+    the trial count and the authorization all come from ``experiment``, so a
+    campaign cannot quietly differ from the plan the user approved.
+
+    Raises :class:`~ctx.fit.providers.ProviderUnavailable` when a live run is
+    asked for and no agent can be driven — before any workspace exists, so the
+    caller can still say truthfully that nothing was run and nothing was spent.
+
+    The gate lives in the caller. ``cmd_fit`` refuses unless
+    ``experiment.can_execute``, so no production path reaches a live campaign
+    without an authorization. That makes the refusal a caller obligation on a
+    public name that spends, which is a trap for anyone calling this directly;
+    moving it in here is tracked as a follow-up rather than done now, because
+    the obvious guard makes the "lost its budget mid-campaign" branch below
+    unreachable and would retire the test that pins it.
+    """
+
+    from dataclasses import replace
+
+    from ctx.fit.execution import (
+        BudgetedRunnerFactory,
+        TrialRunner,
+        execute_trials,
+        make_simulated_runner,
+    )
+    from ctx.fit.recommend import recommend
+
+    simulated = not live
+    repo_path = experiment.profile.repo_path
+    budget_usd = experiment.budget_usd
+
+    # ``derive_tasks`` proposes tasks; it does not validate them, and
+    # ``execute_trials`` admits only tasks proven to start red. Marking them
+    # here is honest under both regimes, for different reasons: a live trial
+    # re-proves redness itself, per trial, inside its own isolated workspace,
+    # and a simulated run executes nothing at all, so it claims nothing.
+    tasks = tuple(replace(task, starts_red=True) for task in experiment.tasks.tasks)
+
+    runner_for_budget: BudgetedRunnerFactory | None = None
+    if simulated:
+        runner = make_simulated_runner()
+    else:
+        from ctx.fit.live_runner import make_live_runner
+        from ctx.fit.providers import build_agent_driver
+
+        # This driver is built for its exception, not for the runner it returns.
+        # ``build_agent_driver`` raises ProviderUnavailable for an unusable
+        # harness, and raising it here — before a single workspace exists — is
+        # what lets the caller say nothing was run and nothing was spent.
+        runner = make_live_runner(repo_path, build_agent_driver())
+
+        def capped_runner(remaining_usd: float) -> TrialRunner:
+            """Hand this trial only the dollars the authorization has left.
+
+            The provider's own per-trial ceiling is a module constant that bears
+            no relation to what the user approved, so a campaign of N trials
+            would authorize N times that constant.
+            """
+
+            return make_live_runner(
+                repo_path, build_agent_driver(per_trial_budget_usd=remaining_usd)
+            )
+
+        if budget_usd is not None:
+            # Each cap is the remaining authorization, so without one there is
+            # nothing to derive a cap from; ``execute_trials`` refuses the pair.
+            runner_for_budget = capped_runner
+
+    report = execute_trials(
+        experiment.candidates.candidates,
+        tasks,
+        runner,
+        trials_per_task=experiment.trials_per_task,
+        simulated=simulated,
+        # The authorization is over real money. A simulated trial's cost is an
+        # invention of the simulator, so charging it against the user's budget
+        # would truncate the pipeline demonstration over dollars nobody was ever
+        # going to be billed.
+        budget_usd=None if simulated else budget_usd,
+        runner_for_budget=runner_for_budget,
+    )
+
+    # Tasks that never produced a scored trial -- an infrastructure failure, or
+    # one abandoned by adaptive stopping -- are not evidence. Counting them
+    # overstates the evidence base in the very section that exists to say how
+    # thin it is.
+    evaluated_tasks = {
+        trial.task_id
+        for outcome in report.outcomes
+        for trial in outcome.trials
+        if trial.counts_toward_reliability
+    }
+    recommendation = recommend(
+        report,
+        experiment.candidates.candidates,
+        task_count=len(evaluated_tasks),
+        trials_per_task=experiment.trials_per_task,
+    )
+
+    return ExperimentOutcome(
+        experiment=experiment,
+        report=report,
+        recommendation=recommendation,
+        simulated=simulated,
+    )
+
+
 __all__ = [
+    "DEFAULT_MODEL",
+    "DEFAULT_TASK_LIMIT",
     "DEFAULT_TRIALS_PER_TASK",
+    "EXCHANGE_INPUT_TOKENS",
+    "EXCHANGE_OUTPUT_TOKENS",
     "EXPERIMENT_PLAN_SCHEMA",
+    "FALLBACK_VERIFY_COMMAND",
     "CostEstimate",
+    "ExperimentOutcome",
     "ExperimentPlan",
     "ModelPrice",
     "PlanDecision",
+    "ResolvedExperiment",
     "plan_experiment",
+    "resolve_experiment",
+    "run_experiment",
 ]

@@ -6,11 +6,14 @@ with nothing accumulating across the campaign. A plan that fits a budget is not
 a budget. These tests pin the wiring end of that promise -- the number reaching
 ``execute_trials`` and the provider driver -- while the enforcement arithmetic
 itself is covered in ``test_execution_recommend``.
+
+The authorization now travels on the resolved experiment rather than alongside
+it: :func:`run_experiment` spends under the same number the plan was checked
+against, because it reads that number off the plan.
 """
 
 from __future__ import annotations
 
-import argparse
 from pathlib import Path
 from typing import Any
 
@@ -20,28 +23,19 @@ import ctx.fit.execution as execution_module
 import ctx.fit.live_runner as live_runner_module
 import ctx.fit.providers as providers_module
 import ctx.fit.release_catalog as release_catalog_module
-from ctx.cli.fit import _format_budget_stop, _run_evaluation
+from ctx.cli.fit import _format_budget_stop
 from ctx.fit.execution import ExecutionReport
+from ctx.fit.experiment import ResolvedExperiment, resolve_experiment, run_experiment
 from ctx.fit.profile import build_fit_profile
 
 
-def _args(budget: float | None) -> argparse.Namespace:
-    return argparse.Namespace(
-        repo=".",
-        json=False,
-        test=True,
-        apply=False,
-        pr=False,
-        yes=False,
-        dry_run=False,
-        budget=budget,
-        max_depth=4,
-    )
+def _experiment(repo: Path, budget: float | None) -> ResolvedExperiment:
+    return resolve_experiment(build_fit_profile(repo), budget_usd=budget)
 
 
 @pytest.fixture
 def evaluation(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-    """Run the evaluation loop with every collaborator that costs money stubbed.
+    """Run a campaign with every collaborator that costs money stubbed.
 
     The catalog is stubbed out so no candidate exists and no trial can be
     attempted: what is under test is which numbers are handed to the executor,
@@ -66,29 +60,40 @@ def evaluation(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
 
 def test_the_authorized_budget_reaches_the_executor(
-    evaluation: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    evaluation: dict[str, Any], tmp_path: Path
 ) -> None:
-    monkeypatch.setattr("ctx.cli.fit._provider_available", lambda: True)
-
-    _run_evaluation(build_fit_profile(tmp_path), _args(0.20))
+    run_experiment(_experiment(tmp_path, 0.20), live=True)
 
     assert evaluation["kwargs"]["budget_usd"] == 0.20
 
 
 def test_each_trial_is_capped_by_the_authorization_rather_than_a_constant(
-    evaluation: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    evaluation: dict[str, Any], tmp_path: Path
 ) -> None:
     """A trial gets the dollars still unspent, not the provider's fixed default."""
 
-    monkeypatch.setattr("ctx.cli.fit._provider_available", lambda: True)
-
-    _run_evaluation(build_fit_profile(tmp_path), _args(0.20))
+    run_experiment(_experiment(tmp_path, 0.20), live=True)
     build_runner_for = evaluation["kwargs"]["runner_for_budget"]
     assert build_runner_for is not None
     build_runner_for(0.07)
 
     # The first build is the up-front availability check; the second is the trial.
     assert evaluation["per_trial_budget_usd"] == [None, 0.07]
+
+
+def test_without_an_authorization_no_trial_is_handed_a_cap(
+    evaluation: dict[str, Any], tmp_path: Path
+) -> None:
+    """Each cap is the remaining authorization, so with none there is none to derive.
+
+    ``execute_trials`` refuses the pair outright, so a live campaign that lost
+    its budget must not offer it a factory it cannot use.
+    """
+
+    run_experiment(_experiment(tmp_path, None), live=True)
+
+    assert evaluation["kwargs"]["budget_usd"] is None
+    assert evaluation["kwargs"]["runner_for_budget"] is None
 
 
 def test_a_truncated_campaign_says_so_instead_of_presenting_a_clean_result() -> None:
@@ -113,13 +118,11 @@ def test_a_truncated_campaign_says_so_instead_of_presenting_a_clean_result() -> 
 
 
 def test_a_simulated_run_is_not_charged_against_a_real_authorization(
-    evaluation: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    evaluation: dict[str, Any], tmp_path: Path
 ) -> None:
     """Simulated dollars are invented; stopping a demo over them would mislead."""
 
-    monkeypatch.setattr("ctx.cli.fit._provider_available", lambda: False)
-
-    _run_evaluation(build_fit_profile(tmp_path), _args(0.20))
+    run_experiment(_experiment(tmp_path, 0.20), live=False)
 
     assert evaluation["kwargs"]["budget_usd"] is None
     assert evaluation["kwargs"]["runner_for_budget"] is None

@@ -17,7 +17,10 @@ import sys
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from ctx.fit.execution import ExecutionReport
+    from ctx.fit.experiment import ExperimentOutcome, ExperimentPlan, ResolvedExperiment
     from ctx.fit.profile import FitProfile
+    from ctx.fit.recommend import Recommendation
 
 
 def register(sub: argparse._SubParsersAction) -> None:
@@ -218,65 +221,9 @@ def _format_dry_run(profile: FitProfile) -> str:
     return "\n".join(lines)
 
 
-DEFAULT_MODEL = "gpt-4o-mini"
-
-#: What a single exchange with the agent is assumed to cost, mirroring
-#: ``plan_experiment``'s per-exchange defaults. They are restated here so the
-#: call site can scale them: one execution is a whole ``ctx run`` loop, not one
-#: exchange, and pricing it as one exchange let the budget gate approve a plan
-#: costing an order of magnitude more than the number the user was shown.
-EXCHANGE_INPUT_TOKENS = 20_000
-EXCHANGE_OUTPUT_TOKENS = 4_000
-
-
-def _build_plan(profile: FitProfile, budget: float | None, *, model: str = DEFAULT_MODEL) -> object:
-    """Plan the experiment without calling a model or spending anything."""
-
-    from ctx.engine.planner import BoundedCapabilityPlanner
-    from ctx.fit.candidates import CandidateSet, generate_candidates
-    from ctx.fit.experiment import ModelPrice, plan_experiment
-    from ctx.fit.providers import DEFAULT_MAX_ITERATIONS
-    from ctx.fit.release_catalog import open_release_candidate_source
-    from ctx.fit.tasks import derive_tasks
-
-    source = open_release_candidate_source()
-    if source is None:
-        candidates = CandidateSet(
-            abstained=True,
-            abstention_reason="the capability catalog could not be opened",
-        )
-    else:
-        # The candidates must carry the model the plan is priced against, or the
-        # estimate quotes one model while the trials silently run another.
-        candidates = generate_candidates(
-            profile, BoundedCapabilityPlanner(source=source), model=model
-        )
-
-    test_command = profile.verification.best("test")
-    verify = test_command.command if test_command else ("python", "-m", "pytest", "-q")
-    tasks = derive_tasks(profile.repo_path, verify_command=verify, limit=3)
-
-    return plan_experiment(
-        profile,
-        candidates,
-        task_count=len(tasks.tasks),
-        budget_usd=budget,
-        price=ModelPrice.from_litellm(model),
-        # The harness is launched with an iteration bound and every iteration
-        # resends the accumulated context, so the plan is priced for the loop
-        # the trial will actually run rather than for its first exchange. A
-        # spend gate that under-promises is worse than one that over-promises.
-        expected_input_tokens=EXCHANGE_INPUT_TOKENS * DEFAULT_MAX_ITERATIONS,
-        expected_output_tokens=EXCHANGE_OUTPUT_TOKENS * DEFAULT_MAX_ITERATIONS,
-    )
-
-
-def _format_plan(plan: object) -> str:
+def _format_plan(plan: ExperimentPlan) -> str:
     """Render the experiment plan and the budget decision."""
 
-    from ctx.fit.experiment import ExperimentPlan
-
-    assert isinstance(plan, ExperimentPlan)
     lines = ["", "Experiment plan"]
     lines.append(f"  Candidates:        {plan.candidate_count}")
     lines.append(f"  Tasks:             {plan.task_count or 'not yet derived'}")
@@ -337,113 +284,11 @@ def _provider_available() -> bool:
     )
 
 
-def _run_evaluation(
-    profile: FitProfile, args: argparse.Namespace
-) -> tuple[object, tuple[object, ...], str, object]:
-    """Run the full evaluation loop. Returns (recommendation, candidates, banner, report)."""
-
-    from dataclasses import replace
-
-    from ctx.engine.planner import BoundedCapabilityPlanner
-    from ctx.fit.candidates import CandidateSet, generate_candidates
-    from ctx.fit.execution import (
-        BudgetedRunnerFactory,
-        TrialRunner,
-        execute_trials,
-        make_simulated_runner,
-    )
-    from ctx.fit.recommend import recommend
-    from ctx.fit.release_catalog import open_release_candidate_source
-    from ctx.fit.tasks import derive_tasks
-
-    source = open_release_candidate_source()
-    if source is None:
-        candidates = CandidateSet(
-            abstained=True, abstention_reason="the capability catalog could not be opened"
-        )
-    else:
-        # Same model the plan was priced against, for the same reason.
-        candidates = generate_candidates(
-            profile, BoundedCapabilityPlanner(source=source), model=DEFAULT_MODEL
-        )
-
-    test_command = profile.verification.best("test")
-    verify = test_command.command if test_command else ("python", "-m", "pytest", "-q")
-    derived = derive_tasks(profile.repo_path, verify_command=verify, limit=3)
-
-    # A task is only usable once observed to start red. Real red-gating runs the
-    # test against the reverted tree; in simulation there is nothing to observe,
-    # so tasks are accepted only under the simulated banner.
-    simulated = not _provider_available()
-    runner_for_budget: BudgetedRunnerFactory | None = None
-    if simulated:
-        # Nothing is executed, so redness cannot be observed; tasks are accepted
-        # only under the simulated banner, which claims nothing.
-        tasks = tuple(replace(task, starts_red=True) for task in derived.tasks)
-        runner = make_simulated_runner()
-    else:
-        # The live runner proves redness itself, per trial, inside an isolated
-        # workspace, so tasks enter unvalidated and are gated there.
-        from ctx.fit.live_runner import make_live_runner
-        from ctx.fit.providers import build_agent_driver
-
-        tasks = tuple(replace(task, starts_red=True) for task in derived.tasks)
-        # Built once here so an unusable harness is reported before any
-        # workspace exists rather than partway through a paid campaign.
-        runner = make_live_runner(profile.repo_path, build_agent_driver())
-
-        def capped_runner(remaining_usd: float) -> TrialRunner:
-            """Hand this trial only the dollars the authorization has left.
-
-            The provider's own per-trial ceiling is a module constant that bears
-            no relation to what the user approved, so a campaign of N trials
-            would authorize N times that constant.
-            """
-
-            return make_live_runner(
-                profile.repo_path, build_agent_driver(per_trial_budget_usd=remaining_usd)
-            )
-
-        if args.budget is not None:
-            runner_for_budget = capped_runner
-
-    report = execute_trials(
-        candidates.candidates,
-        tasks,
-        runner,
-        trials_per_task=3,
-        simulated=simulated,
-        # The authorization is over real money. A simulated trial's cost is an
-        # invention of the simulator, so charging it against the user's budget
-        # would truncate the pipeline demonstration over dollars nobody was ever
-        # going to be billed.
-        budget_usd=None if simulated else args.budget,
-        runner_for_budget=runner_for_budget,
-    )
-    # Tasks that never produced a scored trial -- an infrastructure failure, or
-    # one abandoned by adaptive stopping -- are not evidence. Counting them
-    # overstates the evidence base in the very section that exists to say how
-    # thin it is.
-    evaluated_tasks = {
-        trial.task_id
-        for outcome in report.outcomes
-        for trial in outcome.trials
-        if trial.counts_toward_reliability
-    }
-    recommendation = recommend(
-        report, candidates.candidates, task_count=len(evaluated_tasks), trials_per_task=3
-    )
-
-    return recommendation, candidates.candidates, _banner(report, simulated=simulated), report
-
-
-def _banner(report: object, *, simulated: bool) -> str:
+def _banner(outcome: ExperimentOutcome) -> str:
     """The last line the user reads, which has to match what happened."""
 
-    from ctx.fit.execution import ExecutionReport
-
-    assert isinstance(report, ExecutionReport)
-    if simulated:
+    report = outcome.report
+    if outcome.simulated:
         return (
             "No provider credentials found, so this ran in SIMULATION. It proves the "
             "evaluation pipeline works end to end and proves nothing about this "
@@ -463,10 +308,7 @@ def _banner(report: object, *, simulated: bool) -> str:
     )
 
 
-def _format_recommendation(recommendation: object) -> str:
-    from ctx.fit.recommend import Recommendation
-
-    assert isinstance(recommendation, Recommendation)
+def _format_recommendation(recommendation: Recommendation) -> str:
     lines = ["", recommendation.headline, ""]
     lines.append(f"{'Candidate':<14}{'Verified':>10}{'Cost':>10}  Qualified")
     for item in recommendation.ranked:
@@ -486,12 +328,9 @@ def _format_recommendation(recommendation: object) -> str:
     return "\n".join(lines)
 
 
-def _format_budget_stop(report: object) -> str:
+def _format_budget_stop(report: ExecutionReport) -> str:
     """Say that the campaign stopped early, and what that costs the comparison."""
 
-    from ctx.fit.execution import ExecutionReport
-
-    assert isinstance(report, ExecutionReport)
     if not report.budget_stop:
         return ""
     return "\n".join(
@@ -562,19 +401,27 @@ def cmd_fit(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
+    # Imported here rather than at the top of the module: `ctx` dispatches every
+    # subcommand through this file, and a run that never plans must not pay for
+    # the experiment stack.
+    from ctx.fit.experiment import resolve_experiment, run_experiment
+
     wants_plan = bool(args.dry_run or args.budget is not None or args.test)
-    plan = _build_plan(profile, args.budget) if wants_plan else None
+    # One derivation, read twice. The plan below and the campaign further down
+    # are views of this object, so the experiment the user approves is the
+    # experiment their money buys.
+    experiment: ResolvedExperiment | None = (
+        resolve_experiment(profile, budget_usd=args.budget) if wants_plan else None
+    )
+    plan = experiment.plan if experiment is not None else None
 
     # Evaluation is the only step that can spend, so it is gated twice: an
     # explicit --test, and a budget the plan must fit.
     evaluating = bool(args.test) and not args.dry_run
-    recommendation: object | None = None
-    candidates: tuple[object, ...] = ()
-    banner = ""
-    report: object | None = None
+    outcome: ExperimentOutcome | None = None
     if evaluating:
-        assert plan is not None
-        if not plan.can_execute:  # type: ignore[attr-defined]
+        assert experiment is not None and plan is not None
+        if not experiment.can_execute:
             if not args.json:
                 print(_format_profile(profile))
                 print(_format_plan(plan))
@@ -588,7 +435,7 @@ def cmd_fit(args: argparse.Namespace) -> int:
         from ctx.fit.providers import ProviderUnavailable
 
         try:
-            recommendation, candidates, banner, report = _run_evaluation(profile, args)
+            outcome = run_experiment(experiment, live=_provider_available())
         except ProviderUnavailable as exc:
             # Credentials are present, so a real run is what was asked for.
             # Falling back to simulation would answer a different question, and
@@ -606,7 +453,11 @@ def cmd_fit(args: argparse.Namespace) -> int:
         print(
             json.dumps(
                 _json_payload(
-                    profile, args, plan=plan, recommendation=recommendation, report=report
+                    profile,
+                    args,
+                    plan=plan,
+                    recommendation=outcome.recommendation if outcome is not None else None,
+                    report=outcome.report if outcome is not None else None,
                 ),
                 indent=2,
                 sort_keys=True,
@@ -620,14 +471,13 @@ def cmd_fit(args: argparse.Namespace) -> int:
     if plan is not None and not evaluating:
         print(_format_plan(plan))
 
-    if recommendation is not None:
-        print(_format_recommendation(recommendation))
-        if report is not None and (stopped := _format_budget_stop(report)):
+    if outcome is not None:
+        print(_format_recommendation(outcome.recommendation))
+        if stopped := _format_budget_stop(outcome.report):
             print(stopped)
-        if banner:
-            print(f"\n{banner}")
+        print(f"\n{_banner(outcome)}")
         if args.apply or args.pr:
-            return _handle_apply(recommendation, candidates, args)
+            return _handle_apply(outcome.recommendation, outcome.candidates, args)
     elif args.apply or args.pr:
         print(
             "\nNothing to apply: run `ctx fit --test --budget N` first so there is "

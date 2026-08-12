@@ -1,19 +1,28 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
+from typing import Any
 
+import pytest
+
+import ctx.fit.execution as execution_module
 from ctx.cli.run import main as ctx_main
 from ctx.engine.planner import BoundedCapabilityPlanner
 from ctx.fit.candidates import CandidateSet, generate_candidates
+from ctx.fit.execution import ExecutionReport
 from ctx.fit.experiment import (
     DEFAULT_TRIALS_PER_TASK,
     EXPERIMENT_PLAN_SCHEMA,
     ModelPrice,
     plan_experiment,
+    resolve_experiment,
+    run_experiment,
 )
 from ctx.fit.profile import build_fit_profile
 from ctx.fit.release_catalog import open_release_candidate_source
+from ctx.fit.tasks import FitTask
 
 PRICE = ModelPrice(model="test-model", usd_per_million_input=3.0, usd_per_million_output=15.0)
 
@@ -37,9 +46,26 @@ def _candidates(profile: object) -> CandidateSet:
     return generate_candidates(profile, BoundedCapabilityPlanner(source=source))  # type: ignore[arg-type]
 
 
-def _plan(tmp_path: Path, **kwargs: object):
+def _tasks(count: int) -> tuple[FitTask, ...]:
+    """``count`` tasks to plan over. The plan takes tasks, never a bare count."""
+
+    return tuple(
+        FitTask(
+            task_id=f"revert-{index}",
+            title=f"reimplement thing {index}",
+            source="historical-revert",
+            provenance=f"commit {index}",
+            source_paths=("src/calc.py",),
+            test_paths=("tests/test_calc.py",),
+            verify_command=("python", "-m", "pytest", "-q"),
+        )
+        for index in range(count)
+    )
+
+
+def _plan(tmp_path: Path, *, task_count: int = 0, **kwargs: object):
     profile = build_fit_profile(_repo(tmp_path))
-    return plan_experiment(profile, _candidates(profile), **kwargs)  # type: ignore[arg-type]
+    return plan_experiment(profile, _candidates(profile), _tasks(task_count), **kwargs)  # type: ignore[arg-type]
 
 
 # --------------------------------------------------------------------------
@@ -99,9 +125,7 @@ def test_a_priced_plan_within_budget_is_ready(tmp_path: Path) -> None:
 
 def test_unevaluable_repository_is_blocked_before_cost_is_considered(tmp_path: Path) -> None:
     profile = build_fit_profile(_repo(tmp_path, tests=False))
-    plan = plan_experiment(
-        profile, _candidates(profile), task_count=2, budget_usd=1000.0, price=PRICE
-    )
+    plan = plan_experiment(profile, _candidates(profile), _tasks(2), budget_usd=1000.0, price=PRICE)
 
     assert plan.decision == "blocked-not-evaluable"
 
@@ -156,9 +180,7 @@ def test_abstaining_candidates_do_not_blame_the_repository_for_missing_tests(
         abstained=True, abstention_reason="the capability catalog could not be opened"
     )
 
-    plan = plan_experiment(
-        profile, unopenable_catalog, task_count=2, budget_usd=1000.0, price=PRICE
-    )
+    plan = plan_experiment(profile, unopenable_catalog, _tasks(2), budget_usd=1000.0, price=PRICE)
 
     assert profile.is_fit_evaluable is True
     assert plan.decision == "blocked-no-candidates"
@@ -172,7 +194,7 @@ def test_an_abstention_without_a_reason_still_explains_itself(tmp_path: Path) ->
     profile = build_fit_profile(_repo(tmp_path))
 
     plan = plan_experiment(
-        profile, CandidateSet(abstained=True), task_count=2, budget_usd=1000.0, price=PRICE
+        profile, CandidateSet(abstained=True), _tasks(2), budget_usd=1000.0, price=PRICE
     )
 
     assert plan.decision == "blocked-no-candidates"
@@ -210,6 +232,140 @@ def test_plan_is_serializable_and_versioned(tmp_path: Path) -> None:
 
     assert json.loads(json.dumps(payload, sort_keys=True))["schema"] == EXPERIMENT_PLAN_SCHEMA
     assert payload["explanation"]
+
+
+# --------------------------------------------------------------------------
+# The plan and the campaign are one experiment.
+# --------------------------------------------------------------------------
+
+
+def test_the_campaign_runs_the_experiment_the_plan_priced(
+    monkeypatch, tmp_path: Path, repo_with_history
+) -> None:
+    """--budget gates on the plan, so the campaign has to be the same experiment.
+
+    Priced from one derivation and run from another, the two agreed only by
+    convention: the plan's trial count came from a constant and the campaign's
+    from a literal, so a change to either silently approved one experiment and
+    ran a different one.
+    """
+
+    pytest.importorskip("litellm")
+    recorded: dict[str, Any] = {}
+
+    def capture(candidates, tasks, _runner, **kwargs):
+        recorded["candidates"] = candidates
+        recorded["tasks"] = tasks
+        recorded.update(kwargs)
+        return ExecutionReport()
+
+    monkeypatch.setattr(execution_module, "execute_trials", capture)
+
+    # The recommendation is told the trial count too, and that read was
+    # protected by nothing: a literal here would leave the whole suite green
+    # while the confidence denominator diverged from what the campaign ran.
+    import ctx.fit.recommend as recommend_module
+
+    real_recommend = recommend_module.recommend
+
+    def capture_recommend(report, candidates, **kwargs):
+        recorded["recommend_trials_per_task"] = kwargs.get("trials_per_task")
+        return real_recommend(report, candidates, **kwargs)
+
+    monkeypatch.setattr(recommend_module, "recommend", capture_recommend)
+
+    experiment = resolve_experiment(
+        build_fit_profile(repo_with_history(commits=3)), budget_usd=500.0, trials_per_task=2
+    )
+    run_experiment(experiment, live=False)
+    plan = experiment.plan
+
+    assert plan.task_count == len(recorded["tasks"]) > 0
+    assert plan.candidate_count == len(recorded["candidates"]) > 0
+    assert plan.trials_per_task == recorded["trials_per_task"] == 2
+    assert plan.executions == plan.candidate_count * len(recorded["tasks"]) * 2
+    assert recorded["recommend_trials_per_task"] == 2
+
+
+def test_the_campaign_runs_the_model_the_plan_was_priced_against(
+    tmp_path: Path, repo_with_history
+) -> None:
+    """A price quoted for one model while the trials run another is not a gate."""
+
+    pytest.importorskip("litellm")
+
+    experiment = resolve_experiment(
+        build_fit_profile(repo_with_history()), budget_usd=500.0, model="gpt-4o"
+    )
+
+    assert experiment.model == "gpt-4o"
+    assert {candidate.model for candidate in experiment.candidates.candidates} == {"gpt-4o"}
+    assert "gpt-4o rates" in experiment.plan.cost.basis
+
+
+def test_the_campaign_verifies_with_the_command_the_plan_named(
+    tmp_path: Path, repo_with_history
+) -> None:
+    """Two hand-copied fallbacks are two chances to verify with the wrong thing."""
+
+    experiment = resolve_experiment(build_fit_profile(repo_with_history()))
+
+    assert experiment.verify_command == ("python", "-m", "pytest", "-q")
+    assert all(task.verify_command == experiment.verify_command for task in experiment.tasks.tasks)
+
+
+def test_the_fallback_verify_command_is_the_one_the_module_declares(
+    monkeypatch, repo_with_history
+) -> None:
+    """The fallback branch, exercised for real rather than by coincidence.
+
+    ``repo_with_history`` ships a tests/ directory, so discovery returns a
+    command that happens to equal the fallback literal. That made the guard
+    above pass without ever reaching the ``else`` branch: changing
+    FALLBACK_VERIFY_COMMAND left the whole suite green. Force discovery to find
+    nothing, so the fallback is the only thing that can supply the command.
+    """
+
+    from ctx.fit import experiment as experiment_module
+
+    profile = build_fit_profile(repo_with_history())
+    monkeypatch.setattr(type(profile.verification), "best", lambda self, kind: None)
+
+    experiment = resolve_experiment(profile)
+
+    # Pin the VALUE, not the constant. Asserting against
+    # FALLBACK_VERIFY_COMMAND itself is a tautology: change the constant and
+    # both sides move together, which is how the previous guard stayed green
+    # while the fallback was mutated.
+    assert experiment.verify_command == ("python", "-m", "pytest", "-q")
+    assert experiment_module.FALLBACK_VERIFY_COMMAND == ("python", "-m", "pytest", "-q")
+    assert all(task.verify_command == experiment.verify_command for task in experiment.tasks.tasks)
+
+
+def test_resolving_an_experiment_executes_nothing(tmp_path: Path, repo_with_history) -> None:
+    """ADR-013: planning is free, read-only, and spends nothing."""
+
+    pytest.importorskip("litellm")
+    repo = repo_with_history()
+
+    experiment = resolve_experiment(build_fit_profile(repo), budget_usd=500.0)
+
+    assert experiment.plan.can_execute is True
+    # Nothing ran, so no task has been observed to start red -- and a task that
+    # has not been observed is not evidence of anything yet.
+    assert all(task.starts_red is None for task in experiment.tasks.tasks)
+    assert subprocess_status(repo) == ""
+
+
+def subprocess_status(repo: Path) -> str:
+    """The repository is untouched: resolution reads Git, it never writes it."""
+
+    return subprocess.run(
+        ("git", "-C", str(repo), "status", "--porcelain"),
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
 
 
 # --------------------------------------------------------------------------
