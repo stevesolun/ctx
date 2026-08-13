@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Not a catalog: a repo-aware recommendation layer that loads the right skills, agents, MCPs, and harnesses from your tools or the shipped graph.">
+        <meta name="description" content="CTX Fit finds the cheapest AI coding setup that reliably works on your repository and applies the winner as a reviewable change.">
       
       
       
@@ -74,7 +74,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#ctx-skill-agent-mcp-harness-recommendations" class="md-skip">
+        <a href="#ctx-fit-the-cheapest-ai-coding-setup-that-works-on-your-repo" class="md-skip">
           Skip to content
         </a>
       
@@ -547,20 +547,50 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#why-this-exists" class="md-nav__link">
+  <a href="#what-each-command-actually-does" class="md-nav__link">
     <span class="md-ellipsis">
-      Why this exists
+      What each command actually does
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What each command actually does">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#-apply-and-pr-are-different-writes" class="md-nav__link">
+    <span class="md-ellipsis">
+      --apply and --pr are different writes
     </span>
   </a>
   
 </li>
+        
+      </ul>
+    </nav>
+  
+</li>
       
         <li class="md-nav__item">
-  <a href="#what-this-is" class="md-nav__link">
+  <a href="#the-recommendation-surface-existing-and-what-pypi-ships" class="md-nav__link">
     <span class="md-ellipsis">
-      What this is
+      The recommendation surface (existing, and what PyPI ships)
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="The recommendation surface (existing, and what PyPI ships)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-this-surface-exists" class="md-nav__link">
+    <span class="md-ellipsis">
+      Why this surface exists
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -577,6 +607,15 @@
   <a href="#principles" class="md-nav__link">
     <span class="md-ellipsis">
       Principles
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#before-pushing-a-change-to-ctx-itself" class="md-nav__link">
+    <span class="md-ellipsis">
+      Before pushing a change to ctx itself
     </span>
   </a>
   
@@ -1417,20 +1456,50 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#why-this-exists" class="md-nav__link">
+  <a href="#what-each-command-actually-does" class="md-nav__link">
     <span class="md-ellipsis">
-      Why this exists
+      What each command actually does
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What each command actually does">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#-apply-and-pr-are-different-writes" class="md-nav__link">
+    <span class="md-ellipsis">
+      --apply and --pr are different writes
     </span>
   </a>
   
 </li>
+        
+      </ul>
+    </nav>
+  
+</li>
       
         <li class="md-nav__item">
-  <a href="#what-this-is" class="md-nav__link">
+  <a href="#the-recommendation-surface-existing-and-what-pypi-ships" class="md-nav__link">
     <span class="md-ellipsis">
-      What this is
+      The recommendation surface (existing, and what PyPI ships)
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="The recommendation surface (existing, and what PyPI ships)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-this-surface-exists" class="md-nav__link">
+    <span class="md-ellipsis">
+      Why this surface exists
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1447,6 +1516,15 @@
   <a href="#principles" class="md-nav__link">
     <span class="md-ellipsis">
       Principles
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#before-pushing-a-change-to-ctx-itself" class="md-nav__link">
+    <span class="md-ellipsis">
+      Before pushing a change to ctx itself
     </span>
   </a>
   
@@ -1475,25 +1553,165 @@
   
 
 
-<h1 id="ctx-skill-agent-mcp-harness-recommendations">ctx — Skill, Agent, MCP &amp; Harness Recommendations<a class="headerlink" href="#ctx-skill-agent-mcp-harness-recommendations" title="Permanent link">&para;</a></h1>
+<h1 id="ctx-fit-the-cheapest-ai-coding-setup-that-works-on-your-repo">CTX Fit — the cheapest AI coding setup that works on your repo<a class="headerlink" href="#ctx-fit-the-cheapest-ai-coding-setup-that-works-on-your-repo" title="Permanent link">&para;</a></h1>
 <p><a href="https://hits.sh/github.com/stevesolun/ctx/"><img alt="Repo views" src="https://hits.sh/github.com/stevesolun/ctx.svg?label=repo%20views" /></a></p>
-<p><strong>ctx is not an Amazon-style catalog of skills, MCPs, agents, tools, or
-harnesses. It is a recommendation layer.</strong> Point it at your organization's own
-tools, or use the pre-built graph, and ctx recommends the smallest useful bundle
-for the current development window. The goal is to load the right skills,
-agents, MCP servers, and optional harness at the right moment so hosted LLMs
-burn fewer tokens and local models waste less CPU/GPU work.</p>
-<p>Watches what you develop, walks a knowledge graph of <strong>68,494 skill pages, 467 agents, 10,790 MCP servers, and 207 cataloged harnesses</strong>, and recommends the
-right execution bundle on the fly. The live execution bundle is skills,
-agents, and MCP servers only; custom/API/local model users and external loop
-adapters get separate harness recommendations after explicit user-owned model
-consent, ranked by model choice and task goal. You decide what to load,
-install, or adopt. Powered by a Karpathy LLM wiki with persistent memory that
-gets smarter every session.</p>
+<p><strong>CTX Fit profiles your repository, evaluates candidate AI coding
+configurations against real tasks taken from the repository's own history, and
+produces the winning configuration as a reviewable change.</strong> It picks the
+<em>cheapest</em> setup that <em>reliably</em> works — reliability is a requirement, not a
+tie-break — and "keep what you already have" is a valid and expected answer.</p>
+<p>The winner is chosen by a fixed rule, not a score: discard every candidate
+below the reliability floor, then minimize attributable cost, then break ties
+toward the simpler configuration. An LLM may explain a result; it never decides
+one.</p>
+<div class="admonition warning">
+<p class="admonition-title">CTX Fit ships from source, not yet from PyPI</p>
+<p>The published <code>claude-ctx</code> package is release <strong>1.0.20</strong>, and it contains
+none of CTX Fit — <code>pip install claude-ctx</code> gets you the recommendation
+surface documented further down, whose <code>ctx</code> command is the agent-loop
+harness (<code>ctx run</code>, <code>ctx resume</code>, <code>ctx sessions</code>). This source tree
+declares <code>1.0.21</code> for unreleased work. To use <code>ctx fit</code> today you need a
+source checkout.</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/stevesolun/ctx<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>ctx
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nb">cd</span><span class="w"> </span>/path/to/my-project
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>ctx<span class="w"> </span>fit
+</span></code></pre></div>
+<p>Requires CPython 3.11 or newer on Linux or macOS. Native Windows and
+PowerShell are not supported; run ctx inside WSL2.</p>
+</div>
+<h2 id="what-each-command-actually-does">What each command actually does<a class="headerlink" href="#what-each-command-actually-does" title="Permanent link">&para;</a></h2>
+<p>Bare <code>ctx fit</code> is free, local and read-only. It invokes no model, spends
+nothing, and on a plain run issues no <code>git</code> commands at all. It prints the
+repository profile: detected languages, the AI coding setup already in place,
+the verification commands the repository declares for itself, an agent-readiness
+score with its component breakdown, and the highest-impact improvements.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it costs</th>
+<th>What it touches</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ctx fit</code></td>
+<td>nothing; no model call</td>
+<td>reads the working tree</td>
+</tr>
+<tr>
+<td><code>ctx fit --json</code></td>
+<td>nothing; no model call</td>
+<td>reads the working tree, prints the profile as JSON</td>
+</tr>
+<tr>
+<td><code>ctx fit --dry-run</code></td>
+<td>nothing; no model call</td>
+<td>additionally runs read-only git queries (<code>log</code>, <code>show --name-only</code>, <code>ls-tree</code>, <code>rev-parse</code>) to derive representative tasks, then prints the experiment plan and a cost estimate</td>
+</tr>
+<tr>
+<td><code>ctx fit --test --budget N</code></td>
+<td>up to <code>N</code> dollars</td>
+<td>runs candidates and verifies each trial with the repository's own test command</td>
+</tr>
+<tr>
+<td><code>ctx fit --apply</code></td>
+<td>nothing beyond the evaluation</td>
+<td>writes the winning configuration into your working tree; the write runs no git command, though the evaluation it needs first does</td>
+</tr>
+<tr>
+<td><code>ctx fit --pr</code></td>
+<td>nothing beyond the evaluation</td>
+<td>creates a branch, commits, <strong>pushes to your remote</strong>, and opens a pull request through <code>gh</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>--dry-run</code> reads history to derive tasks and writes nothing — not to the
+repository, not to the index, not to any ref.</p>
+<p>Spending requires two explicit flags. <code>--test</code> alone will not spend: without
+<code>--budget</code> CTX Fit only plans. Run <code>ctx doctor</code> to see whether a real evaluation
+can run where you are; without provider credentials <code>--test</code> runs in
+simulation, which proves the pipeline but never your repository, and a
+simulated result is refused as evidence for <code>--apply</code> and <code>--pr</code>.</p>
+<h3 id="-apply-and-pr-are-different-writes"><code>--apply</code> and <code>--pr</code> are different writes<a class="headerlink" href="#-apply-and-pr-are-different-writes" title="Permanent link">&para;</a></h3>
+<p><code>--apply</code> writes files into your working tree, on whatever branch you are
+standing on. It prints every proposed change first and, unless you pass
+<code>--yes</code>, stops there so you can look. The write itself runs no git command:
+nothing is staged, committed, or pushed. Getting to it does run git — <code>--apply</code>
+is refused without evidence from <code>ctx fit --test --budget N</code>, and deriving the
+tasks for that evaluation uses the same read-only queries <code>--dry-run</code> uses.</p>
+<p>Each proposed change names the file and whether CTX Fit is <em>creating</em> or
+<em>modifying</em> it, and that word decides how you review and undo it. Today every
+plan contains exactly one artifact, <code>AGENTS.md</code>:</p>
+<table>
+<thead>
+<tr>
+<th>It printed</th>
+<th>State after the write</th>
+<th>Review with</th>
+<th>Undo with</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>modify: AGENTS.md</code></td>
+<td>tracked, modified</td>
+<td><code>git diff</code></td>
+<td><code>git checkout -- AGENTS.md</code></td>
+</tr>
+<tr>
+<td><code>create: AGENTS.md</code></td>
+<td>new and <strong>untracked</strong></td>
+<td><code>git status --short</code> shows <code>?? AGENTS.md</code></td>
+<td>delete the file</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition warning">
+<p class="admonition-title"><code>git checkout</code> cannot undo a file git has never seen</p>
+<p>The <code>create</code> row is the common one, because a repository with no agent
+instruction file is exactly the repository CTX Fit's own scorer flags first
+(<code>Add an AGENTS.md describing the project, conventions, and how to verify a
+change. (+12)</code>). A newly created file is not in the index, so <code>git diff</code>
+prints nothing for it and <code>git checkout -- AGENTS.md</code> fails with <code>error:
+pathspec 'AGENTS.md' did not match any file(s) known to git</code>, leaving the
+file in place. CTX Fit's own closing line after a write recommends that
+pair without qualifying it; on a <code>create</code> follow the table instead.</p>
+</div>
+<p><strong><code>--pr</code> writes to a remote.</strong> It creates a branch, commits the winning
+configuration, pushes it to <code>origin</code>, and opens a pull request through the
+GitHub CLI. Before running anything it prints the pull-request body, the files
+it will write, and the exact command sequence:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>git checkout -b ctx-fit/&lt;timestamp&gt;
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>git add -- &lt;paths&gt;
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>git commit -m &quot;&lt;pull request title&gt;&quot;
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>git push --set-upstream origin ctx-fit/&lt;timestamp&gt;
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>gh pr create --title &quot;&lt;pull request title&gt;&quot; --body-file -
+</span></code></pre></div>
+<p>Without <code>--yes</code> it stops there and changes nothing. With <code>--yes</code> it writes those
+files into the working tree and then runs those five commands, in that order and
+no others. Before any of them runs, the gate described below runs read-only
+probes — <code>git rev-parse</code>, <code>git status</code>, <code>git remote get-url</code>, and <code>gh auth
+status</code> — which is what lets every refusal leave the repository exactly as it
+found it. CTX Fit never merges.</p>
+<p><code>--pr</code> refuses before touching anything if you are not inside a git repository,
+if the working tree has changes CTX Fit did not write (untracked files
+included — they would be carried onto the new branch), if <code>gh</code> is not installed
+or not logged in, if the branch already exists, or if there is no remote to
+push to. Each refusal names which one it was, exits non-zero, and leaves the
+tree untouched. If a command fails partway, CTX Fit reports which one and how
+many ran, and how to get back to the branch you were on; the files it had
+already written stay in your working tree.</p>
+<h2 id="the-recommendation-surface-existing-and-what-pypi-ships">The recommendation surface (existing, and what PyPI ships)<a class="headerlink" href="#the-recommendation-surface-existing-and-what-pypi-ships" title="Permanent link">&para;</a></h2>
+<p>The rest of this site documents the graph-backed recommendation layer that
+predates CTX Fit. It still ships, it still works, and it is what release
+<code>1.0.20</code> installs. It is not the product; it is the inventory and routing
+machinery underneath, useful on its own.</p>
 <div class="admonition tip">
-<p class="admonition-title">Install</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>pip<span class="w"> </span>install<span class="w"> </span>claude-ctx
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>ctx-init<span class="w"> </span>--graph<span class="w"> </span>--model-mode<span class="w"> </span>skip
+<p class="admonition-title">Install the recommendation surface</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>pip<span class="w"> </span>install<span class="w"> </span>claude-ctx
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>ctx-init<span class="w"> </span>--graph<span class="w"> </span>--model-mode<span class="w"> </span>skip
 </span></code></pre></div>
 <p>Optional extras: <code>pip install "claude-ctx[embeddings]"</code> for the
 semantic backend, <code>pip install "claude-ctx[harness]"</code> for local/API
@@ -1515,11 +1733,182 @@ packed LLM-wiki installed locally.</p>
 <code>ctx-init --model-mode custom --model &lt;provider/model&gt; --goal "&lt;task&gt;"</code>
 to record the model profile and surface harness recommendations.</p>
 </div>
-<div class="admonition tip">
-<p class="admonition-title">Before pushing</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>scripts/no_mistakes_run.sh<span class="w"> </span>fast<span class="w"> </span>--profile<span class="w"> </span>smoke
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>scripts/no_mistakes_run.sh<span class="w"> </span>fast
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>scripts/no_mistakes_run.sh<span class="w"> </span>gate<span class="w"> </span>--intent<span class="w"> </span><span class="s2">&quot;narrow task statement for this branch&quot;</span>
+<p>Point it at your organization's own tools, or use the pre-built graph, and ctx
+recommends the smallest useful bundle for the current development window: the
+right skills, agents, MCP servers, and optional harness at the right moment, so
+hosted LLMs burn fewer tokens and local models waste less CPU/GPU work.</p>
+<p>It walks a knowledge graph of <strong>68,494 skill pages, 467 agents, 10,790 MCP servers, and 207 cataloged harnesses</strong>.
+The live execution bundle is skills, agents, and MCP servers only; custom/API/local
+model users and external loop adapters get separate harness recommendations
+after explicit user-owned model consent, ranked by model choice and task goal.
+You decide what to load, install, or adopt.</p>
+<h3 id="why-this-surface-exists">Why this surface exists<a class="headerlink" href="#why-this-surface-exists" title="Permanent link">&para;</a></h3>
+<p>Claude Code skills, agents, MCP servers, and model harness profiles are
+powerful, but at scale they become unmanageable:</p>
+<ul>
+<li><strong>Discovery problem</strong> — with 68,494 skill pages, 467 agents, 10,790 MCP servers, and 207 harnesses, how do you know which
+  ones exist and which are relevant to your current project?</li>
+<li><strong>Context budget</strong> — loading every installable entity wastes tokens and
+  degrades quality. You need exactly the right skills, agents, and MCP
+  servers per session, plus a harness recommendation only when you choose
+  a custom/API/local model path.</li>
+<li><strong>Hidden connections</strong> — a FastAPI skill is useful, but you also need
+  the Pydantic skill, the async Python patterns skill, and the Docker
+  skill, plus possibly a matching MCP server. If you are not using Claude
+  Code, ctx separately suggests the model harness most likely to fit your
+  goal.
+  Nobody tells you that.</li>
+<li><strong>Entity rot</strong> — skills, agents, MCP servers, and harness records you
+  added months ago and never used are cluttering your context. Stale ones
+  should be flagged and archived.</li>
+</ul>
+<p>ctx treats your inventory as a <strong>knowledge graph with persistent memory</strong>, not
+a flat directory.</p>
+<p>The core idea comes from Andrej Karpathy's LLM-wiki pattern: instead of
+re-loading everything from scratch each session, an LLM maintains a wiki
+it can read, write, and query. The wiki becomes the agent's long-term
+memory. ctx applies that pattern to entity management and extends it with
+graph-based discovery:</p>
+<ul>
+<li>A Karpathy 3-layer wiki at <code>~/.claude/skill-wiki/</code> is the single source
+  of truth.</li>
+<li><strong>79,958 graph nodes</strong> for the shipped skill/agent/MCP/harness
+  inventory, including 68,494 skill pages
+  and 207 harness pages under <code>entities/harnesses/</code>.
+  Each page tracks tags, status, provenance, and usage where it applies.</li>
+<li>A <strong>knowledge graph</strong> (79,958 nodes, 1,778,069 edges) built from a
+  12,934-node core plus 67,024 body-backed skill nodes.
+  The graph has 52 Louvain communities and blends semantic cosine,
+  tag overlap, and slug-token overlap; 67,024 skill bodies are
+  shipped as installable <code>SKILL.md</code> files. Entries over the configured line
+  threshold are converted to gated micro-skill orchestrators. Full source
+  bodies were used for semantic graphing before packaging; <code>SKILL.md.original</code>
+  backups are not shipped in the tarball.</li>
+<li><strong>52 Louvain communities</strong> group related entities into named
+  communities (e.g., <em>AI + Devops + Frontend</em>, <em>Python + API</em>).</li>
+<li>PostToolUse and Stop hooks update the wiki automatically during each
+  Claude Code session.</li>
+<li>Hydrated skills over 180 lines are converted to gated micro-skill
+  pipelines so the router can load them incrementally.</li>
+<li>At session start, the skill-router scans your project and
+  <strong>recommends</strong> the best-matching skills, agents, and MCP servers.</li>
+<li>Mid-session, the context monitor watches every tool call, detects new
+  stack signals, walks the graph, and <strong>recommends</strong> relevant skills,
+  agents, and MCP servers in real time — <strong>nothing loads or
+  installs without your approval</strong>.</li>
+<li>Recommendation calls can suppress already selected, rejected, active, or
+  baseline context and can filter local/no-key or language-mismatched rows
+  before they enter a plan.</li>
+<li>During custom/API/local model onboarding and LoopFlow/agent-loop adapter
+  calls with explicit user-owned model consent, <code>ctx-init</code>,
+  <code>python -m harness_install</code>, and <code>python -m ctx.adapters.loopflow</code> use the same
+  graph to recommend harnesses above the configured harness match floor.</li>
+</ul>
+<h2 id="explore-the-docs">Explore the docs<a class="headerlink" href="#explore-the-docs" title="Permanent link">&para;</a></h2>
+<div class="grid cards">
+<ul>
+<li>
+<p><strong>Knowledge graph</strong></p>
+<hr />
+<p>79,958 shipped graph nodes: 12,934 curated skill/agent/MCP/harness nodes plus 67,024 body-backed skill nodes. The graph has
+1,778,069 weighted edges and 52 Louvain communities.
+Ships pre-built in <code>graph/wiki-graph.tar.gz</code> and powers the
+graph-aware recommendations + the pre-ship
+<code>python -m ctx.core.quality.dedup_check</code> gate.</p>
+<p><a href="knowledge-graph/"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13.22 19.03a.75.75 0 0 1 0-1.06L18.19 13H3.75a.75.75 0 0 1 0-1.5h14.44l-4.97-4.97a.749.749 0 0 1 .326-1.275.75.75 0 0 1 .734.215l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0"/></svg></span> Knowledge graph</a></p>
+</li>
+<li>
+<p><strong>Entity onboarding</strong></p>
+<hr />
+<p>Step-by-step commands for adding a skill, agent, MCP server, or
+harness to the wiki and graph. Includes the <code>text-to-cad</code> harness
+pattern for custom-model users.</p>
+<p><a href="entity-onboarding/"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13.22 19.03a.75.75 0 0 1 0-1.06L18.19 13H3.75a.75.75 0 0 1 0-1.5h14.44l-4.97-4.97a.749.749 0 0 1 .326-1.275.75.75 0 0 1 .734.215l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0"/></svg></span> Entity onboarding</a></p>
+</li>
+<li>
+<p><strong>Dashboard</strong></p>
+<hr />
+<p><code>python -m ctx_monitor serve</code> opens a local HTTP dashboard over the
+recommendation surface: live graph, skill grades + four-signal scores,
+session timelines, one-click load/unload for skills, agents, and MCP
+servers, selectable recommendations, runtime token history, plus harness
+wiki and graph browsing. It shows no CTX Fit state. It is served by stdlib
+<code>http.server</code> and renders repo docs with MkDocs-compatible Markdown
+extensions.</p>
+<p><a href="dashboard/"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13.22 19.03a.75.75 0 0 1 0-1.06L18.19 13H3.75a.75.75 0 0 1 0-1.5h14.44l-4.97-4.97a.749.749 0 0 1 .326-1.275.75.75 0 0 1 .734.215l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0"/></svg></span> Dashboard reference</a></p>
+</li>
+<li>
+<p><strong>Toolbox</strong></p>
+<hr />
+<p>Curated councils of skills and agents that fire at session-start,
+file-save, pre-commit, and session-end. Blocks <code>git commit</code> on
+HIGH/CRITICAL findings. Five starter toolboxes ship out of the box.</p>
+<p><a href="toolbox/"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13.22 19.03a.75.75 0 0 1 0-1.06L18.19 13H3.75a.75.75 0 0 1 0-1.5h14.44l-4.97-4.97a.749.749 0 0 1 .326-1.275.75.75 0 0 1 .734.215l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0"/></svg></span> Toolbox overview</a> ·
+<a href="toolbox/starters/">Starter toolboxes</a> ·
+<a href="toolbox/verdicts/">Verdicts &amp; guardrails</a></p>
+</li>
+<li>
+<p><strong>Skill router</strong></p>
+<hr />
+<p>Scans the active repo, detects the stack from file signatures, walks
+the stack matrix, loads exactly the skills that apply, and can
+recommend supporting agents and MCP servers. Loop adapters can call
+the same recommender before each plan.</p>
+<p><a href="skill-router/"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13.22 19.03a.75.75 0 0 1 0-1.06L18.19 13H3.75a.75.75 0 0 1 0-1.5h14.44l-4.97-4.97a.749.749 0 0 1 .326-1.275.75.75 0 0 1 .734.215l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0"/></svg></span> Router overview</a> ·
+<a href="stack-signatures/">Stack signatures</a> ·
+<a href="skill-stack-matrix/">Skill-stack matrix</a></p>
+</li>
+<li>
+<p><strong>Health &amp; quality</strong></p>
+<hr />
+<p>Structural health checks (missing frontmatter, orphan manifest
+entries, line-count drift) plus the four-signal quality score
+(telemetry · intake · graph · routing) that grades every skill
+A/B/C/D/F.</p>
+<p><a href="skills-health/"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13.22 19.03a.75.75 0 0 1 0-1.06L18.19 13H3.75a.75.75 0 0 1 0-1.5h14.44l-4.97-4.97a.749.749 0 0 1 .326-1.275.75.75 0 0 1 .734.215l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0"/></svg></span> Skill health</a> ·
+<a href="memory-anchor/">Memory anchoring</a> ·
+<a href="skill-lifecycle-and-dashboard/">Lifecycle dashboard</a></p>
+</li>
+<li>
+<p><strong>Source snapshot</strong></p>
+<hr />
+<p>Current main is <strong>v1.0.21</strong> — MIT, tested on CPython 3.11+ for Linux and macOS,
+8,579 test inventory. Ships seven console scripts led by <code>ctx</code> and
+<code>ctx-init</code>. The maintenance
+tools are still shipped and still work, now via <code>python -m</code>:
+<code>ctx_monitor serve</code> (local dashboard with graph + wiki + load/unload for
+skills, agents, and MCP servers, plus Harness Setup for user-owned LLMs),
+<code>ctx.core.graph.incremental_attach</code>, <code>ctx.core.graph.incremental_shadow</code>,
+<code>ctx.core.quality.dedup_check</code> (pre-ship near-duplicate gate), and
+<code>ctx.core.quality.tag_backfill</code> (entity hygiene), plus a fast runtime graph artifact
+and the full ~281 MiB wiki tarball with <strong>79,958 nodes / 1,778,069 edges / 52 Louvain communities</strong>.</p>
+<p><a href="https://github.com/stevesolun/ctx/blob/main/CHANGELOG.md"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13.22 19.03a.75.75 0 0 1 0-1.06L18.19 13H3.75a.75.75 0 0 1 0-1.5h14.44l-4.97-4.97a.749.749 0 0 1 .326-1.275.75.75 0 0 1 .734.215l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0"/></svg></span> CHANGELOG</a> ·
+<a href="https://github.com/stevesolun/ctx">Repository</a></p>
+</li>
+</ul>
+</div>
+<h2 id="principles">Principles<a class="headerlink" href="#principles" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Reliability is a filter, not a weight.</strong> A configuration that is cheaper
+  but less reliable does not win; it is discarded before cost is compared.</li>
+<li><strong>Verification is the repository's own.</strong> CTX Fit judges a trial with the
+  test, typecheck, lint, and build commands your repository already declares —
+  never with an agent's self-report.</li>
+<li><strong>Unknown cost stays unknown.</strong> A cost record carries its completeness state,
+  and an incomplete record is never compared as if it were complete.</li>
+<li><strong>Explicit approval.</strong> ctx can recommend, review, install, update, unload,
+  or uninstall, but it does not mutate live skills, agents, MCP servers, or
+  harness installs without a command or approval path.</li>
+<li><strong>Configurable gates.</strong> Recommendation floors, semantic edge thresholds,
+  micro-skill line limits, and harness match floors live in config so teams
+  can tune behavior without forking the code.</li>
+<li><strong>Token discipline.</strong> Every council run honors <code>max_tokens</code> /
+  <code>max_seconds</code> budgets.</li>
+</ul>
+<h2 id="before-pushing-a-change-to-ctx-itself">Before pushing a change to ctx itself<a class="headerlink" href="#before-pushing-a-change-to-ctx-itself" title="Permanent link">&para;</a></h2>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>scripts/no_mistakes_run.sh<span class="w"> </span>fast<span class="w"> </span>--profile<span class="w"> </span>smoke
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>scripts/no_mistakes_run.sh<span class="w"> </span>fast
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>scripts/no_mistakes_run.sh<span class="w"> </span>gate<span class="w"> </span>--intent<span class="w"> </span><span class="s2">&quot;narrow task statement for this branch&quot;</span>
 </span></code></pre></div>
 <p><code>scripts/no_mistakes_run.sh fast --profile smoke</code> is the quick first pass:
 it keeps cheap invariants, no-test policy, ruff, and public docs tracker
@@ -1561,175 +1950,6 @@ assets under <code>docs/assets/javascripts/</code>, <code>docs/services/</code>,
 Bug-smoke audit rows live in <code>qa/bug_smoke_status.csv</code> and are validated
 by the same public docs tracker; <code>Retested Pass</code> rows must include <code>PASS:</code>
 retest evidence and a closed <code>next_action</code> starting with <code>Closed;</code>.</p>
-</div>
-<h2 id="why-this-exists">Why this exists<a class="headerlink" href="#why-this-exists" title="Permanent link">&para;</a></h2>
-<p>Claude Code skills, agents, MCP servers, and model harness profiles are
-powerful, but at scale they become unmanageable:</p>
-<ul>
-<li><strong>Discovery problem</strong> — with 68,494 skill pages, 467 agents, 10,790 MCP servers, and 207 harnesses, how do you know which
-  ones exist and which are relevant to your current project?</li>
-<li><strong>Context budget</strong> — loading every installable entity wastes tokens and
-  degrades quality. You need exactly the right skills, agents, and MCP
-  servers per session, plus a harness recommendation only when you choose
-  a custom/API/local model path.</li>
-<li><strong>Hidden connections</strong> — a FastAPI skill is useful, but you also need
-  the Pydantic skill, the async Python patterns skill, and the Docker
-  skill, plus possibly a matching MCP server. If you are not using Claude
-  Code, ctx separately suggests the model harness most likely to fit your
-  goal.
-  Nobody tells you that.</li>
-<li><strong>Entity rot</strong> — skills, agents, MCP servers, and harness records you
-  added months ago and never used are cluttering your context. Stale ones
-  should be flagged and archived.</li>
-</ul>
-<p>ctx solves all of these by treating your ctx inventory as a <strong>knowledge
-graph with persistent memory</strong>, not a flat directory.</p>
-<h2 id="what-this-is">What this is<a class="headerlink" href="#what-this-is" title="Permanent link">&para;</a></h2>
-<p>ctx is not a collection of scripts. It is an agent with persistent memory
-and a knowledge graph.</p>
-<p>The core idea comes from Andrej Karpathy's LLM-wiki pattern: instead of
-re-loading everything from scratch each session, an LLM maintains a wiki
-it can read, write, and query. The wiki becomes the agent's long-term
-memory.</p>
-<p>ctx applies that pattern to entity management — and extends it with
-graph-based discovery:</p>
-<ul>
-<li>A Karpathy 3-layer wiki at <code>~/.claude/skill-wiki/</code> is the single source
-  of truth.</li>
-<li><strong>79,958 graph nodes</strong> for the shipped skill/agent/MCP/harness
-  inventory, including 68,494 skill pages
-  and 207 harness pages under <code>entities/harnesses/</code>.
-  Each page tracks tags, status, provenance, and usage where it applies.</li>
-<li>A <strong>knowledge graph</strong> (79,958 nodes, 1,778,069 edges) built from a
-  12,934-node core plus 67,024 body-backed skill nodes.
-  The graph has 52 Louvain communities and blends semantic cosine,
-  tag overlap, and slug-token overlap; 67,024 skill bodies are
-  shipped as installable <code>SKILL.md</code> files. Entries over the configured line
-  threshold are converted to gated micro-skill orchestrators. Full source
-  bodies were used for semantic graphing before packaging; <code>SKILL.md.original</code>
-  backups are not shipped in the tarball.</li>
-<li><strong>52 Louvain communities</strong> group related entities into named
-  communities (e.g., <em>AI + Devops + Frontend</em>, <em>Python + API</em>).</li>
-<li>PostToolUse and Stop hooks update the wiki automatically during each
-  Claude Code session.</li>
-<li>Hydrated skills over 180 lines are converted to gated micro-skill
-  pipelines so the router can load them incrementally.</li>
-<li>At session start, the skill-router scans your project and
-  <strong>recommends</strong> the best-matching skills, agents, and MCP servers.</li>
-<li>Mid-session, the context monitor watches every tool call, detects new
-  stack signals, walks the graph, and <strong>recommends</strong> relevant skills,
-  agents, and MCP servers in real time — <strong>nothing loads or
-  installs without your approval</strong>.</li>
-<li>Recommendation calls can suppress already selected, rejected, active, or
-  baseline context and can filter local/no-key or language-mismatched rows
-  before they enter a plan.</li>
-<li>During custom/API/local model onboarding and LoopFlow/agent-loop adapter
-  calls with explicit user-owned model consent, <code>ctx-init</code>,
-  <code>python -m harness_install</code>, and <code>python -m ctx.adapters.loopflow</code> use the same
-  graph to recommend harnesses above the configured harness match floor.</li>
-</ul>
-<p>The result: you always know what skills, agents, and MCP servers are available
-for your current task, and which harness fits when you choose your own model.
-The graph reveals hidden connections. The wiki learns from your usage. Stale
-ones are flagged. New ones self-ingest.</p>
-<h2 id="explore-the-docs">Explore the docs<a class="headerlink" href="#explore-the-docs" title="Permanent link">&para;</a></h2>
-<div class="grid cards">
-<ul>
-<li>
-<p><strong>Knowledge graph</strong></p>
-<hr />
-<p>79,958 shipped graph nodes: 12,934 curated skill/agent/MCP/harness nodes plus 67,024 body-backed skill nodes. The graph has
-1,778,069 weighted edges and 52 Louvain communities.
-Ships pre-built in <code>graph/wiki-graph.tar.gz</code> and powers the
-graph-aware recommendations + the pre-ship
-<code>python -m ctx.core.quality.dedup_check</code> gate.</p>
-<p><a href="knowledge-graph/"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13.22 19.03a.75.75 0 0 1 0-1.06L18.19 13H3.75a.75.75 0 0 1 0-1.5h14.44l-4.97-4.97a.749.749 0 0 1 .326-1.275.75.75 0 0 1 .734.215l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0"/></svg></span> Knowledge graph</a></p>
-</li>
-<li>
-<p><strong>Entity onboarding</strong></p>
-<hr />
-<p>Step-by-step commands for adding a skill, agent, MCP server, or
-harness to the wiki and graph. Includes the <code>text-to-cad</code> harness
-pattern for custom-model users.</p>
-<p><a href="entity-onboarding/"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13.22 19.03a.75.75 0 0 1 0-1.06L18.19 13H3.75a.75.75 0 0 1 0-1.5h14.44l-4.97-4.97a.749.749 0 0 1 .326-1.275.75.75 0 0 1 .734.215l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0"/></svg></span> Entity onboarding</a></p>
-</li>
-<li>
-<p><strong>Dashboard</strong></p>
-<hr />
-<p><code>python -m ctx_monitor serve</code> opens a local HTTP dashboard with live graph,
-skill grades + four-signal scores, session timelines, one-click
-load/unload for skills, agents, and MCP servers, selectable
-recommendations, runtime token history, plus harness wiki and graph
-browsing. It is served by stdlib <code>http.server</code> and renders repo docs with
-MkDocs-compatible Markdown extensions.</p>
-<p><a href="dashboard/"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13.22 19.03a.75.75 0 0 1 0-1.06L18.19 13H3.75a.75.75 0 0 1 0-1.5h14.44l-4.97-4.97a.749.749 0 0 1 .326-1.275.75.75 0 0 1 .734.215l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0"/></svg></span> Dashboard reference</a></p>
-</li>
-<li>
-<p><strong>Toolbox</strong></p>
-<hr />
-<p>Curated councils of skills and agents that fire at session-start,
-file-save, pre-commit, and session-end. Blocks <code>git commit</code> on
-HIGH/CRITICAL findings. Five starter toolboxes ship out of the box.</p>
-<p><a href="toolbox/"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13.22 19.03a.75.75 0 0 1 0-1.06L18.19 13H3.75a.75.75 0 0 1 0-1.5h14.44l-4.97-4.97a.749.749 0 0 1 .326-1.275.75.75 0 0 1 .734.215l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0"/></svg></span> Toolbox overview</a> ·
-<a href="toolbox/starters/">Starter toolboxes</a> ·
-<a href="toolbox/verdicts/">Verdicts &amp; guardrails</a></p>
-</li>
-<li>
-<p><strong>Skill router</strong></p>
-<hr />
-<p>Scans the active repo, detects the stack from file signatures, walks
-the stack matrix, loads exactly the skills that apply, and can
-recommend supporting agents and MCP servers. Loop adapters can call
-the same recommender before each plan.</p>
-<p><a href="skill-router/"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13.22 19.03a.75.75 0 0 1 0-1.06L18.19 13H3.75a.75.75 0 0 1 0-1.5h14.44l-4.97-4.97a.749.749 0 0 1 .326-1.275.75.75 0 0 1 .734.215l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0"/></svg></span> Router overview</a> ·
-<a href="stack-signatures/">Stack signatures</a> ·
-<a href="skill-stack-matrix/">Skill-stack matrix</a></p>
-</li>
-<li>
-<p><strong>Health &amp; quality</strong></p>
-<hr />
-<p>Structural health checks (missing frontmatter, orphan manifest
-entries, line-count drift) plus the four-signal quality score
-(telemetry · intake · graph · routing) that grades every skill
-A/B/C/D/F.</p>
-<p><a href="skills-health/"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13.22 19.03a.75.75 0 0 1 0-1.06L18.19 13H3.75a.75.75 0 0 1 0-1.5h14.44l-4.97-4.97a.749.749 0 0 1 .326-1.275.75.75 0 0 1 .734.215l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0"/></svg></span> Skill health</a> ·
-<a href="memory-anchor/">Memory anchoring</a> ·
-<a href="skill-lifecycle-and-dashboard/">Lifecycle dashboard</a></p>
-</li>
-<li>
-<p><strong>Source snapshot</strong></p>
-<hr />
-<p>Current main is <strong>v1.0.21</strong> — MIT, tested on CPython 3.11+ for Linux and macOS,
-8,524 test inventory. Adds enterprise OpenTelemetry-ready telemetry and
-ships seven console scripts led by <code>ctx</code> and <code>ctx-init</code>. The maintenance
-tools are still shipped and still work, now via <code>python -m</code>:
-<code>ctx_monitor serve</code> (local dashboard with graph + wiki + load/unload for
-skills, agents, and MCP servers, plus Harness Setup for user-owned LLMs),
-<code>ctx.core.graph.incremental_attach</code>, <code>ctx.core.graph.incremental_shadow</code>,
-<code>ctx.core.quality.dedup_check</code> (pre-ship near-duplicate gate), and
-<code>ctx.core.quality.tag_backfill</code> (entity hygiene), plus a fast runtime graph artifact
-and the full ~281 MiB wiki tarball with <strong>79,958 nodes / 1,778,069 edges / 52 Louvain communities</strong>.</p>
-<p><a href="https://github.com/stevesolun/ctx/blob/main/CHANGELOG.md"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13.22 19.03a.75.75 0 0 1 0-1.06L18.19 13H3.75a.75.75 0 0 1 0-1.5h14.44l-4.97-4.97a.749.749 0 0 1 .326-1.275.75.75 0 0 1 .734.215l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0"/></svg></span> CHANGELOG</a> ·
-<a href="https://github.com/stevesolun/ctx">Repository</a></p>
-</li>
-</ul>
-</div>
-<h2 id="principles">Principles<a class="headerlink" href="#principles" title="Permanent link">&para;</a></h2>
-<ul>
-<li><strong>Single source of truth.</strong> The wiki and graph drive Claude Code
-  recommendations, custom-model harness recommendations, dashboard views,
-  and entity update reviews.</li>
-<li><strong>Explicit approval.</strong> ctx can recommend, review, install, update, unload,
-  or uninstall, but it does not mutate live skills, agents, MCP servers, or
-  harness installs without a command or approval path.</li>
-<li><strong>Configurable gates.</strong> Recommendation floors, semantic edge thresholds,
-  micro-skill line limits, and harness match floors live in config so teams
-  can tune behavior without forking the code.</li>
-<li><strong>Evidence over opinion.</strong> Suggestions cite real usage data plus
-  knowledge-graph edges. No black-box prompts.</li>
-<li><strong>Token discipline.</strong> Every council run honors <code>max_tokens</code> /
-  <code>max_seconds</code> budgets.</li>
-</ul>
 
 
 

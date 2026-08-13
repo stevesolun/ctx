@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Not a catalog: a repo-aware recommendation layer that loads the right skills, agents, MCPs, and harnesses from your tools or the shipped graph.">
+        <meta name="description" content="CTX Fit finds the cheapest AI coding setup that reliably works on your repository and applies the winner as a reviewable change.">
       
       
       
@@ -1792,6 +1792,14 @@
 
 
 <h1 id="dashboard-python-m-ctx_monitor">Dashboard (<code>python -m ctx_monitor</code>)<a class="headerlink" href="#dashboard-python-m-ctx_monitor" title="Permanent link">&para;</a></h1>
+<div class="admonition info">
+<p class="admonition-title">This is the recommendation surface, not CTX Fit</p>
+<p>The product is <strong>CTX Fit</strong> (<code>ctx fit</code>) — see the <a href="../">home page</a>.
+This dashboard predates it and shows none of it: <code>ctx fit</code> writes nothing
+under <code>~/.claude</code> and reports its results on stdout. Everything below is
+the local skill/agent/MCP wiki, the knowledge graph, and this machine's
+session history.</p>
+</div>
 <p>Local HTTP dashboard for ctx's currently supported live observables:
 loaded skills, agents, MCP servers, and installed harness records; session timelines; the
 knowledge graph; the LLM-wiki browser; quality grades + scores;
@@ -1943,7 +1951,8 @@ skills, agents, MCP servers, and harnesses without reloading the graph.</p>
 <h3 id="read-the-quality-kpis-kpi">Read the quality KPIs — <code>/kpi</code><a class="headerlink" href="#read-the-quality-kpis-kpi" title="Permanent link">&para;</a></h3>
 <p>The KPI tab is the browser equivalent of <code>python -m kpi_dashboard
 render</code>. It aggregates the quality + lifecycle sidecars under
-<code>~/.claude/skill-quality/</code> into a single page with six tables:</p>
+<code>~/.claude/skill-quality/</code> into a single page with a header banner and six
+tables:</p>
 <ol>
 <li><strong>Header banner</strong> — total entity count, subject breakdown, grade
    pill counts, link to the raw <code>/api/kpi.json</code> payload, link back to
