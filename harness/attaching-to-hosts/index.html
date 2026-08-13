@@ -1924,7 +1924,7 @@ ctx which capabilities it may load before planning.</p>
 <li>explicit permission grants for <code>skills</code>, <code>agents</code>, <code>mcps</code>, and <code>harnesses</code>;</li>
 <li>the <code>ctx-mcp-server</code> command and ctx tool names when the permission contract
   allows ctx-core tools;</li>
-<li>ranked skill, agent, and MCP recommendations from the <code>ctx-recommend</code>
+<li>ranked skill, agent, and MCP recommendations from the <code>python -m ctx.cli.recommend</code>
   engine;</li>
 <li><code>related_recommendations</code> after the loop passes selected and rejected
   recommendation IDs;</li>
@@ -2016,7 +2016,7 @@ tools appear only when <code>skills</code>, <code>agents</code>, <code>mcps</cod
 granted.</p>
 <hr />
 <h2 id="installed-harness-attachment">Installed harness attachment<a class="headerlink" href="#installed-harness-attachment" title="Permanent link">&para;</a></h2>
-<p><code>ctx-harness-install &lt;slug&gt;</code> creates <code>.ctx/attach/</code> inside the installed
+<p><code>python -m harness_install &lt;slug&gt;</code> creates <code>.ctx/attach/</code> inside the installed
 harness target. The directory contains the attach files for the modes that
 catalog entry supports:</p>
 <ul>
@@ -2030,7 +2030,7 @@ Setup commands still require <code>--approve-commands</code>; verification comma
 require <code>--run-verify</code>.</p>
 <p>If no catalog harness fits, generate a build handoff instead of forcing a weak
 match:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>ctx-harness-install<span class="w"> </span>--recommend<span class="w"> </span><span class="se">\</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>python<span class="w"> </span>-m<span class="w"> </span>harness_install<span class="w"> </span>--recommend<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-19-2"><a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="w">  </span>--goal<span class="w"> </span><span class="s2">&quot;build a private CAD workflow with a local model&quot;</span><span class="w"> </span><span class="se">\</span>
 </span><span id="__span-19-3"><a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="w">  </span>--model-provider<span class="w"> </span>ollama<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-19-4"><a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="w">  </span>--model<span class="w"> </span>ollama/llama3.1<span class="w"> </span><span class="se">\</span>
@@ -2090,7 +2090,7 @@ and de-ranked from future recommendations. This logic lives in
 <code>ctx.core.quality.quality_signals</code> and runs identically whether
 you're on the MCP path, library path, or <code>ctx run</code> CLI.</p>
 <p>To inspect lifecycle state for a specific skill:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>ctx-skill-quality<span class="w"> </span>explain<span class="w"> </span>fastapi-pro
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>python<span class="w"> </span>-m<span class="w"> </span>skill_quality<span class="w"> </span>explain<span class="w"> </span>fastapi-pro
 </span></code></pre></div>
 <p>Or from Python:</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">ctx.core.quality</span><span class="w"> </span><span class="kn">import</span> <span class="n">quality_signals</span>

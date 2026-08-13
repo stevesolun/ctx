@@ -1657,7 +1657,7 @@ service. Vulnerabilities should be reported through the
 <ul>
 <li>graph, wiki, and external catalog metadata used for recommendations;</li>
 <li>remote and local harness acquisition, installation, and cataloged commands;</li>
-<li>the <code>ctx-monitor</code> HTTP boundary;</li>
+<li>the <code>python -m ctx_monitor</code> HTTP boundary;</li>
 <li>local telemetry spools and optional exporters; and</li>
 <li>the transition from an advisory recommendation to operator-approved execution.</li>
 </ul>
@@ -1778,7 +1778,7 @@ directory, with the host's ordinary filesystem permissions and network access.
 Environment allowlisting does not stop a process from reading accessible files
 or reaching the network. Output redaction does not prevent exfiltration.</p>
 <h3 id="monitor-boundary">Monitor Boundary<a class="headerlink" href="#monitor-boundary" title="Permanent link">&para;</a></h3>
-<p><code>ctx-monitor</code> defaults to <code>127.0.0.1</code> and is designed as a local operator tool.
+<p><code>python -m ctx_monitor</code> defaults to <code>127.0.0.1</code> and is designed as a local operator tool.
 On a loopback bind:</p>
 <ul>
 <li>reads are available to loopback clients without authentication;</li>
@@ -1944,7 +1944,7 @@ permission grant.</p>
 <h2 id="operator-baseline">Operator Baseline<a class="headerlink" href="#operator-baseline" title="Permanent link">&para;</a></h2>
 <p>For the lowest-risk supported posture:</p>
 <ol>
-<li>keep <code>ctx-monitor</code> on loopback;</li>
+<li>keep <code>python -m ctx_monitor</code> on loopback;</li>
 <li>leave telemetry network export disabled, or use a loopback collector;</li>
 <li>allow remote harness network access only to reviewed repository hosts and
    install from an inspected full commit SHA;</li>

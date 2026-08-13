@@ -1498,10 +1498,14 @@ gets smarter every session.</p>
 <p>Optional extras: <code>pip install "claude-ctx[embeddings]"</code> for the
 semantic backend, <code>pip install "claude-ctx[harness]"</code> for local/API
 model harness runs, <code>pip install "claude-ctx[dev]"</code> for the
-pytest/mypy/ruff toolchain. After install the <code>ctx</code>, <code>ctx-scan-repo</code>,
-<code>ctx-skill-quality</code>, <code>ctx-skill-health</code>, and <code>ctx-toolbox</code> console
-scripts are on PATH; <code>python -m ctx --help</code> reaches the same
-run/resume/sessions CLI as <code>ctx</code>. <code>ctx-init --graph</code> installs the fast
+pytest/mypy/ruff toolchain. After install the <code>ctx</code>, <code>ctx-init</code>,
+<code>ctx-scan-repo</code>, <code>ctx-mcp-server</code>, <code>ctx-source-registry</code>,
+<code>ctx-telemetry-export</code>, and <code>ctx-telemetry-retention</code> console scripts are
+on PATH; <code>python -m ctx --help</code> reaches the same CLI as <code>ctx</code>. Skill
+quality and health tooling moved off PATH and is reached with
+<code>python -m skill_quality</code> and
+<code>python -m ctx.adapters.claude_code.skill_health</code>.
+<code>ctx-init --graph</code> installs the fast
 pre-built runtime graph that powers recommendations and harness dry-runs;
 source checkouts use <code>graph/wiki-graph-runtime.tar.gz</code>, while pip installs
 download the matching GitHub release asset. Use
@@ -1621,7 +1625,7 @@ graph-based discovery:</p>
   before they enter a plan.</li>
 <li>During custom/API/local model onboarding and LoopFlow/agent-loop adapter
   calls with explicit user-owned model consent, <code>ctx-init</code>,
-  <code>ctx-harness-install</code>, and <code>python -m ctx.adapters.loopflow</code> use the same
+  <code>python -m harness_install</code>, and <code>python -m ctx.adapters.loopflow</code> use the same
   graph to recommend harnesses above the configured harness match floor.</li>
 </ul>
 <p>The result: you always know what skills, agents, and MCP servers are available
@@ -1637,7 +1641,8 @@ ones are flagged. New ones self-ingest.</p>
 <p>79,958 shipped graph nodes: 12,934 curated skill/agent/MCP/harness nodes plus 67,024 body-backed skill nodes. The graph has
 1,778,069 weighted edges and 52 Louvain communities.
 Ships pre-built in <code>graph/wiki-graph.tar.gz</code> and powers the
-graph-aware recommendations + the pre-ship <code>ctx-dedup-check</code> gate.</p>
+graph-aware recommendations + the pre-ship
+<code>python -m ctx.core.quality.dedup_check</code> gate.</p>
 <p><a href="knowledge-graph/"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13.22 19.03a.75.75 0 0 1 0-1.06L18.19 13H3.75a.75.75 0 0 1 0-1.5h14.44l-4.97-4.97a.749.749 0 0 1 .326-1.275.75.75 0 0 1 .734.215l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0"/></svg></span> Knowledge graph</a></p>
 </li>
 <li>
@@ -1651,7 +1656,7 @@ pattern for custom-model users.</p>
 <li>
 <p><strong>Dashboard</strong></p>
 <hr />
-<p><code>ctx-monitor serve</code> opens a local HTTP dashboard with live graph,
+<p><code>python -m ctx_monitor serve</code> opens a local HTTP dashboard with live graph,
 skill grades + four-signal scores, session timelines, one-click
 load/unload for skills, agents, and MCP servers, selectable
 recommendations, runtime token history, plus harness wiki and graph
@@ -1695,13 +1700,14 @@ A/B/C/D/F.</p>
 <p><strong>Source snapshot</strong></p>
 <hr />
 <p>Current main is <strong>v1.0.21</strong> — MIT, tested on CPython 3.11+ for Linux and macOS,
-6,201 test inventory. Adds enterprise OpenTelemetry-ready telemetry and
-ships console scripts including <code>ctx-init</code>,
-<code>ctx-monitor</code> (local dashboard with graph + wiki + load/unload for
+8,524 test inventory. Adds enterprise OpenTelemetry-ready telemetry and
+ships seven console scripts led by <code>ctx</code> and <code>ctx-init</code>. The maintenance
+tools are still shipped and still work, now via <code>python -m</code>:
+<code>ctx_monitor serve</code> (local dashboard with graph + wiki + load/unload for
 skills, agents, and MCP servers, plus Harness Setup for user-owned LLMs),
-<code>ctx-incremental-attach</code>, <code>ctx-incremental-shadow</code>, <code>ctx-dedup-check</code>
-(pre-ship near-duplicate gate), and
-<code>ctx-tag-backfill</code> (entity hygiene), plus a fast runtime graph artifact
+<code>ctx.core.graph.incremental_attach</code>, <code>ctx.core.graph.incremental_shadow</code>,
+<code>ctx.core.quality.dedup_check</code> (pre-ship near-duplicate gate), and
+<code>ctx.core.quality.tag_backfill</code> (entity hygiene), plus a fast runtime graph artifact
 and the full ~281 MiB wiki tarball with <strong>79,958 nodes / 1,778,069 edges / 52 Louvain communities</strong>.</p>
 <p><a href="https://github.com/stevesolun/ctx/blob/main/CHANGELOG.md"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13.22 19.03a.75.75 0 0 1 0-1.06L18.19 13H3.75a.75.75 0 0 1 0-1.5h14.44l-4.97-4.97a.749.749 0 0 1 .326-1.275.75.75 0 0 1 .734.215l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0"/></svg></span> CHANGELOG</a> ·
 <a href="https://github.com/stevesolun/ctx">Repository</a></p>

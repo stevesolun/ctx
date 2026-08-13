@@ -76,7 +76,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#dashboard-ctx-monitor" class="md-skip">
+        <a href="#dashboard-python-m-ctx_monitor" class="md-skip">
           Skip to content
         </a>
       
@@ -1791,16 +1791,16 @@
   
 
 
-<h1 id="dashboard-ctx-monitor">Dashboard (<code>ctx-monitor</code>)<a class="headerlink" href="#dashboard-ctx-monitor" title="Permanent link">&para;</a></h1>
+<h1 id="dashboard-python-m-ctx_monitor">Dashboard (<code>python -m ctx_monitor</code>)<a class="headerlink" href="#dashboard-python-m-ctx_monitor" title="Permanent link">&para;</a></h1>
 <p>Local HTTP dashboard for ctx's currently supported live observables:
 loaded skills, agents, MCP servers, and installed harness records; session timelines; the
 knowledge graph; the LLM-wiki browser; quality grades + scores;
 durable queue state; graph/wiki artifact versions; filterable audit
 logs; generic-harness validation/escalation state; a live event stream;
 and harness wiki/graph browsing.</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>ctx-monitor<span class="w"> </span>serve<span class="w">              </span><span class="c1"># http://127.0.0.1:8765</span>
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>ctx-monitor<span class="w"> </span>serve<span class="w"> </span>--port<span class="w"> </span><span class="m">8888</span><span class="w">  </span><span class="c1"># custom port</span>
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>ctx-monitor<span class="w"> </span>serve<span class="w"> </span>--host<span class="w"> </span><span class="m">0</span>.0.0.0<span class="w"> </span>--port<span class="w"> </span><span class="m">8888</span><span class="w"> </span>--allow-non-loopback<span class="w">  </span><span class="c1"># LAN read-only</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>python<span class="w"> </span>-m<span class="w"> </span>ctx_monitor<span class="w"> </span>serve<span class="w">              </span><span class="c1"># http://127.0.0.1:8765</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>python<span class="w"> </span>-m<span class="w"> </span>ctx_monitor<span class="w"> </span>serve<span class="w"> </span>--port<span class="w"> </span><span class="m">8888</span><span class="w">  </span><span class="c1"># custom port</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>python<span class="w"> </span>-m<span class="w"> </span>ctx_monitor<span class="w"> </span>serve<span class="w"> </span>--host<span class="w"> </span><span class="m">0</span>.0.0.0<span class="w"> </span>--port<span class="w"> </span><span class="m">8888</span><span class="w"> </span>--allow-non-loopback<span class="w">  </span><span class="c1"># LAN read-only</span>
 </span></code></pre></div>
 <p>Zero Python dependencies added by the dashboard. Everything runs on
 stdlib <code>http.server</code>, using daemon request threads so a live
@@ -1812,7 +1812,7 @@ third-party JavaScript.</p>
 <p>Every page in the dashboard has the same top nav, so getting around
 is <code>Home -&gt; jump anywhere</code>. The dashboard indexes skills, agents, MCP
 servers, and harness pages in wiki/graph views. Harness installation,
-update, and uninstall run through <code>ctx-harness-install</code>; dashboard
+update, and uninstall run through <code>python -m harness_install</code>; dashboard
 load/unload POSTs reject harnesses with the exact dry-run command to use.
 Quality scoring is shown for sidecar-backed skills, agents, and MCP servers.
 The <code>/recommend</code> page exposes the browser selectable recommendation flow:
@@ -1827,9 +1827,9 @@ escalation state, tool-selection totals, selected-vs-system source counts, token
 usage totals, attribution counts, and recent per-tool usage rows.</p>
 <h3 id="smoke-test-the-dashboard">Smoke-test the dashboard<a class="headerlink" href="#smoke-test-the-dashboard" title="Permanent link">&para;</a></h3>
 <p>Use the repo smoke check after dashboard changes or before screenshots. It uses
-only stdlib HTTP calls against a running <code>ctx-monitor</code> instance and checks the
+only stdlib HTTP calls against a running <code>python -m ctx_monitor</code> instance and checks the
 core pages plus graph/wiki/catalog APIs.</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>ctx-monitor<span class="w"> </span>serve
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>python<span class="w"> </span>-m<span class="w"> </span>ctx_monitor<span class="w"> </span>serve
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>python<span class="w"> </span>scripts/dashboard_smoke.py<span class="w"> </span>--warm
 </span></code></pre></div>
 <p>To make latency regressions fail the command, add named thresholds:</p>
@@ -1867,7 +1867,7 @@ page provides search, autocomplete suggestions, and tile cards that deep-link
 into the local dashboard. To open the full live searchable tile catalog, install
 the full wiki pages and start the local dashboard:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>ctx-init<span class="w"> </span>--graph<span class="w"> </span>--graph-install-mode<span class="w"> </span>full<span class="w"> </span>--model-mode<span class="w"> </span>skip
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>ctx-monitor<span class="w"> </span>serve
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>python<span class="w"> </span>-m<span class="w"> </span>ctx_monitor<span class="w"> </span>serve
 </span></code></pre></div>
 <p>Then use:</p>
 <ul>
@@ -1917,7 +1917,7 @@ context.</p>
 <p>The graph tab is a dependency-free interactive SVG view over the
 dashboard-supported skill/agent/MCP/harness graph. Imported skills are normal
 <code>skill</code> nodes in the graph. Harness nodes are browsable and filterable here;
-install/update actions remain in <code>ctx-harness-install</code>. If the SVG renderer
+install/update actions remain in <code>python -m harness_install</code>. If the SVG renderer
 cannot initialize, the dashboard falls back to a list view over the same graph
 payload.
 When you arrive with no
@@ -1965,7 +1965,7 @@ render</code>. It aggregates the quality + lifecycle sidecars under
 </ol>
 <p>If the quality sidecar directory is empty (no scoring has happened
 yet), the page shows a helpful empty-state pointing at
-<code>ctx-skill-quality recompute --all</code>.</p>
+<code>python -m skill_quality recompute --all</code>.</p>
 <h2 id="routes">Routes<a class="headerlink" href="#routes" title="Permanent link">&para;</a></h2>
 <h3 id="top-navigation">Top navigation<a class="headerlink" href="#top-navigation" title="Permanent link">&para;</a></h3>
 <p>Every page shows the same nav bar. The tabs cover the
@@ -1976,7 +1976,7 @@ dashboard-supported observable surface of ctx:</p>
 <p>Harness catalog entries are visible in wiki and graph routes. <code>/loaded</code> shows
 installed harness records from <code>~/.claude/harness-installs/*.json</code>, not the
 full catalog. Harness installation, update, and uninstall remain
-<code>ctx-harness-install</code> workflows, while harness scoring is not exposed in the
+<code>python -m harness_install</code> workflows, while harness scoring is not exposed in the
 dashboard yet.
 Dashboard POST actions are available only from loopback clients and require the
 per-process monitor token injected into the rendered page.</p>
@@ -2142,9 +2142,9 @@ per-process monitor token injected into the rendered page.</p>
 </tbody>
 </table>
 <h3 id="mutation-endpoints">Mutation endpoints<a class="headerlink" href="#mutation-endpoints" title="Permanent link">&para;</a></h3>
-<p>Dashboard GET views are read-only. When <code>ctx-monitor</code> is bound to a
+<p>Dashboard GET views are read-only. When <code>python -m ctx_monitor</code> is bound to a
 non-loopback host, HTML, <code>/api/*</code> JSON, and SSE routes require the
-read-token URL printed by <code>ctx-monitor</code>; the first successful token URL
+read-token URL printed by <code>python -m ctx_monitor</code>; the first successful token URL
 sets an HttpOnly same-site cookie for dashboard navigation. Keep the
 default loopback bind for local automation. POST endpoints enforce
 the exact normalized HTTP <code>Origin</code>/<code>Host</code> authority, including the effective
@@ -2211,7 +2211,7 @@ load/unload mutation endpoint yet.</p>
 </tbody>
 </table>
 <p>Harness load/unload POSTs are rejected with the exact
-<code>ctx-harness-install ... --dry-run</code> command to run instead. Skill rows emit
+<code>python -m harness_install ... --dry-run</code> command to run instead. Skill rows emit
 <code>skill.loaded</code> / <code>skill.unloaded</code>, agent rows emit <code>agent.loaded</code> /
 <code>agent.unloaded</code>, and MCP rows emit <code>toolbox.triggered</code> with
 <code>meta.entity_type="mcp-server"</code> and <code>meta.action</code> set to <code>loaded</code> or
@@ -2327,7 +2327,7 @@ observability proof that ctx's telemetry pipeline is live.</p>
 <h2 id="security">Security<a class="headerlink" href="#security" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Binds to 127.0.0.1 by default</strong>. Use
-  <code>ctx-monitor serve --host 0.0.0.0 --allow-non-loopback</code> only if you
+  <code>python -m ctx_monitor serve --host 0.0.0.0 --allow-non-loopback</code> only if you
   actually want LAN-visible read-only access. The startup output prints a
   one-process read-token URL; without that token or the cookie it sets, LAN
   HTML/API/SSE requests return 403. Mutations remain disabled on non-loopback

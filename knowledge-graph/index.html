@@ -1663,9 +1663,9 @@
 <p>A pre-built weighted graph of skills, agents, MCP servers, and
 harnesses in the ctx ecosystem, shipped as <code>graph/wiki-graph.tar.gz</code>.
 The on-disk JSON and <code>resolve_graph</code> Python API are harness-aware, including
-plain-slug graph walks from <code>harness:&lt;slug&gt;</code> nodes. <code>ctx-monitor</code>
+plain-slug graph walks from <code>harness:&lt;slug&gt;</code> nodes. <code>python -m ctx_monitor</code>
 exposes skill/agent/MCP/harness wiki and graph views. Harness installation,
-update, and uninstall are handled by <code>ctx-harness-install</code>; dashboard
+update, and uninstall are handled by <code>python -m harness_install</code>; dashboard
 load/unload POSTs deliberately reject harnesses and return the dry-run CLI
 command to use instead. Quality scoring is exposed for sidecar-backed skills,
 agents, and MCP servers.</p>
@@ -1748,7 +1748,7 @@ shipped tarball.</p>
 <code>graph/wiki-graph-runtime.tar.gz</code>; pip installs download the matching GitHub
 release asset for the installed package version. This installs
 <code>graphify-out/*</code>, the skill index used by recommendations, and
-the harness pages used by <code>ctx-harness-install</code>:</p>
+the harness pages used by <code>python -m harness_install</code>:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>ctx-init<span class="w"> </span>--graph
 </span></code></pre></div>
 <p>The runtime install includes a small actionable fallback set that does not
@@ -1783,7 +1783,7 @@ browsing through ctx's merged pack/local view:</p>
 <code>.obsidian/</code> config ships inside the tarball — so you can use
 Obsidian's native graph view if you prefer it to the web dashboard.</p>
 <h2 id="how-edges-are-built">How edges are built<a class="headerlink" href="#how-edges-are-built" title="Permanent link">&para;</a></h2>
-<p>Edges are built and explained by the <code>ctx-wiki-graphify</code> console script
+<p>Edges are built and explained by the <code>python -m ctx.core.wiki.wiki_graphify</code> console script
 (<code>ctx.core.wiki.wiki_graphify</code>). A pair must first have at least one base
 signal:</p>
 <ol>
@@ -1844,7 +1844,7 @@ the default because it finishes in seconds and produces equivalent
 quality clusters for the recommendation use case.</p>
 <h2 id="querying-the-graph">Querying the graph<a class="headerlink" href="#querying-the-graph" title="Permanent link">&para;</a></h2>
 <h3 id="via-the-dashboard">Via the dashboard<a class="headerlink" href="#via-the-dashboard" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>ctx-monitor<span class="w"> </span>serve<span class="w">              </span><span class="c1"># http://127.0.0.1:8765</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>python<span class="w"> </span>-m<span class="w"> </span>ctx_monitor<span class="w"> </span>serve<span class="w">              </span><span class="c1"># http://127.0.0.1:8765</span>
 </span></code></pre></div>
 <p>Then open <code>/graph?slug=&lt;entity-slug&gt;&amp;type=&lt;entity-type&gt;</code> for the
 dashboard's interactive SVG neighborhood view, or
@@ -1903,7 +1903,7 @@ The helper <code>resolve_graph.load_graph()</code> does this for you.</p>
   those records, the same recommender falls back to the index file.</li>
 <li>Harness recommendations are a separate path for custom/API/local
   model onboarding (<code>ctx-init --model-mode custom ...</code>),
-  <code>ctx-harness-install</code>, and LoopFlow/agent-loop adapter calls that pass
+  <code>python -m harness_install</code>, and LoopFlow/agent-loop adapter calls that pass
   explicit user-owned/API/local model consent. Model/provider fields can
   improve ranking, but the LoopFlow adapter does not treat them as consent by
   themselves. Harness paths use the same graph filtered to <code>harness</code> nodes and
@@ -1962,7 +1962,7 @@ when you intentionally refresh the release artifact, change global scoring
 configuration, rebuild communities, or compact a long chain of overlays into a
 new base snapshot.</p>
 <p>To stage a coordinated graph+wiki compaction without mutating the active wiki:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>ctx-pack-compact<span class="w"> </span>compact<span class="w"> </span><span class="se">\</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>python<span class="w"> </span>-m<span class="w"> </span>ctx.core.wiki.pack_compaction<span class="w"> </span>compact<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span>--wiki-path<span class="w"> </span>~/.claude/skill-wiki<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">  </span>--base-export-id<span class="w"> </span>&lt;new-export-id&gt;<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">  </span>--staging-dir<span class="w"> </span>/tmp/ctx-pack-stage<span class="w"> </span><span class="se">\</span>
@@ -1972,13 +1972,13 @@ new base snapshot.</p>
 staged graph and wiki base packs. Promotion validates the top-level manifest,
 graph pack manifest, wiki pack manifest, checksums, matching export IDs, and
 graph/wiki entity consistency before replacing active packs:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>ctx-pack-compact<span class="w"> </span>validate<span class="w"> </span><span class="se">\</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>python<span class="w"> </span>-m<span class="w"> </span>ctx.core.wiki.pack_compaction<span class="w"> </span>validate<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span>--staged-graph-packs-dir<span class="w"> </span>/tmp/ctx-pack-stage/graph-packs<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span>--staged-wiki-packs-dir<span class="w"> </span>/tmp/ctx-pack-stage/wiki-packs<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">  </span>--require-compaction-manifest<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">  </span>--json
 </span></code></pre></div>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>ctx-pack-compact<span class="w"> </span>promote<span class="w"> </span><span class="se">\</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>python<span class="w"> </span>-m<span class="w"> </span>ctx.core.wiki.pack_compaction<span class="w"> </span>promote<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span>--wiki-path<span class="w"> </span>~/.claude/skill-wiki<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">  </span>--staged-graph-packs-dir<span class="w"> </span>/tmp/ctx-pack-stage/graph-packs<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">  </span>--staged-wiki-packs-dir<span class="w"> </span>/tmp/ctx-pack-stage/wiki-packs<span class="w"> </span><span class="se">\</span>
@@ -1987,15 +1987,15 @@ graph/wiki entity consistency before replacing active packs:</p>
 <p>Promotion refreshes the SQLite dashboard/recommendation graph store by default.
 Use <code>--graph-store-db &lt;path&gt;</code> to refresh a non-default store, or
 <code>--no-graph-store-refresh</code> only when you plan to rebuild it separately:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>ctx-pack-compact<span class="w"> </span>validate<span class="w"> </span><span class="se">\</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>python<span class="w"> </span>-m<span class="w"> </span>ctx.core.wiki.pack_compaction<span class="w"> </span>validate<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span>--wiki-path<span class="w"> </span>~/.claude/skill-wiki<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">  </span>--json
 </span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>
-</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>ctx-graph-store<span class="w"> </span>build<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>python<span class="w"> </span>-m<span class="w"> </span>ctx.core.graph.graph_store<span class="w"> </span>build<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="w">  </span>--graph-dir<span class="w"> </span>~/.claude/skill-wiki/graphify-out<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="w">  </span>--db<span class="w"> </span>~/.claude/skill-wiki/graphify-out/graph-store.sqlite3
 </span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>
-</span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>ctx-graph-store<span class="w"> </span>validate<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>python<span class="w"> </span>-m<span class="w"> </span>ctx.core.graph.graph_store<span class="w"> </span>validate<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-10-10"><a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="w">  </span>--db<span class="w"> </span>~/.claude/skill-wiki/graphify-out/graph-store.sqlite3
 </span></code></pre></div>
 <h3 id="llm-wiki-design-references">LLM-wiki design references<a class="headerlink" href="#llm-wiki-design-references" title="Permanent link">&para;</a></h3>
@@ -2007,7 +2007,7 @@ MIT, so ctx can use those ideas as product inspiration but must not copy or
 vendor its code or assets.</p>
 <h2 id="rebuilding">Rebuilding<a class="headerlink" href="#rebuilding" title="Permanent link">&para;</a></h2>
 <p>After you add a skill, agent, MCP server, or harness entity page:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>ctx-wiki-worker<span class="w"> </span>--wiki<span class="w"> </span>~/.claude/skill-wiki<span class="w"> </span>--limit<span class="w"> </span><span class="m">1</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>python<span class="w"> </span>-m<span class="w"> </span>ctx.core.wiki.wiki_queue_worker<span class="w"> </span>--wiki<span class="w"> </span>~/.claude/skill-wiki<span class="w"> </span>--limit<span class="w"> </span><span class="m">1</span>
 </span></code></pre></div>
 <p>The <code>entity-upsert</code> worker path validates the queued page hash, updates the
 wiki index, and, when a persisted semantic vector index exists, runs a
@@ -2020,10 +2020,10 @@ dashboard and resolver reads see the merged view. The active wiki page is the
 pack page when one exists, otherwise the local entity markdown file unless a
 pack tombstone hides that relative path.</p>
 <p>For manual review or debugging:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>ctx-incremental-attach<span class="w"> </span>calibrate<span class="w"> </span><span class="se">\</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>python<span class="w"> </span>-m<span class="w"> </span>ctx.core.graph.incremental_attach<span class="w"> </span>calibrate<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span>--graph<span class="w"> </span>~/.claude/skill-wiki/graphify-out/graph.json
 </span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>
-</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>ctx-incremental-attach<span class="w"> </span>attach<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>python<span class="w"> </span>-m<span class="w"> </span>ctx.core.graph.incremental_attach<span class="w"> </span>attach<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="w">  </span>--index-dir<span class="w"> </span>~/.claude/skill-wiki/.embedding-cache/graph/vector-index<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="w">  </span>--overlay<span class="w"> </span>~/.claude/skill-wiki/graphify-out/entity-overlays.jsonl<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="w">  </span>--node-id<span class="w"> </span>skill:fastapi-review<span class="w"> </span><span class="se">\</span>
@@ -2034,7 +2034,7 @@ pack tombstone hides that relative path.</p>
 </span></code></pre></div>
 <p>Shadow-gate a persisted index before trusting a new ANN backend, changed
 thresholds, or a large attach workflow:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>ctx-incremental-shadow<span class="w"> </span><span class="se">\</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>python<span class="w"> </span>-m<span class="w"> </span>ctx.core.graph.incremental_shadow<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">  </span>--index-dir<span class="w"> </span>~/.claude/skill-wiki/.embedding-cache/graph/vector-index<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">  </span>--graph<span class="w"> </span>~/.claude/skill-wiki/graphify-out/graph.json<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="w">  </span>--sample-size<span class="w"> </span><span class="m">100</span><span class="w"> </span><span class="se">\</span>
@@ -2046,23 +2046,23 @@ precision, recall, top-5/top-10/top-20 agreement, score deltas, and bad
 examples. A failing gate means either tune thresholds or use a full graph
 rebuild before shipping.</p>
 <p>If the vector index is missing, rebuild it without repacking artifacts:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>ctx-wiki-graphify<span class="w"> </span><span class="se">\</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>python<span class="w"> </span>-m<span class="w"> </span>ctx.core.wiki.wiki_graphify<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="w">  </span>--wiki-dir<span class="w"> </span>~/.claude/skill-wiki<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="w">  </span>--incremental<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="w">  </span>--graph-only<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="w">  </span>--semantic-vector-index<span class="w"> </span>numpy-flat
 </span></code></pre></div>
-<p>Then drain pending entity-upsert work with <code>ctx-wiki-worker --wiki
+<p>Then drain pending entity-upsert work with <code>python -m ctx.core.wiki.wiki_queue_worker --wiki
 ~/.claude/skill-wiki</code>. This is the current repair path for "build index" and
 "attach pending" without adding another command surface.</p>
 <p>Before publishing graph artifacts, run the full rebuild/export path:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>ctx-wiki-graphify<span class="w">          </span><span class="c1"># rebuild entity graph + communities</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>python<span class="w"> </span>-m<span class="w"> </span>ctx.core.wiki.wiki_graphify<span class="w">          </span><span class="c1"># rebuild entity graph + communities</span>
 </span></code></pre></div>
 <p>The pre-commit hook (<code>.githooks/pre-commit</code>) does <strong>not</strong> rebuild or
 repack graph artifacts from <code>~/.claude/skill-wiki/</code>; that local wiki can
 contain private entities. It refreshes cheap README stats when relevant
 checked-in files are staged and warns when entity sources changed. Run
-<code>ctx-wiki-graphify</code>, validate, repack, and stage the artifacts explicitly
+<code>python -m ctx.core.wiki.wiki_graphify</code>, validate, repack, and stage the artifacts explicitly
 for skill, agent, MCP server, or harness releases.</p>
 <p>Graphify exports stage and validate each generated artifact before atomic
 promotion. <code>graph.json</code>, <code>graph-delta.json</code>, <code>communities.json</code>,
@@ -2098,7 +2098,7 @@ the wiki content and the checked-in graph build configuration.</p>
 <p>Three advisory gates run before the tarball is repackaged. All three produce
 review reports and never auto-modify the inventory.</p>
 <ul>
-<li><strong><code>ctx-dedup-check</code></strong> — flags entity pairs (skill ↔ skill, skill ↔
+<li><strong><code>python -m ctx.core.quality.dedup_check</code></strong> — flags entity pairs (skill ↔ skill, skill ↔
   agent, skill ↔ MCP, agent ↔ agent, agent ↔ MCP, MCP ↔ MCP) at or
   above 0.85 cosine similarity. Incremental: keeps a <code>dedup-state.json</code>
   next to the embedding cache, so follow-up runs only re-check pairs
@@ -2106,11 +2106,11 @@ review reports and never auto-modify the inventory.</p>
   <code>.dedup-allowlist.txt</code>. The current snapshot has 15,976 findings,
   most of which are within-MCP near-duplicates (multiple wrappers
   around the same upstream service).</li>
-<li><strong><code>ctx-tag-backfill</code></strong> — finds installed skills/agents with empty <code>tags:</code>
+<li><strong><code>python -m ctx.core.quality.tag_backfill</code></strong> — finds installed skills/agents with empty <code>tags:</code>
   frontmatter and proposes a backfill from slug tokens and an allowlist of
   body keywords. Existing tag frequency breaks keyword ties. Report-only by
   default; pass <code>--apply</code> to write. Backfills are additive only.</li>
-<li><strong><code>ctx-skillspector-audit</code></strong> — runs a static <code>--no-llm</code> check over
+<li><strong><code>python -m ctx.core.quality.skillspector_audit</code></strong> — runs a static <code>--no-llm</code> check over
   shipped skill bodies with
   <a href="https://github.com/NVIDIA/SkillSpector">NVIDIA SkillSpector</a>, writes
   <code>graph/skillspector-audit.jsonl.gz</code>, and stamps skill entity pages in the

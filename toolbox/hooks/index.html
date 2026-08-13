@@ -1613,11 +1613,11 @@ against the listed files.</p>
 </table>
 <p>The <code>2</code> exit from <code>pre-commit</code> is what actually blocks <code>git commit</code>.</p>
 <h2 id="installation">Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h2>
-<p><code>pip install claude-ctx</code> exposes <code>ctx-toolbox</code> on PATH; wire it into
+<p><code>pip install claude-ctx</code> exposes <code>python -m toolbox</code> on PATH; wire it into
 <code>.githooks/pre-commit</code> directly:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># .githooks/pre-commit</span>
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="c1">#!/bin/sh</span>
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>ctx-toolbox<span class="w"> </span>run<span class="w"> </span>--event<span class="w"> </span>pre-commit
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>python<span class="w"> </span>-m<span class="w"> </span>toolbox<span class="w"> </span>run<span class="w"> </span>--event<span class="w"> </span>pre-commit
 </span></code></pre></div>
 <p>Then <code>git config core.hooksPath .githooks</code>.</p>
 <h2 id="file-save-path-matching">file-save path matching<a class="headerlink" href="#file-save-path-matching" title="Permanent link">&para;</a></h2>
