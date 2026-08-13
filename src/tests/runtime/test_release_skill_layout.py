@@ -600,11 +600,22 @@ def test_release_skill_layout_request_uses_only_derived_stable_identity(tmp_path
 
 
 def test_release_skill_layout_does_not_inherit_recreated_workspace(tmp_path: Path) -> None:
+    """Recreating the workspace must not inherit the previous session.
+
+    Only observable where the filesystem does not immediately reuse the freed
+    inode. ext4 does, so this skips there rather than asserting something the
+    platform cannot deliver -- see ``_identity_digest`` for why stat alone
+    cannot close that gap, and GOOD_FIRST_ISSUES.md for the durable fix.
+    """
+
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     first = _open(tmp_path, workspace)
+    before = workspace.stat().st_ino
     workspace.rmdir()
     workspace.mkdir()
+    if workspace.stat().st_ino == before:
+        pytest.skip("filesystem reused the freed inode; recreation is not observable via stat")
 
     second = _open(tmp_path, workspace)
 

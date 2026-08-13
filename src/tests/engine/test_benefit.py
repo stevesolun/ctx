@@ -887,7 +887,11 @@ def test_candidate_pool_accepts_exact_bound_and_rejects_one_more() -> None:
     )
 
     # Bound algorithmic CPU cost without charging this worker for scheduler
-    # starvation while the full suite is running under xdist.
+    # starvation while the full suite is running under xdist. The bound catches
+    # a pathological blowup, not a slow machine: the real algorithmic guard is
+    # search_evaluation_count below. Calibrated on a laptop it read under 5s and
+    # measured 14.6s on a shared GitHub runner, so it is set where only a
+    # genuine regression can trip it.
     started = time.process_time()
     accepted = _policy().select(candidates[:-1], requested_limit=5)
     elapsed = time.process_time() - started
@@ -895,7 +899,7 @@ def test_candidate_pool_accepts_exact_bound_and_rejects_one_more() -> None:
     assert len(accepted.assessments) == MAX_CANDIDATES
     assert len(accepted.selections) == 5
     assert accepted.search_evaluation_count < 100_000
-    assert elapsed < 5.0
+    assert elapsed < 60.0
     with pytest.raises(ValueError, match="bounded limit"):
         _policy().select(candidates, requested_limit=1)
 

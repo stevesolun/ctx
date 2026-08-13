@@ -18,6 +18,12 @@ import pytest
 import ctx.cli.doctor as doctor_module
 from ctx.cli.doctor import PROVIDER_ENV_VARS, cmd_doctor
 
+# `ctx doctor` reports a blocking cause when model pricing cannot be read, which
+# is correct: without prices there is no cost estimate and no budget gate. That
+# makes these credential-reporting assertions depend on litellm, which lives in
+# the `harness` extra rather than `[dev]`.
+pytest.importorskip("litellm")
+
 READY = "This repository is ready"
 REFUSES = "would refuse to run here"
 

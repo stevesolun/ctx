@@ -85,6 +85,23 @@ def capture_workspace_identity(workspace: Path) -> WorkspaceIdentity:
 
 
 def _identity_digest(device: int, inode: int) -> str:
+    """Identify a directory by the pair the kernel uses for the same purpose.
+
+    Known limit, and it is a real one. This cannot detect a directory that was
+    deleted and recreated when the filesystem reuses the freed inode, which
+    ext4 routinely does -- so on Linux a recreated workspace can hash to the
+    identity of the one it replaced. APFS allocates inodes monotonically, which
+    is why this reads as sound on macOS.
+
+    Neither creation nor change time closes it. ``st_ctime_ns`` moves on any
+    metadata write, which breaks the property that two captures of one
+    workspace agree; ``st_birthtime`` is second-granular and unchanged by a
+    recreate inside the same second, and is absent on many Linux builds.
+    Detecting recreation reliably needs a marker written inside the workspace,
+    which capture deliberately does not do -- capturing an identity must not
+    mutate the thing being identified. Tracked in GOOD_FIRST_ISSUES.md.
+    """
+
     return hashlib.sha256(f"ctx-workspace-v1\0{device}\0{inode}".encode()).hexdigest()
 
 

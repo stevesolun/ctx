@@ -13,6 +13,13 @@ import pytest
 from ctx.runtime.query_decision import QueryHostDescriptor
 from scripts import ctx_ab_benchmark as benchmark
 
+# The deterministic bridge is a loopback in front of the LiteLLM runtime, so it
+# cannot be exercised without it. litellm ships in the `harness` extra, not in
+# `[dev]`, and CI's unit lane installs only `[dev]`. One test guarded itself at
+# line 251; the other eleven did not, and failed in CI on an absence that is not
+# a defect. Guard the module once. Run with `pip install -e ".[dev,harness]"`.
+pytest.importorskip("litellm")
+
 
 ROOT = Path(__file__).resolve().parents[2]
 SCENARIOS = ROOT / "benchmarks" / "ctx_ab" / "scenarios.yaml"

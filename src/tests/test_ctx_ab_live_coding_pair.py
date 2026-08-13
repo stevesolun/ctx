@@ -11,6 +11,12 @@ import pytest
 
 from scripts import ctx_ab_benchmark as benchmark
 
+# Same constraint as the deterministic pair: this drives the LiteLLM runtime
+# through a loopback, so it cannot run without it. litellm is in the `harness`
+# extra, not `[dev]`, and CI's unit lane installs only `[dev]`. Guarded at the
+# module so an absent optional dependency reads as a skip, not 16 failures.
+pytest.importorskip("litellm")
+
 
 ROOT = Path(__file__).resolve().parents[2]
 SCENARIOS = ROOT / "benchmarks" / "ctx_ab" / "scenarios.yaml"

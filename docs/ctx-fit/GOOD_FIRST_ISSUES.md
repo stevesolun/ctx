@@ -390,3 +390,33 @@ anything. Discussion is welcome; code is premature.
   The current output is at least honest about this — it prints "Suggested branch
   (not created)" and states that changes land in your working tree — so the bug
   is the missing capability, not a false claim.
+
+## Workspace identity cannot detect a recreated directory on ext4
+
+**Where.** `src/ctx/runtime/workspace_identity.py`, `_identity_digest`.
+
+**The problem.** A workspace is identified by `sha256(st_dev, st_ino)`. That is
+the pair the kernel itself uses, but it is not enough: when a directory is
+deleted and recreated, ext4 routinely hands back the just-freed inode, so the
+new directory hashes to the identity of the one it replaced and inherits its
+session. APFS allocates inodes monotonically, which is why this reads as sound
+on macOS and only fails on Linux.
+
+**Why the obvious fixes do not work.** `st_ctime_ns` moves on any metadata
+write — including `chmod` — which breaks the property that two captures of one
+workspace agree; adding it turns 26 tests red. `st_birthtime` is second-granular
+and unchanged by a recreate inside the same second, and is absent on many Linux
+builds. Both were tried.
+
+**Where it stands.** `test_release_skill_layout_does_not_inherit_recreated_workspace`
+skips where the filesystem reuses the inode, so the gap is visible rather than
+asserted away.
+
+**A durable fix** probably writes a small marker inside the workspace and folds
+it into the identity. The constraint to respect: capturing an identity must not
+mutate the thing being identified, so the marker has to be created by whatever
+establishes the workspace, not by `capture_workspace_identity`.
+
+**Done when** a recreated workspace gets a different identity on ext4, two
+captures of an unchanged workspace still agree, `chmod` does not change the
+identity, and the skip above is removed.

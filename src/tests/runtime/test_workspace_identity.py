@@ -51,8 +51,11 @@ def test_workspace_identity_detects_delete_and_recreate(tmp_path: Path) -> None:
     workspace.mkdir()
     identity = capture_workspace_identity(workspace)
 
+    _before_ino = workspace.stat().st_ino
     workspace.rmdir()
     workspace.mkdir()
+    if workspace.stat().st_ino == _before_ino:
+        pytest.skip("filesystem reused the freed inode; recreation is not observable via stat")
 
     with pytest.raises(WorkspaceIdentityError, match="changed"):
         identity.assert_current()

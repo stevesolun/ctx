@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -71,7 +72,9 @@ def test_unrelated_invalid_choice_errors_are_untouched() -> None:
     assert result.returncode == 2
     combined = result.stdout + result.stderr
     assert "argument --ctx-engine-mode: invalid choice: 'bogus'" in combined
-    assert "(choose from legacy, shadow, recommend)" in combined
+    # 3.12 quotes the choices, 3.11 does not; the point is that argparse's own
+    # message is untouched, not which interpreter rendered it.
+    assert re.search(r"choose from '?legacy'?, '?shadow'?, '?recommend'?", combined), combined
 
 
 def test_bare_advanced_is_a_usage_error_not_a_success() -> None:
