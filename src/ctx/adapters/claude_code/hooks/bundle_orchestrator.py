@@ -53,7 +53,7 @@ PENDING_UNLOAD = CLAUDE_DIR / "pending-unload.json"
 SHOWN_FLAG = CLAUDE_DIR / ".bundle-suggest-shown"
 
 # Entity-type display ordering for the execution bundle. Harnesses are
-# recommended through ctx-init / ctx-harness-install / loop adapters, not
+# recommended through ctx-init / python -m harness_install / loop adapters, not
 # Claude Code hooks.
 _TYPE_ORDER: tuple[str, ...] = ("skill", "agent", "mcp-server")
 _TYPE_DISPLAY: dict[str, str] = {
@@ -64,9 +64,9 @@ _TYPE_DISPLAY: dict[str, str] = {
 # Install CLI hint per type — surfaced in the message so the user
 # knows how to act on each category.
 _TYPE_INSTALL_CLI: dict[str, str] = {
-    "skill": "ctx-skill-install <slug> --security-scan-required",
-    "agent": "ctx-agent-install <slug>",
-    "mcp-server": "ctx-mcp-install <slug> --cmd '...'",
+    "skill": "python -m ctx.adapters.claude_code.install.skill_install <slug> --security-scan-required",
+    "agent": "python -m ctx.adapters.claude_code.install.agent_install <slug>",
+    "mcp-server": "python -m ctx.adapters.claude_code.install.mcp_install <slug> --cmd '...'",
 }
 
 

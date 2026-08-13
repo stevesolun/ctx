@@ -1,4 +1,4 @@
-"""KPI summary loading and caching for ctx-monitor."""
+"""KPI summary loading and caching for the ctx dashboard."""
 
 from __future__ import annotations
 

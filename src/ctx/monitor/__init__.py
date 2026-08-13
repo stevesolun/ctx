@@ -1,1 +1,1 @@
-"""Dashboard internals for ctx-monitor."""
+"""Internals of the ctx dashboard."""

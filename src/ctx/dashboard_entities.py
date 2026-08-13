@@ -151,8 +151,8 @@ def perform_load(
     if entity_type == "harness":
         return (
             False,
-            "harness installs are managed by ctx-harness-install; "
-            f"run: ctx-harness-install {slug} --dry-run",
+            "harness installs are managed by python -m harness_install; "
+            f"run: python -m harness_install {slug} --dry-run",
         )
     result: Any
     try:
@@ -215,8 +215,8 @@ def perform_unload(
     if entity_type == "harness":
         return (
             False,
-            "harness installs are managed by ctx-harness-install; "
-            f"run: ctx-harness-install {slug} --uninstall --dry-run",
+            "harness installs are managed by python -m harness_install; "
+            f"run: python -m harness_install {slug} --uninstall --dry-run",
         )
     if entity_type == "mcp-server":
         try:

@@ -1,4 +1,4 @@
-"""Queue and artifact status helpers for ctx-monitor."""
+"""Queue and artifact status helpers for the ctx dashboard."""
 
 from __future__ import annotations
 

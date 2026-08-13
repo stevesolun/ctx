@@ -1,1 +1,1 @@
-"""HTTP API helpers for ctx-monitor."""
+"""HTTP API helpers for the ctx dashboard."""

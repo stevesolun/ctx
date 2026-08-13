@@ -1,1 +1,1 @@
-"""Read/write services for ctx-monitor."""
+"""Read/write services for the ctx dashboard."""

@@ -31,7 +31,7 @@ Design notes:
     the exit code.
 
 Wiring:
-  - CLI: ``ctx-dedup-check``.
+  - CLI: ``python -m ctx.core.quality.dedup_check``.
   - Pre-ship gate: invoke after graphify, before ``tar -czf`` of the
     wiki tarball. Documented in ``graph/README.md``.
 """

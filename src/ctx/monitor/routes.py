@@ -1,4 +1,4 @@
-"""Route inventory for ctx-monitor."""
+"""Route inventory for the ctx dashboard."""
 
 from __future__ import annotations
 

@@ -9,13 +9,13 @@ sources listed.
 Usage
 -----
     # Single record from JSON file
-    ctx-mcp-add --from-json /path/to/record.json
+    python -m mcp_add --from-json /path/to/record.json
 
     # JSONL from file, streamed one JSON object per line
-    ctx-mcp-add --from-jsonl /path/to/records.jsonl
+    python -m mcp_add --from-jsonl /path/to/records.jsonl
 
     # JSONL from stdin, streamed one JSON object per line
-    ctx-mcp-add --from-stdin
+    python -m mcp_add --from-stdin
 
     [--dry-run] [--wiki PATH] [--skip-existing]
 """
@@ -677,7 +677,7 @@ def _iter_jsonl_records(lines: Iterable[str]) -> Iterable[dict[str, Any]]:
 
 
 def main() -> None:
-    """Entry point for the ctx-mcp-add CLI."""
+    """Entry point for the python -m mcp_add CLI."""
     parser = argparse.ArgumentParser(description="Add MCP server records to the wiki catalog")
 
     source_group = parser.add_mutually_exclusive_group(required=True)

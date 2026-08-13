@@ -1,4 +1,4 @@
-"""Read-only graph artifact loading helpers for ctx-monitor."""
+"""Read-only graph artifact loading helpers for the ctx dashboard."""
 
 from __future__ import annotations
 

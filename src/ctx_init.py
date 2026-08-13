@@ -14,14 +14,14 @@ What it does:
      ``backups/``).
   2. Copies the shipped starter config if ``skill-system-config.json``
      is missing (otherwise leaves the user's config alone).
-  3. Seeds the starter toolboxes via ``ctx-toolbox init`` if the
+  3. Seeds the starter toolboxes via ``python -m toolbox init`` if the
      global toolboxes file is empty.
   4. In a terminal, guides first-time users through hooks, graph install,
-     model profile, and harness recommendation setup. Automation can
+     per-kind install consent, model profile, and harness recommendation setup. Automation can
      keep the non-interactive path by passing explicit flags such as
      ``--model-mode skip``; ``--wizard`` forces the prompts.
   5. Optionally: injects PostToolUse + Stop hooks via
-     ``ctx-install-hooks``. Skipped unless the wizard or ``--hooks`` asks
+     ``python -m ctx.adapters.claude_code.inject_hooks``. Skipped unless the wizard or ``--hooks`` asks
      for it, so the user has to opt in to modifying
      ``~/.claude/settings.json``.
   6. Optionally: installs the initial graph/wiki archive if missing.
@@ -56,6 +56,12 @@ from pathlib import Path
 from pathlib import PurePosixPath
 from typing import Any
 
+from ctx.core.install_policy_store import (
+    has_persisted_install_policy,
+    load_current_install_policy,
+    persist_install_policy,
+)
+from ctx.engine.installation import INSTALL_CONSENT_MODES, InstallConsentPolicy
 from ctx.utils._fs_utils import safe_atomic_write_text
 
 
@@ -185,7 +191,7 @@ def seed_toolboxes(*, force: bool = False) -> ToolboxSeedResult:
 
 
 def install_hooks(*, ctx_src_dir: Path, settings_path: Path | None = None) -> int:
-    """Run ``inject_hooks.main()`` to wire PostToolUse + Stop hooks."""
+    """Wire the Claude Code prompt and observation hooks."""
     target_settings = settings_path or (_claude_dir() / "settings.json")
     cmd = [
         sys.executable,
@@ -196,6 +202,20 @@ def install_hooks(*, ctx_src_dir: Path, settings_path: Path | None = None) -> in
         "--ctx-dir",
         str(ctx_src_dir),
     ]
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if result.stdout.strip():
+        print(result.stdout.rstrip())
+    if result.stderr.strip():
+        print(result.stderr.rstrip(), file=sys.stderr)
+    return result.returncode
+
+
+def install_codex_hook(*, hooks_path: Path | None = None) -> int:
+    """Register the Codex prompt hook without modifying host trust state."""
+
+    cmd = [sys.executable, "-m", "ctx.adapters.codex.install_query_hook"]
+    if hooks_path is not None:
+        cmd.extend(("--hooks-path", str(hooks_path)))
     result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if result.stdout.strip():
         print(result.stdout.rstrip())
@@ -2101,7 +2121,7 @@ def _harness_frontmatter_from_wiki(slug: str) -> dict[str, Any]:
 def _load_harness_recommendation_graph() -> Any:
     """Load a tiny harness-only graph for interactive onboarding.
 
-    ``ctx-init`` and ``ctx-harness-install --recommend`` are user-facing
+    ``ctx-init`` and ``python -m harness_install --recommend`` are user-facing
     wizard paths. Loading the full 100k-node graph there is unnecessary and
     can take tens of seconds on slower hosts; harness fit only needs harness
     entity metadata.
@@ -2249,6 +2269,22 @@ def _prompt_knowledge_mode(default: str = "shipped") -> str:
         print("  Please choose shipped, local, enriched, or skip.")
 
 
+def _prompt_install_consent_mode(capability_label: str, *, default: str) -> str:
+    while True:
+        answer = (
+            input(
+                f"Install recommended {capability_label} automatically or ask each time? "
+                f"[{default}; choices: preapproved-auto/ask-each-time] "
+            )
+            .strip()
+            .lower()
+        )
+        mode = answer or default
+        if mode in INSTALL_CONSENT_MODES:
+            return mode
+        print("  Please choose preapproved-auto or ask-each-time.")
+
+
 def _harness_requirements_from_args(args: argparse.Namespace) -> dict[str, str]:
     requirements: dict[str, str] = {}
     for key, attr in _HARNESS_REQUIREMENT_FIELDS:
@@ -2270,7 +2306,7 @@ def _harness_plan_command(
     harness_requirements: dict[str, str],
 ) -> str:
     parts = [
-        "ctx-harness-install --recommend",
+        "python -m harness_install --recommend",
         f"--goal {json.dumps(goal or model or 'custom model work')}",
     ]
     if model_provider:
@@ -2326,8 +2362,13 @@ def _should_run_wizard(
     return bool(args.wizard or (not raw_argv and _stdio_is_interactive()))
 
 
-def run_wizard(args: argparse.Namespace) -> None:
+def run_wizard(
+    args: argparse.Namespace,
+    install_policy: InstallConsentPolicy,
+) -> None:
     """Prompt for first-run choices and mutate parsed args in place."""
+    if not isinstance(install_policy, InstallConsentPolicy):
+        raise TypeError("install_policy must be an InstallConsentPolicy")
     print("ctx-init wizard:")
     args.hooks = _prompt_yes_no(
         "Install Claude Code observation hooks now?",
@@ -2341,6 +2382,19 @@ def run_wizard(args: argparse.Namespace) -> None:
         )
     elif args.knowledge_mode == "local":
         args.graph = False
+
+    args.skill_install_consent = _prompt_install_consent_mode(
+        "skills",
+        default=args.skill_install_consent or install_policy.skill_mode,
+    )
+    args.agent_install_consent = _prompt_install_consent_mode(
+        "agents",
+        default=args.agent_install_consent or install_policy.agent_mode,
+    )
+    args.mcp_install_consent = _prompt_install_consent_mode(
+        "MCP servers",
+        default=args.mcp_install_consent or install_policy.mcp_server_mode,
+    )
 
     args.model_mode = _prompt_model_mode(args.model_mode or "claude-code")
     if args.model_mode == "skip":
@@ -2462,7 +2516,7 @@ def run_model_onboarding(args: argparse.Namespace, claude: Path) -> int:
             fit = float(row.get("fit_score") or row.get("normalized_score") or 0.0)
             name = row.get("name")
             print(f"       - {name} (fit {fit:.2f})")
-            print(f"         install: ctx-harness-install {name} --dry-run")
+            print(f"         install: python -m harness_install {name} --dry-run")
     elif goal or mode == "custom":
         print("  [info] no harness recommendations matched yet")
         print(
@@ -2480,6 +2534,36 @@ def run_model_onboarding(args: argparse.Namespace, claude: Path) -> int:
 # ─── CLI ────────────────────────────────────────────────────────────────────
 
 
+_INSTALL_CONSENT_ARGUMENTS = (
+    "skill_install_consent",
+    "agent_install_consent",
+    "mcp_install_consent",
+)
+
+
+def _install_consent_policy_from_args(args: argparse.Namespace) -> InstallConsentPolicy:
+    return InstallConsentPolicy(
+        skill_mode=args.skill_install_consent,
+        agent_mode=args.agent_install_consent,
+        mcp_server_mode=args.mcp_install_consent,
+    )
+
+
+def _print_install_consent_policy(
+    policy: InstallConsentPolicy,
+    *,
+    persisted: bool,
+) -> None:
+    source = "persisted" if persisted else "safe default"
+    print(
+        "  [ok] install consent "
+        f"({source}): skills={policy.skill_mode}, "
+        f"agents={policy.agent_mode}, "
+        f"mcp-servers={policy.mcp_server_mode}, "
+        f"policy-digest={policy.policy_digest}"
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="ctx-init",
@@ -2488,7 +2572,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--hooks",
         action="store_true",
-        help="Inject PostToolUse + Stop hooks into ~/.claude/settings.json",
+        help="Inject CTX prompt and observation hooks into Claude Code settings",
+    )
+    parser.add_argument(
+        "--codex-hooks",
+        action="store_true",
+        help="Register the CTX prompt hook in Codex hooks.json (trust remains host-owned)",
     )
     parser.add_argument(
         "--graph",
@@ -2532,6 +2621,20 @@ def main(argv: list[str] | None = None) -> int:
             "only, shipped plus user enrichment, or skip recording a policy."
         ),
     )
+    for flag, destination, label in (
+        ("--skill-install-consent", "skill_install_consent", "skills"),
+        ("--agent-install-consent", "agent_install_consent", "agents"),
+        ("--mcp-install-consent", "mcp_install_consent", "MCP servers"),
+    ):
+        parser.add_argument(
+            flag,
+            dest=destination,
+            choices=tuple(sorted(INSTALL_CONSENT_MODES)),
+            help=(
+                f"Persistent-install consent for recommended {label}: "
+                "preapproved-auto or ask-each-time"
+            ),
+        )
     parser.add_argument(
         "--force",
         action="store_true",
@@ -2541,8 +2644,8 @@ def main(argv: list[str] | None = None) -> int:
         "--wizard",
         action="store_true",
         help=(
-            "Prompt for hooks, graph install, model profile, and harness "
-            "recommendation setup. Plain ctx-init does this automatically "
+            "Prompt for hooks, graph install, per-kind install consent, model "
+            "profile, and harness recommendation setup. Plain ctx-init does this automatically "
             "when run in an interactive terminal."
         ),
     )
@@ -2593,8 +2696,30 @@ def main(argv: list[str] | None = None) -> int:
     )
     raw_argv = sys.argv[1:] if argv is None else list(argv)
     args = parser.parse_args(raw_argv)
-    if _should_run_wizard(args, raw_argv):
-        run_wizard(args)
+    explicit_install_modes = tuple(
+        getattr(args, field_name) for field_name in _INSTALL_CONSENT_ARGUMENTS
+    )
+    supplied_install_modes = sum(value is not None for value in explicit_install_modes)
+    run_interactive_wizard = _should_run_wizard(args, raw_argv)
+    if not run_interactive_wizard and supplied_install_modes not in {0, 3}:
+        parser.error(
+            "--skill-install-consent, --agent-install-consent, and "
+            "--mcp-install-consent must be supplied together"
+        )
+    try:
+        policy_was_persisted = has_persisted_install_policy()
+        current_install_policy = load_current_install_policy()
+    except Exception as exc:  # noqa: BLE001 - fail closed before setup side effects.
+        print(
+            f"  [error] failed to load install consent policy ({type(exc).__name__})",
+            file=sys.stderr,
+        )
+        return 1
+    if not isinstance(current_install_policy, InstallConsentPolicy):
+        print("  [error] failed to load install consent policy", file=sys.stderr)
+        return 1
+    if run_interactive_wizard:
+        run_wizard(args, current_install_policy)
     if args.knowledge_mode == "local" and args.graph:
         print(
             "  [warn] --knowledge-mode local cannot be combined with --graph; "
@@ -2603,7 +2728,28 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
-
+    should_persist_install_policy = run_interactive_wizard or supplied_install_modes == 3
+    resolved_install_policy = (
+        _install_consent_policy_from_args(args)
+        if should_persist_install_policy
+        else current_install_policy
+    )
+    if should_persist_install_policy:
+        try:
+            persisted_policy_digest = persist_install_policy(resolved_install_policy)
+            if persisted_policy_digest != resolved_install_policy.policy_digest:
+                raise ValueError("persisted install policy digest mismatch")
+        except Exception as exc:  # noqa: BLE001 - fail before tools, hooks, or graph work.
+            print(
+                f"  [error] failed to persist install consent policy ({type(exc).__name__})",
+                file=sys.stderr,
+            )
+            return 1
+        policy_was_persisted = True
+    _print_install_consent_policy(
+        resolved_install_policy,
+        persisted=policy_was_persisted,
+    )
     claude = _claude_dir()
     print(f"ctx-init: setting up {claude}")
 
@@ -2646,12 +2792,23 @@ def main(argv: list[str] | None = None) -> int:
     if args.hooks:
         rc = install_hooks(ctx_src_dir=_resolve_ctx_src_dir())
         if rc == 0:
-            print("  [ok] PostToolUse + Stop hooks injected")
+            print("  [ok] Claude Code prompt and observation hooks injected")
         else:
             print(f"  [warn] hook injection returned {rc}", file=sys.stderr)
             final_rc = rc
     else:
         print("  [skip] hook injection (pass --hooks to enable)")
+
+    if args.codex_hooks:
+        rc = install_codex_hook()
+        if rc == 0:
+            print("  [ok] Codex prompt hook registered; approve it in Codex /hooks")
+        else:
+            print(f"  [warn] Codex hook registration returned {rc}", file=sys.stderr)
+            if final_rc == 0:
+                final_rc = rc
+    else:
+        print("  [skip] Codex hook registration (pass --codex-hooks to enable)")
 
     if args.graph:
         rc = build_graph(
@@ -2680,14 +2837,19 @@ def main(argv: list[str] | None = None) -> int:
     if rc != 0 and final_rc == 0:
         final_rc = rc
 
+    # Label first, command second: the surviving invocations are `python -m`
+    # module paths, and trailing `# comment` columns can no longer be aligned
+    # across them without running past the line limit.
     print("\nctx-init: done. Next steps:")
-    print("  - ctx-toolbox list                 # see starter toolboxes")
-    print("  - ctx-skill-health dashboard       # baseline health scan")
-    print("  - ctx-monitor serve                # local dashboard at :8765")
+    print("  - starter toolboxes:  python -m toolbox list")
+    print("  - baseline health:    python -m ctx.adapters.claude_code.skill_health dashboard")
+    print("  - local dashboard:    python -m ctx_monitor serve   (http://127.0.0.1:8765)")
     if not args.hooks:
-        print("  - ctx-init --hooks                 # wire live observation")
+        print("  - live observation:   ctx-init --hooks")
+    if not args.codex_hooks:
+        print("  - Codex prompt hook:  ctx-init --codex-hooks")
     if not args.graph and args.knowledge_mode != "local":
-        print("  - ctx-init --graph                 # install knowledge graph")
+        print("  - knowledge graph:    ctx-init --graph")
     return final_rc
 
 

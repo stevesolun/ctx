@@ -54,7 +54,7 @@ toolboxes:
 Run it manually:
 
 ```bash
-ctx-toolbox run --event pre-commit
+python -m toolbox run --event pre-commit
 ```
 
 Or let the `pre-commit` hook fire it automatically — see

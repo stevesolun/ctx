@@ -680,7 +680,7 @@ def test_config_and_harness_pages_support_browser_wizard_flows(
 
         page.locator("[data-select-harness='langgraph']").click()
         selected = page.locator("#selected-harness-command").inner_text()
-        assert "ctx-harness-install langgraph --dry-run" in selected
+        assert "python -m harness_install langgraph --dry-run" in selected
         assert "ctx-scan-repo --repo . --recommend" in selected
     finally:
         harness.close()

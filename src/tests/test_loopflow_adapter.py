@@ -1423,7 +1423,9 @@ def test_harnesses_require_user_owned_llm(monkeypatch) -> None:
     ]
     assert allowed["capabilities"]["harnesses"][0]["name"] == "local-agent-loop"
     assert shlex.split(allowed["agent_loop"]["harness_install"]) == [
-        "ctx-harness-install",
+        "python",
+        "-m",
+        "harness_install",
         "--dry-run",
         "--goal=run with a private model",
         "--model-provider=ollama",
@@ -1461,10 +1463,12 @@ def test_harness_install_command_is_shell_quoted(monkeypatch) -> None:
 
     command = payload["agent_loop"]["harness_install"]
 
-    assert command.startswith("ctx-harness-install --dry-run")
+    assert command.startswith("python -m harness_install --dry-run")
     assert command.endswith("-- '-local $(touch bad)'")
     assert shlex.split(command) == [
-        "ctx-harness-install",
+        "python",
+        "-m",
+        "harness_install",
         "--dry-run",
         "--goal=-run $(touch bad)",
         "--model-provider=-open`whoami`",
@@ -1502,7 +1506,9 @@ def test_unknown_harness_requirements_warn_without_crashing(monkeypatch) -> None
 
     assert payload["warnings"] == ["ignored unknown harness requirement(s): unknown"]
     assert shlex.split(payload["agent_loop"]["harness_install"]) == [
-        "ctx-harness-install",
+        "python",
+        "-m",
+        "harness_install",
         "--dry-run",
         "--goal=run with a private model",
         "--harness-runtime=local workstation",
@@ -1547,7 +1553,9 @@ def test_main_api_key_env_reaches_harness_install(monkeypatch, capsys) -> None:
 
     payload = json.loads(capsys.readouterr().out)
     assert shlex.split(payload["agent_loop"]["harness_install"]) == [
-        "ctx-harness-install",
+        "python",
+        "-m",
+        "harness_install",
         "--dry-run",
         "--goal=run remote loop",
         "--model-provider=openai",

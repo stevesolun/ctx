@@ -15,7 +15,7 @@ Why this exists (from Phase 6e close-out):
   - Without ``github_url``, the quality scorer's popularity and
     freshness signals stay neutral for every MCP, flattening the
     A/B/C/D distribution to 100% B+C.
-  - ``ctx-mcp-install`` needs a URL to pass to ``claude mcp add``.
+  - ``python -m ctx.adapters.claude_code.install.mcp_install`` needs a URL to pass to ``claude mcp add``.
   - The knowledge graph has no way to link pulsemcp entries to the
     same repo surfaced elsewhere (awesome-mcp, mcp-get, ...).
 
@@ -36,12 +36,12 @@ a second run over the same day is near-instant (cache hit) and a
 re-run tomorrow refreshes everything naturally.
 
 Usage:
-    ctx-mcp-enrich --source pulsemcp                  # all entities
-    ctx-mcp-enrich --source pulsemcp --limit 50       # first 50 only
-    ctx-mcp-enrich --source pulsemcp --slug foo-bar   # single entity
-    ctx-mcp-enrich --source pulsemcp --status         # checkpoint report
-    ctx-mcp-enrich --source pulsemcp --reset          # delete checkpoint
-    ctx-mcp-enrich --source pulsemcp --dry-run        # fetch without writes
+    python -m mcp_enrich --source pulsemcp                  # all entities
+    python -m mcp_enrich --source pulsemcp --limit 50       # first 50 only
+    python -m mcp_enrich --source pulsemcp --slug foo-bar   # single entity
+    python -m mcp_enrich --source pulsemcp --status         # checkpoint report
+    python -m mcp_enrich --source pulsemcp --reset          # delete checkpoint
+    python -m mcp_enrich --source pulsemcp --dry-run        # fetch without writes
 """
 
 from __future__ import annotations
@@ -400,7 +400,7 @@ def _render_scalar(value: Any) -> str:
     a Source implementation that returned a multi-line URL value
     (e.g. scraped from a poisoned detail page) would otherwise inject
     fake YAML keys like ``status: installed`` or ``install_cmd: ...``
-    which the next ``ctx-mcp-install --force`` would dutifully pick
+    which the next ``python -m ctx.adapters.claude_code.install.mcp_install --force`` would dutifully pick
     up from the now-poisoned frontmatter. The executable allowlist
     (commit b79be55) catches most of the blast radius today, but the
     injection vector must be shut at the writer too.
@@ -713,7 +713,7 @@ def _print_status(wiki_path: Path, source: str) -> None:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="ctx-mcp-enrich",
+        prog="python -m mcp_enrich",
         description=(
             "Enrich MCP entity frontmatter from per-source detail pages. "
             "Currently supports --source pulsemcp (github_url + stars)."
@@ -814,7 +814,7 @@ def main() -> None:
     else:
         entity_paths = list(_iter_entities(wiki_path))
         if not entity_paths:
-            print("No MCP entities found — run ctx-mcp-ingest first.", file=sys.stderr)
+            print("No MCP entities found — run python -m mcp_ingest first.", file=sys.stderr)
             sys.exit(1)
 
     graceful = _GracefulExit()

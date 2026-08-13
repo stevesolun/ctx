@@ -1,4 +1,4 @@
-"""Operational dashboard pages for ctx-monitor."""
+"""Operational pages for the ctx dashboard."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def render_kpi(
             "The KPI dashboard reads from "
             "<code>~/.claude/skill-quality/*.json</code> and "
             "<code>*.lifecycle.json</code>. Run "
-            "<code>ctx-skill-quality recompute --all</code> to populate "
+            "<code>python -m skill_quality recompute --all</code> to populate "
             "sidecars, then reload this page.</p>"
             "<p class='muted'>CLI equivalent: "
             "<code>python -m kpi_dashboard render</code></p></div>"

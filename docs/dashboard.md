@@ -1,4 +1,4 @@
-# Dashboard (`ctx-monitor`)
+# Dashboard (`python -m ctx_monitor`)
 
 Local HTTP dashboard for ctx's currently supported live observables:
 loaded skills, agents, MCP servers, and installed harness records; session timelines; the
@@ -8,9 +8,9 @@ logs; generic-harness validation/escalation state; a live event stream;
 and harness wiki/graph browsing.
 
 ```bash
-ctx-monitor serve              # http://127.0.0.1:8765
-ctx-monitor serve --port 8888  # custom port
-ctx-monitor serve --host 0.0.0.0 --port 8888 --allow-non-loopback  # LAN read-only
+python -m ctx_monitor serve              # http://127.0.0.1:8765
+python -m ctx_monitor serve --port 8888  # custom port
+python -m ctx_monitor serve --host 0.0.0.0 --port 8888 --allow-non-loopback  # LAN read-only
 ```
 
 Zero Python dependencies added by the dashboard. Everything runs on
@@ -25,7 +25,7 @@ third-party JavaScript.
 Every page in the dashboard has the same top nav, so getting around
 is `Home -> jump anywhere`. The dashboard indexes skills, agents, MCP
 servers, and harness pages in wiki/graph views. Harness installation,
-update, and uninstall run through `ctx-harness-install`; dashboard
+update, and uninstall run through `python -m harness_install`; dashboard
 load/unload POSTs reject harnesses with the exact dry-run command to use.
 Quality scoring is shown for sidecar-backed skills, agents, and MCP servers.
 The `/recommend` page exposes the browser selectable recommendation flow:
@@ -42,11 +42,11 @@ usage totals, attribution counts, and recent per-tool usage rows.
 ### Smoke-test the dashboard
 
 Use the repo smoke check after dashboard changes or before screenshots. It uses
-only stdlib HTTP calls against a running `ctx-monitor` instance and checks the
+only stdlib HTTP calls against a running `python -m ctx_monitor` instance and checks the
 core pages plus graph/wiki/catalog APIs.
 
 ```bash
-ctx-monitor serve
+python -m ctx_monitor serve
 python scripts/dashboard_smoke.py --warm
 ```
 
@@ -93,7 +93,7 @@ the full wiki pages and start the local dashboard:
 
 ```bash
 ctx-init --graph --graph-install-mode full --model-mode skip
-ctx-monitor serve
+python -m ctx_monitor serve
 ```
 
 Then use:
@@ -148,7 +148,7 @@ context.
 The graph tab is a dependency-free interactive SVG view over the
 dashboard-supported skill/agent/MCP/harness graph. Imported skills are normal
 `skill` nodes in the graph. Harness nodes are browsable and filterable here;
-install/update actions remain in `ctx-harness-install`. If the SVG renderer
+install/update actions remain in `python -m harness_install`. If the SVG renderer
 cannot initialize, the dashboard falls back to a list view over the same graph
 payload.
 When you arrive with no
@@ -199,7 +199,7 @@ render`. It aggregates the quality + lifecycle sidecars under
 
 If the quality sidecar directory is empty (no scoring has happened
 yet), the page shows a helpful empty-state pointing at
-`ctx-skill-quality recompute --all`.
+`python -m skill_quality recompute --all`.
 
 ## Routes
 
@@ -217,7 +217,7 @@ Home · Loaded · Skills · Wiki · Graph · Recommend · Manage · Harness Setu
 Harness catalog entries are visible in wiki and graph routes. `/loaded` shows
 installed harness records from `~/.claude/harness-installs/*.json`, not the
 full catalog. Harness installation, update, and uninstall remain
-`ctx-harness-install` workflows, while harness scoring is not exposed in the
+`python -m harness_install` workflows, while harness scoring is not exposed in the
 dashboard yet.
 Dashboard POST actions are available only from loopback clients and require the
 per-process monitor token injected into the rendered page.
@@ -267,9 +267,9 @@ per-process monitor token injected into the rendered page.
 
 ### Mutation endpoints
 
-Dashboard GET views are read-only. When `ctx-monitor` is bound to a
+Dashboard GET views are read-only. When `python -m ctx_monitor` is bound to a
 non-loopback host, HTML, `/api/*` JSON, and SSE routes require the
-read-token URL printed by `ctx-monitor`; the first successful token URL
+read-token URL printed by `python -m ctx_monitor`; the first successful token URL
 sets an HttpOnly same-site cookie for dashboard navigation. Keep the
 default loopback bind for local automation. POST endpoints enforce
 the exact normalized HTTP `Origin`/`Host` authority, including the effective
@@ -293,7 +293,7 @@ load/unload mutation endpoint yet.
 | `POST /api/entity/delete` | `{"slug": "...", "entity_type": "skill"}` | validate the request, unload a live entity before unlinking its wiki page, then queue graph refresh and an active-pack tombstone for worker drain |
 
 Harness load/unload POSTs are rejected with the exact
-`ctx-harness-install ... --dry-run` command to run instead. Skill rows emit
+`python -m harness_install ... --dry-run` command to run instead. Skill rows emit
 `skill.loaded` / `skill.unloaded`, agent rows emit `agent.loaded` /
 `agent.unloaded`, and MCP rows emit `toolbox.triggered` with
 `meta.entity_type="mcp-server"` and `meta.action` set to `loaded` or
@@ -369,7 +369,7 @@ observability proof that ctx's telemetry pipeline is live.
 ## Security
 
 - **Binds to 127.0.0.1 by default**. Use
-  `ctx-monitor serve --host 0.0.0.0 --allow-non-loopback` only if you
+  `python -m ctx_monitor serve --host 0.0.0.0 --allow-non-loopback` only if you
   actually want LAN-visible read-only access. The startup output prints a
   one-process read-token URL; without that token or the cookie it sets, LAN
   HTML/API/SSE requests return 403. Mutations remain disabled on non-loopback

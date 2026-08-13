@@ -1,4 +1,4 @@
-"""Read-only harness catalog helpers for ctx-monitor."""
+"""Read-only harness catalog helpers for the ctx dashboard."""
 
 from __future__ import annotations
 

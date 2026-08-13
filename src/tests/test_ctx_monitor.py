@@ -912,7 +912,7 @@ def test_render_loaded_shows_harness_install_without_unload_button(fake_claude: 
     html = mt.render_loaded()
 
     assert "langgraph" in html
-    assert "ctx-harness-install langgraph --uninstall --dry-run" in html
+    assert "python -m harness_install langgraph --uninstall --dry-run" in html
     assert "data-slug='langgraph'" not in html
 
 
@@ -3222,8 +3222,8 @@ def test_render_runtime_harness_entity_shows_install_commands(
     html_out = mt.render_wiki_entity("mirage", entity_type="harness")
 
     assert "Install harness" in html_out
-    assert "ctx-harness-install mirage --dry-run" in html_out
-    assert "ctx-harness-install mirage" in html_out
+    assert "python -m harness_install mirage --dry-run" in html_out
+    assert "python -m harness_install mirage" in html_out
     assert "data-testid='runtime-entity-load'" not in html_out
 
 
@@ -6643,7 +6643,7 @@ def test_entity_delete_keeps_page_when_live_unload_fails(
     monkeypatch.setattr(
         mt,
         "perform_unload",
-        lambda slug, entity_type="skill": (False, "use ctx-harness-install"),
+        lambda slug, entity_type="skill": (False, "use python -m harness_install"),
     )
 
     ok, detail = mt.delete_wiki_entity("local-harness", "harness")
@@ -6677,8 +6677,8 @@ def test_render_kpi_empty_state(fake_claude: Path) -> None:
     html_out = mt.render_kpi()
     assert "<h1>KPIs</h1>" in html_out
     assert "No KPI data yet" in html_out
-    assert "ctx-skill-quality recompute --all" in html_out
-    assert "ctx-skill-quality score --all" not in html_out
+    assert "python -m skill_quality recompute --all" in html_out
+    assert "python -m skill_quality score --all" not in html_out
 
 
 def test_render_kpi_with_sidecars(fake_claude: Path) -> None:
@@ -7347,8 +7347,8 @@ def test_render_harness_wizard_guides_model_choice_and_real_commands(
     assert "Model provider" in html_out
     assert "Development goal" in html_out
     assert "data-harness-slug='langgraph'" in html_out
-    assert "ctx-harness-install --recommend" in html_out
-    assert "ctx-harness-install langgraph --dry-run" in html_out
+    assert "python -m harness_install --recommend" in html_out
+    assert "python -m harness_install langgraph --dry-run" in html_out
     assert "ctx-scan-repo --repo . --recommend" in html_out
     assert "ctx-scan-repo --recommend" not in html_out
     assert "--plan-on-no-fit" in html_out
@@ -7375,8 +7375,8 @@ def test_harness_page_module_renders_catalog_cards_and_commands() -> None:
     assert "<h1>Harness Setup</h1>" in html_out
     assert "id='harness-wizard-form'" in html_out
     assert "data-harness-slug='langgraph'" in html_out
-    assert "ctx-harness-install langgraph --dry-run" in html_out
-    assert "ctx-harness-install --recommend" in html_out
+    assert "python -m harness_install langgraph --dry-run" in html_out
+    assert "python -m harness_install --recommend" in html_out
     assert "--plan-on-no-fit" in html_out
     assert "<option>windows</option>" not in html_out
     assert "<option>macos</option>" in html_out

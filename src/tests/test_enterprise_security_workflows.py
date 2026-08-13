@@ -93,12 +93,18 @@ def test_codeql_config_excludes_non_product_and_fixture_trees() -> None:
 
     assert config["queries"] == [{"uses": "security-extended"}]
     assert config["paths"] == ["src", "scripts", "hooks"]
+    # src/tests is excluded because it is not shipped (absent from the wheel's
+    # package list) and it deliberately builds the insecure conditions the
+    # product must reject, so scanning it reports the fixtures rather than the
+    # product. Pinned here so widening the exclusion set stays a decision.
     assert set(config["paths-ignore"]) == {
         "imported-skills/**",
         "graph/**",
         "docs/**",
         "**/fixtures/**",
+        "src/tests/**",
     }
+    assert "src" in config["paths"], "product code must still be scanned"
 
 
 @pytest.mark.parametrize(

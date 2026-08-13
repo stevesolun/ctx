@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-inject_hooks.py -- Inject PostToolUse and Stop hooks into ~/.claude/settings.json.
+inject_hooks.py -- Inject CTX lifecycle hooks into ~/.claude/settings.json.
 
 Merges new hook entries without overwriting existing ones.
 Idempotent: safe to run multiple times.
@@ -12,22 +12,24 @@ Usage:
 """
 
 import argparse
-import json
 import os
 import shlex
 import sys
-import tempfile
 from pathlib import Path
+
+from ctx.adapters.hook_config import (
+    load_json_object,
+    merge_hook_events,
+    remove_python_module_handlers,
+    update_json_object_locked,
+    write_json_object_atomic,
+)
 
 
 def load_settings(path: Path) -> dict:
-    """Load existing settings.json or return empty dict."""
-    if path.exists():
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            print(f"Warning: {path} is invalid JSON, starting fresh", file=sys.stderr)
-    return {}
+    """Load existing settings.json without repairing malformed user data."""
+
+    return load_json_object(path)
 
 
 def make_hooks(ctx_dir: str) -> dict:
@@ -49,6 +51,7 @@ def make_hooks(ctx_dir: str) -> dict:
     skill_add_cmd = _module_cmd("skill_add_detector", "--from-stdin")
     # Graph-based skill suggestion: surfaces pending-skills.json to Claude for user approval
     suggest_cmd = _module_cmd("ctx.adapters.claude_code.hooks.bundle_orchestrator")
+    query_cmd = _module_cmd("ctx.adapters.claude_code.query_handler")
     # Change-triggered backup: fires on every Edit/Write/MultiEdit, takes a
     # snapshot into ~/.claude/backups/ ONLY when tracked files actually
     # changed. SHA-gated so no-op edits don't create folders. Without this,
@@ -60,6 +63,17 @@ def make_hooks(ctx_dir: str) -> dict:
     )
 
     return {
+        "UserPromptSubmit": [
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": query_cmd,
+                        "timeout": 10,
+                    },
+                ],
+            },
+        ],
         "PostToolUse": [
             {
                 "matcher": ".*",
@@ -120,26 +134,122 @@ def _module_cmd(module: str, *args: str) -> str:
 _STALE_PATTERNS = ["context-monitor.py", "usage-tracker.py", "skill-transformer.py"]
 
 
+def _validate_claude_handler(handler: dict[str, object], *, event_name: str) -> None:
+    handler_type = handler.get("type")
+    if handler_type not in {"command", "http", "mcp_tool", "prompt", "agent"}:
+        raise ValueError(f"existing {event_name} handler type is invalid")
+    required_fields = {
+        "command": ("command",),
+        "http": ("url",),
+        "mcp_tool": ("server", "tool"),
+        "prompt": ("prompt",),
+        "agent": ("prompt",),
+    }[str(handler_type)]
+    for required_field in required_fields:
+        required_value = handler.get(required_field)
+        if not isinstance(required_value, str) or not required_value.strip():
+            raise ValueError(f"existing {event_name} handler {required_field} is invalid")
+    timeout = handler.get("timeout")
+    if timeout is not None and (
+        not isinstance(timeout, int | float) or isinstance(timeout, bool) or timeout <= 0
+    ):
+        raise ValueError(f"existing {event_name} handler timeout is invalid")
+    if "async" in handler and not isinstance(handler["async"], bool):
+        raise ValueError(f"existing {event_name} handler async flag is invalid")
+    for boolean_field in ("asyncRewake", "once"):
+        if boolean_field in handler and not isinstance(handler[boolean_field], bool):
+            raise ValueError(f"existing {event_name} handler {boolean_field} is invalid")
+    status = handler.get("statusMessage")
+    if status is not None and not isinstance(status, str):
+        raise ValueError(f"existing {event_name} handler status message is invalid")
+    for string_field in ("if", "model"):
+        value = handler.get(string_field)
+        if value is not None and not isinstance(value, str):
+            raise ValueError(f"existing {event_name} handler {string_field} is invalid")
+    args = handler.get("args")
+    if args is not None and (
+        not isinstance(args, list) or not all(isinstance(value, str) for value in args)
+    ):
+        raise ValueError(f"existing {event_name} handler args are invalid")
+    headers = handler.get("headers")
+    if headers is not None and (
+        not isinstance(headers, dict)
+        or not all(
+            isinstance(key, str) and isinstance(value, str) for key, value in headers.items()
+        )
+    ):
+        raise ValueError(f"existing {event_name} handler headers are invalid")
+    allowed_env = handler.get("allowedEnvVars")
+    if allowed_env is not None and (
+        not isinstance(allowed_env, list)
+        or not all(isinstance(value, str) for value in allowed_env)
+    ):
+        raise ValueError(f"existing {event_name} handler allowedEnvVars are invalid")
+    mcp_input = handler.get("input")
+    if mcp_input is not None and not isinstance(mcp_input, dict):
+        raise ValueError(f"existing {event_name} handler input is invalid")
+
+
+def _validate_claude_settings(settings: dict[str, object]) -> None:
+    raw_events = settings.get("hooks", {})
+    if not isinstance(raw_events, dict):
+        raise ValueError("hook configuration 'hooks' field must be an object")
+    for event_name, raw_groups in raw_events.items():
+        if not isinstance(raw_groups, list):
+            raise ValueError(f"existing {event_name} hooks must be a list")
+        for raw_group in raw_groups:
+            if not isinstance(raw_group, dict):
+                raise ValueError(f"existing {event_name} matcher group is invalid")
+            matcher = raw_group.get("matcher")
+            if matcher is not None and not isinstance(matcher, str):
+                raise ValueError(f"existing {event_name} matcher is invalid")
+            if "hooks" not in raw_group:
+                _validate_claude_handler(raw_group, event_name=str(event_name))
+                continue
+            raw_handlers = raw_group["hooks"]
+            if not isinstance(raw_handlers, list):
+                raise ValueError(f"existing {event_name} handler list is invalid")
+            for raw_handler in raw_handlers:
+                if not isinstance(raw_handler, dict):
+                    raise ValueError(f"existing {event_name} handler is invalid")
+                _validate_claude_handler(raw_handler, event_name=str(event_name))
+
+
 def _remove_stale_hooks(settings: dict) -> dict:
     """Remove hook entries that reference renamed/deleted scripts."""
     hooks = settings.get("hooks", {})
+    if not isinstance(hooks, dict):
+        raise ValueError("hook configuration 'hooks' field must be an object")
     for event_name, entries in list(hooks.items()):
+        if not isinstance(entries, list):
+            raise ValueError(f"existing {event_name} hooks must be a list")
         cleaned = []
         for entry in entries:
-            if isinstance(entry, dict):
-                cmd = entry.get("command", "")
-                sub_hooks = entry.get("hooks", [])
-                if any(pat in cmd for pat in _STALE_PATTERNS):
+            if not isinstance(entry, dict):
+                raise ValueError(f"existing {event_name} matcher group is invalid")
+            cmd = entry.get("command", "")
+            if not isinstance(cmd, str):
+                raise ValueError(f"existing {event_name} command is invalid")
+            sub_hooks = entry.get("hooks", [])
+            if not isinstance(sub_hooks, list) or not all(
+                isinstance(hook, dict) for hook in sub_hooks
+            ):
+                raise ValueError(f"existing {event_name} handler list is invalid")
+            if any(pat in cmd for pat in _STALE_PATTERNS):
+                continue
+            if sub_hooks:
+                for hook in sub_hooks:
+                    command = hook.get("command", "")
+                    if not isinstance(command, str):
+                        raise ValueError(f"existing {event_name} handler command is invalid")
+                sub_hooks = [
+                    hook
+                    for hook in sub_hooks
+                    if not any(pattern in hook.get("command", "") for pattern in _STALE_PATTERNS)
+                ]
+                if not sub_hooks:
                     continue
-                if sub_hooks:
-                    sub_hooks = [
-                        h
-                        for h in sub_hooks
-                        if not any(pat in h.get("command", "") for pat in _STALE_PATTERNS)
-                    ]
-                    if not sub_hooks:
-                        continue
-                    entry["hooks"] = sub_hooks
+                entry["hooks"] = sub_hooks
             cleaned.append(entry)
         hooks[event_name] = cleaned
     return settings
@@ -147,70 +257,7 @@ def _remove_stale_hooks(settings: dict) -> dict:
 
 def merge_hooks(existing: dict, new_hooks: dict) -> dict:
     """Merge new hooks into existing settings without duplicating entries."""
-    if "hooks" not in existing:
-        existing["hooks"] = {}
-
-    for event_name, new_entries in new_hooks.items():
-        if event_name not in existing["hooks"]:
-            existing["hooks"][event_name] = new_entries
-            continue
-
-        existing_list = existing["hooks"][event_name]
-
-        # Deduplicate by command string (for both list-of-matchers and list-of-hooks formats)
-        existing_commands: set[str] = set()
-        for entry in existing_list:
-            if isinstance(entry, dict):
-                if "command" in entry:
-                    existing_commands.add(entry["command"])
-                for hook in entry.get("hooks", []):
-                    if "command" in hook:
-                        existing_commands.add(hook["command"])
-
-        for new_entry in new_entries:
-            if isinstance(new_entry, dict):
-                new_cmd = new_entry.get("command", "")
-                new_hooks_list = new_entry.get("hooks", [])
-
-                if isinstance(new_hooks_list, list) and new_hooks_list:
-                    missing_hooks = [
-                        hook
-                        for hook in new_hooks_list
-                        if isinstance(hook, dict)
-                        and hook.get("command")
-                        and hook.get("command") not in existing_commands
-                    ]
-                    if not missing_hooks:
-                        continue
-                    matcher = new_entry.get("matcher")
-                    target_entry = next(
-                        (
-                            entry
-                            for entry in existing_list
-                            if isinstance(entry, dict)
-                            and entry.get("matcher") == matcher
-                            and isinstance(entry.get("hooks"), list)
-                        ),
-                        None,
-                    )
-                    if target_entry is not None:
-                        target_entry["hooks"].extend(missing_hooks)
-                    else:
-                        entry = dict(new_entry)
-                        entry["hooks"] = missing_hooks
-                        existing_list.append(entry)
-                    existing_commands.update(
-                        hook["command"]
-                        for hook in missing_hooks
-                        if isinstance(hook.get("command"), str)
-                    )
-                    continue
-
-                if new_cmd and new_cmd not in existing_commands:
-                    existing_list.append(new_entry)
-                    existing_commands.add(new_cmd)
-
-    return existing
+    return merge_hook_events(existing, new_hooks)
 
 
 def write_settings_atomic(path: Path, data: dict) -> None:
@@ -219,36 +266,23 @@ def write_settings_atomic(path: Path, data: dict) -> None:
     ``os.replace()`` is atomic on the supported POSIX hosts. A short retry also
     tolerates transient permission races from concurrent local tooling.
     """
-    import time
+    write_json_object_atomic(path, data)
 
-    content = json.dumps(data, indent=2) + "\n"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(
-        prefix="settings.json.",
-        dir=str(path.parent),
-        suffix=".tmp",
-    )
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(content)
-            fh.flush()
-            os.fsync(fh.fileno())
-        # Retry transient permission races without hiding persistent failures.
-        _last_exc: Exception | None = None
-        for attempt in range(10):
-            try:
-                os.replace(tmp_path, path)
-                return
-            except PermissionError as exc:
-                _last_exc = exc
-                time.sleep(0.01 * (attempt + 1))
-        raise _last_exc  # type: ignore[misc]
-    except Exception:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
+
+def install_hooks_file(settings_path: Path, ctx_dir: str) -> dict:
+    """Install all CTX Claude hooks under one locked read-modify-write."""
+
+    def update(settings: dict[str, object]) -> dict[str, object]:
+        remove_python_module_handlers(
+            settings,
+            event_name="UserPromptSubmit",
+            module="ctx.adapters.claude_code.query_handler",
+        )
+        _validate_claude_settings(settings)
+        cleaned = _remove_stale_hooks(settings)
+        return merge_hooks(cleaned, make_hooks(ctx_dir))
+
+    return update_json_object_locked(settings_path, update)
 
 
 def main() -> None:
@@ -260,14 +294,10 @@ def main() -> None:
     settings_path = Path(args.settings)
     ctx_dir = os.path.abspath(args.ctx_dir)
 
-    settings = load_settings(settings_path)
-    settings = _remove_stale_hooks(settings)
-    new_hooks = make_hooks(ctx_dir)
-    updated = merge_hooks(settings, new_hooks)
-
-    write_settings_atomic(settings_path, updated)
+    install_hooks_file(settings_path, ctx_dir)
 
     print(f"Hooks injected into {settings_path}")
+    print("  UserPromptSubmit: CTX capability engine")
     print("  PostToolUse: context_monitor + skill-add-detector + skill-suggest + backup_on_change")
     print("  Stop: usage_tracker + quality_on_session_end")
 

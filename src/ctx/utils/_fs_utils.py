@@ -116,7 +116,15 @@ def atomic_write_json(path: Path, obj: Any, indent: int | None = 2) -> None:
 
 
 def _replace_atomically(src: str | Path, dst: str | Path) -> None:
-    """Replace *dst* with *src* using the supported POSIX atomic rename."""
+    """Replace *dst* with *src* using the supported POSIX atomic rename.
+
+    Deliberately does not retry. A PermissionError here is a real failure and
+    must surface; the transient-race retry main carried at the settings-file
+    level is superseded by the locked read-modify-write boundary in
+    ``ctx.adapters.hook_config``. ``test_atomic_replace_propagates_permission_
+    error_without_retry`` pins this.
+    """
+
     os.replace(src, dst)
 
 

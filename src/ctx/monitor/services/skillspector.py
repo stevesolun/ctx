@@ -1,4 +1,4 @@
-"""Read-only SkillSpector audit helpers for ctx-monitor."""
+"""Read-only SkillSpector audit helpers for the ctx dashboard."""
 
 from __future__ import annotations
 

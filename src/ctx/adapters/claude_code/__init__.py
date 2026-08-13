@@ -10,3 +10,16 @@ Populated in phase R4 (moves from src/bundle_orchestrator.py,
 context_monitor.py, skill_suggest.py, inject_hooks.py, skill_install.py,
 agent_install.py, mcp_install.py).
 """
+
+from ctx.adapters.claude_code.engine_hook import (
+    ClaudeHookEnvelope,
+    render_committed_query_hook,
+    render_recommendation_hook,
+)
+
+
+__all__ = [
+    "ClaudeHookEnvelope",
+    "render_committed_query_hook",
+    "render_recommendation_hook",
+]

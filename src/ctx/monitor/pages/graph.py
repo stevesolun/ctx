@@ -1,4 +1,4 @@
-"""Knowledge graph page for ctx-monitor."""
+"""Knowledge graph page for the ctx dashboard."""
 
 from __future__ import annotations
 

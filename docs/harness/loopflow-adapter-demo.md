@@ -120,10 +120,10 @@ stable.
         "type": "skill",
         "status": "available",
         "source_catalog": "skill-index",
-        "install_command": "ctx-skill-install nickcrew-claude-ctx-plugin-tool-selection",
+        "install_command": "python -m ctx.adapters.claude_code.install.skill_install nickcrew-claude-ctx-plugin-tool-selection",
         "installable": false,
         "load_status": "external-install-required",
-        "source_path": "ctx-skill-install nickcrew-claude-ctx-plugin-tool-selection"
+        "source_path": "python -m ctx.adapters.claude_code.install.skill_install nickcrew-claude-ctx-plugin-tool-selection"
       }
     ],
     "agents": [
@@ -156,7 +156,7 @@ stable.
   "agent_loop": {
     "before_act": "Load only the granted capability groups from capabilities.*.",
     "on_failure": "Pass the latest failure back as last_failure before the next plan.",
-    "harness_install": "ctx-harness-install --dry-run '--goal=mcp agent loop local ollama filesystem' --model-provider=ollama --model=ollama/llama3.1 -- autogen"
+    "harness_install": "python -m harness_install --dry-run '--goal=mcp agent loop local ollama filesystem' --model-provider=ollama --model=ollama/llama3.1 -- autogen"
   },
   "warnings": []
 }

@@ -184,7 +184,7 @@ def _load_full_body(meta: dict, slug: str, entity_type: str) -> str:
         plus ``references/*.md`` stages when present. Falls back to the
         entity card body when no converted dir exists.
       - **agent**: ``<wiki>/converted-agents/<slug>.md`` holds the full
-        Claude Code agent prompt (populated by ``ctx-agent-mirror``).
+        Claude Code agent prompt (populated by ``python -m agent_mirror``).
         Falls back to the entity card body when the mirror hasn't
         run for a particular slug.
       - **mcp-server** and **harness**: entity cards are the only body we have; the

@@ -134,7 +134,7 @@ def run_shadow_validation(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="ctx-incremental-shadow",
+        prog="python -m ctx.core.graph.incremental_shadow",
         description="Shadow-validate incremental ANN graph attach.",
     )
     parser.add_argument("--index-dir", required=True)

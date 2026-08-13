@@ -611,7 +611,7 @@ def compute_semantic_edges(
             schema/model/top_k/build_floor don't match the current
             run — see ``TopKState.is_compatible``.
         persist_cache: When False, read existing cache/state but skip
-            embedding and top-K state writes. ``ctx-wiki-graphify
+            embedding and top-K state writes. ``python -m ctx.core.wiki.wiki_graphify
             --dry-run`` uses this so previews do not mutate disk.
         affected_out: Optional set populated with node IDs whose
             incident semantic edges were recomputed. Callers that patch

@@ -3,7 +3,7 @@
 skill_mirror.py -- Mirror locally-installed short skills into the wiki.
 
 Context: `<wiki>/converted/<slug>/SKILL.md` is the canonical source that
-`ctx-skill-install` reads from. Long skills (> cfg.line_threshold lines,
+`python -m ctx.adapters.claude_code.install.skill_install` reads from. Long skills (> cfg.line_threshold lines,
 default 180) go through `batch_convert` into a `converted/<slug>/` with
 SKILL.md + references/*.md. Short skills skip the pipeline — their
 content lives ONLY at `~/.claude/skills/<slug>/SKILL.md` on the
@@ -18,18 +18,18 @@ that has no `<wiki>/converted/<slug>/` dir yet, writes a minimal
 `converted/<slug>/SKILL.md` containing the local body verbatim. Long
 skills with existing `converted/` are left untouched.
 
-The CLI is a one-shot admin operation. `ctx-skill-install` stays
+The CLI is a one-shot admin operation. `python -m ctx.adapters.claude_code.install.skill_install` stays
 exactly as-is — its `_pick_source` already reads `converted/<slug>/
 SKILL.md` which is now populated for every skill.
 
 Usage:
-    ctx-skill-mirror                     # mirror everything missing
-    ctx-skill-mirror --slug foo          # mirror one slug
-    ctx-skill-mirror --force             # overwrite even when converted/
+    python -m skill_mirror                     # mirror everything missing
+    python -m skill_mirror --slug foo          # mirror one slug
+    python -m skill_mirror --force             # overwrite even when converted/
                                          # exists (for re-sync after a
                                          # local edit)
-    ctx-skill-mirror --dry-run           # report without writing
-    ctx-skill-mirror --prune             # delete mirrors whose local
+    python -m skill_mirror --dry-run           # report without writing
+    python -m skill_mirror --prune             # delete mirrors whose local
                                          # source has disappeared
 """
 
@@ -161,7 +161,7 @@ def mirror_one(
             body_lines=lines,
             message=(
                 f"{lines} lines > line_threshold={line_threshold}; "
-                "use ctx-skill-add / batch_convert for long skills"
+                "use python -m skill_add / batch_convert for long skills"
             ),
         )
 
@@ -321,12 +321,12 @@ def _summarize(results: list[MirrorResult]) -> dict[str, int]:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="ctx-skill-mirror",
+        prog="python -m skill_mirror",
         description=(
             "Mirror short skills (<line_threshold lines) from "
             "~/.claude/skills/ into <wiki>/converted/<slug>/SKILL.md "
-            "so ctx-skill-install finds them after a fresh tarball "
-            "extract. Companion to ctx-agent-mirror."
+            "so python -m ctx.adapters.claude_code.install.skill_install finds them after a fresh tarball "
+            "extract. Companion to python -m agent_mirror."
         ),
     )
     parser.add_argument("--slug", help="Mirror a single slug")

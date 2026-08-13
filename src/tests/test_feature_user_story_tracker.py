@@ -319,6 +319,7 @@ def test_canonical_feature_status_tracker_merges_supporting_ledgers() -> None:
             "expert-lane/api-mcp-harness",
             "expert-lane/telemetry-release-governance",
             "expert-lane/cli-package-inventory",
+            "expert-lane/ctx-fit",
         }
         assert row["risk_level"] in {"Low", "Medium", "High", "Critical"}
         assert row["status"] in CANONICAL_STATUSES

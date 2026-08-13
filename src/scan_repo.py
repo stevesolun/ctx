@@ -14,6 +14,7 @@ imports in an entry file to distinguish React from Preact).
 """
 
 import argparse
+import fnmatch
 import json
 import os
 import re
@@ -76,6 +77,7 @@ def scan_directory(repo_path: str, max_depth: int = MAX_DEPTH) -> dict:
         "files": [],  # (relative_path, extension)
         "dirs": [],  # relative directory paths
         "config_files": [],  # config files found (will be read)
+        "unreadable_dirs": [],  # directories the walk could not enter
     }
 
     repo = Path(repo_path).resolve()
@@ -157,17 +159,33 @@ def scan_directory(repo_path: str, max_depth: int = MAX_DEPTH) -> dict:
     # of them and the corresponding stack detection silently no-ops.
     SIGNAL_HIDDEN_DIRS = {".github", ".devcontainer", ".vscode", ".idea"}
 
-    for dirpath, dirnames, filenames in os.walk(repo):
+    def _on_walk_error(exc: OSError) -> None:
+        # os.walk discards scandir errors by default, so an unreadable subtree
+        # produced a profile that described nothing and said nothing about why.
+        # Record it and say so, rather than let "could not look" be reported as
+        # "there is nothing there".
+        target = getattr(exc, "filename", None) or str(exc)
+        try:
+            target = os.path.relpath(target, repo)
+        except (OSError, ValueError):  # pragma: no cover - defensive
+            pass
+        signals["unreadable_dirs"].append(target)
+        print(f"Warning: could not read {target}: {exc.strerror or exc}", file=sys.stderr)
+
+    for dirpath, dirnames, filenames in os.walk(repo, onerror=_on_walk_error):
         rel_dir = os.path.relpath(dirpath, repo)
         depth = 0 if rel_dir == "." else rel_dir.count(os.sep) + 1
 
         # Skip ignored dirs. Hidden dirs are dropped EXCEPT the
         # allowlisted signal-bearing ones (.github etc.).
-        dirnames[:] = [
+        # Sorted so the walk order is a property of the repository rather than
+        # of the filesystem: os.scandir order differs between APFS and ext4, and
+        # it leaks into evidence lists and language tie-breaks downstream.
+        dirnames[:] = sorted(
             d
             for d in dirnames
             if d not in SKIP_DIRS and (not d.startswith(".") or d in SIGNAL_HIDDEN_DIRS)
-        ]
+        )
 
         if depth > max_depth:
             dirnames.clear()
@@ -175,7 +193,7 @@ def scan_directory(repo_path: str, max_depth: int = MAX_DEPTH) -> dict:
 
         signals["dirs"].append(rel_dir)
 
-        for fname in filenames:
+        for fname in sorted(filenames):
             ext = Path(fname).suffix.lower()
             rel_path = os.path.join(rel_dir, fname) if rel_dir != "." else fname
             signals["files"].append((rel_path, ext))
@@ -261,6 +279,50 @@ def read_requirements(path: str) -> list[str]:
         return []
 
 
+#: Manifests that mark a directory as its own package. Used to spot workspace
+#: members, which is how a non-JavaScript monorepo announces itself.
+_PACKAGE_MANIFESTS = frozenset({"package.json", "pyproject.toml", "Cargo.toml", "go.mod"})
+
+#: Conventional parents of workspace members. Restricted deliberately: "two
+#: nested manifests anywhere" would call any repository with a fixture package
+#: a monorepo.
+_WORKSPACE_PARENTS = frozenset({"packages", "apps", "libs", "services", "crates", "modules"})
+
+#: Manifests are small; refusing to slurp an arbitrarily large one keeps the
+#: scan bounded.
+_MAX_MANIFEST_CHARS = 512 * 1024
+
+
+def _declared_workspace_globs(root_pkg_json: dict | None) -> list[str]:
+    """The workspace globs a root ``package.json`` declares, if any.
+
+    npm/yarn accept either a list or ``{"packages": [...]}``. A repository that
+    names its members ``frontend/*`` is as much a monorepo as one that uses
+    ``packages/*``, and reporting "0 workspace packages" for it states a count
+    that the manifest on disk contradicts.
+    """
+
+    if not isinstance(root_pkg_json, dict):
+        return []
+    declared = root_pkg_json.get("workspaces")
+    if isinstance(declared, dict):
+        declared = declared.get("packages")
+    if not isinstance(declared, list):
+        return []
+    return [item.rstrip("/") for item in declared if isinstance(item, str) and item]
+
+
+def _root_file_declares(repo_abspath: str, name: str, pattern: str) -> bool:
+    """Whether a root manifest contains ``pattern``. Missing file reads False."""
+
+    path = os.path.join(repo_abspath, name)
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            return re.search(pattern, handle.read(_MAX_MANIFEST_CHARS), re.MULTILINE) is not None
+    except OSError:
+        return False
+
+
 def detect_stack(repo_path: str, signals: dict) -> dict:
     """Analyze signals and produce a stack profile."""
     profile: dict[str, Any] = {
@@ -293,10 +355,18 @@ def detect_stack(repo_path: str, signals: dict) -> dict:
     all_py_deps: list[str] = []
     core_py_deps: list[str] = []
     all_js_deps: list[str] = []
-    pkg_json = None
+    root_pkg_json: dict | None = None
+    nested_manifest_dirs: set[str] = set()
+    # realpath, not abspath: scan_directory resolves the root, so on macOS a
+    # /tmp path would otherwise never compare equal to its /private/tmp form.
+    repo_abspath = os.path.realpath(repo_path)
 
     for cfg in signals["config_files"]:
         base = os.path.basename(cfg)
+        cfg_dir = os.path.dirname(os.path.realpath(cfg))
+        is_root_manifest = cfg_dir == repo_abspath
+        if base in _PACKAGE_MANIFESTS and not is_root_manifest:
+            nested_manifest_dirs.add(os.path.relpath(cfg_dir, repo_abspath))
         if base == "pyproject.toml":
             all_py_deps.extend(read_toml_deps(cfg))
             core_py_deps.extend(read_toml_deps(cfg, include_optional=False))
@@ -310,11 +380,21 @@ def detect_stack(repo_path: str, signals: dict) -> dict:
             core_py_deps.extend(deps)
         elif base == "package.json":
             data = read_json_safe(cfg)
-            if data:
-                pkg_json = data
+            # A manifest can be valid JSON and still not be an object, and its
+            # dependency sections can be null or a list of numbers. Guarding
+            # only against unparseable JSON let those shapes escape as an
+            # unhandled traceback with an empty stdout.
+            if isinstance(data, dict):
+                # Only the ROOT manifest describes the workspace. os.walk is
+                # top-down, so keeping the last one seen meant a nested package
+                # always overwrote the root one — and `monorepo` came out false
+                # for exactly the layouts that define a workspace monorepo.
+                if is_root_manifest:
+                    root_pkg_json = data
                 for section in ("dependencies", "devDependencies", "peerDependencies"):
-                    if section in data:
-                        all_js_deps.extend(k.lower() for k in data[section])
+                    names = data.get(section)
+                    if isinstance(names, (dict, list)):
+                        all_js_deps.extend(k.lower() for k in names if isinstance(k, str))
 
     py_dep_set = set(all_py_deps)
     py_core_dep_set = set(core_py_deps)
@@ -342,7 +422,9 @@ def detect_stack(repo_path: str, signals: dict) -> dict:
             lang = lang_map[ext]
             detected_langs[lang] = detected_langs.get(lang, 0) + count
 
-    for lang, count in sorted(detected_langs.items(), key=lambda x: -x[1]):
+    # Name is the tie-break so that two languages with the same file count keep
+    # a content-derived order instead of inheriting directory-walk order.
+    for lang, count in sorted(detected_langs.items(), key=lambda x: (-x[1], x[0])):
         evidence = [f"{count} files with matching extensions"]
         conf = 0.8
         # Boost for lock files
@@ -473,12 +555,16 @@ def detect_stack(repo_path: str, signals: dict) -> dict:
 
     # K8s
     k8s_dirs = {"k8s", "kubernetes", "helm", "charts"}
-    if k8s_dirs & dir_basenames:
+    # Sort before formatting: a set's repr follows per-process hash order, so
+    # interpolating the set directly made the profile differ byte-for-byte
+    # between runs and broke the reproducibility guarantee the profile makes.
+    matched_k8s_dirs = sorted(k8s_dirs & dir_basenames)
+    if matched_k8s_dirs:
         profile["infrastructure"].append(
             {
                 "name": "kubernetes",
                 "confidence": 0.95,
-                "evidence": [f"directory: {k8s_dirs & dir_basenames}"],
+                "evidence": [f"directory: {name}" for name in matched_k8s_dirs],
             }
         )
 
@@ -618,16 +704,45 @@ def detect_stack(repo_path: str, signals: dict) -> dict:
         if os.path.basename(f) in ("openapi.yaml", "openapi.json", "swagger.yaml", "swagger.json")
     ]
     if openapi_files:
+        # Sorted before slicing: which three paths are shown must not depend on
+        # the order the filesystem handed them back.
         profile["docs"].append(
-            {"name": "openapi", "confidence": 0.95, "evidence": openapi_files[:3]}
+            {"name": "openapi", "confidence": 0.95, "evidence": sorted(openapi_files)[:3]}
         )
 
     # --- MONOREPO ---
+    # Detection used to be JavaScript-only, so a uv/Cargo/Go workspace was told
+    # "single-package layout, so change scope is unambiguous" — an affirmative
+    # claim about the one layout the check exists to warn about.
     monorepo_signals = {"turbo.json", "nx.json", "lerna.json", "pnpm-workspace.yaml"}
-    if monorepo_signals & config_basenames:
+    declared_globs = _declared_workspace_globs(root_pkg_json)
+    workspace_members = sorted(
+        member
+        for member in nested_manifest_dirs
+        if member.split(os.sep)[0] in _WORKSPACE_PARENTS
+        # A declared glob is evidence, not a convention: when the root manifest
+        # says where the members live, the conventional-parent restriction (a
+        # guard for the *inferred* case below) would drop real members.
+        or any(fnmatch.fnmatch(member, pattern) for pattern in declared_globs)
+    )
+    matched_signals = sorted(monorepo_signals & config_basenames)
+    if matched_signals:
         profile["monorepo"] = True
-    elif pkg_json and "workspaces" in pkg_json:
+    elif root_pkg_json and "workspaces" in root_pkg_json:
         profile["monorepo"] = True
+    elif _root_file_declares(repo_abspath, "Cargo.toml", r"^\s*\[workspace\]"):
+        profile["monorepo"] = True
+    elif os.path.isfile(os.path.join(repo_abspath, "go.work")):
+        profile["monorepo"] = True
+    elif _root_file_declares(
+        repo_abspath, "pyproject.toml", r"^\s*\[tool\.(?:uv|rye)\.workspace\]"
+    ):
+        profile["monorepo"] = True
+    elif len(workspace_members) >= 2:
+        profile["monorepo"] = True
+
+    if profile["monorepo"]:
+        profile["workspace_packages"] = workspace_members
 
     # --- PROJECT TYPE ---
     fw_names = {f["name"] for f in profile["frameworks"]}
@@ -834,8 +949,15 @@ def _print_recommendations(repo: str, profile: dict) -> None:
                 score_text += f"  norm={norm:.2f}"
             print(f"  {m['name']:<40s}  {score_text}  via={shared_tag_text}")
     else:
+        # The python -m mcp_fetch / python -m mcp_add console scripts were retired when the
+        # public surface collapsed to `ctx`; the modules behind them still run
+        # via `python -m`, so the hint has to name that form or it cannot be
+        # followed.
         print("  (no MCP servers matched — try running")
-        print("   `ctx-mcp-fetch --source awesome-mcp --limit 100 | ctx-mcp-add --from-stdin`")
+        print(
+            "   `python -m mcp_fetch --source awesome-mcp --limit 100 "
+            "| python -m mcp_add --from-stdin`"
+        )
         print("   to populate the catalog, then rescan)")
 
     # Warnings (missing skill installs etc.)
@@ -856,8 +978,9 @@ def main():
         help=(
             "After scanning, run the resolver and print recommended "
             "skills / agents / MCP servers to stderr. Requires an "
-            "existing ~/.claude/skill-wiki graph (run ctx-wiki-graphify "
-            "first). Default: scan only, no recommendations."
+            "existing ~/.claude/skill-wiki graph (run "
+            "`python -m ctx.core.wiki.wiki_graphify` first). "
+            "Default: scan only, no recommendations."
         ),
     )
     args = parser.parse_args()

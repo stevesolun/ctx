@@ -1,4 +1,4 @@
-"""Catalog management page for ctx-monitor."""
+"""Catalog management page for the ctx dashboard."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ def render_manage(
         if mutations_enabled
         else (
             "<div class='card'><strong>Read-only mode.</strong> Catalog edits are "
-            "disabled because ctx-monitor is not bound to a loopback address.</div>"
+            "disabled because the dashboard is not bound to a loopback address.</div>"
         )
     )
     disabled = "" if mutations_enabled else " disabled"

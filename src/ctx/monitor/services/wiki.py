@@ -1,4 +1,4 @@
-"""Read-only wiki entity helpers for ctx-monitor."""
+"""Read-only wiki entity helpers for the ctx dashboard."""
 
 from __future__ import annotations
 

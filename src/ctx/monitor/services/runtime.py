@@ -1,4 +1,4 @@
-"""Runtime lifecycle readers for ctx-monitor."""
+"""Runtime lifecycle readers for the ctx dashboard."""
 
 from __future__ import annotations
 

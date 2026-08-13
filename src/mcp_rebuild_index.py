@@ -4,7 +4,7 @@ mcp_rebuild_index.py -- Rebuild the canonical-key sidecar index for MCP entities
 
 Usage
 -----
-    ctx-mcp-rebuild-index [--wiki PATH] [--dry-run]
+    python -m mcp_rebuild_index [--wiki PATH] [--dry-run]
 
 Reads MCP entity markdown from either:
 
@@ -32,9 +32,9 @@ _MCP_ENTITY_SUBDIR = "entities/mcp-servers"
 
 
 def main() -> None:
-    """Entry point for ``ctx-mcp-rebuild-index``."""
+    """Entry point for ``python -m mcp_rebuild_index``."""
     parser = argparse.ArgumentParser(
-        prog="ctx-mcp-rebuild-index",
+        prog="python -m mcp_rebuild_index",
         description=(
             "Rebuild the canonical-key sidecar index from existing MCP entity "
             "pages. Idempotent; safe to run repeatedly."

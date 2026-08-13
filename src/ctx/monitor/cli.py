@@ -1,4 +1,4 @@
-"""CLI and blocking serve loop for ctx-monitor."""
+"""CLI and blocking serve loop for the ctx dashboard."""
 
 from __future__ import annotations
 
@@ -49,17 +49,17 @@ def serve(
     url = f"http://{display_host(host)}:{port}/"
     if not mutations_enabled:
         url = f"{url}?token={monitor_token}"
-    print(f"ctx-monitor serving at {url}  (Ctrl+C to stop)", flush=True)
+    print(f"ctx dashboard serving at {url}  (Ctrl+C to stop)", flush=True)
     if not mutations_enabled:
         print(
-            "ctx-monitor: non-loopback bind; read token required and "
+            "ctx dashboard: non-loopback bind; read token required and "
             "load/unload mutations disabled",
             flush=True,
         )
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("ctx-monitor: shutdown", flush=True)
+        print("ctx dashboard: shutdown", flush=True)
     finally:
         server.server_close()
 
@@ -70,7 +70,7 @@ def main(
     serve_func: Callable[..., None],
 ) -> int:
     parser = argparse.ArgumentParser(
-        prog="ctx-monitor",
+        prog="python -m ctx_monitor",
         description="Local HTTP dashboard for ctx skill/agent activity.",
     )
     sub = parser.add_subparsers(dest="cmd", required=True)

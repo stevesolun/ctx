@@ -763,8 +763,15 @@ def test_module_and_console_handshakes_have_current_version_and_clean_stderr(
     if entrypoint == "module":
         command = [sys.executable, "-m", "ctx.mcp_server.server"]
     else:
-        console_script = shutil.which("ctx-mcp-server")
-        assert console_script is not None
+        # Console scripts are installed alongside the running interpreter
+        # (e.g. .venv/bin/ctx-mcp-server). shutil.which only finds it when that
+        # bin dir is on PATH, which is not guaranteed when pytest is invoked as
+        # ".venv/bin/python -m pytest" without activating the venv. Look next to
+        # sys.executable first (the correct wrapper for this interpreter), then
+        # fall back to PATH for activated-venv layouts.
+        candidate = Path(sys.executable).parent / "ctx-mcp-server"
+        console_script = str(candidate) if candidate.exists() else shutil.which("ctx-mcp-server")
+        assert console_script is not None, "ctx-mcp-server console script not found"
         command = [console_script]
     env = {
         **os.environ,

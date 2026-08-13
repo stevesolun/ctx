@@ -1,4 +1,4 @@
-"""Activity and runtime page renderers for ctx-monitor."""
+"""Activity and runtime page renderers for the ctx dashboard."""
 
 from __future__ import annotations
 

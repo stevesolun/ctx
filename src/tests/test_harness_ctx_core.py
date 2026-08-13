@@ -1544,7 +1544,7 @@ class TestRuntimeLifecycle:
         assert result["event"]["security_scan"]["status"] == "not_provided"
         assert (
             result["event"]["security_scan"]["recommended_command"]
-            == "ctx-skill-install fastapi-pro --security-scan-required"
+            == "python -m ctx.adapters.claude_code.install.skill_install fastapi-pro --security-scan-required"
         )
 
         state = json.loads(

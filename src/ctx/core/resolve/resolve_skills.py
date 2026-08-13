@@ -368,7 +368,7 @@ def resolve(
                     # skill / agent path. Skills must be installed locally
                     # because the resolver emits load entries; agents are
                     # catalog/wiki entities and are installed on approval via
-                    # ctx-agent-install, so do not require SKILL.md presence.
+                    # python -m ctx.adapters.claude_code.install.agent_install, so do not require SKILL.md presence.
                     if name in needed:
                         continue
                     if hit_type == "skill" and name not in available:

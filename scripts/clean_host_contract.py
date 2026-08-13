@@ -174,6 +174,7 @@ def isolated_env(paths: ContractPaths, *, extra_pythonpath: Path | None = None) 
             "XDG_CONFIG_HOME": str(paths.xdg_config),
             "XDG_CACHE_HOME": str(paths.xdg_cache),
             "PIP_CACHE_DIR": str(paths.pip_cache),
+            "CODEX_HOME": str(paths.home / ".codex"),
             "CTX_ALLOW_MISSING_GRAPH": "1",
             "PYTHONUTF8": "1",
         }
@@ -282,6 +283,13 @@ def write_fake_claude_cli(fake_modules: Path) -> Path:
         "import sys\n"
         "from pathlib import Path\n\n"
         "PAYLOADS = {\n"
+        "    'UserPromptSubmit': {\n"
+        "        'hook_event_name': 'UserPromptSubmit',\n"
+        "        'permission_mode': 'default',\n"
+        "        'prompt': 'Fix the Python tests',\n"
+        "        'session_id': 'clean-host-fake-claude',\n"
+        "        'transcript_path': None,\n"
+        "    },\n"
         "    'PostToolUse': {\n"
         "        'hook_event_name': 'PostToolUse',\n"
         "        'tool_name': 'Bash',\n"
@@ -322,8 +330,10 @@ def write_fake_claude_cli(fake_modules: Path) -> Path:
         "    settings = json.loads(_settings_path(args.settings).read_text(encoding='utf-8'))\n"
         "    cwd = args.cwd or os.getcwd()\n"
         "    records = []\n"
-        "    for event in ('PostToolUse', 'Stop'):\n"
-        "        payload = json.dumps(PAYLOADS[event])\n"
+        "    for event in ('UserPromptSubmit', 'PostToolUse', 'Stop'):\n"
+        "        event_payload = dict(PAYLOADS[event])\n"
+        "        event_payload['cwd'] = cwd\n"
+        "        payload = json.dumps(event_payload)\n"
         "        for command in _commands(settings, event):\n"
         "            result = subprocess.run(\n"
         "                command,\n"
@@ -339,11 +349,80 @@ def write_fake_claude_cli(fake_modules: Path) -> Path:
         "                'event': event,\n"
         "                'command': command,\n"
         "                'returncode': result.returncode,\n"
-        "                'stdout': result.stdout[-500:],\n"
-        "                'stderr': result.stderr[-500:],\n"
+        "                'stdout': result.stdout[-4096:],\n"
+        "                'stderr': result.stderr[-4096:],\n"
         "            })\n"
         "    failed = [r for r in records if r['returncode'] != 0]\n"
         "    print(json.dumps({'hook_commands': len(records), 'failed': len(failed), 'commands': records}))\n"
+        "    return 1 if failed else 0\n\n"
+        "if __name__ == '__main__':\n"
+        "    raise SystemExit(main())\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def write_fake_codex_cli(fake_modules: Path) -> Path:
+    """Write a deterministic Codex-like prompt-hook host with no model call."""
+
+    fake_modules.mkdir(parents=True, exist_ok=True)
+    path = fake_modules / "fake_codex.py"
+    path.write_text(
+        '''"""Deterministic Codex prompt-hook smoke host."""\n'''
+        "from __future__ import annotations\n\n"
+        "import argparse\n"
+        "import json\n"
+        "import os\n"
+        "import subprocess\n"
+        "from pathlib import Path\n\n"
+        "def main() -> int:\n"
+        "    parser = argparse.ArgumentParser()\n"
+        "    parser.add_argument('--hooks', required=True)\n"
+        "    parser.add_argument('--cwd', required=True)\n"
+        "    args = parser.parse_args()\n"
+        "    settings = json.loads(Path(args.hooks).read_text(encoding='utf-8'))\n"
+        "    payload = {\n"
+        "        'cwd': args.cwd,\n"
+        "        'hook_event_name': 'UserPromptSubmit',\n"
+        "        'model': 'gpt-5.6-sol',\n"
+        "        'permission_mode': 'default',\n"
+        "        'prompt': 'Fix the Python tests',\n"
+        "        'session_id': 'clean-host-fake-codex',\n"
+        "        'transcript_path': None,\n"
+        "        'turn_id': 'clean-host-turn-1',\n"
+        "    }\n"
+        "    records = []\n"
+        "    for group in settings.get('hooks', {}).get('UserPromptSubmit', []):\n"
+        "        if not isinstance(group, dict):\n"
+        "            continue\n"
+        "        for hook in group.get('hooks', []):\n"
+        "            if not isinstance(hook, dict) or hook.get('type') != 'command':\n"
+        "                continue\n"
+        "            command = hook.get('command')\n"
+        "            if not isinstance(command, str) or not command.strip():\n"
+        "                continue\n"
+        "            result = subprocess.run(\n"
+        "                command,\n"
+        "                cwd=args.cwd,\n"
+        "                env=os.environ.copy(),\n"
+        "                input=json.dumps(payload),\n"
+        "                text=True,\n"
+        "                capture_output=True,\n"
+        "                check=False,\n"
+        "                shell=True,\n"
+        "            )\n"
+        "            records.append({\n"
+        "                'command': command,\n"
+        "                'returncode': result.returncode,\n"
+        "                'stdout': result.stdout[-4096:],\n"
+        "                'stderr': result.stderr[-4096:],\n"
+        "            })\n"
+        "    failed = [record for record in records if record['returncode'] != 0]\n"
+        "    print(json.dumps({\n"
+        "        'hook_commands': len(records),\n"
+        "        'failed': len(failed),\n"
+        "        'commands': records,\n"
+        "    }))\n"
         "    return 1 if failed else 0\n\n"
         "if __name__ == '__main__':\n"
         "    raise SystemExit(main())\n",
@@ -398,7 +477,7 @@ def _prepare_dirs(paths: ContractPaths) -> None:
         path.mkdir(parents=True, exist_ok=True)
 
 
-def _assert_fake_claude_hook_output(stdout: str) -> None:
+def _assert_fake_claude_hook_output(stdout: str) -> str:
     try:
         result = json.loads(stdout)
     except json.JSONDecodeError as exc:
@@ -406,12 +485,13 @@ def _assert_fake_claude_hook_output(stdout: str) -> None:
     if result.get("failed") != 0:
         raise AssertionError(f"fake Claude hook smoke had failures: {stdout}")
     hook_commands = int(result.get("hook_commands") or 0)
-    if hook_commands < 5:
-        raise AssertionError(f"expected at least 5 generated hook commands, got {hook_commands}")
+    if hook_commands < 6:
+        raise AssertionError(f"expected at least 6 generated hook commands, got {hook_commands}")
     rendered = "\n".join(
         str(row.get("command", "")) for row in result.get("commands", []) if isinstance(row, dict)
     )
     for expected in (
+        "ctx.adapters.claude_code.query_handler",
         "ctx.adapters.claude_code.hooks.context_monitor",
         "skill_add_detector",
         "ctx.adapters.claude_code.hooks.bundle_orchestrator",
@@ -420,6 +500,40 @@ def _assert_fake_claude_hook_output(stdout: str) -> None:
     ):
         if expected not in rendered:
             raise AssertionError(f"fake Claude hook smoke did not run {expected}")
+    return _assert_prompt_context_output(result, host="Claude")
+
+
+def _assert_fake_codex_hook_output(stdout: str) -> str:
+    try:
+        result = json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        raise AssertionError(f"fake Codex hook smoke returned invalid JSON: {stdout!r}") from exc
+    if result.get("failed") != 0:
+        raise AssertionError(f"fake Codex hook smoke had failures: {stdout}")
+    if result.get("hook_commands") != 1:
+        raise AssertionError(f"expected exactly one Codex prompt hook command: {stdout}")
+    commands = result.get("commands", [])
+    rendered = "\n".join(str(row.get("command", "")) for row in commands if isinstance(row, dict))
+    if "ctx.adapters.codex.hook_handler" not in rendered:
+        raise AssertionError(f"fake Codex hook smoke did not run the CTX handler: {stdout}")
+    return _assert_prompt_context_output(result, host="Codex")
+
+
+def _assert_prompt_context_output(result: object, *, host: str) -> str:
+    if not isinstance(result, dict):
+        raise AssertionError(f"fake {host} hook smoke result is not an object")
+    outputs = [
+        str(row.get("stdout", "")) for row in result.get("commands", []) if isinstance(row, dict)
+    ]
+    context_outputs = [output for output in outputs if "# ctx Python Testing" in output]
+    if len(context_outputs) != 1:
+        raise AssertionError(
+            f"fake {host} hook smoke expected one authenticated canary context, "
+            f"got {len(context_outputs)}"
+        )
+    if '"hookEventName":"UserPromptSubmit"' not in context_outputs[0]:
+        raise AssertionError(f"fake {host} canary output is not a prompt-hook envelope")
+    return context_outputs[0]
 
 
 def _quote_command(parts: Sequence[str | Path]) -> str:
@@ -654,6 +768,7 @@ def run_contract(
     write_tiny_repo(paths.tiny_repo)
     write_fake_litellm(paths.fake_modules)
     fake_claude = write_fake_claude_cli(paths.fake_modules)
+    fake_codex = write_fake_codex_cli(paths.fake_modules)
 
     env = isolated_env(paths)
     runner.run(
@@ -680,11 +795,26 @@ def run_contract(
     ctx_scan_repo = venv_script(paths.venv, "ctx-scan-repo")
     ctx = venv_script(paths.venv, "ctx")
 
-    runner.run([str(ctx_init), "--hooks"], cwd=paths.tiny_repo, env=run_env)
+    runner.run(
+        [str(ctx_init), "--hooks", "--codex-hooks"],
+        cwd=paths.tiny_repo,
+        env=run_env,
+    )
     claude_dir = paths.home / ".claude"
+    codex_hooks = paths.home / ".codex" / "hooks.json"
     assert_inside(claude_dir, paths.root)
+    assert_inside(codex_hooks, paths.root)
     if not (claude_dir / "settings.json").exists():
         raise AssertionError("ctx-init --hooks did not write isolated settings.json")
+    if not codex_hooks.exists():
+        raise AssertionError("ctx-init --codex-hooks did not write isolated hooks.json")
+    hook_env = dict(run_env)
+    hook_env.update(
+        {
+            "CTX_ENGINE_MODE": "activate",
+            "CTX_QUERY_DELIVERY_ROOT": str(paths.root / "query-delivery"),
+        }
+    )
     fake_claude_result = runner.run(
         [
             str(py),
@@ -697,9 +827,24 @@ def run_contract(
             "trigger clean-host hook smoke",
         ],
         cwd=paths.tiny_repo,
-        env=run_env,
+        env=hook_env,
     )
-    _assert_fake_claude_hook_output(fake_claude_result.stdout)
+    claude_context = _assert_fake_claude_hook_output(fake_claude_result.stdout)
+    fake_codex_result = runner.run(
+        [
+            str(py),
+            str(fake_codex),
+            "--hooks",
+            str(codex_hooks),
+            "--cwd",
+            str(paths.tiny_repo),
+        ],
+        cwd=paths.tiny_repo,
+        env=hook_env,
+    )
+    codex_context = _assert_fake_codex_hook_output(fake_codex_result.stdout)
+    if claude_context != codex_context:
+        raise AssertionError("Claude and Codex prompt-hook envelopes are not byte-identical")
     if run_live_claude:
         _run_live_claude_gate(
             runner=runner,
@@ -725,6 +870,34 @@ def run_contract(
     )
     if not stack_profile.exists():
         raise AssertionError("ctx-scan-repo did not write stack profile")
+
+    # The product itself, on the installed wheel. Asserting on OUTPUT and not
+    # only on the exit code is deliberate: bare `ctx` exited 0 while dying of
+    # ModuleNotFoundError, so an exit-code check alone proved nothing. This
+    # block is what would have caught ctx.fit being absent from the wheel.
+    for surface, surface_argv, needle in (
+        ("bare ctx", [str(ctx)], "AI agent readiness"),
+        ("ctx fit", [str(ctx), "fit", str(paths.tiny_repo)], "Repository:"),
+        ("ctx doctor", [str(ctx), "doctor"], "CTX Fit diagnostics"),
+    ):
+        product = runner.run(surface_argv, cwd=paths.tiny_repo, env=run_env)
+        if "Traceback (most recent call last)" in (product.stdout + product.stderr):
+            raise AssertionError(f"{surface} raised on a clean install:\n{product.stderr[-1500:]}")
+        if needle not in product.stdout:
+            raise AssertionError(
+                f"{surface} did not produce its expected output "
+                f"({needle!r} missing); got:\n{product.stdout[-1500:]}"
+            )
+
+    fit_json = runner.run(
+        [str(ctx), "fit", str(paths.tiny_repo), "--json"], cwd=paths.tiny_repo, env=run_env
+    )
+    try:
+        json.loads(fit_json.stdout)
+    except json.JSONDecodeError as exc:
+        raise AssertionError(
+            f"ctx fit --json did not emit valid JSON on a clean install: {exc}"
+        ) from exc
 
     runner.run(
         [

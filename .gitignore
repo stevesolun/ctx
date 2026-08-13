@@ -104,3 +104,9 @@ htmlcov/
 
 # MkDocs build output
 /site/
+
+# LoopX control-plane state. Goal state can carry private evidence and is
+# machine-local; the repository is not its home.
+.loopx/
+.codex/
+ACTIVE_GOAL_STATE.md

@@ -377,23 +377,83 @@ def recommend_by_tags_indexed(
 
     try:
         with closing(_open_recommendation_index(db_path)) as conn:
-            metadata = _recommendation_index_metadata(conn)
-            if metadata is None:
-                return None
-            total_nodes = int(conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0])
-            rows = _indexed_candidate_rows(conn, signals)
-            candidates = [_indexed_node(row) for row in rows]
-            non_external_nodes = total_nodes - _indexed_external_node_count(conn)
-            idf = _indexed_signal_idf(candidates, signals, non_external_nodes)
-            for node_id, node_data in candidates:
-                node_data["_ctx_recommendation_degree"] = _indexed_node_degree(conn, node_id)
+            return _recommend_by_tags_indexed_connection(
+                conn,
+                signals,
+                top_n=top_n,
+                query=query,
+                entity_types=entity_types,
+                min_normalized_score=min_normalized_score,
+                external_catalog_path=external_catalog_path,
+                candidate_filter=candidate_filter,
+                allow_inferred_external_catalog=True,
+            )
     except (OSError, ValueError, json.JSONDecodeError, sqlite3.Error):
         return None
+
+
+def recommend_by_tags_indexed_snapshot(
+    conn: sqlite3.Connection,
+    tags: list[str],
+    *,
+    top_n: int = 10,
+    query: str | None = None,
+    entity_types: tuple[str, ...] | set[str] | None = None,
+    min_normalized_score: float = 0.0,
+    candidate_filter: Callable[[Mapping[str, Any]], bool] | None = None,
+) -> tuple[list[dict[str, Any]], int]:
+    """Rank only from an already pinned, authenticated SQLite snapshot.
+
+    Unlike the legacy path wrapper, this function never infers or reads an
+    external catalog and never falls back to graph JSON or semantic retrieval.
+    Snapshot validation and lifetime belong to the caller.
+    """
+    signals = _normalise_signals(tags)
+    if top_n < 1 or not signals:
+        return ([], 0)
+    return _recommend_by_tags_indexed_connection(
+        conn,
+        signals,
+        top_n=top_n,
+        query=query,
+        entity_types=entity_types,
+        min_normalized_score=min_normalized_score,
+        external_catalog_path=None,
+        candidate_filter=candidate_filter,
+        allow_inferred_external_catalog=False,
+    )
+
+
+def _recommend_by_tags_indexed_connection(
+    conn: sqlite3.Connection,
+    signals: list[str],
+    *,
+    top_n: int,
+    query: str | None,
+    entity_types: tuple[str, ...] | set[str] | None,
+    min_normalized_score: float,
+    external_catalog_path: Path | None,
+    candidate_filter: Callable[[Mapping[str, Any]], bool] | None,
+    allow_inferred_external_catalog: bool,
+) -> tuple[list[dict[str, Any]], int]:
+    metadata = _recommendation_index_metadata(conn)
+    if metadata is None:
+        raise ValueError("unsupported graph-store schema")
+    total_nodes = int(conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0])
+    rows = _indexed_candidate_rows(conn, signals)
+    candidates = [_indexed_node(row) for row in rows]
+    non_external_nodes = total_nodes - _indexed_external_node_count(conn)
+    idf = _indexed_signal_idf(candidates, signals, non_external_nodes)
+    for node_id, node_data in candidates:
+        node_data["_ctx_recommendation_degree"] = _indexed_node_degree(conn, node_id)
 
     import networkx as nx  # noqa: PLC0415
 
     graph = nx.Graph()
     graph.graph.update(_indexed_graph_metadata(metadata))
+    if not allow_inferred_external_catalog:
+        graph.graph.pop("ctx_graph_path", None)
+        graph.graph["external_catalog_nodes"] = {"skills.sh": 1}
     graph.graph["_ctx_recommendation_graph_marker"] = _INDEXED_RECOMMENDATION_GRAPH_MARKER
     graph.graph["_ctx_recommendation_token_idf"] = idf
     graph.add_nodes_from(candidates)

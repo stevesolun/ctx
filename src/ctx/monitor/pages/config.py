@@ -1,4 +1,4 @@
-"""Config page renderer for ctx-monitor."""
+"""Config page renderer for the ctx dashboard."""
 
 from __future__ import annotations
 

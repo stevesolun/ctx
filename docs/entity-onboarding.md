@@ -14,7 +14,7 @@ After adding any entity, drain the durable wiki queue when you want the local
 runtime graph to see it immediately:
 
 ```bash
-ctx-wiki-worker --wiki ~/.claude/skill-wiki --limit 1
+python -m ctx.core.wiki.wiki_queue_worker --wiki ~/.claude/skill-wiki --limit 1
 ctx-scan-repo --repo . --recommend
 ```
 
@@ -36,7 +36,7 @@ change. The graph and LLM-wiki are shippable artifacts, not scratch output, so
 the update is treated like a release step.
 
 1. Add or update the entity through the matching command:
-   `ctx-skill-add`, `ctx-agent-add`, `ctx-mcp-add`, or `ctx-harness-add`.
+   `python -m skill_add`, `python -m agent_add`, `python -m mcp_add`, or `python -m harness_add`.
 2. If the entity already exists, read the update review. It lists changed
    fields, likely benefits, regressions, and security findings. Do not pass
    `--update-existing` until those findings are acceptable.
@@ -46,12 +46,12 @@ the update is treated like a release step.
    integrations from repeatedly LFS-cleaning the full wiki tarball while it is
    still changing.
 5. Drain the wiki queue for local runtime use:
-   `ctx-wiki-worker --wiki ~/.claude/skill-wiki --limit 1`. This updates the
+   `python -m ctx.core.wiki.wiki_queue_worker --wiki ~/.claude/skill-wiki --limit 1`. This updates the
    wiki index, writes wiki overlay packs, attempts incremental ANN graph attach
    when a vector index exists, writes graph overlay packs when active packs are
    present, and queues a graph-store refresh so local reads see the merged
    graph/wiki view.
-6. Rebuild the curated wiki graph with `ctx-wiki-graphify` before shipping
+6. Rebuild the curated wiki graph with `python -m ctx.core.wiki.wiki_graphify` before shipping
    release artifacts or when you need a full graph/export reconciliation.
 7. Repack `graph/wiki-graph.tar.gz` through the artifact promotion path:
    write a staged tarball, validate it, atomically promote it, and keep the
@@ -79,7 +79,7 @@ the update is treated like a release step.
 
 The durable wiki worker drains `entity-upsert`, `graph-export`,
 `skill-index-refresh`, `tar-refresh`, and `artifact-promotion` jobs. Use
-`ctx-wiki-worker --wiki ~/.claude/skill-wiki --limit 1` for a controlled
+`python -m ctx.core.wiki.wiki_queue_worker --wiki ~/.claude/skill-wiki --limit 1` for a controlled
 single-job drain, or omit `--limit` to drain the ready queue.
 Artifact-promotion jobs must target known `<wiki>/graphify-out/` graph outputs
 or allowlisted repo `graph/` release artifacts, and their staged path must be
@@ -90,7 +90,7 @@ type before promotion.
 For a manual attach dry-run against an existing vector index:
 
 ```bash
-ctx-incremental-attach attach \
+python -m ctx.core.graph.incremental_attach attach \
   --index-dir ~/.claude/skill-wiki/.embedding-cache/graph/vector-index \
   --overlay ~/.claude/skill-wiki/graphify-out/entity-overlays.jsonl \
   --node-id skill:fastapi-review \
@@ -100,7 +100,7 @@ ctx-incremental-attach attach \
   --dry-run
 ```
 
-Use `ctx-incremental-attach calibrate --graph ~/.claude/skill-wiki/graphify-out/graph.json`
+Use `python -m ctx.core.graph.incremental_attach calibrate --graph ~/.claude/skill-wiki/graphify-out/graph.json`
 to inspect the current graph's semantic and degree distributions before
 changing attach thresholds.
 
@@ -108,7 +108,7 @@ Validate the attach quality before relying on a new ANN backend or changed
 threshold:
 
 ```bash
-ctx-incremental-shadow \
+python -m ctx.core.graph.incremental_shadow \
   --index-dir ~/.claude/skill-wiki/.embedding-cache/graph/vector-index \
   --graph ~/.claude/skill-wiki/graphify-out/graph.json \
   --sample-size 100 \
@@ -126,7 +126,7 @@ If the worker says `incremental attach skipped (no vector index)`, build the
 persisted semantic index once:
 
 ```bash
-ctx-wiki-graphify \
+python -m ctx.core.wiki.wiki_graphify \
   --wiki-dir ~/.claude/skill-wiki \
   --incremental \
   --graph-only \
@@ -141,12 +141,12 @@ should be shadow-gated before release use.
 Then process pending entity updates:
 
 ```bash
-ctx-wiki-worker --wiki ~/.claude/skill-wiki
+python -m ctx.core.wiki.wiki_queue_worker --wiki ~/.claude/skill-wiki
 ```
 
 That is the supported "attach pending" flow today: the queue is durable, so
 failed or skipped entity-upsert jobs remain visible to the worker and can be
-retried after the index exists. Use manual `ctx-incremental-attach attach
+retried after the index exists. Use manual `python -m ctx.core.graph.incremental_attach attach
 --dry-run` for one-off debugging, not as the normal bulk path.
 
 ## Security and Cyber Check
@@ -163,8 +163,8 @@ approved commands, and before shipping a refreshed graph tarball.
 - For MCP and harness updates, check network access, filesystem scope, auth
   material, command transports, and whether setup or verify commands execute
   remote code.
-- Prefer dry-run first: `ctx-harness-install <slug> --dry-run` and
-  `ctx-harness-install <slug> --update --dry-run`.
+- Prefer dry-run first: `python -m harness_install <slug> --dry-run` and
+  `python -m harness_install <slug> --update --dry-run`.
 - If a candidate is useful but risky, document the safer install path or keep it
   as metadata instead of shipping it as an installed skill.
 
@@ -182,37 +182,37 @@ Use this flow for every entity type:
 3. Keep the current entity by doing nothing, or re-run with `--skip-existing`
    in batch jobs where you do not want reviews.
 4. Apply the replacement only after review with `--update-existing`.
-5. Drain the queue with `ctx-wiki-worker --wiki ~/.claude/skill-wiki --limit 1`
-   for immediate local recommendation use, or rebuild with `ctx-wiki-graphify`
+5. Drain the queue with `python -m ctx.core.wiki.wiki_queue_worker --wiki ~/.claude/skill-wiki --limit 1`
+   for immediate local recommendation use, or rebuild with `python -m ctx.core.wiki.wiki_graphify`
    when the update should be reconciled into shipped graph artifacts.
 
 Examples:
 
 ```bash
-ctx-skill-add --skill-path ./SKILL.md --name fastapi-review
-ctx-skill-add --skill-path ./SKILL.md --name fastapi-review --update-existing
+python -m skill_add --skill-path ./SKILL.md --name fastapi-review
+python -m skill_add --skill-path ./SKILL.md --name fastapi-review --update-existing
 
-ctx-agent-add --agent-path ./code-reviewer.md --name code-reviewer
-ctx-agent-add --agent-path ./code-reviewer.md --name code-reviewer --update-existing
+python -m agent_add --agent-path ./code-reviewer.md --name code-reviewer
+python -m agent_add --agent-path ./code-reviewer.md --name code-reviewer --update-existing
 
-ctx-mcp-add --from-json ./github-mcp.json
-ctx-mcp-fetch --source pulsemcp --limit 50 | ctx-mcp-add --from-stdin
-ctx-mcp-add --from-json ./github-mcp.json --update-existing
+python -m mcp_add --from-json ./github-mcp.json
+python -m mcp_fetch --source pulsemcp --limit 50 | python -m mcp_add --from-stdin
+python -m mcp_add --from-json ./github-mcp.json --update-existing
 
-ctx-harness-add --from-json ./text-to-cad-harness.json
-ctx-harness-add --from-json ./text-to-cad-harness.json --update-existing
+python -m harness_add --from-json ./text-to-cad-harness.json
+python -m harness_add --from-json ./text-to-cad-harness.json --update-existing
 ```
 
-`ctx-harness-install --update` is different: it refreshes an installed harness
+`python -m harness_install --update` is different: it refreshes an installed harness
 checkout under `~/.claude/harnesses/<slug>`. Catalog entity replacement uses
-`ctx-harness-add --update-existing`.
+`python -m harness_add --update-existing`.
 
 ## Removing or Retiring an Entity
 
 Removal has three separate meanings. First decide which one you need.
 
 - **Catalog removal** stops ctx from showing the entity in the wiki, graph, and
-  recommendations. Use the dashboard: `ctx-monitor serve`, open **Manage**,
+  recommendations. Use the dashboard: `python -m ctx_monitor serve`, open **Manage**,
   search for the slug and type, then choose **Delete selected**. If the entity
   is currently loaded, Manage first attempts to unload it; if unloading fails,
   deletion stops and the wiki page is kept. Otherwise, Manage unlinks the page
@@ -225,16 +225,16 @@ Removal has three separate meanings. First decide which one you need.
   unloads call the Claude MCP removal path when available; skill and agent
   unloads remove the manifest row.
 - **Installed-file removal** is type-specific. Use
-  `ctx-harness-install <slug> --uninstall` for harness checkouts,
-  `ctx-mcp-uninstall <slug>` for installed MCPs, and `ctx-lifecycle archive`
-  then `ctx-lifecycle purge` for stale local skills that should be deleted
+  `python -m harness_install <slug> --uninstall` for harness checkouts,
+  `python -m ctx.adapters.claude_code.install.mcp_install uninstall <slug>` for installed MCPs, and `python -m ctx_lifecycle archive`
+  then `python -m ctx_lifecycle purge` for stale local skills that should be deleted
   after the configured grace period.
 
 After deleting an entity page, drain or rebuild before trusting recommendation
 results:
 
 ```bash
-ctx-wiki-worker --wiki ~/.claude/skill-wiki --limit 1
+python -m ctx.core.wiki.wiki_queue_worker --wiki ~/.claude/skill-wiki --limit 1
 ctx-scan-repo --repo . --recommend
 ```
 
@@ -249,7 +249,7 @@ Use this when you have a local `SKILL.md` that should be installed under
 `~/.claude/skills/<name>/SKILL.md` and mirrored into the wiki.
 
 ```bash
-ctx-skill-add \
+python -m skill_add \
   --skill-path ./SKILL.md \
   --name fastapi-review
 ```
@@ -270,7 +270,7 @@ What happens:
 Use this when you have a local Claude Code agent markdown file.
 
 ```bash
-ctx-agent-add \
+python -m agent_add \
   --agent-path ./code-reviewer.md \
   --name code-reviewer
 ```
@@ -278,11 +278,11 @@ ctx-agent-add \
 Batch-add every top-level `.md` file in a directory:
 
 ```bash
-ctx-agent-add --scan-dir ./agents --skip-existing
+python -m agent_add --scan-dir ./agents --skip-existing
 ```
 
 Agents are copied into `~/.claude/agents/` and mirrored into
-`entities/agents/`. Re-run `ctx-wiki-graphify` after adding agents if you want
+`entities/agents/`. Re-run `python -m ctx.core.wiki.wiki_graphify` after adding agents if you want
 graph recommendations to include them.
 
 ## Add an MCP Server
@@ -307,7 +307,7 @@ Create `github-mcp.json`:
 Add it:
 
 ```bash
-ctx-mcp-add --from-json ./github-mcp.json
+python -m mcp_add --from-json ./github-mcp.json
 ```
 
 MCP pages live under `entities/mcp-servers/<shard>/<slug>.md`. The add command
@@ -318,7 +318,7 @@ exists, ctx prints the update review and skips replacement unless
 `--update-existing` is passed.
 
 Runtime install is separate from catalog add. Use
-`ctx-mcp-install <slug> --dry-run` to inspect the Claude MCP command without
+`python -m ctx.adapters.claude_code.install.mcp_install <slug> --dry-run` to inspect the Claude MCP command without
 mutating local state. If the server is already installed, dry-run reports
 `skipped-existing` and does not reconcile `skill-manifest.json`; run without
 `--dry-run` to refresh the manifest record, or add `--force` when you need to
@@ -335,7 +335,7 @@ browser-automation runners, evaluation loops, and local-model workbenches.
 Example: add `earthtojake/text-to-cad` as a harness recommendation.
 
 ```bash
-ctx-harness-add \
+python -m harness_add \
   --repo https://github.com/earthtojake/text-to-cad \
   --name "Text to CAD" \
   --description "Harness for turning text prompts into CAD artifacts." \
@@ -365,7 +365,7 @@ Or load one JSON record:
 ```
 
 ```bash
-ctx-harness-add --from-json ./text-to-cad-harness.json
+python -m harness_add --from-json ./text-to-cad-harness.json
 ```
 
 Harness pages live under `entities/harnesses/<slug>.md`. Setup and verification
@@ -375,10 +375,10 @@ decide before running anything.
 To inspect and install a harness:
 
 ```bash
-ctx-harness-install text-to-cad --dry-run
-ctx-harness-install text-to-cad
-ctx-harness-install text-to-cad --update --dry-run
-ctx-harness-install text-to-cad --uninstall --dry-run
+python -m harness_install text-to-cad --dry-run
+python -m harness_install text-to-cad
+python -m harness_install text-to-cad --update --dry-run
+python -m harness_install text-to-cad --uninstall --dry-run
 ```
 
 The installer clones or copies the harness into `~/.claude/harnesses/<slug>` and
@@ -387,10 +387,10 @@ unless you pass `--approve-commands`, and it does not run verification commands
 unless you also pass `--run-verify`.
 
 ```bash
-ctx-harness-install text-to-cad --approve-commands --run-verify
-ctx-harness-install text-to-cad --update --approve-commands --run-verify
-ctx-harness-install text-to-cad --uninstall
-ctx-harness-install text-to-cad --uninstall --keep-files
+python -m harness_install text-to-cad --approve-commands --run-verify
+python -m harness_install text-to-cad --update --approve-commands --run-verify
+python -m harness_install text-to-cad --uninstall
+python -m harness_install text-to-cad --uninstall --keep-files
 ```
 
 ## Initialize Model Choice

@@ -1,4 +1,4 @@
-"""Graph artifact and dashboard index helpers for ctx-monitor."""
+"""Graph artifact and index helpers for the ctx dashboard."""
 
 from __future__ import annotations
 

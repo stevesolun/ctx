@@ -1,4 +1,4 @@
-"""Harness Setup page renderer for ctx-monitor."""
+"""Harness Setup page renderer for the ctx dashboard."""
 
 from __future__ import annotations
 
@@ -69,7 +69,7 @@ def render_harness_wizard(
             if row["repo_url"].startswith(("http://", "https://"))
             else ""
         )
-        + f"<code>ctx-harness-install {html.escape(row['slug'])} --dry-run</code>"
+        + f"<code>python -m harness_install {html.escape(row['slug'])} --dry-run</code>"
         + f"<button type='button' class='secondary' data-select-harness='{html.escape(row['slug'])}'>select</button>"
         + "</div>"
         for row in harnesses
@@ -135,7 +135,7 @@ def render_harness_wizard(
         "</form>"
         "<aside class='card'>"
         "<h2 style='margin-top:0;'>Command plan</h2>"
-        "<pre class='command-box' data-testid='harness-command-output'>ctx-harness-install --recommend --goal \"...\" --model-provider openai --model openai/gpt-5.5 --top-k 5 --plan-on-no-fit</pre>"
+        "<pre class='command-box' data-testid='harness-command-output'>python -m harness_install --recommend --goal \"...\" --model-provider openai --model openai/gpt-5.5 --top-k 5 --plan-on-no-fit</pre>"
         "<p class='muted'>Run the dry-run first. The installer writes attach files under the harness target so the selected harness can connect to ctx graph/wiki recommendations.</p>"
         "<div id='selected-harness-command' class='muted'>Select a harness card to see install, update, and validation commands.</div>"
         "</aside>"
@@ -153,7 +153,7 @@ def render_harness_wizard(
         "<section class='card'>"
         "<h2>No-fit custom harness PRD</h2>"
         "<p class='muted'>When no catalog harness clears the configured match score, generate a PRD for the user's strong model or engineering team. It must include orchestration, durable state, permissions, verification gates, and ctx recommendation hooks.</p>"
-        "<pre class='command-box' id='no-fit-command'>ctx-harness-install --recommend --goal \"...\" --model-provider openai --model openai/gpt-5.5 --plan-on-no-fit --plan-output custom-harness-prd.md</pre>"
+        "<pre class='command-box' id='no-fit-command'>python -m harness_install --recommend --goal \"...\" --model-provider openai --model openai/gpt-5.5 --plan-on-no-fit --plan-output custom-harness-prd.md</pre>"
         "</section>"
         "<script>\n"
         "(function () {\n"
@@ -169,7 +169,7 @@ def render_harness_wizard(
         "  function arg(flag, val) { return val ? ' ' + flag + ' ' + shellQuote(val) : ''; }\n"
         "  function recommendCommand() {\n"
         "    const tools = checkedTools();\n"
-        "    let cmd = 'ctx-harness-install --recommend';\n"
+        "    let cmd = 'python -m harness_install --recommend';\n"
         "    cmd += arg('--goal', value('goal'));\n"
         "    cmd += arg('--model-provider', value('model_provider'));\n"
         "    cmd += arg('--model', value('model'));\n"
@@ -211,7 +211,10 @@ def render_harness_wizard(
         "  document.querySelectorAll('[data-select-harness]').forEach(btn => btn.addEventListener('click', () => {\n"
         "    const slug = btn.dataset.selectHarness || '';\n"
         "    cards.forEach(card => card.classList.toggle('selected', card.dataset.harnessSlug === slug));\n"
-        "    selected.innerHTML = '<pre class=\"command-box\">ctx-harness-install ' + slug + ' --dry-run\\nctx-harness-install ' + slug + '\\nctx-harness-install ' + slug + ' --update --dry-run\\nctx-scan-repo --repo . --recommend\\nctx-monitor serve</pre>';\n"
+        "    selected.innerHTML = '<pre class=\"command-box\">python -m harness_install ' + slug"
+        " + ' --dry-run\\npython -m harness_install ' + slug"
+        " + '\\npython -m harness_install ' + slug + ' --update --dry-run"
+        "\\nctx-scan-repo --repo . --recommend\\npython -m ctx_monitor serve</pre>';\n"
         "  }));\n"
         "  refresh();\n"
         "})();\n"

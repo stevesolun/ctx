@@ -672,7 +672,7 @@ def _harness_command(
 ) -> str | None:
     if not harnesses:
         return None
-    parts = ["ctx-harness-install", "--dry-run"]
+    parts = ["python", "-m", "harness_install", "--dry-run"]
     if goal:
         parts.append(f"--goal={goal}")
     if model_provider:

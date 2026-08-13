@@ -19,7 +19,7 @@ from ctx_config import cfg
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="ctx-recommend",
+        prog="python -m ctx.cli.recommend",
         description="Recommend up to five skills, agents, or MCPs for an intent.",
     )
     parser.add_argument(

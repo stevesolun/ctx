@@ -13,3 +13,12 @@ paths-ignore:
   - graph/**
   - docs/**
   - "**/fixtures/**"
+  # Test code is not shipped -- src/tests is absent from the wheel's package
+  # list -- and it deliberately constructs the insecure conditions the product
+  # must reject: world-writable modes, symlinked targets, malformed archives,
+  # fake credentials. Scanning it reports the fixtures rather than the product.
+  # Two concrete false positives this excludes: a monkeypatch stub whose
+  # signature mirrors os.open's own `mode=0o777` default while setting no
+  # permissions at all, and a constant naming an environment VARIABLE
+  # (CTX_AB_TEST_PROVIDER_KEY) read as a stored password.
+  - src/tests/**

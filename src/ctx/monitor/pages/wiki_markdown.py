@@ -1,4 +1,4 @@
-"""Conservative Markdown rendering helpers for ctx-monitor wiki pages."""
+"""Conservative Markdown rendering helpers for ctx dashboard wiki pages."""
 
 from __future__ import annotations
 

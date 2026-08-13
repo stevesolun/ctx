@@ -1,0 +1,532 @@
+"""``ctx fit`` — repository-specific AI coding stack optimization.
+
+Milestone 1 scope: understand the repository and report a structured Fit
+profile.  This command performs **no model execution and spends nothing**;
+later milestones add candidate evaluation behind an explicit budget.
+
+The output deliberately leads with decisions rather than internals. Graph
+statistics, entity taxonomy, and planner detail belong in diagnostic output,
+not in the answer a developer reads.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from ctx.fit.execution import ExecutionReport
+    from ctx.fit.experiment import ExperimentOutcome, ExperimentPlan, ResolvedExperiment
+    from ctx.fit.profile import FitProfile
+    from ctx.fit.recommend import Recommendation
+
+
+def register(sub: argparse._SubParsersAction) -> None:
+    """Attach the ``fit`` subcommand to the ``ctx`` umbrella parser."""
+
+    parser = sub.add_parser(
+        "fit",
+        help="Find the cheapest AI coding setup that works on this repository.",
+        description=(
+            "Analyze a repository, optionally test candidate AI coding "
+            "configurations against real tasks from its history, and generate "
+            "the winning configuration. Bare `ctx fit` runs no model and spends "
+            "nothing."
+        ),
+    )
+    parser.add_argument(
+        "repo",
+        nargs="?",
+        default=".",
+        help="Repository path to analyze (default: the current directory).",
+    )
+    parser.add_argument("--json", action="store_true", help="Emit the Fit profile as JSON.")
+    parser.add_argument(
+        "--test",
+        action="store_true",
+        help=(
+            "Evaluate candidate configurations against real tasks. Requires "
+            "--budget. Without provider credentials this runs in simulation, "
+            "which proves the pipeline but never the repository."
+        ),
+    )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Generate the winning configuration. Shows every change before writing.",
+    )
+    parser.add_argument(
+        "--pr",
+        action="store_true",
+        help=(
+            "Print a pull-request body and a suggested branch name. Creates no "
+            "branch, commits nothing and never merges."
+        ),
+    )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Skip the confirmation prompt when applying changes.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "Describe what a full Fit evaluation would do without doing it. "
+            "Profiling itself never executes a model."
+        ),
+    )
+    parser.add_argument(
+        "--budget",
+        type=float,
+        default=None,
+        metavar="USD",
+        help=(
+            "Maximum dollars CTX Fit may spend on an evaluation. Required before "
+            "any paid execution; without it CTX Fit only plans."
+        ),
+    )
+    parser.add_argument(
+        "--max-depth",
+        type=int,
+        default=4,
+        help="Maximum repository scan depth (default: 4).",
+    )
+
+
+def _format_profile(profile: FitProfile) -> str:
+    lines: list[str] = []
+    stack = profile.stack or {}
+    languages = ", ".join(item["name"] for item in stack.get("languages", [])[:4]) or "unknown"
+
+    lines.append(f"Repository: {profile.repo_path}")
+    lines.append(f"Languages:  {languages}")
+    lines.append("")
+
+    config = profile.existing_ai_config
+    lines.append("Current AI coding setup")
+    if config.is_configured:
+        if config.instruction_files:
+            lines.append(f"  Instructions:  {', '.join(config.instruction_files)}")
+        if config.tool_config_files:
+            lines.append(f"  Tool config:   {', '.join(config.tool_config_files)}")
+        for label, count in config.capability_counts:
+            lines.append(f"  Installed {label}: {count}")
+    else:
+        lines.append("  none detected")
+    lines.append("")
+
+    lines.append("How this repository verifies itself")
+    if profile.verification.commands:
+        for command in profile.verification.commands:
+            rendered = " ".join(command.command)
+            lines.append(f"  {command.kind:<10} {rendered}")
+            lines.append(f"  {'':<10} from {command.source} ({command.confidence} confidence)")
+    else:
+        lines.append("  no verification commands discovered")
+    lines.append("")
+
+    from ctx.fit.readiness import score_readiness
+
+    readiness = score_readiness(profile)
+    lines.append("AI agent readiness")
+    if readiness.score is None:
+        lines.append("  could not be assessed for this repository")
+    else:
+        lines.append(f"  {readiness.score}/100")
+        for dimension in readiness.dimensions:
+            if dimension.is_assessable:
+                lines.append(
+                    f"    {dimension.title:<22}{dimension.earned:>3}/{dimension.assessable}"
+                )
+    lines.append("")
+
+    if readiness.blockers:
+        lines.append("Blocking")
+        for blocker in readiness.blockers:
+            lines.append(f"  - {blocker.title}: {blocker.evidence[0] if blocker.evidence else ''}")
+            lines.append(f"    fix: {blocker.remedy}")
+        lines.append("")
+
+    top_fixes = readiness.improvements[:3]
+    if top_fixes:
+        lines.append("Highest-impact improvements")
+        for index, fix in enumerate(top_fixes, start=1):
+            gain = fix.possible - fix.earned
+            lines.append(f"  {index}. {fix.remedy} (+{gain})")
+            if fix.evidence:
+                lines.append(f"     {fix.evidence[0]}")
+        lines.append("")
+
+    # The full dimension breakdown is CTX's own view of its experimental rig,
+    # not a fact about the user's repository, so it stays in --json. One human
+    # sentence carries the honest scope limit.
+    if profile.is_fit_evaluable:
+        lines.append(
+            "This repository can be evaluated: it has deterministic tests, so a "
+            "candidate configuration can be judged on evidence rather than on an "
+            "agent's own claim."
+        )
+        lines.append(
+            "What varies between candidates here is the capability set. The model "
+            "is one global choice applied to every candidate, the instruction files "
+            "are the repository's own and identical across candidates, and only one "
+            "coding agent is currently supported — so none of those three is being "
+            "compared."
+        )
+    else:
+        lines.append(
+            "This repository cannot yet be evaluated honestly: without runnable "
+            "tests there is no way to tell a configuration that solved a task "
+            "from one that only claimed to."
+        )
+
+    if profile.warnings:
+        lines.append("")
+        lines.append("What to fix first")
+        for warning in profile.warnings:
+            lines.append(f"  - {warning}")
+
+    lines.append("")
+    lines.append(
+        "Next: `ctx fit --dry-run` shows what a full evaluation would involve."
+        if profile.is_fit_evaluable
+        else "Next: add runnable tests, then re-run `ctx fit`."
+    )
+    return "\n".join(lines)
+
+
+def _format_dry_run(profile: FitProfile) -> str:
+    evaluable = [dimension.name for dimension in profile.dimensions if dimension.evaluable]
+    lines = [
+        "",
+        "Dry run — a full Fit evaluation would:",
+        "  1. profile this repository            (done; no cost)",
+        "  2. derive representative tasks        from recent commits (no cost)",
+        f"  3. generate bounded candidates over   {', '.join(evaluable) or 'nothing evaluable'}",
+        "  4. run each candidate against the baseline, repeated for reliability",
+        "  5. verify every trial with the repository's own commands above",
+        "  6. keep only candidates that reliably pass, then pick the cheapest",
+        "  7. write the winning configuration and print a pull-request body "
+        "(no branch is created and nothing is merged)",
+        "",
+        "The winner is the cheapest configuration that reliably works — "
+        "reliability is a requirement, not a tie-break. If nothing beats your "
+        "current setup, CTX Fit says so and recommends keeping it.",
+        "",
+        "No model was invoked and nothing was spent.",
+    ]
+    return "\n".join(lines)
+
+
+def _format_plan(plan: ExperimentPlan) -> str:
+    """Render the experiment plan and the budget decision."""
+
+    lines = ["", "Experiment plan"]
+    lines.append(f"  Candidates:        {plan.candidate_count}")
+    lines.append(f"  Tasks:             {plan.task_count or 'not yet derived'}")
+    lines.append(f"  Trials per task:   {plan.trials_per_task} (for reliability)")
+    lines.append(f"  Total executions:  {plan.executions}")
+    if plan.verification:
+        lines.append(f"  Verified with:     {plan.verification[0]}")
+
+    cost = plan.cost
+    if plan.executions == 0:
+        # A cost for zero executions is arithmetically $0 and completely
+        # meaningless. Printing it would read as "this is free" rather than
+        # "there is no experiment to price".
+        lines.append("  Estimated cost:    not applicable — nothing would run")
+    elif cost.is_known:
+        lines.append(f"  Estimated cost:    ${cost.low_usd}-${cost.high_usd}")
+        # The basis is what makes the number checkable. Hiding it whenever the
+        # estimate succeeds leaves the user approving a figure they cannot audit.
+        lines.append(f"                     {cost.basis}")
+    else:
+        lines.append("  Estimated cost:    unknown")
+        lines.append(f"                     {cost.basis}")
+
+    lines.append("")
+    lines.append(
+        f"Ready to run: {plan.explanation}."
+        if plan.can_execute
+        else f"Not runnable: {plan.explanation}."
+    )
+    for warning in plan.warnings:
+        lines.append(f"  - {warning}")
+    return "\n".join(lines)
+
+
+def default_namespace(repo: str = ".") -> argparse.Namespace:
+    """Arguments for a bare ``ctx`` invocation: analyze, spend nothing."""
+
+    return argparse.Namespace(
+        repo=repo,
+        json=False,
+        test=False,
+        apply=False,
+        pr=False,
+        yes=False,
+        dry_run=False,
+        budget=None,
+        max_depth=4,
+    )
+
+
+def _provider_available() -> bool:
+    """Whether real execution is possible. Absence means simulation, not failure."""
+
+    import os
+
+    return any(
+        os.environ.get(name) for name in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "CTX_FIT_API_KEY")
+    )
+
+
+def _banner(outcome: ExperimentOutcome) -> str:
+    """The last line the user reads, which has to match what happened."""
+
+    report = outcome.report
+    if outcome.simulated:
+        return (
+            "No provider credentials found, so this ran in SIMULATION. It proves the "
+            "evaluation pipeline works end to end and proves nothing about this "
+            "repository. Set OPENAI_API_KEY or ANTHROPIC_API_KEY for a real run."
+        )
+    # This arm used to claim the run was simulated, contradicting both the
+    # report and the JSON payload of the same run: real trials had executed and
+    # real money had been spent.
+    spend = (
+        f"${report.spent_usd} was spent"
+        if report.spent_usd is not None
+        else "total spend was not tracked"
+    )
+    return (
+        f"This was a real run: {report.trials_run} trial(s) executed against "
+        f"throwaway copies of this repository and {spend}."
+    )
+
+
+def _format_recommendation(recommendation: Recommendation) -> str:
+    lines = ["", recommendation.headline, ""]
+    lines.append(f"{'Candidate':<14}{'Verified':>10}{'Cost':>10}  Qualified")
+    for item in recommendation.ranked:
+        cost = f"${item.total_cost_usd}" if item.total_cost_usd is not None else "unknown"
+        mark = "yes" if item.qualified else f"no ({item.exclusion_reason})"
+        lines.append(f"{item.candidate_id:<14}{item.verified}/{item.scored:<8}{cost:>10}  {mark}")
+    lines.append("")
+    for line in recommendation.reasoning:
+        lines.append(f"  {line}")
+    lines.append("")
+    lines.append(f"Confidence: {recommendation.confidence}")
+    if recommendation.limitations:
+        lines.append("")
+        lines.append("Limitations")
+        for line in recommendation.limitations:
+            lines.append(f"  - {line}")
+    return "\n".join(lines)
+
+
+def _format_budget_stop(report: ExecutionReport) -> str:
+    """Say that the campaign stopped early, and what that costs the comparison."""
+
+    if not report.budget_stop:
+        return ""
+    return "\n".join(
+        [
+            "",
+            f"Stopped on budget: ${report.spent_usd} of the ${report.budget_usd} "
+            f"authorized was spent and {report.trials_skipped_budget} trial(s) "
+            "never ran.",
+            f"  Reason: {report.budget_stop}.",
+            "  Candidates did not all get the same number of trials, so the "
+            "comparison above rests on truncated evidence. Re-run with a larger "
+            "--budget to finish it.",
+        ]
+    )
+
+
+def _json_payload(
+    profile: FitProfile,
+    args: argparse.Namespace,
+    *,
+    plan: object | None = None,
+    recommendation: object | None = None,
+    report: object | None = None,
+) -> dict[str, object]:
+    """The one JSON document every ``--json`` path emits.
+
+    Each branch used to assemble its own, so a blocked plan silently dropped
+    ``readiness`` and ``dry_run`` while still declaring the same schema version.
+    A consumer's key set must depend on the schema and the flags, never on which
+    branch happened to produce the answer.
+    """
+
+    from ctx.fit.readiness import score_readiness
+
+    payload = profile.to_dict()
+    payload["readiness"] = score_readiness(profile).to_dict()
+    if plan is not None:
+        payload["plan"] = plan.to_dict()  # type: ignore[attr-defined]
+        payload["dry_run"] = bool(args.dry_run)
+    if recommendation is not None:
+        payload["recommendation"] = recommendation.to_dict()  # type: ignore[attr-defined]
+    if report is not None:
+        # What was actually spent against the authorization, and whether the
+        # campaign was cut short by it: a machine-readable consumer needs
+        # that as much as a human does.
+        payload["execution"] = report.to_dict()  # type: ignore[attr-defined]
+    return payload
+
+
+def cmd_fit(args: argparse.Namespace) -> int:
+    """Run the Fit profiler. Returns a process exit code."""
+
+    from ctx.fit.profile import build_fit_profile
+
+    if args.json and (args.apply or args.pr):
+        # The JSON branch returns before the apply handling, so honouring these
+        # would have meant claiming success for work that never happened.
+        print(
+            "error: --apply and --pr cannot be combined with --json. Re-run "
+            "without --json to review and write the winning configuration.",
+            file=sys.stderr,
+        )
+        return 2
+
+    try:
+        profile = build_fit_profile(args.repo, max_depth=args.max_depth)
+    except NotADirectoryError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    # Imported here rather than at the top of the module: `ctx` dispatches every
+    # subcommand through this file, and a run that never plans must not pay for
+    # the experiment stack.
+    from ctx.fit.experiment import resolve_experiment, run_experiment
+
+    wants_plan = bool(args.dry_run or args.budget is not None or args.test)
+    # One derivation, read twice. The plan below and the campaign further down
+    # are views of this object, so the experiment the user approves is the
+    # experiment their money buys.
+    experiment: ResolvedExperiment | None = (
+        resolve_experiment(profile, budget_usd=args.budget) if wants_plan else None
+    )
+    plan = experiment.plan if experiment is not None else None
+
+    # Evaluation is the only step that can spend, so it is gated twice: an
+    # explicit --test, and a budget the plan must fit.
+    evaluating = bool(args.test) and not args.dry_run
+    outcome: ExperimentOutcome | None = None
+    if evaluating:
+        assert experiment is not None and plan is not None
+        if not experiment.can_execute:
+            if not args.json:
+                print(_format_profile(profile))
+                print(_format_plan(plan))
+                print("\nNothing was run and nothing was spent.")
+            else:
+                print(json.dumps(_json_payload(profile, args, plan=plan), indent=2, sort_keys=True))
+            return 1
+
+        # Imported here rather than at the top of the function: a bare profile
+        # run must not pay for the provider stack it will never touch.
+        from ctx.fit.providers import ProviderUnavailable
+
+        try:
+            outcome = run_experiment(experiment, live=_provider_available())
+        except ProviderUnavailable as exc:
+            # Credentials are present, so a real run is what was asked for.
+            # Falling back to simulation would answer a different question, and
+            # letting this escape printed a traceback out of a product whose
+            # contract is to refuse cleanly.
+            print(f"error: a real evaluation cannot run here: {exc}", file=sys.stderr)
+            print(
+                "Nothing was run and nothing was spent. Install CTX so `ctx` is on "
+                "PATH, or unset the provider credentials to run in simulation.",
+                file=sys.stderr,
+            )
+            return 1
+
+    if args.json:
+        print(
+            json.dumps(
+                _json_payload(
+                    profile,
+                    args,
+                    plan=plan,
+                    recommendation=outcome.recommendation if outcome is not None else None,
+                    report=outcome.report if outcome is not None else None,
+                ),
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+
+    print(_format_profile(profile))
+    if args.dry_run:
+        print(_format_dry_run(profile))
+    if plan is not None and not evaluating:
+        print(_format_plan(plan))
+
+    if outcome is not None:
+        print(_format_recommendation(outcome.recommendation))
+        if stopped := _format_budget_stop(outcome.report):
+            print(stopped)
+        print(f"\n{_banner(outcome)}")
+        if args.apply or args.pr:
+            return _handle_apply(outcome.recommendation, outcome.candidates, args)
+    elif args.apply or args.pr:
+        print(
+            "\nNothing to apply: run `ctx fit --test --budget N` first so there is "
+            "evidence to act on."
+        )
+        return 1
+    return 0
+
+
+def _handle_apply(
+    recommendation: object,
+    candidates: tuple[object, ...],
+    args: argparse.Namespace,
+) -> int:
+    """Preview, then optionally write, the winning configuration."""
+
+    from ctx.fit.apply import apply_plan, plan_apply
+
+    plan = plan_apply(recommendation, candidates, repo_path=args.repo)  # type: ignore[arg-type]
+    if not plan.can_apply:
+        print(f"\nNo changes proposed: {plan.explanation}.")
+        return 0
+
+    print("\nProposed changes")
+    for artifact in plan.artifacts:
+        print(f"  {artifact.action}: {artifact.path} ({artifact.reason})")
+    if args.pr:
+        # Nothing here runs git. Printing "Branch: x" as a statement of fact led
+        # a reader to believe the write was isolated on a branch they could
+        # delete, when --apply modifies the working tree they are standing in.
+        print(f"\nSuggested branch (not created): {plan.branch}")
+        print(f"PR title:                       {plan.pr_title}")
+        print("\n--- pull request body ---")
+        print(plan.pr_body)
+        print("--- end ---")
+        print(
+            "\nCTX Fit creates no branch, commits nothing and never merges: any "
+            "changes below land in your working tree on the current branch."
+        )
+
+    if not args.apply:
+        return 0
+    if not args.yes:
+        print("\nRe-run with --yes to write these files.")
+        return 0
+
+    written = apply_plan(plan, args.repo)
+    print(f"\nWrote: {', '.join(written)}")
+    return 0
+
+
+__all__ = ["cmd_fit", "register"]

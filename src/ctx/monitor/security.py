@@ -1,4 +1,4 @@
-"""HTTP trust and token helpers for ctx-monitor."""
+"""HTTP trust and token helpers for the ctx dashboard."""
 
 from __future__ import annotations
 
