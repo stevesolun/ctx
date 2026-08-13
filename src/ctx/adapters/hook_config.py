@@ -131,7 +131,16 @@ def write_json_object_atomic(path: Path, data: JsonObject) -> None:
         metadata = path.stat(follow_symlinks=False)
     except FileNotFoundError:
         metadata = None
-    if metadata is not None and (not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1):
+    if metadata is not None and metadata.st_nlink == 0:
+        # The inode was unlinked between the lookup and the stat -- a concurrent
+        # writer's os.replace, which is exactly what this function does. A link
+        # count of zero means the file is GONE, not that it is multiply linked,
+        # so it belongs with FileNotFoundError above. Treating it as a hardlink
+        # made concurrent writers reject each other with "cannot be a symlink or
+        # hardlink"; that fired on macOS first and reached Linux CI too, so it
+        # is a race in this guard rather than a property of one filesystem.
+        metadata = None
+    if metadata is not None and (not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink > 1):
         raise ValueError("hook configuration cannot be a symlink or hardlink")
     content = json.dumps(data, ensure_ascii=True, indent=2, allow_nan=False) + "\n"
     if len(content.encode("utf-8")) > _MAX_HOOK_CONFIG_BYTES:
