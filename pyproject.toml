@@ -80,7 +80,7 @@ dev = [
     "mypy>=1.8",
     "numpy<2.5",
     "types-PyYAML>=6.0",
-    "ruff==0.15.20",
+    "ruff==0.16.2",
 ]
 browser = [
     "playwright>=1.52",
@@ -111,7 +111,7 @@ harness = [
     # Keep Click on a patched release while remaining compatible with
     # current LiteLLM and the intentionally capped Typer CLI surface.
     "click>=8.3.3,<9",
-    "typer>=0.16,<0.17",
+    "typer>=0.16,<0.28",
     "litellm>=1.40,<2",
 ]
 
