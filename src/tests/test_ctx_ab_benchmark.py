@@ -441,7 +441,12 @@ def test_unified_engine_dry_pair_changes_only_the_treatment_prompt_suffix(
         + treatment["engine_treatment_planning_seconds"]
         + treatment["engine_treatment_content_seconds"]
         + treatment["engine_treatment_render_seconds"],
-        abs=2e-6,
+        # Each component is independently rounded to 1e-6, so four of them can
+        # drift 2e-6 from the total before the total's own rounding is added.
+        # A tolerance equal to the error budget leaves nothing spare, and it
+        # tipped over on macOS/py3.11: 0.161599 vs 0.161601. This still catches
+        # any real accounting error, which is orders of magnitude larger.
+        abs=5e-6,
     )
     assert baseline["engine_treatment_status"] is None
     assert not (Path(baseline["artifact_dir"]) / "engine" / "engine.sqlite3").exists()
