@@ -13,6 +13,19 @@ disturb another trial's edits, and the user's working tree is never touched --
 including when that working tree is a linked ``git worktree``, whose ``.git``
 is a *file* aimed back at the real repository.
 
+An isolated *directory* is not yet an isolated *import*. Under an editable
+install -- ``pip install -e .`` on a src-layout project, which is the standard
+Python layout and what this repository itself uses -- the ambient interpreter
+resolves the package through a ``.pth`` in its own site-packages that points at
+the user's real source tree. The trial then reverts the source on disk and the
+suite goes on importing the original, so the task is discarded as "did not
+start red" and CTX Fit cannot evaluate its own repository (FITBUG-016).
+:class:`CampaignEnvironment` closes that gap: one interpreter per campaign,
+with the trial's workspace installed into it, re-aimed at each new workspace.
+When such an environment cannot be built the trial refuses and says why --
+never silently, because a task that vanishes without a reason is the half of
+this defect the user actually sees.
+
 **The repository judges, not the agent.** Success means the repository's own
 test command exited zero after the agent finished, with the task's test files
 byte-for-byte as they were handed over. What the agent said about its own work
@@ -35,12 +48,15 @@ flattering it.
 from __future__ import annotations
 
 import hashlib
+import os
 import subprocess
+import sys
 import tarfile
 import tempfile
 import threading
 import time
-from collections.abc import Callable
+import tomllib
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -56,6 +72,34 @@ DEFAULT_VERIFY_TIMEOUT_SECONDS = 300
 #: Exporting a whole tree is heavier than the path-limited checkout this
 #: replaced, so it gets more room before it is called a hung repository.
 _EXPORT_TIMEOUT_SECONDS = 120
+
+#: Building the campaign's environment resolves a whole dependency set, which
+#: can legitimately take minutes on a cold cache -- but not forever. A campaign
+#: that hangs here has spent the user's time and learned nothing, so exceeding
+#: this is an infrastructure failure with the cause stated.
+DEFAULT_ENVIRONMENT_TIMEOUT_SECONDS = 900
+
+#: Re-aiming a built environment at the next trial's workspace rewrites one
+#: path file and resolves nothing, so it gets a fraction of the budget. This is
+#: what makes one-environment-per-campaign affordable: the first trial pays for
+#: the dependency set and every later trial pays for a path rewrite.
+DEFAULT_REPOINT_TIMEOUT_SECONDS = 180
+
+#: Extras that conventionally carry a project's test dependencies, best first.
+#: The repository's own verify command is nearly always its test suite, and a
+#: suite cannot run against runtime dependencies alone.
+_TEST_EXTRAS: tuple[str, ...] = ("dev", "test", "tests", "testing", "develop")
+
+#: Files whose contents decide what the environment has to contain. When none
+#: of them is present there is no package to install -- and, just as important,
+#: nothing that could have been installed elsewhere to shadow the workspace.
+_PACKAGING_FILES: tuple[str, ...] = (
+    "pyproject.toml",
+    "setup.py",
+    "setup.cfg",
+    "requirements.txt",
+    "requirements-dev.txt",
+)
 
 #: The trial's specification changed while the trial was running, so the agent
 #: -- not the repository -- decided the verdict. Such a trial measured nothing:
@@ -95,7 +139,14 @@ class AgentOutcome:
 AgentDriver = Callable[[AgentInvocation], AgentOutcome]
 
 
-def _run(command: tuple[str, ...], cwd: Path, timeout: int) -> tuple[int | None, str]:
+def _run(
+    command: tuple[str, ...],
+    cwd: Path,
+    timeout: int,
+    env: Mapping[str, str] | None = None,
+) -> tuple[int | None, str]:
+    """Run ``command``. ``env`` of None inherits this process's environment."""
+
     try:
         completed = subprocess.run(
             command,
@@ -104,12 +155,268 @@ def _run(command: tuple[str, ...], cwd: Path, timeout: int) -> tuple[int | None,
             text=True,
             timeout=timeout,
             check=False,
+            env=None if env is None else dict(env),
         )
     except subprocess.TimeoutExpired:
         return None, "timed out"
     except OSError as exc:
         return None, f"could not execute: {exc}"
     return completed.returncode, (completed.stdout + completed.stderr)[-2000:]
+
+
+def _packaging_evidence(workspace: Path) -> tuple[Path, ...]:
+    """The files in ``workspace`` that declare what has to be installed."""
+
+    return tuple(path for name in _PACKAGING_FILES if (path := workspace / name).is_file())
+
+
+def _dependency_digest(evidence: tuple[Path, ...]) -> str:
+    """A digest of everything that decides the environment's contents.
+
+    Tasks in one campaign come from different commits, so the second task's
+    workspace can declare a dependency the first one never had. Re-pointing
+    without noticing would leave the suite failing on a missing import, and the
+    green gate would report it as "this repository's own tests do not pass" --
+    true, but for a reason CTX created. When the digest moves, the dependency
+    set is resolved again; when it does not, the trial pays for a path rewrite.
+    """
+
+    digest = hashlib.sha256()
+    for path in evidence:
+        digest.update(path.name.encode())
+        try:
+            digest.update(path.read_bytes())
+        except OSError:  # pragma: no cover - it was a file a moment ago
+            digest.update(b"<unreadable>")
+    return digest.hexdigest()
+
+
+def _test_extra(workspace: Path) -> str | None:
+    """The extra that most likely carries this project's test dependencies.
+
+    An install of runtime dependencies alone leaves an environment that cannot
+    run the repository's own suite -- which the green gate would correctly, and
+    uselessly, report as "this workspace cannot judge a candidate".
+    """
+
+    try:
+        declared = tomllib.loads((workspace / "pyproject.toml").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    optional = declared.get("project", {}).get("optional-dependencies", {})
+    if not isinstance(optional, dict):
+        return None
+    return next((extra for extra in _TEST_EXTRAS if extra in optional), None)
+
+
+def _interpreter_environment(venv: Path) -> dict[str, str]:
+    """The process environment that makes ``venv`` the interpreter in charge.
+
+    The verify command is the repository's own (``python -m pytest -q``, and
+    friends), so it is re-pointed by making this environment's ``bin`` win on
+    ``PATH`` rather than by rewriting anyone's argv.
+
+    ``PYTHONHOME`` is dropped because it would aim the environment's
+    interpreter at a different installation's standard library, and
+    ``PYTHONPATH`` because it is the remaining way for the user's own source
+    tree to land on ``sys.path`` ahead of the workspace -- the exact shadowing
+    this environment exists to end.
+    """
+
+    environment = dict(os.environ)
+    bin_directory = venv / ("Scripts" if os.name == "nt" else "bin")
+    environment["PATH"] = os.pathsep.join(
+        item for item in (str(bin_directory), environment.get("PATH", "")) if item
+    )
+    environment["VIRTUAL_ENV"] = str(venv)
+    environment.pop("PYTHONHOME", None)
+    environment.pop("PYTHONPATH", None)
+    return environment
+
+
+@dataclass(frozen=True, slots=True)
+class TrialEnvironment:
+    """Which interpreter one trial's commands run under, and why."""
+
+    env: dict[str, str] | None = None
+    """Process environment for the trial's commands; None means the ambient one."""
+
+    error: str | None = None
+    """Why no environment could be built. Set means the trial must not proceed."""
+
+    account: str = ""
+    """What was done, in the user's terms. Reported when a task is discarded.
+
+    A discarded task is the only thing the user sees of this machinery, so the
+    discard has to say whether the workspace's own code was the code under test.
+    """
+
+
+#: Said when the repository declares no Python package of its own. Nothing can
+#: be installed -- and nothing could have been installed *elsewhere* from this
+#: tree either, so no installed copy exists to shadow the workspace and the
+#: ambient interpreter is the honest answer rather than a shortcut.
+_NOTHING_TO_INSTALL = (
+    "this repository declares no installable Python package (no pyproject.toml, "
+    "setup.py or setup.cfg), so the workspace's own files are what run"
+)
+
+_ISOLATED = "the workspace was installed into an environment built for this campaign"
+
+
+class CampaignEnvironment:
+    """One Python environment, built once per campaign, re-aimed per trial.
+
+    Per-trial environments would be correct and unaffordable: every trial in a
+    campaign shares one dependency set, so building it once means the first
+    trial pays for the resolve and the rest pay for a path rewrite.
+
+    Constructing this object does nothing. No interpreter is created, no
+    package is downloaded and nothing is spent until :meth:`aim_at` is called
+    from inside a trial the budget gate has already cleared (ADR-013), and even
+    then the spend is disk and time -- never model tokens (ADR-004).
+    """
+
+    def __init__(
+        self,
+        *,
+        base_python: str | Path | None = None,
+        build_timeout: int = DEFAULT_ENVIRONMENT_TIMEOUT_SECONDS,
+        repoint_timeout: int = DEFAULT_REPOINT_TIMEOUT_SECONDS,
+    ) -> None:
+        self._base_python = Path(base_python) if base_python else Path(sys.executable)
+        self._build_timeout = build_timeout
+        self._repoint_timeout = repoint_timeout
+        self._home: tempfile.TemporaryDirectory[str] | None = None
+        self._venv: Path | None = None
+        self._installed_digest: str | None = None
+        self._unbuildable: str | None = None
+
+    @property
+    def venv(self) -> Path | None:
+        """Where the campaign's environment lives, once it has been built."""
+
+        return self._venv
+
+    def aim_at(self, workspace: Path, verify_command: tuple[str, ...]) -> TrialEnvironment:
+        """Make ``workspace`` the code that this campaign's interpreter imports."""
+
+        evidence = _packaging_evidence(workspace)
+        if not any(path.name in {"pyproject.toml", "setup.py", "setup.cfg"} for path in evidence):
+            return TrialEnvironment(account=_NOTHING_TO_INSTALL)
+
+        if self._unbuildable is not None:
+            # An interpreter that could not be created once will not create
+            # itself on the next trial, and retrying would charge every
+            # remaining trial the full build timeout to reach the same answer.
+            # The cause is repeated rather than dropped: each trial states it.
+            return TrialEnvironment(error=self._unbuildable)
+
+        if self._venv is None:
+            self._unbuildable = self._build()
+            if self._unbuildable is not None:
+                return TrialEnvironment(error=self._unbuildable)
+
+        error = self._install(workspace, evidence, verify_command)
+        if error is not None:
+            # Not sticky: this is about *this* workspace -- the commit under
+            # test may declare something the next task's commit does not.
+            return TrialEnvironment(error=error)
+
+        assert self._venv is not None
+        return TrialEnvironment(env=_interpreter_environment(self._venv), account=_ISOLATED)
+
+    def close(self) -> None:
+        """Remove the environment. Safe to call more than once."""
+
+        if self._home is not None:
+            self._home.cleanup()
+            self._home = None
+        self._venv = None
+        self._installed_digest = None
+
+    def _build(self) -> str | None:
+        """Create the interpreter. Returns a stated cause, or None on success."""
+
+        self._home = tempfile.TemporaryDirectory(prefix="ctx-fit-env-", ignore_cleanup_errors=True)
+        home = Path(self._home.name)
+        venv = home / "env"
+        code, output = _run(
+            (str(self._base_python), "-m", "venv", str(venv)), home, timeout=self._build_timeout
+        )
+        if code != 0:
+            return (
+                "this trial needs an environment of its own so that the workspace -- not an "
+                "editable install pointing at your source tree -- is the code under test, and "
+                f"one could not be created with {self._base_python}: "
+                f"{output.strip()[-200:] or 'no output'}"
+            )
+        self._venv = venv
+        return None
+
+    def _install(
+        self, workspace: Path, evidence: tuple[Path, ...], verify_command: tuple[str, ...]
+    ) -> str | None:
+        """Install ``workspace`` into the environment. Returns a cause or None."""
+
+        assert self._venv is not None
+        python = self._venv / ("Scripts" if os.name == "nt" else "bin") / "python"
+        digest = _dependency_digest(evidence)
+        resolve = digest != self._installed_digest
+        extra = _test_extra(workspace)
+
+        attempts: list[tuple[str, ...]] = []
+        for target in (f"{workspace}[{extra}]", str(workspace)) if extra else (str(workspace),):
+            command = [
+                str(python),
+                "-m",
+                "pip",
+                "install",
+                "--disable-pip-version-check",
+                "--no-input",
+                "--editable",
+                target,
+            ]
+            if resolve:
+                # The repository's verify command is its own, and it is nearly
+                # always pytest; a project whose test dependencies live outside
+                # its extras would otherwise fail the green gate on a missing
+                # runner rather than on anything about the candidate.
+                if any("pytest" in token for token in verify_command):
+                    command.append("pytest")
+            else:
+                # Editable, so the source is read live: only the path this
+                # environment points at has to change, and re-resolving the
+                # dependency set is what makes per-trial environments too slow
+                # to run.
+                command.append("--no-deps")
+            attempts.append(tuple(command))
+
+        # The install runs under the same environment the verify command will,
+        # so a stray ``PYTHONPATH`` cannot feed the user's source tree to a
+        # build backend that imports the project to describe it.
+        installing = _interpreter_environment(self._venv)
+        failure = ""
+        for attempt in attempts:
+            code, output = _run(
+                attempt,
+                workspace,
+                self._build_timeout if resolve else self._repoint_timeout,
+                installing,
+            )
+            if code == 0:
+                self._installed_digest = digest
+                return None
+            failure = output.strip()[-300:] or "no output"
+
+        # Falling through the extras attempt to the plain one and still failing
+        # is reported once, on the plain install: naming the extra would send
+        # the user to fix a dependency group that is not the problem.
+        return (
+            "the workspace could not be installed into this campaign's environment, so the "
+            "code under test would have been whatever is already installed rather than the "
+            f"trial's own tree: {failure}"
+        )
 
 
 def _export_tree(
@@ -295,10 +602,19 @@ def make_live_runner(
     *,
     trial_timeout: int = DEFAULT_TRIAL_TIMEOUT_SECONDS,
     verify_timeout: int = DEFAULT_VERIFY_TIMEOUT_SECONDS,
+    environment: CampaignEnvironment | None = None,
 ) -> Callable[[CandidateConfiguration, FitTask, int], TrialResult]:
-    """Build a runner that really executes and really verifies."""
+    """Build a runner that really executes and really verifies.
+
+    ``environment`` is the campaign's, and passing it is how "one environment
+    per campaign" survives a caller that rebuilds the runner between trials --
+    which the budgeted path does, once per trial, to cap each trial at the
+    authorization that is actually left. Omitting it gives this runner an
+    environment of its own, which is per-campaign only if the runner is.
+    """
 
     repo = Path(repo_path)
+    campaign_environment = environment if environment is not None else CampaignEnvironment()
 
     def run(candidate: CandidateConfiguration, task: FitTask, index: int) -> TrialResult:
         started = time.monotonic()
@@ -334,6 +650,21 @@ def make_live_runner(
             if error is not None:
                 return result("infrastructure-failure", detail=error)
 
+            # Before either half of the gate: both halves have to be measured
+            # on the same interpreter, and it has to be one that imports this
+            # workspace. Aiming it only at the reverted tree would compare a
+            # green run of the user's installed package against a red run of
+            # the workspace, which measures the environment change, not the
+            # revert.
+            trial_environment = campaign_environment.aim_at(workspace, task.verify_command)
+            if trial_environment.error is not None:
+                # Stated, not silent. Without an environment the revert below
+                # may be invisible to the suite, and the trial would be thrown
+                # away as "did not start red" -- a task disappearing for a
+                # reason the user was never told (FITBUG-016).
+                return result("infrastructure-failure", detail=trial_environment.error)
+            verify_env = trial_environment.env
+
             # Green baseline. The task's own commit is a state the repository is
             # supposed to pass in, so if it does not pass here the fault is the
             # workspace's -- no test runner installed, a suite that needs
@@ -343,13 +674,18 @@ def make_live_runner(
             # through, the same non-zero would come back after the agent ran,
             # and every candidate would be recorded as having failed a task
             # nothing here was ever able to judge (FITBUG-018, FITBUG-019).
-            code, output = _run(task.verify_command, workspace, timeout=verify_timeout)
+            code, output = _run(task.verify_command, workspace, verify_timeout, verify_env)
             if code != 0:
                 return result(
                     "infrastructure-failure",
                     detail=(
                         "the repository's own tests do not pass at this task's commit before "
-                        "anything is changed, so this workspace cannot judge a candidate: "
+                        "anything is changed, so this workspace cannot judge a candidate "
+                        # Which environment ran them is half the diagnosis: a
+                        # missing test dependency is the campaign's environment
+                        # to fix, and blaming the repository for it sends the
+                        # user to repair something that is not broken.
+                        f"({trial_environment.account}): "
                         f"{output.strip()[-200:] or 'no output'}"
                     ),
                 )
@@ -360,7 +696,7 @@ def make_live_runner(
 
             # Red gate. If the reverted tree already passes, the task proves
             # nothing and must not be scored against any candidate.
-            code, output = _run(task.verify_command, workspace, timeout=verify_timeout)
+            code, output = _run(task.verify_command, workspace, verify_timeout, verify_env)
             if code is None:
                 # Not red: unknown. `None == 0` is False, so without this the
                 # gate reads a verify command that never finished as proof the
@@ -375,7 +711,10 @@ def make_live_runner(
             if code == 0:
                 return result(
                     "infrastructure-failure",
-                    detail="task did not start red; it cannot distinguish configurations",
+                    detail=(
+                        "task did not start red; it cannot distinguish configurations "
+                        f"({trial_environment.account})"
+                    ),
                 )
 
             # The specification as handed over. The prompt asks the agent not to
@@ -446,7 +785,7 @@ def make_live_runner(
                 )
 
             # The repository decides. The agent's own claim is not consulted.
-            code, output = _run(task.verify_command, workspace, timeout=verify_timeout)
+            code, output = _run(task.verify_command, workspace, verify_timeout, verify_env)
             if code is None:
                 outcome = "inconclusive"
                 detail = f"verification did not complete: {output[:200]}"
@@ -469,11 +808,15 @@ def make_live_runner(
 
 
 __all__ = [
+    "DEFAULT_ENVIRONMENT_TIMEOUT_SECONDS",
+    "DEFAULT_REPOINT_TIMEOUT_SECONDS",
     "DEFAULT_TRIAL_TIMEOUT_SECONDS",
     "DEFAULT_VERIFY_TIMEOUT_SECONDS",
     "INVALID_TESTS_MODIFIED",
     "AgentDriver",
     "AgentInvocation",
     "AgentOutcome",
+    "CampaignEnvironment",
+    "TrialEnvironment",
     "make_live_runner",
 ]

@@ -38,6 +38,7 @@ from ctx.fit.profile import FitProfile
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ctx.fit.candidates import CandidateConfiguration
     from ctx.fit.execution import ExecutionReport
+    from ctx.fit.live_runner import CampaignEnvironment
     from ctx.fit.recommend import Recommendation
     from ctx.fit.tasks import FitTask, TaskSet
 
@@ -506,6 +507,7 @@ def run_experiment(experiment: ResolvedExperiment, *, live: bool) -> ExperimentO
     simulated = not live
     repo_path = experiment.profile.repo_path
     budget_usd = experiment.budget_usd
+    environment: CampaignEnvironment | None = None
 
     # ``derive_tasks`` proposes tasks; it does not validate them, and
     # ``execute_trials`` admits only tasks proven to start red. Marking them
@@ -518,14 +520,24 @@ def run_experiment(experiment: ResolvedExperiment, *, live: bool) -> ExperimentO
     if simulated:
         runner = make_simulated_runner()
     else:
-        from ctx.fit.live_runner import make_live_runner
+        from ctx.fit.live_runner import CampaignEnvironment, make_live_runner
         from ctx.fit.providers import build_agent_driver
+
+        # One environment for the whole campaign, so the first trial pays for
+        # the dependency set and the rest are re-pointed at their own workspace
+        # (FITBUG-016). It is created here rather than inside the runner because
+        # ``capped_runner`` below builds a *new* runner for every trial; a
+        # runner-owned environment would therefore be a trial-owned one, and
+        # every trial would pay a full install. Constructing it spends nothing
+        # and touches no disk (ADR-013) — the first ``aim_at``, inside a trial
+        # the budget gate has already cleared, is what builds it.
+        environment = CampaignEnvironment()
 
         # This driver is built for its exception, not for the runner it returns.
         # ``build_agent_driver`` raises ProviderUnavailable for an unusable
         # harness, and raising it here — before a single workspace exists — is
         # what lets the caller say nothing was run and nothing was spent.
-        runner = make_live_runner(repo_path, build_agent_driver())
+        runner = make_live_runner(repo_path, build_agent_driver(), environment=environment)
 
         def capped_runner(remaining_usd: float) -> TrialRunner:
             """Hand this trial only the dollars the authorization has left.
@@ -536,7 +548,9 @@ def run_experiment(experiment: ResolvedExperiment, *, live: bool) -> ExperimentO
             """
 
             return make_live_runner(
-                repo_path, build_agent_driver(per_trial_budget_usd=remaining_usd)
+                repo_path,
+                build_agent_driver(per_trial_budget_usd=remaining_usd),
+                environment=environment,
             )
 
         if budget_usd is not None:
@@ -544,19 +558,26 @@ def run_experiment(experiment: ResolvedExperiment, *, live: bool) -> ExperimentO
             # nothing to derive a cap from; ``execute_trials`` refuses the pair.
             runner_for_budget = capped_runner
 
-    report = execute_trials(
-        experiment.candidates.candidates,
-        tasks,
-        runner,
-        trials_per_task=experiment.trials_per_task,
-        simulated=simulated,
-        # The authorization is over real money. A simulated trial's cost is an
-        # invention of the simulator, so charging it against the user's budget
-        # would truncate the pipeline demonstration over dollars nobody was ever
-        # going to be billed.
-        budget_usd=None if simulated else budget_usd,
-        runner_for_budget=runner_for_budget,
-    )
+    try:
+        report = execute_trials(
+            experiment.candidates.candidates,
+            tasks,
+            runner,
+            trials_per_task=experiment.trials_per_task,
+            simulated=simulated,
+            # The authorization is over real money. A simulated trial's cost is
+            # an invention of the simulator, so charging it against the user's
+            # budget would truncate the pipeline demonstration over dollars
+            # nobody was ever going to be billed.
+            budget_usd=None if simulated else budget_usd,
+            runner_for_budget=runner_for_budget,
+        )
+    finally:
+        # The campaign owns the environment's lifetime: a whole dependency set
+        # on disk must not outlive the run that needed it, including when the
+        # run raises.
+        if environment is not None:
+            environment.close()
 
     # Tasks that never produced a scored trial -- an infrastructure failure, or
     # one abandoned by adaptive stopping -- are not evidence. Counting them

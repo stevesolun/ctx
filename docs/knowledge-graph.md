@@ -1,5 +1,13 @@
 # Knowledge graph
 
+!!! info "Part of the recommendation surface, not CTX Fit"
+
+    The product is **CTX Fit** (`ctx fit`): it finds the cheapest AI coding
+    setup that reliably works on a repository. See the [home page](index.md).
+    This page documents the older graph-backed recommendation layer, which
+    still ships and is what the published PyPI release installs.
+
+
 A pre-built weighted graph of skills, agents, MCP servers, and
 harnesses in the ctx ecosystem, shipped as `graph/wiki-graph.tar.gz`.
 The on-disk JSON and `resolve_graph` Python API are harness-aware, including

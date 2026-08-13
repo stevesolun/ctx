@@ -5,15 +5,31 @@ configuration", so this is the terminal deliverable rather than an optional
 extra. A report a user has to hand-translate into config files has not finished
 the job.
 
-Three safety properties, in order of importance:
+The two deliverables are deliberately different in strength (FITBUG-036):
+
+**`--apply` runs no git command at all.** :func:`apply_plan` writes the winning
+configuration into the working tree and stops. The user reviews it with
+``git diff`` and discards it with ``git checkout``, the two commands they
+already trust. No branch is created, nothing is committed.
+
+**`--pr` actually opens the pull request.** :func:`plan_pull_request` gathers
+the branch, commit, push and ``gh pr create`` invocations and every reason not
+to run them; :func:`open_pull_request` runs exactly that announced sequence.
+Printing a branch name that was never created was the defect — a reader
+believed their change was isolated on a branch they could delete.
+
+Four safety properties, in order of importance:
 
 **Nothing is written without being shown first.** Artifacts are generated into
-a preview and applied only on an explicit, separate request.
+a preview and applied only on an explicit, separate request. For a pull request
+that extends to the commands themselves: every git and gh invocation is
+returned for printing before any of them runs.
 
 **Nothing is applied from evidence that cannot support it.** A simulated run, a
 `no-verdict`, or a `keep-current` verdict produces no configuration change —
 the last of those because "your setup already won" means the correct action is
-to change nothing.
+to change nothing. A pull request is a stronger claim than a file write, so it
+refuses on all of those too, and on more besides.
 
 **Nothing the user wrote is destroyed, and nothing outside the repository is
 touched.** The generated document lives inside a delimited block that CTX Fit
@@ -21,17 +37,24 @@ owns; every other byte of an existing file is carried through untouched. A
 destination that is a symbolic link is refused rather than followed: writing
 through it would edit a file the preview never named, possibly outside the
 repository entirely, where git cannot show it and the PR's rollback advice
-cannot undo it (FITBUG-010, FITBUG-011).
+cannot undo it (FITBUG-010, FITBUG-011). The same principle gates the pull
+request: uncommitted work CTX Fit did not write is never carried into a CTX Fit
+branch or commit. That is decided by content, not by filename — `git add --
+AGENTS.md` stages a whole file, so a user's unrelated edit *inside* a file CTX
+Fit writes has to stop the pull request just as their unrelated file does.
 
-**Nothing is merged.** This prepares a branch and a PR body. A human merges.
+**Nothing is merged.** This opens a pull request. A human merges.
 """
 
 from __future__ import annotations
 
 import os
+import shlex
+import subprocess
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Protocol
 
 from ctx.fit.candidates import CandidateConfiguration
 from ctx.fit.recommend import Recommendation
@@ -39,6 +62,13 @@ from ctx.fit.recommend import Recommendation
 APPLY_SCHEMA = "ctx.fit.apply-v1"
 
 BRANCH_PREFIX = "ctx-fit"
+
+#: The remote a pull request is pushed to unless the caller names another.
+DEFAULT_REMOTE = "origin"
+
+#: How long any one git or gh command may take. A push to a remote that never
+#: answers has to fail the run rather than hang the terminal indefinitely.
+COMMAND_TIMEOUT_SECONDS = 300
 
 ApplyRefusal = Literal[
     "simulated-evidence",
@@ -397,15 +427,447 @@ def apply_plan(plan: ApplyPlan, repo_path: str | Path) -> tuple[str, ...]:
     return tuple(written)
 
 
+# --------------------------------------------------------------------------
+# Opening the pull request.
+#
+# Every git and gh invocation goes through one injectable runner, so a test can
+# assert the exact argv sequence without a repository, a `gh` binary or a
+# network — and so the production path has exactly one place that shells out.
+# --------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class CommandResult:
+    """What one git or gh invocation did."""
+
+    returncode: int
+    stdout: str = ""
+    stderr: str = ""
+    #: False when the executable itself was not found. A `gh` that is missing
+    #: and a `gh` that is installed but logged out need different messages, and
+    #: this is what separates them.
+    found: bool = True
+
+    @property
+    def ok(self) -> bool:
+        return self.found and self.returncode == 0
+
+    @property
+    def message(self) -> str:
+        """The most useful line the command produced, for a refusal."""
+
+        text = (self.stderr or self.stdout).strip()
+        return text.splitlines()[0].strip() if text else ""
+
+
+class CommandRunner(Protocol):
+    """Runs one command in the repository and reports what happened."""
+
+    def __call__(
+        self, command: Sequence[str], *, cwd: Path, stdin: str | None = None
+    ) -> CommandResult: ...
+
+
+def run_command(command: Sequence[str], *, cwd: Path, stdin: str | None = None) -> CommandResult:
+    """The production runner: an actual subprocess, never a shell."""
+
+    try:
+        completed = subprocess.run(
+            list(command),
+            cwd=str(cwd),
+            input=stdin,
+            capture_output=True,
+            text=True,
+            timeout=COMMAND_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        # An absent binary is a different problem from a binary that ran and
+        # refused, and the user needs to be told which one they have.
+        return CommandResult(returncode=127, stderr=str(exc), found=False)
+    except (OSError, subprocess.SubprocessError, UnicodeDecodeError) as exc:
+        # Decoding is in the list because one of these commands reads a file out
+        # of the repository (`git show`), and a repository may hold bytes that
+        # are not text. Unreadable output is a failed command, not a traceback.
+        return CommandResult(returncode=1, stderr=f"{command[0]} could not be run: {exc}")
+    return CommandResult(completed.returncode, completed.stdout, completed.stderr)
+
+
+PullRequestRefusal = Literal[
+    "plan-refused",
+    "git-not-installed",
+    "not-a-git-repository",
+    "dirty-worktree",
+    "gh-not-installed",
+    "gh-not-authenticated",
+    "branch-exists",
+    "no-remote",
+]
+
+PR_REFUSAL_EXPLANATION: dict[PullRequestRefusal, str] = {
+    "plan-refused": "there is no change for a pull request to carry",
+    "git-not-installed": (
+        "git is what creates the branch and the commit, and it is not on PATH; "
+        "install it from https://git-scm.com"
+    ),
+    "not-a-git-repository": (
+        "this directory is not inside a git repository, so there is no branch to push"
+    ),
+    "dirty-worktree": (
+        "the working tree has changes CTX Fit did not write, and they would be carried "
+        "onto the new branch; commit or stash them first"
+    ),
+    "gh-not-installed": (
+        "the GitHub CLI (`gh`) is what opens the pull request and it is not on PATH; "
+        "install it from https://cli.github.com"
+    ),
+    "gh-not-authenticated": (
+        "the GitHub CLI (`gh`) is installed but not logged in; run `gh auth login`"
+    ),
+    "branch-exists": (
+        "that branch already exists, and CTX Fit will not commit onto a branch it did "
+        "not create; delete it or re-run to get a new name"
+    ),
+    "no-remote": "there is no remote to push the branch to",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class PullRequestPlan:
+    """The exact sequence that would open the pull request, or why it will not.
+
+    Holding the commands as data rather than running them is what makes the
+    announcement honest: the caller prints this, asks, and only then hands it
+    back to :func:`open_pull_request`, which runs these and nothing else.
+    """
+
+    branch: str
+    #: Paths written into the working tree before the first command runs.
+    writes: tuple[str, ...] = ()
+    commands: tuple[tuple[str, ...], ...] = ()
+    #: The pull-request body, piped to `gh` on standard input. A temporary file
+    #: inside the repository would dirty the tree this command is strict about.
+    body: str = ""
+    #: The branch the user was standing on, so a mid-sequence failure can say
+    #: how to get back to it.
+    original_branch: str = ""
+    refusal: PullRequestRefusal | None = None
+    refusal_detail: str = ""
+
+    @property
+    def can_open(self) -> bool:
+        return self.refusal is None and bool(self.commands)
+
+    @property
+    def explanation(self) -> str:
+        if self.refusal is None:
+            return "ready to open"
+        general = PR_REFUSAL_EXPLANATION[self.refusal]
+        return f"{general} ({self.refusal_detail})" if self.refusal_detail else general
+
+    @property
+    def rendered_commands(self) -> tuple[str, ...]:
+        """The commands as a user would type them, for the announcement."""
+
+        return tuple(shlex.join(command) for command in self.commands)
+
+
+@dataclass(frozen=True, slots=True)
+class PullRequestResult:
+    """What actually ran, and how far it got."""
+
+    written: tuple[str, ...] = ()
+    ran: tuple[tuple[str, ...], ...] = ()
+    url: str = ""
+    #: The command that failed, if one did. Everything after it never ran.
+    failed: tuple[str, ...] | None = None
+    detail: str = ""
+
+    @property
+    def opened(self) -> bool:
+        return self.failed is None and bool(self.ran)
+
+
+def _changed_paths(status_output: str) -> tuple[str, ...]:
+    """Every path in ``git status --porcelain -z``, relative to the repo root.
+
+    The NUL-separated form is used because the default one C-quotes any path
+    with a space or a non-ASCII byte in it, and a path that fails to parse must
+    not silently become a path that looks unchanged.
+    """
+
+    fields = [field for field in status_output.split("\0") if field]
+    paths: list[str] = []
+    index = 0
+    while index < len(fields):
+        record = fields[index]
+        index += 1
+        if len(record) < 4:  # "XY " plus at least one character of path
+            continue
+        status, path = record[:2], record[3:]
+        paths.append(path)
+        if ("R" in status or "C" in status) and index < len(fields):
+            # A rename or copy is reported as the new path followed by a second
+            # record holding the old one. Both are uncommitted changes.
+            paths.append(fields[index])
+            index += 1
+    return tuple(paths)
+
+
+def _committed_content(path: str, *, repo_root: Path, run: CommandRunner) -> str:
+    """The committed bytes of a repository path, or "" when HEAD has none.
+
+    A path absent from HEAD — untracked, or a repository with no commits yet —
+    is the empty file for this purpose: everything in the working tree is then
+    new, and all of it has to be accounted for.
+    """
+
+    shown = run(("git", "show", f"HEAD:{path}"), cwd=repo_root)
+    return shown.stdout if shown.ok else ""
+
+
+def _worktree_content(target: Path) -> str:
+    """What is in a file now, or "" if it cannot be read.
+
+    A file that cannot be read cannot be shown to be CTX Fit's own work, and
+    the safe answer to "is any of this the user's?" is yes — which is what the
+    empty string produces, since no block can be found in it.
+    """
+
+    try:
+        return target.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return ""
+
+
+def _is_ctx_fit_output(worktree: str, committed: str) -> bool:
+    """Is this working-tree file exactly what CTX Fit makes of the committed one?
+
+    Answered by reproducing it: take the block CTX Fit's markers delimit in the
+    working-tree file, splice it into the committed file with the same merge
+    :func:`apply_plan` uses, and require the result byte for byte. That holds
+    only when every byte outside CTX Fit's own block is still what was
+    committed — which is the actual question the dirty-worktree gate asks.
+
+    A file with no block, or one the user has edited around the block, fails
+    here, and it must: `git add -- AGENTS.md` stages the whole file, so any
+    other change in it would be committed and pushed inside a pull request
+    whose title and body describe a configuration change and nothing else.
+    """
+
+    start = worktree.find(OWNED_BLOCK_START)
+    end = worktree.find(OWNED_BLOCK_END, start + 1) if start != -1 else -1
+    if start == -1 or end == -1:
+        return False
+    # The trailing newline is part of what `_owned_block` produced; the block
+    # has to go back in exactly as it came out for the comparison to be exact.
+    block = worktree[start : end + len(OWNED_BLOCK_END)] + "\n"
+    return _merge_owned_block(committed, block) == worktree
+
+
+def _unrelated_changes(
+    status_output: str,
+    repo_root: Path,
+    plan_root: Path,
+    plan: ApplyPlan,
+    *,
+    run: CommandRunner,
+) -> tuple[str, ...]:
+    """Uncommitted paths holding work CTX Fit did not write.
+
+    A path this plan writes is exempt only when the bytes in it are CTX Fit's
+    own output over the committed file. Exempting the path itself was the
+    defect: a user with unrelated edits in AGENTS.md had them staged by
+    `git add -- AGENTS.md`, committed under CTX Fit's title and pushed.
+
+    Compared as absolute paths: `git status` reports relative to the repository
+    root while an artifact path is relative to the directory the user named,
+    and those coincide only when `ctx fit` was run from the top of the tree.
+    """
+
+    ours = {(plan_root / artifact.path).resolve() for artifact in plan.artifacts}
+    unrelated: list[str] = []
+    for path in _changed_paths(status_output):
+        absolute = (repo_root / path).resolve()
+        if absolute in ours and _is_ctx_fit_output(
+            _worktree_content(absolute), _committed_content(path, repo_root=repo_root, run=run)
+        ):
+            continue
+        unrelated.append(path)
+    return tuple(unrelated)
+
+
+def _dirty_detail(
+    unrelated: Sequence[str], repo_root: Path, plan_root: Path, plan: ApplyPlan
+) -> str:
+    """Name the paths, and say when the work is inside a file CTX Fit writes.
+
+    "uncommitted: AGENTS.md" on its own reads as a bug to anyone who has just
+    run `--apply`: they know CTX Fit wrote that file. What stops the pull
+    request is the rest of what is in it, so the message has to say so.
+    """
+
+    ours = {(plan_root / artifact.path).resolve() for artifact in plan.artifacts}
+    labels = [
+        f"{path} (which holds changes of your own as well)"
+        if (repo_root / path).resolve() in ours
+        else path
+        for path in sorted(unrelated)
+    ]
+    return "uncommitted: " + ", ".join(labels)
+
+
+def plan_pull_request(
+    plan: ApplyPlan,
+    repo_path: str | Path = ".",
+    *,
+    runner: CommandRunner | None = None,
+    remote: str = DEFAULT_REMOTE,
+) -> PullRequestPlan:
+    """Check every gate, and return the commands that would open the PR.
+
+    Nothing here changes anything. The probes it does run — ``git rev-parse``,
+    ``git status``, ``git show``, ``git remote get-url``, ``gh auth status`` — are read-only,
+    which is what lets every refusal below leave the repository byte for byte as
+    it was found. The commands that do change something are returned rather than
+    run, so the caller can print them and ask first.
+    """
+
+    run = runner if runner is not None else run_command
+    root = Path(repo_path)
+
+    def refuse(reason: PullRequestRefusal, detail: str = "") -> PullRequestPlan:
+        return PullRequestPlan(branch=plan.branch, refusal=reason, refusal_detail=detail)
+
+    if not plan.can_apply:
+        # A pull request is a stronger claim than a file write, never a weaker
+        # one: evidence too thin to write AGENTS.md cannot open a PR either.
+        return refuse("plan-refused", plan.explanation)
+
+    toplevel = run(("git", "rev-parse", "--show-toplevel"), cwd=root)
+    if not toplevel.found:
+        # Same distinction the `gh` gate makes: a binary that is absent and a
+        # binary that ran and said no are different problems with different fixes.
+        return refuse("git-not-installed")
+    if not toplevel.ok:
+        return refuse("not-a-git-repository", toplevel.message)
+    repo_root = Path(toplevel.stdout.strip())
+
+    status = run(("git", "status", "--porcelain", "-z", "--untracked-files=all"), cwd=root)
+    if not status.ok:
+        return refuse("not-a-git-repository", status.message)
+    unrelated = _unrelated_changes(status.stdout, repo_root, root, plan, run=run)
+    if unrelated:
+        # `git checkout -b` carries uncommitted work onto the new branch, and
+        # `git add -- AGENTS.md` stages a whole file, so this covers both the
+        # user's other files and the user's other edits inside ours.
+        return refuse("dirty-worktree", _dirty_detail(unrelated, repo_root, root, plan))
+
+    auth = run(("gh", "auth", "status"), cwd=root)
+    if not auth.found:
+        return refuse("gh-not-installed")
+    if not auth.ok:
+        return refuse("gh-not-authenticated", auth.message)
+
+    if run(("git", "rev-parse", "--verify", "--quiet", f"refs/heads/{plan.branch}"), cwd=root).ok:
+        return refuse("branch-exists", plan.branch)
+    if not run(("git", "remote", "get-url", remote), cwd=root).ok:
+        # Checked here rather than discovered at the push, which would leave a
+        # branch and a commit behind for a run that could never have finished.
+        return refuse("no-remote", f"`git remote add {remote} <url>` first")
+
+    head = run(("git", "rev-parse", "--abbrev-ref", "HEAD"), cwd=root)
+    paths = tuple(artifact.path for artifact in plan.artifacts)
+    return PullRequestPlan(
+        branch=plan.branch,
+        writes=paths,
+        commands=(
+            ("git", "checkout", "-b", plan.branch),
+            ("git", "add", "--", *paths),
+            ("git", "commit", "-m", plan.pr_title),
+            ("git", "push", "--set-upstream", remote, plan.branch),
+            ("gh", "pr", "create", "--title", plan.pr_title, "--body-file", "-"),
+        ),
+        body=plan.pr_body,
+        original_branch=head.stdout.strip() if head.ok else "",
+    )
+
+
+def _pull_request_url(output: str) -> str:
+    """The PR URL `gh` prints, ignoring whatever else it said."""
+
+    for line in reversed(output.splitlines()):
+        candidate = line.strip()
+        if candidate.startswith("https://"):
+            return candidate
+    return ""
+
+
+def open_pull_request(
+    plan: ApplyPlan,
+    pull_request: PullRequestPlan,
+    repo_path: str | Path,
+    *,
+    runner: CommandRunner | None = None,
+) -> PullRequestResult:
+    """Write the artifacts, then run the announced commands, in order.
+
+    The files are written before the branch is created so that a failed write
+    leaves the user exactly where ``--apply`` would have: on their own branch,
+    with a modified file `git checkout` undoes. `git checkout -b` carries the
+    change onto the new branch, so the resulting commit is the same either way.
+
+    Stops at the first failure and reports it rather than unwinding: an unwind
+    would be git commands the user was never shown, which is the whole defect
+    this gate exists to prevent.
+    """
+
+    if not pull_request.can_open:
+        raise ValueError(f"this pull request cannot be opened: {pull_request.explanation}")
+
+    run = runner if runner is not None else run_command
+    root = Path(repo_path)
+    written = apply_plan(plan, root)
+
+    ran: list[tuple[str, ...]] = []
+    url = ""
+    for command in pull_request.commands:
+        # The body goes on stdin: it is markdown with newlines and backticks in
+        # it, and no temporary file has to be created inside the repository.
+        stdin = pull_request.body if tuple(command[:3]) == ("gh", "pr", "create") else None
+        result = run(command, cwd=root, stdin=stdin)
+        if not result.ok:
+            return PullRequestResult(
+                written=written,
+                ran=tuple(ran),
+                failed=tuple(command),
+                detail=result.message or f"exit status {result.returncode}",
+            )
+        ran.append(tuple(command))
+        url = _pull_request_url(result.stdout) or url
+    return PullRequestResult(written=written, ran=tuple(ran), url=url)
+
+
 __all__ = [
     "APPLY_SCHEMA",
     "BRANCH_PREFIX",
+    "COMMAND_TIMEOUT_SECONDS",
+    "DEFAULT_REMOTE",
     "OWNED_BLOCK_END",
     "OWNED_BLOCK_START",
+    "PR_REFUSAL_EXPLANATION",
     "REFUSAL_EXPLANATION",
     "ApplyPlan",
     "ApplyRefusal",
     "Artifact",
+    "CommandResult",
+    "CommandRunner",
+    "PullRequestPlan",
+    "PullRequestRefusal",
+    "PullRequestResult",
     "apply_plan",
+    "open_pull_request",
     "plan_apply",
+    "plan_pull_request",
+    "run_command",
 ]

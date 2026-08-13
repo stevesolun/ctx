@@ -13,10 +13,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import sys
+import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from ctx.fit.apply import ApplyPlan
     from ctx.fit.execution import ExecutionReport
     from ctx.fit.experiment import ExperimentOutcome, ExperimentPlan, ResolvedExperiment
     from ctx.fit.profile import FitProfile
@@ -55,20 +58,29 @@ def register(sub: argparse._SubParsersAction) -> None:
     parser.add_argument(
         "--apply",
         action="store_true",
-        help="Generate the winning configuration. Shows every change before writing.",
+        help=(
+            "Write the winning configuration into the working tree, showing "
+            "every change first. Runs no git command: review with `git diff`, "
+            "discard with `git checkout`."
+        ),
     )
     parser.add_argument(
         "--pr",
         action="store_true",
         help=(
-            "Print a pull-request body and a suggested branch name. Creates no "
-            "branch, commits nothing and never merges."
+            "Open a pull request with the winning configuration: creates a "
+            "branch, commits, pushes and runs `gh pr create`. Requires a clean "
+            "working tree and an authenticated `gh`. Every command is printed "
+            "before any of them runs, and nothing is ever merged."
         ),
     )
     parser.add_argument(
         "--yes",
         action="store_true",
-        help="Skip the confirmation prompt when applying changes.",
+        help=(
+            "Skip the confirmation step: write the files, and with --pr run the "
+            "git and gh commands that open the pull request."
+        ),
     )
     parser.add_argument(
         "--dry-run",
@@ -209,8 +221,9 @@ def _format_dry_run(profile: FitProfile) -> str:
         "  4. run each candidate against the baseline, repeated for reliability",
         "  5. verify every trial with the repository's own commands above",
         "  6. keep only candidates that reliably pass, then pick the cheapest",
-        "  7. write the winning configuration and print a pull-request body "
-        "(no branch is created and nothing is merged)",
+        "  7. with --apply, write the winning configuration into your working "
+        "tree; with --pr, branch, commit, push and open the pull request "
+        "(nothing is ever merged)",
         "",
         "The winner is the cheapest configuration that reliably works — "
         "reliability is a requirement, not a tie-break. If nothing beats your "
@@ -492,31 +505,36 @@ def _handle_apply(
     candidates: tuple[object, ...],
     args: argparse.Namespace,
 ) -> int:
-    """Preview, then optionally write, the winning configuration."""
+    """Preview, then write the winning configuration — or open a pull request."""
 
     from ctx.fit.apply import apply_plan, plan_apply
 
-    plan = plan_apply(recommendation, candidates, repo_path=args.repo)  # type: ignore[arg-type]
+    plan = plan_apply(
+        recommendation,  # type: ignore[arg-type]
+        candidates,  # type: ignore[arg-type]
+        repo_path=args.repo,
+        # Per-run, because a branch name is now a branch: two runs a week apart
+        # must not collide on `ctx-fit/run` and make the second one unopenable.
+        run_id=time.strftime("%Y%m%d-%H%M%S"),
+    )
     if not plan.can_apply:
+        # Not an error: "your current setup already won" is a correct answer to
+        # the question that was asked, and exiting non-zero would fail a CI job
+        # for the product working properly.
         print(f"\nNo changes proposed: {plan.explanation}.")
         return 0
 
     print("\nProposed changes")
     for artifact in plan.artifacts:
         print(f"  {artifact.action}: {artifact.path} ({artifact.reason})")
+
     if args.pr:
-        # Nothing here runs git. Printing "Branch: x" as a statement of fact led
-        # a reader to believe the write was isolated on a branch they could
-        # delete, when --apply modifies the working tree they are standing in.
-        print(f"\nSuggested branch (not created): {plan.branch}")
-        print(f"PR title:                       {plan.pr_title}")
-        print("\n--- pull request body ---")
-        print(plan.pr_body)
-        print("--- end ---")
-        print(
-            "\nCTX Fit creates no branch, commits nothing and never merges: any "
-            "changes below land in your working tree on the current branch."
-        )
+        if args.apply:
+            # Said out loud rather than silently dropped: --pr writes the same
+            # files on its way to the commit, so --apply adds nothing, and a
+            # user who passed both should not have to guess which one ran.
+            print("\n--apply adds nothing here: --pr writes the same files before it commits.")
+        return _handle_pull_request(plan, args)
 
     if not args.apply:
         return 0
@@ -526,6 +544,74 @@ def _handle_apply(
 
     written = apply_plan(plan, args.repo)
     print(f"\nWrote: {', '.join(written)}")
+    # --apply runs no git command by design, so the review and the undo are the
+    # two the user already trusts. Naming them is the whole handover.
+    print(
+        "Nothing was committed and no branch was created. Review with `git diff`, "
+        f"discard with `git checkout -- {' '.join(written)}`."
+    )
+    return 0
+
+
+def _handle_pull_request(plan: ApplyPlan, args: argparse.Namespace) -> int:
+    """Gate, announce, and then actually open the pull request."""
+
+    from ctx.fit.apply import open_pull_request, plan_pull_request
+
+    print(f"\nPR title: {plan.pr_title}")
+    print("\n--- pull request body ---")
+    print(plan.pr_body)
+    print("--- end ---")
+
+    pull_request = plan_pull_request(plan, args.repo)
+    if not pull_request.can_open:
+        # A refusal here is the environment blocking work the user asked for,
+        # unlike "no change is warranted" above, so it exits non-zero.
+        print(f"\nNo pull request was opened: {pull_request.explanation}.", file=sys.stderr)
+        # Precise rather than reassuring: the gate does run read-only probes,
+        # and this command's whole problem was claiming more than it did.
+        print(
+            "The repository is unchanged: nothing written, no branch, no commit, no push.",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Announced in full before a single one of them runs: this is the only path
+    # in CTX that writes to a remote.
+    print(
+        f"\nTo open it, CTX Fit will write {', '.join(pull_request.writes)} into the "
+        "working tree, then run, in order:"
+    )
+    for rendered in pull_request.rendered_commands:
+        print(f"    {rendered}")
+    print("(the pull-request body above is piped to `gh` on standard input)")
+
+    if not args.yes:
+        print("\nNothing has been changed. Re-run with --yes to run these commands.")
+        return 0
+
+    result = open_pull_request(plan, pull_request, args.repo)
+    if not result.opened:
+        # Rendered the same way it was announced, so the user can match the two.
+        print(
+            f"\nStopped at `{shlex.join(result.failed or ())}`: {result.detail}.",
+            file=sys.stderr,
+        )
+        print(
+            f"{len(result.ran)} of {len(pull_request.commands)} commands ran. "
+            # The write happens before the first command, so it has happened
+            # whatever went wrong; recovery advice that omits it is incomplete.
+            f"{', '.join(result.written)} is written into the working tree. Return "
+            f"to your branch with `git checkout {pull_request.original_branch}`, "
+            f"remove the new one with `git branch -D {pull_request.branch}` if it "
+            f"was created, and discard the file with `git checkout -- "
+            f"{' '.join(result.written)}`.",
+            file=sys.stderr,
+        )
+        return 1
+
+    print(f"\nOpened: {result.url or 'the pull request (gh printed no URL)'}")
+    print(f"Branch {pull_request.branch} is pushed. CTX Fit never merges.")
     return 0
 
 

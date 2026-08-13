@@ -3,19 +3,23 @@
 Every case here is a place where the command's own account diverged from what
 happened: a refusal that arrived as a traceback, an exit code of 0 for work that
 was silently dropped, a JSON document whose keys depended on which branch built
-it, a real and paid run announcing itself as a simulation, and an evidence count
-that included tasks which produced no evidence.
+it, a real and paid run announcing itself as a simulation, an evidence count
+that included tasks which produced no evidence, and a pull request announced but
+never opened.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import re
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+import ctx.fit.apply as apply_module
 import ctx.fit.execution as execution_module
 import ctx.fit.live_runner as live_runner_module
 import ctx.fit.providers as providers_module
@@ -29,6 +33,7 @@ from ctx.cli.fit import (
     cmd_fit,
     default_namespace,
 )
+from ctx.fit.apply import CommandResult
 from ctx.fit.candidates import CandidateConfiguration
 from ctx.fit.execution import CandidateOutcome, ExecutionReport, TrialResult
 from ctx.fit.experiment import (
@@ -172,19 +177,99 @@ def test_the_budget_gate_prices_the_whole_agent_loop_not_one_exchange(repo_with_
 
 
 def test_the_dry_run_script_describes_what_the_product_actually_does(repo_with_history) -> None:
-    """The rehearsal has to match the performance: no PR is opened, and tasks are derived."""
+    """The rehearsal has to match the performance: --pr now opens the pull request."""
 
     script = _format_dry_run(build_fit_profile(repo_with_history()))
 
     assert "not implemented yet" not in script  # tasks are derived from history today
-    assert "open a PR" not in script
-    assert "no branch is created and nothing is merged" in script
+    assert "no branch is created" not in script  # --pr creates one (FITBUG-036)
+    assert "open the pull request" in script
+    assert "nothing is ever merged" in script
 
 
-def test_pr_output_does_not_claim_a_branch_was_created(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+# --------------------------------------------------------------------------
+# FITBUG-036: --apply writes files and runs no git; --pr opens the PR, after
+# announcing every command it will run.
+# --------------------------------------------------------------------------
+
+#: The probes the gate is allowed to run before the user has said yes.
+_READ_ONLY = (
+    "git rev-parse",
+    "git status",
+    "git show",
+    "git remote get-url",
+    "gh auth status",
+)
+
+
+class _Commands:
+    """Stands in for the one subprocess seam in `ctx.fit.apply`, recording calls."""
+
+    def __init__(self, replies: dict[str, CommandResult] | None = None) -> None:
+        self.replies = dict(replies or {})
+        self.calls: list[tuple[str, ...]] = []
+
+    def __call__(
+        self, command: Sequence[str], *, cwd: Path, stdin: str | None = None
+    ) -> CommandResult:
+        command = tuple(command)
+        self.calls.append(command)
+        for prefix, reply in self.replies.items():
+            if " ".join(command).startswith(prefix):
+                return reply
+        return CommandResult(0)
+
+    @property
+    def mutating(self) -> tuple[tuple[str, ...], ...]:
+        """Calls that could change something — everything but the probes."""
+
+        return tuple(call for call in self.calls if not " ".join(call).startswith(_READ_ONLY))
+
+
+def _healthy(root: Path, overrides: dict[str, CommandResult] | None = None) -> _Commands:
+    """A repository where every gate passes, unless a test spoils one."""
+
+    replies = {
+        "git rev-parse --show-toplevel": CommandResult(0, f"{root}\n"),
+        "git status": CommandResult(0, ""),
+        "gh auth status": CommandResult(0, "Logged in to github.com account octocat"),
+        "git rev-parse --verify": CommandResult(1),
+        "git remote get-url": CommandResult(0, "git@github.com:octocat/repo.git\n"),
+        "git rev-parse --abbrev-ref": CommandResult(0, "main\n"),
+        "gh pr create": CommandResult(0, "https://github.com/octocat/repo/pull/7\n"),
+    }
+    replies.update(overrides or {})
+    return _Commands(replies)
+
+
+def test_apply_writes_the_configuration_and_runs_no_git_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Nothing in the apply path runs git, and --apply writes to the current branch."""
+    """--apply's whole contract is a working-tree write the user reviews themselves."""
+
+    commands = _Commands()
+    monkeypatch.setattr(apply_module, "run_command", commands)
+
+    exit_code = _handle_apply(
+        _winning_recommendation(), (_winning_candidate(),), _args(tmp_path, apply=True, yes=True)
+    )
+
+    assert exit_code == 0
+    assert (tmp_path / "AGENTS.md").exists()
+    assert commands.calls == []  # no branch, no commit, no push
+    out = capsys.readouterr().out
+    assert "no branch was created" in out
+    assert "git diff" in out
+    assert "git checkout -- AGENTS.md" in out
+
+
+def test_pr_announces_every_command_before_running_any_of_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Without --yes the user reads the whole sequence and nothing has happened yet."""
+
+    commands = _healthy(tmp_path)
+    monkeypatch.setattr(apply_module, "run_command", commands)
 
     exit_code = _handle_apply(
         _winning_recommendation(), (_winning_candidate(),), _args(tmp_path, pr=True)
@@ -192,8 +277,144 @@ def test_pr_output_does_not_claim_a_branch_was_created(
 
     assert exit_code == 0
     out = capsys.readouterr().out
-    assert "Suggested branch (not created)" in out
-    assert "land in your working tree on the current branch" in out
+    # Per-run, so a second `ctx fit --pr` cannot collide with the first branch.
+    match = re.search(r"ctx-fit/\d{8}-\d{6}", out)
+    assert match is not None
+    branch = match.group(0)
+    assert f"git checkout -b {branch}" in out
+    assert "git add -- AGENTS.md" in out
+    assert "git commit -m 'Optimize AI coding configuration using CTX Fit'" in out
+    assert f"git push --set-upstream origin {branch}" in out
+    assert "gh pr create --title" in out
+    assert "Re-run with --yes" in out
+    assert commands.mutating == ()
+    assert not (tmp_path / "AGENTS.md").exists()
+
+
+def test_pr_with_yes_opens_the_pull_request_it_announced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The defect was a branch name printed and never created."""
+
+    commands = _healthy(tmp_path)
+    monkeypatch.setattr(apply_module, "run_command", commands)
+
+    exit_code = _handle_apply(
+        _winning_recommendation(), (_winning_candidate(),), _args(tmp_path, pr=True, yes=True)
+    )
+
+    assert exit_code == 0
+    assert [call[:2] for call in commands.mutating] == [
+        ("git", "checkout"),
+        ("git", "add"),
+        ("git", "commit"),
+        ("git", "push"),
+        ("gh", "pr"),
+    ]
+    assert (tmp_path / "AGENTS.md").exists()
+    out = capsys.readouterr().out
+    assert "https://github.com/octocat/repo/pull/7" in out
+    assert "never merges" in out
+
+
+def test_an_unauthenticated_gh_is_refused_with_the_fix_in_the_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The common failure, and --yes does not get past it."""
+
+    commands = _healthy(
+        tmp_path,
+        {"gh auth status": CommandResult(1, stderr="You are not logged into any GitHub hosts.")},
+    )
+    monkeypatch.setattr(apply_module, "run_command", commands)
+
+    exit_code = _handle_apply(
+        _winning_recommendation(), (_winning_candidate(),), _args(tmp_path, pr=True, yes=True)
+    )
+
+    assert exit_code == 1
+    err = capsys.readouterr().err
+    assert "gh auth login" in err
+    assert "no branch, no commit, no push" in err
+    assert commands.mutating == ()
+    assert not (tmp_path / "AGENTS.md").exists()
+
+
+def test_the_users_own_work_inside_agents_md_stops_the_pull_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The refusal has to name the file, because the user cannot see the gate.
+
+    `git add -- AGENTS.md` stages every byte of it. A gate that exempted the
+    path rather than the content pushed the line below to the user's remote.
+    """
+
+    (tmp_path / "AGENTS.md").write_text(
+        "# House rules\nTODO(me): drop the customer database.\n", encoding="utf-8"
+    )
+    commands = _healthy(
+        tmp_path,
+        {
+            "git status": CommandResult(0, " M AGENTS.md\0"),
+            "git show HEAD:AGENTS.md": CommandResult(0, "# House rules\n"),
+        },
+    )
+    monkeypatch.setattr(apply_module, "run_command", commands)
+
+    exit_code = _handle_apply(
+        _winning_recommendation(), (_winning_candidate(),), _args(tmp_path, pr=True, yes=True)
+    )
+
+    assert exit_code == 1
+    err = capsys.readouterr().err
+    assert "AGENTS.md" in err
+    assert "changes CTX Fit did not write" in err
+    assert commands.mutating == ()
+    assert "drop the customer database" in (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
+
+
+def test_a_command_that_fails_is_reported_as_it_was_announced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Two renderings of one command read as two commands, and the file is written."""
+
+    commands = _healthy(tmp_path, {"git commit": CommandResult(1, stderr="nothing to commit")})
+    monkeypatch.setattr(apply_module, "run_command", commands)
+
+    exit_code = _handle_apply(
+        _winning_recommendation(), (_winning_candidate(),), _args(tmp_path, pr=True, yes=True)
+    )
+
+    captured = capsys.readouterr()
+    announced = next(
+        line.strip() for line in captured.out.splitlines() if line.strip().startswith("git commit")
+    )
+
+    assert exit_code == 1
+    assert f"Stopped at `{announced}`" in captured.err
+    assert "2 of 5 commands ran" in captured.err
+    # The write happens before the first command, so the undo has to name it.
+    assert "AGENTS.md is written into the working tree" in captured.err
+    assert "git checkout -- AGENTS.md" in captured.err
+    assert (tmp_path / "AGENTS.md").exists()
+
+
+def test_asking_for_both_apply_and_pr_says_which_one_ran(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--pr supersedes --apply. Silently dropping a flag the user typed is not an answer."""
+
+    commands = _healthy(tmp_path)
+    monkeypatch.setattr(apply_module, "run_command", commands)
+
+    exit_code = _handle_apply(
+        _winning_recommendation(),
+        (_winning_candidate(),),
+        _args(tmp_path, apply=True, pr=True, yes=True),
+    )
+
+    assert exit_code == 0
+    assert "--apply adds nothing here" in capsys.readouterr().out
 
 
 def test_a_real_run_does_not_announce_itself_as_a_simulation(

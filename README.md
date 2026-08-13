@@ -1,16 +1,22 @@
 # ctx
 
 [![CI](https://github.com/stevesolun/ctx/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
-[![Tests](https://img.shields.io/badge/Tests-8524_inventory-blue.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
+[![Tests](https://img.shields.io/badge/Tests-8579_inventory-blue.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
 
 **Find the cheapest AI coding setup that actually works on your repo.**
 
 CTX Fit analyzes your repository, tests promising AI coding configurations
-against real tasks in it, and writes the winning configuration into your
-working tree. It picks the *cheapest* setup that *reliably* works —
-reliability is a requirement, not a tie-break — and if nothing beats what you
-already have, it says so.
+against real tasks in it, and produces the winning configuration as a
+reviewable change — in your working tree with `--apply`, or as a pull request
+with `--pr`. It picks the *cheapest* setup that *reliably* works — reliability
+is a requirement, not a tie-break — and if nothing beats what you already have,
+it says so.
+
+The winner is chosen by a fixed rule, not a score: discard every candidate
+below the reliability floor, then minimize attributable cost, then break ties
+toward the simpler configuration. An LLM may explain a result; it never
+decides one.
 
 > **CTX Fit is not released yet.** The published `claude-ctx` package
 > ([v1.0.20](https://pypi.org/project/claude-ctx/)) contains none of it —
@@ -24,10 +30,12 @@ cd /path/to/my-project
 ctx fit
 ```
 
-Bare `ctx fit` is free, local and read-only: it runs no model and spends
-nothing. Example output from a real run, abridged:
+Bare `ctx fit` is free, local and read-only: it runs no model, spends nothing,
+and issues no `git` commands at all. Example output, abridged from a real run
+against this repository:
 
 ```text
+Repository: /path/to/ctx
 Languages:  python, javascript
 
 Current AI coding setup
@@ -42,11 +50,13 @@ How this repository verifies itself
              from pyproject.toml [tool.mypy] (high confidence)
   lint       python -m ruff check .
              from pyproject.toml [tool.ruff] (high confidence)
+  build      python -m build
+             from pyproject.toml [build-system] (medium confidence)
 
 AI agent readiness
-  83/100
+  91/100
     Verification           30/30
-    Instructions           12/20
+    Instructions           20/20
     Environment             6/15
     CI enforcement         15/15
     Tool safety            10/10
@@ -55,26 +65,79 @@ AI agent readiness
 Highest-impact improvements
   1. Commit a dependency lockfile. (+9)
      no dependency lockfile is committed
-  2. State the exact test command in the instruction file. (+8)
-     AGENTS.md, CLAUDE.md never mention how to verify a change
 
 This repository can be evaluated: it has deterministic tests, so a candidate
 configuration can be judged on evidence rather than on an agent's own claim.
 ```
 
 Requires Python 3.11 or newer. Add `--json` for machine-readable output, or
-`--dry-run` to see what a full evaluation would involve.
+`--dry-run` to see what a full evaluation would involve. `--dry-run` does read
+your history — it runs read-only git queries (`log`, `show --name-only`,
+`ls-tree`, `rev-parse`) to derive representative tasks — and writes nothing:
+not to the repository, not to the index, not to any ref.
 
 Beyond the free profile, `ctx fit --test --budget N` evaluates candidate
-configurations against real tasks taken from the repository's own history, and
-`ctx fit --apply` writes the winning configuration, showing every change before
-it writes. Run `ctx doctor` to see whether a real evaluation can run here;
-without provider credentials `--test` runs in simulation, which proves the
-pipeline but not your repository.
+configurations against those tasks. Spending needs both flags: `--test`
+without `--budget` only plans. Run `ctx doctor` to see whether a real
+evaluation can run here; without provider credentials `--test` runs in
+simulation, which proves the pipeline but not your repository, and a simulated
+result is refused as evidence for `--apply` and `--pr`.
 
-`ctx fit --pr` prints a suggested branch name and a pull-request body to
-stdout. It creates no branch, commits nothing, pushes nothing, and opens no
-pull request — that is yours to do.
+### `--apply` and `--pr` write different things
+
+`ctx fit --apply` writes the winning configuration into your working tree, on
+whatever branch you are standing on. It prints every proposed change first and
+stops there unless you pass `--yes`. **The write itself runs no git command**:
+nothing is staged, committed, or pushed. Getting to it does run git — `--apply`
+is refused without evidence from `ctx fit --test --budget N`, and deriving the
+tasks for that evaluation uses the same read-only queries `--dry-run` uses.
+
+Each proposed change names the file and whether CTX Fit is *creating* or
+*modifying* it, and that word decides how you review and undo it. Today every
+plan contains exactly one artifact, `AGENTS.md`:
+
+| It printed | State after the write | Review with | Undo with |
+| --- | --- | --- | --- |
+| `modify: AGENTS.md` | tracked, modified | `git diff` | `git checkout -- AGENTS.md` |
+| `create: AGENTS.md` | new and **untracked** | `git status --short` shows `?? AGENTS.md` | delete the file |
+
+The `create` row is the common one, because a repository with no agent
+instruction file is exactly the repository CTX Fit's own scorer flags first
+(`Add an AGENTS.md describing the project, conventions, and how to verify a
+change. (+12)`). A file git has never seen is not in the index, so `git diff`
+prints nothing for it and `git checkout -- AGENTS.md` fails with `error:
+pathspec 'AGENTS.md' did not match any file(s) known to git`, leaving the file
+in place. CTX Fit's own closing line after a write recommends that pair without
+qualifying it; on a `create` follow the table instead.
+
+**`ctx fit --pr` writes to a remote.** It creates a branch, commits the winning
+configuration, pushes it to `origin`, and opens a pull request through the
+GitHub CLI. Before running anything it prints the pull-request body, the files
+it will write, and the exact command sequence:
+
+```text
+git checkout -b ctx-fit/<timestamp>
+git add -- <paths>
+git commit -m "<pull request title>"
+git push --set-upstream origin ctx-fit/<timestamp>
+gh pr create --title "<pull request title>" --body-file -
+```
+
+Without `--yes` it stops there and changes nothing. With `--yes` it writes those
+files into the working tree and then runs those five commands, in that order and
+no others. Before any of them runs, the gate described below runs read-only
+probes — `git rev-parse`, `git status`, `git remote get-url`, and `gh auth
+status` — which is what lets every refusal leave the repository exactly as it
+found it. CTX Fit never merges.
+
+`--pr` refuses before touching anything if you are not inside a git repository,
+if the working tree has changes CTX Fit did not write (including untracked
+files — they would be carried onto the new branch), if `gh` is not installed or
+not logged in, if the branch already exists, or if there is no remote to push
+to. Each refusal says which one it was, exits non-zero, and leaves the tree
+untouched. If a command fails partway, CTX Fit reports which one and how many
+ran, and how to get back to the branch you were on; the files it had already
+written stay in your working tree.
 
 **Release status:** [v1.0.20](https://github.com/stevesolun/ctx/releases/tag/v1.0.20)
 is the current GitHub and [PyPI](https://pypi.org/project/claude-ctx/) release;
@@ -143,22 +206,29 @@ The dry run inspects the local spool without exporting it.
 
 | Task | CLI | Guide |
 | --- | --- | --- |
-| Analyze a repository and get a recommendation | `ctx` | [Entity onboarding](https://stevesolun.github.io/ctx/entity-onboarding/) |
-| Check why a real evaluation cannot run yet | `ctx doctor` | [Entity onboarding](https://stevesolun.github.io/ctx/entity-onboarding/) |
-| Initialize ctx and install graph data | `ctx-init` | [Knowledge graph](https://stevesolun.github.io/ctx/knowledge-graph/) |
-| Scan a repository | `ctx-scan-repo` | [Entity onboarding](https://stevesolun.github.io/ctx/entity-onboarding/) |
+| Profile a repository for AI coding readiness | `ctx` (same as `ctx fit`) | this README |
+| Evaluate candidate configurations and pick a winner | `ctx fit --test --budget N` | this README |
+| Write the winner into the working tree | `ctx fit --apply` | this README |
+| Open a pull request with the winner | `ctx fit --pr` | this README |
+| Diagnose whether a real evaluation can run here | `ctx doctor` | this README |
+| Initialize the recommendation surface and install graph data | `ctx-init` | [Knowledge graph](https://stevesolun.github.io/ctx/knowledge-graph/) |
+| Scan a repository for skill/agent/MCP recommendations | `ctx-scan-repo` | [Entity onboarding](https://stevesolun.github.io/ctx/entity-onboarding/) |
 | Connect an MCP, Python, or CLI host | `ctx-mcp-server`, `ctx advanced run` | [Host integration](https://stevesolun.github.io/ctx/harness/attaching-to-hosts/) |
-| Inspect the local runtime | `python -m ctx_monitor serve` | [Dashboard](https://stevesolun.github.io/ctx/dashboard/) |
+| Inspect the local recommendation runtime | `python -m ctx_monitor serve` | [Dashboard](https://stevesolun.github.io/ctx/dashboard/) |
 | Review or export telemetry | `ctx-telemetry-export`, `ctx-telemetry-retention` | [Telemetry](https://stevesolun.github.io/ctx/telemetry/) |
 
 This table describes the source tree. The `ctx-*` scripts are also in release
 `1.0.20`; the `ctx` subcommands other than `run`, `resume` and `sessions` are
-not.
+not. Bare `ctx` with no arguments runs the Fit profile, which is why it is not
+listed under the recommendation surface.
 
 The agent-loop harness (`run`, `resume`, `sessions`) is still there and still
-supported; it now lives under `ctx advanced` so the top-level help stays about
-the product. Maintenance utilities that used to be console scripts are reached
-with `python -m` — for example `python -m ctx.cli.recommend` or
+supported. It moved under `ctx advanced` so the top-level help stays about the
+product, but the original spellings keep working: `ctx run ...` and
+`ctx advanced run ...` are the same command, and `ctx run --help` still prints
+the harness options. Only `ctx --help` changed — it advertises `fit`, `doctor`
+and `advanced`. Maintenance utilities that used to be console scripts are
+reached with `python -m` — for example `python -m ctx.cli.recommend` or
 `python -m ctx.core.quality.dedup_check`.
 
 See the [full documentation](https://stevesolun.github.io/ctx/) for configuration,
@@ -169,7 +239,7 @@ APIs, entity lifecycle, and operational details.
 | Tracker ID | User outcome |
 | --- | --- |
 | `CLI-002` | Scan a repository and receive a bounded skill, agent, and MCP recommendation set. |
-| `CLI-026` | Review a custom-model harness recommendation with `python -m harness_install --dry-run` before installation. |
+| `CLI-026` | Review a custom-model harness recommendation with `python -m harness_install <slug> --dry-run` before installation. The slug is required: `--dry-run` on its own exits 2. |
 | `API-011` | Manage local entities through the dashboard's validated API. |
 
 <details>

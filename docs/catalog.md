@@ -1,5 +1,13 @@
 # Catalog
 
+!!! info "Part of the recommendation surface, not CTX Fit"
+
+    The product is **CTX Fit** (`ctx fit`): it finds the cheapest AI coding
+    setup that reliably works on a repository. See the [home page](index.md).
+    This page documents the older graph-backed recommendation layer, which
+    still ships and is what the published PyPI release installs.
+
+
 Use this page when you click a README badge from GitHub, PyPI, or Hugging Face.
 It is public and always reachable. The full live catalog runs locally inside
 `python -m ctx_monitor`.
