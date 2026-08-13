@@ -637,3 +637,60 @@ class TestAtomicWrite:
         # No stale .tmp files should remain
         tmp_files = list(tmp_path.glob("*settings.json*.tmp"))
         assert not tmp_files, f"Stale tempfiles not cleaned up: {tmp_files}"
+
+
+def test_a_concurrently_unlinked_target_is_absent_not_a_hardlink(tmp_path, monkeypatch) -> None:
+    """A zero link count means the file is gone, not that it is multiply linked.
+
+    Two writers racing through ``write_json_object_atomic`` both call
+    ``os.replace``. A stat landing inside another writer's replace window sees
+    the old inode with ``st_nlink == 0``. The guard tested ``!= 1``, so each
+    writer rejected the other with "cannot be a symlink or hardlink" -- the
+    flake that failed on macOS and then on Linux CI. A real hardlink still has
+    to be refused, which the test below this one pins.
+    """
+
+    from ctx.adapters.hook_config import write_json_object_atomic
+
+    target = tmp_path / "settings.json"
+    target.write_text("{}", encoding="utf-8")
+    real_stat = Path.stat
+
+    def unlinked_stat(self, *args, **kwargs):
+        result = real_stat(self, *args, **kwargs)
+        if self == target:
+            return os.stat_result(
+                (
+                    result.st_mode,
+                    result.st_ino,
+                    result.st_dev,
+                    0,
+                    result.st_uid,
+                    result.st_gid,
+                    result.st_size,
+                    result.st_atime,
+                    result.st_mtime,
+                    result.st_ctime,
+                )
+            )
+        return result
+
+    monkeypatch.setattr(Path, "stat", unlinked_stat)
+
+    write_json_object_atomic(target, {"ok": True})
+
+    monkeypatch.undo()
+    assert json.loads(target.read_text(encoding="utf-8")) == {"ok": True}
+
+
+def test_a_real_hardlink_is_still_refused(tmp_path) -> None:
+    """The guard's actual purpose, pinned so the fix above cannot erode it."""
+
+    from ctx.adapters.hook_config import write_json_object_atomic
+
+    target = tmp_path / "settings.json"
+    target.write_text("{}", encoding="utf-8")
+    os.link(target, tmp_path / "second-name.json")
+
+    with pytest.raises(ValueError, match="symlink or hardlink"):
+        write_json_object_atomic(target, {"ok": True})

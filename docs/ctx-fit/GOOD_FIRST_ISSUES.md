@@ -370,26 +370,34 @@ pick it as a first contribution to the codebase; pick it as a second.
 
 ---
 
-## Not available: blocked on an owner decision
+## Decided and shipped: the two items that used to be blocked here
 
-Two deferred rows are deliberately not offered above. Both need a product ruling
-the project owner has not yet made, so a patch cannot be reviewed against
-anything. Discussion is welcome; code is premature.
+Both owner decisions have been made and implemented, so nothing on this page is
+waiting on a ruling. They are recorded here because the reasoning is worth
+having, and because the code is a good place to read how the product wants to
+behave.
 
-- **FITBUG-016 — trial isolation** (`src/ctx/fit/live_runner.py`, the workspace
-  and subprocess setup). With a normal editable install, the workspace's tests
-  exercise the user's original source tree rather than the isolated copy. The
-  open question is one environment per campaign with refuse-as-fallback, versus
-  detect-and-refuse only. This blocks evaluating any src-layout
-  editable-install repository — including CTX itself, which makes it the
-  highest-impact item on this page.
-- **FITBUG-036 — git behaviour** (`_handle_apply` in `src/ctx/cli/fit.py`).
-  Today `--pr` announces a branch it never creates, and `--apply` writes to whatever branch
-  you are standing on. The open question is whether `--apply` may run git and
-  `--pr` may open the PR via `gh`, or whether CTX Fit should touch git at all.
-  The current output is at least honest about this — it prints "Suggested branch
-  (not created)" and states that changes land in your working tree — so the bug
-  is the missing capability, not a false claim.
+- **FITBUG-016 — trial isolation.** Decided: one Python environment per
+  campaign, with a stated refusal when it cannot be built. Shipped in
+  `819e8199`. An isolated directory was never an isolated import: under
+  `pip install -e .` on a src-layout project the interpreter resolves the
+  package through a `.pth` pointing at the user's real source tree, so the trial
+  reverted the file on disk while the suite kept importing the original and the
+  task was discarded as "did not start red". The environment is built once per
+  campaign — every trial shares one dependency set, so the first pays and the
+  rest are re-pointed — and a build that fails returns `infrastructure-failure`
+  with the cause, because a task that vanishes without a reason is the half of
+  the defect the user actually sees.
+
+- **FITBUG-036 — git behaviour.** Decided: `--apply` never runs a git write
+  command; `--pr` genuinely opens the pull request. Shipped in `819e8199`.
+  `--pr` creates the branch, commits, pushes and calls `gh pr create`, gated on
+  a clean working tree, an authenticated `gh`, every git and gh command printed
+  before any of them runs, and the same refusals `--apply` makes. Worth reading
+  for one subtlety the review caught: the clean-tree gate exempts a path only
+  when the file on disk is reproducibly CTX Fit's own output over the
+  *committed* file. Exempting the path itself meant `git add -- AGENTS.md`
+  would stage a user's unrelated work in that file and push it.
 
 ## Workspace identity cannot detect a recreated directory on ext4
 
