@@ -1,14 +1,15 @@
 # ctx code ownership
 #
-# @stevesolun is the only verified repository owner at present.
-# HUMAN GOVERNANCE BLOCKER: Add a second real human CODEOWNER before claiming
-# dual control or independent security/release approval.
-# Sequence: grant that reviewer repository access, add their real handle here,
-# then extend active ruleset 15907020 to require pull-request review and
-# CODEOWNER approval. The ruleset already protects main with strict required CI
-# and no bypass actors, but it does not require review. Enabling CODEOWNER
-# approval with only the author-owner could deadlock merges. This file records
-# ownership but cannot enforce review by itself.
+# @stevesolun is the sole owner of this repository, by decision rather than by
+# default. Sole ownership is deliberate, and it means exactly what it says:
+# there is no dual control and no independent security or release approval.
+# Do not describe this repository as having either.
+#
+# Enforcement is CI, not review. The active ruleset 15907020 already protects main with strict required CI
+# and no bypass actors, and it deliberately does not require pull-request review
+# or CODEOWNER approval: with a single owner who is also the author, requiring
+# CODEOWNER approval could deadlock merges. This file records ownership; it
+# cannot enforce review by itself.
 
 # Default owner for every tracked path.
 * @stevesolun

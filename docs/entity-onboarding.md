@@ -1,5 +1,13 @@
 # Entity Onboarding
 
+!!! info "Part of the recommendation surface, not CTX Fit"
+
+    The product is **CTX Fit** (`ctx fit`): it finds the cheapest AI coding
+    setup that reliably works on a repository. See the [home page](index.md).
+    This page documents the older graph-backed recommendation layer, which
+    still ships and is what the published PyPI release installs.
+
+
 ctx treats skills, agents, MCP servers, and harnesses as wiki entities that can
 be indexed, linked in the knowledge graph, and recommended from the same
 surface. The important distinction is install behavior:

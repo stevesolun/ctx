@@ -1,5 +1,13 @@
 # Skill router
 
+!!! info "Part of the recommendation surface, not CTX Fit"
+
+    The product is **CTX Fit** (`ctx fit`): it finds the cheapest AI coding
+    setup that reliably works on a repository. See the [home page](../index.md).
+    This page documents the older graph-backed recommendation layer, which
+    still ships and is what the published PyPI release installs.
+
+
 The skill router decides which skills, agents, and MCP servers are useful for
 the active repository and current development task. Harnesses are recommended in
 the custom-model onboarding flow or loop adapters; after a harness is attached,

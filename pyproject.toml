@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "claude-ctx"
 version = "1.0.21"
-description = "Not an Amazon-style catalog: a recommendation layer for loading the right skills, agents, MCPs, and harnesses at the right development moment"
+description = "CTX Fit: find the cheapest AI coding setup that reliably works on your repository, then apply the winner as a reviewable change"
 authors = [{ name = "Steve Solun" }]
 license = "MIT"
 readme = "README.md"

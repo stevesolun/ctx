@@ -64,6 +64,16 @@ def render_home(
 
     body = (
         "<h1>ctx monitor</h1>"
+        # The product is CTX Fit; this dashboard predates it and shows none of
+        # it. A reader who arrived from the README would otherwise assume the
+        # empty Fit state was a bug rather than a scope boundary.
+        "<p class='muted' style='margin-top:-0.4rem; margin-bottom:1.1rem;'>"
+        "Everything below is the local recommendation surface: the skill/agent/MCP "
+        "wiki, the knowledge graph, and this machine's session history. "
+        "It shows no <code>ctx fit</code> state, because there is none to show &mdash; "
+        "<code>ctx fit</code> writes nothing under <code>~/.claude</code> and reports "
+        "its results on stdout."
+        "</p>"
         "<div style='display:grid; grid-template-columns:repeat(auto-fit, minmax(180px,1fr));"
         " gap:0.8rem; margin-bottom:1.25rem;'>"
         + "<div class='card'><div class='muted' style='font-size:0.8rem;'>Currently loaded</div>"
