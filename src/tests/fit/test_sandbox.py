@@ -264,21 +264,48 @@ def test_repository_process_cannot_signal_an_ambient_host_process(tmp_path: Path
     assert "reachable" not in attempted.stdout
 
 
-def test_repository_process_cannot_create_host_posix_shared_memory(tmp_path: Path) -> None:
+def test_repository_process_cannot_reach_host_posix_shared_memory(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
 
-    attempted = _run_python(
-        workspace,
-        (
-            "from multiprocessing import shared_memory; "
-            "region = shared_memory.SharedMemory(create=True, size=1); "
-            "print('created'); region.close(); region.unlink()"
-        ),
-    )
+    if sys.platform == "darwin":
+        attempted = _run_python(
+            workspace,
+            (
+                "from multiprocessing import shared_memory; "
+                "region = shared_memory.SharedMemory(create=True, size=1); "
+                "print('created'); region.close(); region.unlink()"
+            ),
+        )
 
-    assert attempted.returncode != 0
-    assert "created" not in attempted.stdout
+        assert attempted.returncode != 0
+        assert "created" not in attempted.stdout
+        return
+
+    from multiprocessing import shared_memory
+
+    host_region = shared_memory.SharedMemory(create=True, size=1)
+    try:
+        host_buffer = host_region.buf
+        assert host_buffer is not None
+        host_buffer[0] = 17
+        attempted = _run_python(
+            workspace,
+            (
+                "from multiprocessing import shared_memory; "
+                f"region = shared_memory.SharedMemory(name={host_region.name!r}, "
+                "create=True, size=1); "
+                "region.buf[0] = 99; print(region.buf[0]); "
+                "region.close(); region.unlink()"
+            ),
+        )
+
+        assert attempted.returncode == 0, attempted.stderr
+        assert attempted.stdout.strip() == "99"
+        assert host_buffer[0] == 17
+    finally:
+        host_region.close()
+        host_region.unlink()
 
 
 def test_repository_process_cannot_lookup_a_host_mach_service(tmp_path: Path) -> None:
@@ -389,6 +416,12 @@ def test_linux_uses_an_empty_root_and_only_explicit_read_bindings(
     assert "--unshare-net" in command
     bind_at = command.index("--bind")
     assert command[bind_at + 1 : bind_at + 3] == (str(workspace.resolve()),) * 2
+    root_readonly_at = command.index("--remount-ro")
+    assert command[root_readonly_at + 1] == "/"
+    assert root_readonly_at > bind_at
+    dev_at = command.index("--dev")
+    chdir_at = command.index("--chdir")
+    assert dev_at < root_readonly_at < chdir_at
     assert ("--ro-bind", str(runtime.resolve()), str(runtime.resolve())) in tuple(
         zip(command, command[1:], command[2:])
     )

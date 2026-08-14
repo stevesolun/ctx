@@ -335,6 +335,15 @@ def sandboxed_command(
                 "/proc",
                 "--dev",
                 "/dev",
+                # The empty tmpfs root is private, but leaving it writable lets
+                # repository code create same-spelled paths beside the bound
+                # workspace. Remount only that private root read-only after
+                # setup. Bubblewrap's remount is deliberately non-recursive,
+                # so the explicit workspace bind and private /dev mount remain
+                # usable while the workspace stays the only host-backed,
+                # persistent writable tree.
+                "--remount-ro",
+                "/",
                 "--chdir",
                 str(working),
                 "--",

@@ -188,7 +188,7 @@ jobs:
             src/tests/fit/test_sandbox.py::test_network_enabled_process_cannot_connect_to_an_ambient_unix_socket \
             src/tests/fit/test_sandbox.py::test_network_disabled_process_cannot_connect_to_tcp \
             src/tests/fit/test_sandbox.py::test_repository_process_cannot_signal_an_ambient_host_process \
-            src/tests/fit/test_sandbox.py::test_repository_process_cannot_create_host_posix_shared_memory
+            src/tests/fit/test_sandbox.py::test_repository_process_cannot_reach_host_posix_shared_memory
           python - <<'PY'
           from pathlib import Path
           import xml.etree.ElementTree as ET

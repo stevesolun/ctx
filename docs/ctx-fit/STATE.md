@@ -13,16 +13,15 @@
 
 - Updated: 2026-08-15 (Asia/Jerusalem)
 - Active goal: review, harden, verify, and release CTX Fit 1.0.21
-- Phase: final Ubuntu namespace repair and exact-SHA remote verification
+- Phase: final Linux mount-boundary repair and exact-SHA remote verification
 - Release decision: **DO NOT RELEASE YET**
 - Branch: `codex/ctx-fit-release-hardening`
 - Base commit: `bd36bbea591495f8ef498a6818e7ec541fe78ebb`
-- Committed release candidate: `6ec9d9b2401acbdd8634f84deaeefb4c327122b0`
+- Last pushed release candidate: `c4aaa22e5115ea85e1da9781ce2643057ac5070b`
 - Community PR: `https://github.com/stevesolun/ctx/pull/267`
 - Working tree at checkpoint:
-  - modified: Ubuntu AppArmor CI setup, sandbox evidence integrity,
-    operational readiness, public Linux instructions, focused tests, and this
-    checkpoint
+  - modified: Linux private-root mount policy, POSIX-shared-memory privacy
+    evidence, the required Ubuntu selector, and this checkpoint
   - user-owned and out of scope: `.scratch/`
 - Parallel execution: the CI/profile, sandbox-evidence, and production
   readiness repairs are complete. Independent security refreeze accepted the
@@ -82,7 +81,7 @@ All of the following must be true before tagging or publishing:
 | Applied winner activation | Complete, independently accepted | Activation writer + coordinator + independent reviewer | Strict repository-root loader, nested-sidecar refusal, hash/model validation, one-use exact context, subdirectory activation, and explicit model-conflict handling passed independent refreeze as part of the 222-check baseline/activation lane |
 | ADR-015 stop attribution | Complete, independently accepted | Coordinator + spend/fairness reviewer | Structured stop reason/log fields flow provider → live runner → serialized result, budget-capped trials are inconclusive, and the accepted spend/fairness lane plus 446-test Fit aggregate are green |
 | Release metadata and publish guard | Complete, independently accepted | Metadata writer + publish writer/reviewer + coordinator | 1.0.21 metadata and changelog are current; exact-main/exact-successful-Tests production guard and changelog-backed notes have no P0/P1 review findings; P2 credential/doc hardening is integrated |
-| Final verification and release | PR open; remote Ubuntu repair accepted locally | Coordinator + expert writers/reviewer | Commit `6ec9d9b2` passed proportional clean release checks, then its required Ubuntu lane exposed an AppArmor namespace-start failure and a false-positive denial-test gap. The current repair loads Ubuntu's targeted profile, requires child-start evidence, and operationally probes Bubblewrap before a campaign; 513 Fit tests, focused/static/docs checks, and independent refreeze are green. New committed gates and exact-SHA remote Ubuntu evidence remain |
+| Final verification and release | PR open; second remote Ubuntu repair active | Coordinator + expert writers/reviewer | Commit `c4aaa22e` passed all 11 fast lanes and all 19 clean PR-preflight lanes. Its required Ubuntu job proved the AppArmor/startup repair, then found that Bubblewrap's private tmpfs root remained writable beside the workspace and that the old POSIX-shm test mistook private creation for host leakage. The current repair remounts only the private root read-only and proves Linux shm name isolation while retaining the macOS denial; focused security/static checks are green. New committed gates and exact-SHA remote Ubuntu evidence remain |
 
 ## Open release blockers
 
@@ -97,7 +96,7 @@ verification is explicitly a non-adversarial trust boundary.
 
 ### P1 — must resolve or explicitly de-scope before release
 
-None in the independently reviewed working tree, but its authoritative Ubuntu
+None outside the active Linux mount-boundary repair, whose authoritative Ubuntu
 evidence is still missing. PR run `31840406705`, job `94895906939`, proved that
 finding `bwrap` on `PATH` was insufficient on Ubuntu 24.04: AppArmor denied
 Bubblewrap's loopback setup with `Failed RTM_NEWADDR`, so three positive checks
@@ -105,8 +104,14 @@ failed and seven denial checks had not proved their child started. The accepted
 repair keeps `--unshare-net` and the global user-namespace restriction, loads
 Ubuntu's packaged `bwrap-userns-restrict` profile, requires an exact child-start
 sentinel in every isolation test, and makes doctor/live setup run a bounded
-no-network canary before a campaign. The exact committed SHA must pass that
-real Ubuntu lane before the release is eligible.
+no-network canary before a campaign. PR run `31843023765`, job `94903820786`,
+then proved all sandbox children started and 8 of 10 boundaries passed. Its two
+failures were a stricter-policy gap, not demonstrated host escapes: the private
+tmpfs root allowed a same-spelled sibling write, and private `/dev/shm` allowed
+POSIX-shm creation. The current repair makes the private root read-only while
+preserving the workspace submount, and replaces the Linux creation-denial
+assumption with a same-name host/sandbox isolation proof. The exact committed
+SHA must pass that real Ubuntu lane before the release is eligible.
 
 The release also deliberately discloses that qualification did not include a
 paid provider call or a complete provider-plus-filesystem-MCP launch on this
@@ -179,6 +184,9 @@ surface makes that row stale for release purposes.
 | Commit `6ec9d9b2`, 2026-08-14 | proportional clean release/docs/package revalidation | 180 release/workflow/docs tests, strict MkDocs, stats, reproducible build, and Twine passed; wheel `4d3e5e3c...`, sdist `798d9582...` | Exact pushed candidate evidence before remote Ubuntu execution |
 | PR #267 / commit `6ec9d9b2`, 2026-08-15 | required Ubuntu live-prerequisite lane | 3 positive sandbox checks failed before child start with `bwrap: loopback: Failed RTM_NEWADDR`; 7 negative checks were not valid denial evidence because the child never started | Release-stopping remote evidence; directly drove the AppArmor profile, child-start sentinel, and operational-preflight repair |
 | Accepted Ubuntu repair tree, 2026-08-15 | sandbox/provider/doctor/workflow focused + full Fit + independent refreeze + static/docs | Coordinator: 64 focused and 513 full Fit passed. Independent reviewer: 513 Fit, 99 focused, 75 adjacent, docs/tracker 36; Ruff, format, mypy, workflow parsing, strict MkDocs, stats, and diff checks all passed; no P0-P2 | Accepted uncommitted evidence; committed gates and exact-SHA remote Ubuntu run remain |
+| Commit `c4aaa22e`, 2026-08-15 | committed fast gate + clean detached PR preflight | All 11 fast lanes and all 19 preflight lanes passed; 8,774 tests, 5 skipped, 92.16% coverage; wheel `e9770d99...`, sdist `a0d86319...`, Twine green | Exact local release evidence; remote Ubuntu still required |
+| PR #267 / commit `c4aaa22e`, 2026-08-15 | required Ubuntu live-prerequisite lane | AppArmor profile loaded and every child started; 8 passed, while a private-root sibling write and private POSIX-shm creation contradicted the old denial assertions | Release-stopping policy/evidence mismatch; directly drove private-root remount and same-name shm isolation proof |
+| Linux private-root repair tree, 2026-08-15 | sandbox/provider/doctor/workflow focused + static | 64 passed; Ruff, format, mypy, and diff check passed; independent review found no P0/P1 | Fresh local evidence; committed gates and exact-SHA Ubuntu remain |
 | Exact tag target | required GitHub CI and package/publish smoke | Not run | Required |
 
 No paid real-provider evaluation has been authorized or run during this
@@ -237,14 +245,27 @@ be overwritten.
 
 ## Immediate next actions
 
-1. Commit the independently accepted Ubuntu repair and run committed fast and
-   PR-preflight gates on that exact history.
+1. Commit the independently accepted Linux private-root/shm evidence repair and
+   run committed fast and PR-preflight gates on that exact history.
 2. Push PR #267 and require the repaired zero-spend Ubuntu lane, `unit-linux`,
    CodeQL, and every aggregate check to be green on that exact SHA.
 3. Hand off the green PR for human merge. Build, tag, and publish only from the
    resulting exact green `main` SHA.
 
 ## Checkpoint log
+
+- 2026-08-15: Commit `c4aaa22e` passed all 11 committed fast lanes and all 19
+  clean detached PR-preflight lanes, including 8,774 tests, 5 skips, 92.16%
+  coverage, reproducible wheel `e9770d99...`, reproducible sdist `a0d86319...`,
+  and Twine. Required Ubuntu job `94903820786` then started every Bubblewrap
+  child and passed 8 of 10 adversarial checks. The two failures exposed an
+  evidence-model distinction: writes beside the workspace and POSIX shm were
+  private to Bubblewrap's new tmpfs/dev mounts, not host mutations. The active
+  repair enforces the stronger host-backed single-writable-tree policy with a
+  non-recursive root remount and proves Linux shm isolation by using the same
+  name inside and outside the sandbox; macOS denial remains unchanged. Focused
+  behavior/static checks and independent review are green; commit, gates, and
+  exact-SHA Ubuntu remain.
 
 - 2026-08-15: Required Ubuntu run `31840406705` reached the real Bubblewrap
   boundary and failed with AppArmor denying loopback setup. Three positive
