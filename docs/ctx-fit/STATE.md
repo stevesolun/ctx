@@ -13,14 +13,14 @@
 
 - Updated: 2026-08-14 (Asia/Jerusalem)
 - Active goal: review, harden, verify, and release CTX Fit 1.0.21
-- Phase: final committed verification of Linux CI remediation
+- Phase: final remote CI verification of Linux CI remediation
 - Release decision: **DO NOT RELEASE YET**
 - Branch: `codex/ctx-fit-release-hardening`
 - Base commit: `bd36bbea591495f8ef498a6818e7ec541fe78ebb`
-- Committed release candidate: `2cc8667d53a7ca39af18e22e5d9c2727045f07ca`
+- Committed release candidate: `10e47d37916aa09a12e338456691fc9df2c2e6d9`
 - Community PR: `https://github.com/stevesolun/ctx/pull/267`
 - Working tree at checkpoint:
-  - reviewed Linux/provider/CI remediation is ready for a new commit
+  - modified: this live state file records the completed local gates
   - user-owned and out of scope: `.scratch/`
 - Parallel execution: the Linux semantic-test, provider/pricing, and zero-spend
   Ubuntu CI lanes are complete. Independent integration review accepted the
@@ -79,7 +79,7 @@ All of the following must be true before tagging or publishing:
 | Applied winner activation | Complete, independently accepted | Activation writer + coordinator + independent reviewer | Strict repository-root loader, nested-sidecar refusal, hash/model validation, one-use exact context, subdirectory activation, and explicit model-conflict handling passed independent refreeze as part of the 222-check baseline/activation lane |
 | ADR-015 stop attribution | Complete, independently accepted | Coordinator + spend/fairness reviewer | Structured stop reason/log fields flow provider → live runner → serialized result, budget-capped trials are inconclusive, and the accepted spend/fairness lane plus 446-test Fit aggregate are green |
 | Release metadata and publish guard | Complete, independently accepted | Metadata writer + publish writer/reviewer + coordinator | 1.0.21 metadata and changelog are current; exact-main/exact-successful-Tests production guard and changelog-backed notes have no P0/P1 review findings; P2 credential/doc hardening is integrated |
-| Final verification and release | PR open; repaired tree independently accepted | Coordinator + expert writers/reviewer | The original Linux failures are repaired without weakening fail-closed behavior. A new required zero-spend Ubuntu lane installs `[harness]` plus Bubblewrap, runs ten real isolation checks, and constructs but never invokes the live driver. Full Fit is 508 passed; workflow contracts are 137 passed. Commit, committed gates, and remote Ubuntu evidence remain |
+| Final verification and release | PR open; local gates green, remote rerun pending | Coordinator + expert writers/reviewer | Commit `10e47d37` passed all 11 committed fast lanes and all 19 clean preflight lanes: 8,769 tests, 5 skipped, 92.16% coverage, reproducible artifacts, and Twine green. Push plus required Ubuntu/CodeQL/aggregate evidence remain |
 
 ## Open release blockers
 
@@ -169,6 +169,7 @@ surface makes that row stale for release purposes.
 | Commit `2cc8667d`, 2026-08-14 | committed fast gate + clean detached PR preflight | All 11 fast lanes and all 19 preflight lanes passed; 8,762 tests, 5 skipped, 92.15% coverage; wheel `9986b8c6...`, sdist `099825fd...`, Twine green | Exact macOS/local release evidence; remote Linux still required |
 | PR #267 / commit `2cc8667d`, 2026-08-14 | GitHub CodeQL and Tests | CodeQL aggregate plus 15 specialized checks passed; `unit-linux` failed 8 cases (2 missing Bubblewrap, 6 missing optional harness metadata/pricing), causing aggregate CI failure | Release-stopping Linux environment-contract evidence; parallel repair active |
 | Reviewed Linux/provider remediation tree, 2026-08-14 | full Fit + Linux/provider/CLI + no-LiteLLM + workflow/CI/docs contracts | 508 Fit passed; 146 targeted passed; no-LiteLLM 72 passed/16 expected skips; workflow/CI 137 passed; docs tracker 36 passed; Ruff/format/mypy/YAML/embedded-Python/diff green | Independent integration reviewer accepted with no P0-P2; remote Ubuntu lane remains the authoritative Linux execution evidence |
+| Commit `10e47d37`, 2026-08-14 | committed fast gate + clean detached PR preflight | All 11 fast lanes and all 19 preflight lanes passed; 8,769 tests, 5 skipped, 92.16% coverage; wheel `03cdaac7...`, sdist `1b488e9e...`, Twine green | Exact implementation commit evidence; this state-only follow-up needs proportional revalidation before push |
 | Exact tag target | required GitHub CI and package/publish smoke | Not run | Required |
 
 No paid real-provider evaluation has been authorized or run during this
@@ -227,14 +228,21 @@ be overwritten.
 
 ## Immediate next actions
 
-1. Commit the independently accepted Linux/provider/CI remediation.
-2. Run the committed fast gate and clean PR preflight against that exact SHA.
-3. Push PR #267 and require `unit-linux`, the new zero-spend live-prerequisite
+1. Commit this state-only checkpoint and proportionally revalidate the final
+   SHA, including reproducible package identities.
+2. Push PR #267 and require `unit-linux`, the new zero-spend live-prerequisite
    Ubuntu lane, CodeQL, and every aggregate check to be green.
-4. Merge only after review, then build, tag, and publish from the exact green
+3. Merge only after review, then build, tag, and publish from the exact green
    `main` SHA.
 
 ## Checkpoint log
+
+- 2026-08-14: Committed Linux/provider/CI remediation as `10e47d37`. Its
+  committed-history fast gate passed all 11 lanes in 323.45 seconds; the clean
+  detached PR preflight passed all 19 lanes, including 8,769 tests, 5 skips,
+  92.16% coverage, reproducible wheel `03cdaac7...`, reproducible sdist
+  `1b488e9e...`, and Twine. Recording that result creates this state-only
+  follow-up; proportionate exact-SHA checks and remote required CI remain.
 
 - 2026-08-14: Repaired all eight `unit-linux` failures without weakening
   production boundaries. Semantic live-runner tests now inject their executor;
