@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,7 @@ from ctx.fit.candidates import (
 )
 from ctx.fit.execution import ExecutionReport
 from ctx.fit.experiment import (
+    DEFAULT_MODEL,
     DEFAULT_TRIALS_PER_TASK,
     EXPERIMENT_PLAN_SCHEMA,
     ModelPrice,
@@ -32,6 +34,32 @@ from ctx.fit.release_catalog import open_release_candidate_source
 from ctx.fit.tasks import FitTask
 
 PRICE = ModelPrice(model="test-model", usd_per_million_input=3.0, usd_per_million_output=15.0)
+
+
+def test_default_model_exact_price_is_available_without_litellm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Budget enforcement is part of base CTX Fit, not the optional live harness."""
+
+    monkeypatch.setitem(sys.modules, "litellm", None)
+
+    price = ModelPrice.from_litellm(DEFAULT_MODEL)
+
+    assert price is not None
+    assert price.model == "gpt-4o-mini"
+    assert price.usd_per_million_input == 0.15
+    assert price.usd_per_million_output == 0.60
+    assert "OpenAI" in price.source
+
+
+def test_unknown_model_price_stays_unknown_without_litellm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The clean-install fallback must not invent rates for arbitrary models."""
+
+    monkeypatch.setitem(sys.modules, "litellm", None)
+
+    assert ModelPrice.from_litellm("unknown/provider-model") is None
 
 
 def _repo(tmp_path: Path, *, tests: bool = True) -> Path:

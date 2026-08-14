@@ -1,7 +1,7 @@
 # ctx
 
 [![CI](https://github.com/stevesolun/ctx/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
-[![Tests](https://img.shields.io/badge/Tests-8783_inventory-blue.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
+[![Tests](https://img.shields.io/badge/Tests-8790_inventory-blue.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
 
 **Find the cheapest AI coding setup that actually works on your repo.**
@@ -92,9 +92,14 @@ not to the repository, not to the index, not to any ref.
 Beyond the free profile, `ctx fit --test --budget N` evaluates candidate
 configurations against those tasks. Spending needs both flags: `--test`
 without `--budget` only plans. Run `ctx doctor` to see whether a real
-evaluation can run here; without provider credentials `--test` runs in
-simulation, which proves the pipeline but not your repository, and a simulated
-result is refused as evidence for `--apply` and `--pr`.
+evaluation can run here. A real evaluation needs
+`pip install "claude-ctx[harness]"`, Node.js with `npx` for the
+workspace-filesystem MCP, a matching provider credential, and Bubblewrap on
+Linux; the base install can profile, plan, and simulate. Without a matching
+provider credential, `--test` runs in simulation, which proves the pipeline but
+not your repository. With a credential but a missing live prerequisite, CTX
+refuses the run before trial setup. A simulated result is refused as evidence
+for `--apply` and `--pr`.
 
 ### `--apply` and `--pr` write different things
 
@@ -164,6 +169,11 @@ supported. On a Windows machine, run ctx inside WSL2 as a Linux installation.
 ```bash
 pip install claude-ctx
 ```
+
+For real model-backed evaluations, install `claude-ctx[harness]` instead and
+make Node.js plus `npx` available. Linux hosts also need Bubblewrap.
+`ctx doctor` checks these prerequisites without contacting a model or spending
+money.
 
 Version `1.0.21` ships `ctx fit` as the primary command, plus `ctx doctor` and
 `ctx advanced`. The established agent-loop spellings (`ctx run`, `ctx resume`,

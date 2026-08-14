@@ -69,9 +69,14 @@ repository, not to the index, not to any ref.
 
 Spending requires two explicit flags. `--test` alone will not spend: without
 `--budget` CTX Fit only plans. Run `ctx doctor` to see whether a real evaluation
-can run where you are; without provider credentials `--test` runs in
-simulation, which proves the pipeline but never your repository, and a
-simulated result is refused as evidence for `--apply` and `--pr`.
+can run where you are. A real evaluation needs
+`pip install "claude-ctx[harness]"`, Node.js with `npx` for the
+workspace-filesystem MCP, a matching provider credential, and Bubblewrap on
+Linux; the base install can profile, plan, and simulate. Without a matching
+provider credential, `--test` runs in simulation, which proves the pipeline but
+never your repository. With a credential but a missing live prerequisite, CTX
+refuses the run before trial setup. A simulated result is refused as evidence
+for `--apply` and `--pr`.
 
 ### `--apply` and `--pr` are different writes
 
@@ -322,7 +327,7 @@ graph-based discovery:
     ---
 
     Current main is **v1.0.21** — MIT, tested on CPython 3.11+ for Linux and macOS,
-    8,783 test inventory. Ships seven console scripts led by `ctx` and
+    8,790 test inventory. Ships seven console scripts led by `ctx` and
     `ctx-init`. The maintenance
     tools are still shipped and still work, now via `python -m`:
     `ctx_monitor serve` (local dashboard with graph + wiki + load/unload for

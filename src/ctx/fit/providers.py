@@ -83,6 +83,18 @@ class CapabilityNotApplicable(ProviderUnavailable):
     """
 
 
+def _require_harness_dependency() -> None:
+    """Refuse a paid driver when its optional provider runtime is absent."""
+
+    try:
+        import litellm  # noqa: F401
+    except ImportError as exc:
+        raise ProviderUnavailable(
+            "the live harness dependency is not installed; install "
+            "`claude-ctx[harness]` before running a real CTX Fit evaluation"
+        ) from exc
+
+
 @dataclass(frozen=True, slots=True)
 class ModelCredential:
     """The one credential environment variable selected for one model.
@@ -104,27 +116,33 @@ def resolve_model_credential(
 ) -> ModelCredential:
     """Resolve model → credential through the harness's own key resolver.
 
-    Provider-prefixed models are already understood by ``ctx run``. Bare model
-    names such as Fit's ``gpt-4o-mini`` need LiteLLM's provider metadata first;
-    the resulting provider is then passed to the same side-effect-free resolver
-    the harness calls. CTX keeps no second provider/key table here.
+    Provider-prefixed models are already understood by ``ctx run``. CTX Fit's
+    own unprefixed default is resolved from the provider declared beside that
+    default, so clean base installs do not depend on optional LiteLLM metadata.
+    Other bare model names use LiteLLM metadata when the harness extra is
+    installed. The resulting provider is always passed to the same
+    side-effect-free key resolver the harness calls; CTX keeps no second key
+    table here.
     """
 
     from ctx.cli.run import _resolve_api_key_env
+    from ctx.fit.experiment import DEFAULT_MODEL, DEFAULT_MODEL_PROVIDER
 
-    provider: str | None = None
-    try:
-        import litellm
-    except ImportError:
-        pass
-    else:
-        table = getattr(litellm, "model_cost", None)
-        entry = table.get(model) if isinstance(table, dict) else None
-        candidate = entry.get("litellm_provider") if isinstance(entry, dict) else None
-        if isinstance(candidate, str) and candidate:
-            provider = candidate
-
+    provider: str | None = DEFAULT_MODEL_PROVIDER if model == DEFAULT_MODEL else None
     name = _resolve_api_key_env(None, model, provider)
+    if name is None:
+        try:
+            import litellm
+        except ImportError:
+            pass
+        else:
+            table = getattr(litellm, "model_cost", None)
+            entry = table.get(model) if isinstance(table, dict) else None
+            candidate = entry.get("litellm_provider") if isinstance(entry, dict) else None
+            if isinstance(candidate, str) and candidate:
+                provider = candidate
+                name = _resolve_api_key_env(None, model, provider)
+
     source = os.environ if environment is None else environment
     return ModelCredential(
         model=model,
@@ -361,6 +379,7 @@ def build_agent_driver(
         raise ProviderUnavailable(
             "the `ctx` harness is not on PATH, so no real agent can be driven"
         )
+    _require_harness_dependency()
     try:
         require_sandbox_available({"PATH": os.environ.get("PATH", os.defpath)})
     except SandboxUnavailable as exc:

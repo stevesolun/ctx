@@ -26,6 +26,8 @@ import pytest
 from ctx.fit.candidates import CandidateConfiguration
 from ctx.fit.execution import TrialResult
 from ctx.fit.live_runner import (
+    DEFAULT_TRIAL_TIMEOUT_SECONDS,
+    DEFAULT_VERIFY_TIMEOUT_SECONDS,
     INVALID_TESTS_MODIFIED,
     AgentDriver,
     AgentInvocation,
@@ -137,7 +139,14 @@ def _candidate(candidate_id: str = "candidate-a") -> CandidateConfiguration:
     )
 
 
-def _trial(repo: Path, driver: AgentDriver, task: FitTask) -> TrialResult:
+def _trial(
+    repo: Path,
+    driver: AgentDriver,
+    task: FitTask,
+    *,
+    trial_timeout: int = DEFAULT_TRIAL_TIMEOUT_SECONDS,
+    verify_timeout: int = DEFAULT_VERIFY_TIMEOUT_SECONDS,
+) -> TrialResult:
     # Most tests in this file exercise trial semantics rather than the external
     # OS boundary. Keep that boundary injectable so the security-specific
     # regression below can exercise the production default without making the
@@ -145,6 +154,8 @@ def _trial(repo: Path, driver: AgentDriver, task: FitTask) -> TrialResult:
     runner = make_live_runner(
         repo,
         driver,
+        trial_timeout=trial_timeout,
+        verify_timeout=verify_timeout,
         environment=CampaignEnvironment(repository_executor=_run),
     )
     return runner(_candidate(), task, 0)
@@ -493,7 +504,9 @@ def test_a_workspace_with_no_usable_test_runner_is_not_a_candidate_failure(
     assert invoked == []
 
 
-def test_a_red_gate_that_never_finished_is_not_read_as_red(tmp_path: Path) -> None:
+def test_a_red_gate_that_never_finished_is_not_read_as_red(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A verify command that hangs on the reverted tree proves nothing.
 
     ``_run`` reports the timeout as ``None``, and ``None == 0`` is False, so an
@@ -510,6 +523,8 @@ def test_a_red_gate_that_never_finished_is_not_read_as_red(tmp_path: Path) -> No
         "    time.sleep(60)\n"
         "sys.exit(0)\n"
     )
+    monkeypatch.setattr("ctx.fit.sandbox.platform.system", lambda: "Linux")
+    monkeypatch.setattr("ctx.fit.sandbox.shutil.which", lambda name, path=None: None)
     origin, sha = _repo_with_a_task(
         tmp_path, scaffold_files={"slow_checks.py": hangs_when_reverted}
     )
@@ -519,12 +534,12 @@ def test_a_red_gate_that_never_finished_is_not_read_as_red(tmp_path: Path) -> No
         invoked.append(invocation.task_title)
         return AgentOutcome(completed=True, cost_usd=0.42)
 
-    runner = make_live_runner(
+    result = _trial(
         origin,
         driver,
+        _task(sha, verify_command=(sys.executable, "slow_checks.py")),
         verify_timeout=2,
     )
-    result = runner(_candidate(), _task(sha, verify_command=(sys.executable, "slow_checks.py")), 0)
 
     assert result.outcome == "infrastructure-failure", result.detail
     assert "redness is unproven" in result.detail
@@ -534,9 +549,13 @@ def test_a_red_gate_that_never_finished_is_not_read_as_red(tmp_path: Path) -> No
 # --- FITBUG-039: the documented trial timeout has to actually bound a trial --
 
 
-def test_an_agent_that_outruns_the_trial_timeout_is_abandoned(tmp_path: Path) -> None:
+def test_an_agent_that_outruns_the_trial_timeout_is_abandoned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """``trial_timeout`` was accepted, documented, and never applied."""
 
+    monkeypatch.setattr("ctx.fit.sandbox.platform.system", lambda: "Linux")
+    monkeypatch.setattr("ctx.fit.sandbox.shutil.which", lambda name, path=None: None)
     origin, sha = _repo_with_a_task(tmp_path)
     released = threading.Event()
     entered = threading.Event()
@@ -549,8 +568,7 @@ def test_an_agent_that_outruns_the_trial_timeout_is_abandoned(tmp_path: Path) ->
         return AgentOutcome(completed=True, cost_usd=99.0)
 
     try:
-        runner = make_live_runner(origin, never_returns, trial_timeout=1)
-        result = runner(_candidate(), _task(sha), 0)
+        result = _trial(origin, never_returns, _task(sha), trial_timeout=1)
     finally:
         released.set()
 

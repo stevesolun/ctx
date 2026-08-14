@@ -9,11 +9,13 @@ Three properties matter more than convenience here.
 **Nothing expensive happens by accident.** The plan is computed without calling
 a model, and execution is refused unless the plan fits an explicit budget.
 
-**An unknown cost is never treated as an affordable one.** CTX has no pricing
-table of its own; without one, the dollar cost of a plan is genuinely unknown.
-A budget cannot be enforced against an unknown number, so a plan with unknown
-cost and a budget is *blocked*, not waved through. Under-reporting cost would
-be the most damaging possible bug in a product whose objective is "cheapest".
+**An unknown cost is never treated as an affordable one.** CTX ships an exact,
+release-verified rate for its default model and resolves custom-model rates
+only from an available provider table. Without either, the dollar cost of a
+plan is genuinely unknown. A budget cannot be enforced against an unknown
+number, so a plan with unknown cost and a budget is *blocked*, not waved
+through. Under-reporting cost would be the most damaging possible bug in a
+product whose objective is "cheapest".
 
 **The plan and the campaign are the same experiment.** They used to be two
 independent derivations, one in the pre-flight path and one in the spending
@@ -61,6 +63,11 @@ DEFAULT_TRIALS_PER_TASK = 3
 #: control and the treatments alike: a baseline on a different model turns every
 #: reported difference into a mixture of capability effect and model effect.
 DEFAULT_MODEL = "gpt-4o-mini"
+
+#: The provider for CTX Fit's unprefixed default model. Keep this beside the
+#: model selection itself: the base product must be able to select the matching
+#: credential without importing the optional live-harness dependency.
+DEFAULT_MODEL_PROVIDER = "openai"
 
 #: How many representative tasks one experiment uses. Each task multiplies the
 #: campaign by ``candidates x trials_per_task`` executions, so this number is a
@@ -140,9 +147,9 @@ DECISION_EXPLANATION: dict[PlanDecision, str] = {
 class ModelPrice:
     """Per-token pricing for one model, supplied by the caller.
 
-    CTX ships no price table. Prices change, and a stale hardcoded rate would
-    silently produce wrong cost comparisons — the exact failure the objective
-    function cannot tolerate.
+    CTX ships one release-verified rate for its own default model. Other rates
+    come from the optional runtime or the caller; unresolved cost stays unknown
+    rather than silently using a stale or guessed number.
     """
 
     model: str
@@ -157,13 +164,26 @@ class ModelPrice:
 
     @classmethod
     def from_litellm(cls, model: str) -> ModelPrice | None:
-        """Read rates from LiteLLM's own table, or return None if unavailable.
+        """Resolve an exact rate, or return None if one is unavailable.
 
-        LiteLLM is already the source of truth for *actual* cost at runtime, so
-        using its table for the pre-flight estimate keeps both halves of the
-        cost story consistent and avoids CTX shipping a rate that goes stale.
-        Returning None rather than a guess keeps the budget gate fail-closed.
+        The base CTX Fit install owns its default model, so it also ships that
+        model's release-verified provider rate. Custom models use LiteLLM's
+        runtime table when the optional harness dependency is installed.
+        Returning ``None`` for every other unresolved model keeps the budget
+        gate fail-closed rather than inventing a rate.
         """
+
+        if model == DEFAULT_MODEL:
+            return cls(
+                model=model,
+                usd_per_million_input=0.15,
+                usd_per_million_output=0.60,
+                source=(
+                    "OpenAI API model pricing "
+                    "(developers.openai.com/api/docs/models/gpt-4o-mini; "
+                    "verified 2026-08-14)"
+                ),
+            )
 
         try:
             import litellm
@@ -462,8 +482,8 @@ def _estimate_cost(
         return CostEstimate(
             completeness="unknown",
             basis=(
-                "no pricing supplied; CTX ships no price table because a stale rate "
-                "would silently corrupt a cost comparison"
+                "no exact pricing resolved; CTX ships only its release-verified "
+                "default-model rate and will not guess a custom model's cost"
             ),
         )
     per_execution = price.estimate(expected_input_tokens, expected_output_tokens)
@@ -1018,6 +1038,7 @@ def run_experiment(experiment: ResolvedExperiment, *, live: bool) -> ExperimentO
 
 __all__ = [
     "DEFAULT_MODEL",
+    "DEFAULT_MODEL_PROVIDER",
     "DEFAULT_TASK_LIMIT",
     "DEFAULT_TRIALS_PER_TASK",
     "EXCHANGE_INPUT_TOKENS",

@@ -13,21 +13,18 @@
 
 - Updated: 2026-08-14 (Asia/Jerusalem)
 - Active goal: review, harden, verify, and release CTX Fit 1.0.21
-- Phase: community PR security remediation
+- Phase: final committed verification of Linux CI remediation
 - Release decision: **DO NOT RELEASE YET**
 - Branch: `codex/ctx-fit-release-hardening`
 - Base commit: `bd36bbea591495f8ef498a6818e7ec541fe78ebb`
-- Committed release candidate: `0264cede6dee568f0c70c390d1af95f6d66dee44`
+- Committed release candidate: `2cc8667d53a7ca39af18e22e5d9c2727045f07ca`
 - Community PR: `https://github.com/stevesolun/ctx/pull/267`
 - Working tree at checkpoint:
-  - modified: `src/ctx/fit/apply.py` (CodeQL permission repair)
-  - modified: `src/tests/fit/test_apply.py` (failing-first regression)
-  - modified: this live state file
+  - reviewed Linux/provider/CI remediation is ready for a new commit
   - user-owned and out of scope: `.scratch/`
-- Parallel execution: the implementation swarm and independent semantic
-  reviews are complete. The CodeQL permission repair received independent
-  ACCEPT with no P0-P2 findings; the coordinator owns committed and remote
-  reruns.
+- Parallel execution: the Linux semantic-test, provider/pricing, and zero-spend
+  Ubuntu CI lanes are complete. Independent integration review accepted the
+  combined tree with no P0-P2 findings; the coordinator owns final gates.
 
 ## Product destination
 
@@ -70,7 +67,7 @@ All of the following must be true before tagging or publishing:
 | --- | --- | --- | --- |
 | Merge the reviewed CTX Fit base | Complete | Coordinator | PR #266 merged; this hardening branch starts at `bd36bbea` |
 | Independent product review | Complete | Product reviewer | Verdict: do not release; 4 P0 and 7 P1 findings recorded below |
-| Production agent editing surface | Implemented, refreeze active | Coordinator + independent reviewer | Production trials expose only a workspace-rooted filesystem MCP through the shared sandbox, use a scrubbed environment, and deliver exact candidate material; focused provider/Fit integration was green before the latest spend edits |
+| Production agent editing surface | Complete, independently accepted | Coordinator + independent reviewer | Production trials expose only a workspace-rooted filesystem MCP through the shared sandbox, use a scrubbed environment, deliver exact candidate material, and now refuse missing harness dependencies before trial setup; the integrated 508-test Fit suite and Linux/provider refreeze are green |
 | Repository sandbox and secret isolation | Complete, independently accepted | Sandbox writer + coordinator + independent reviewer | Exact executable/symlink paths cannot expose sibling trees, trusted runtime subtrees remain usable, repository setup/verification stays network-disabled, and provider authority remains separate. Final macOS refreeze passed 84 focused tests plus real child/installed-CTX compatibility and static checks with no P0-P2 findings |
 | Verification-judge integrity | Complete, independently accepted | Coordinator + architecture reviewer | The forgeable Python witness was removed. ADR-016 defines the repository command as an explicit, non-adversarial trust boundary; exact Python/JS/TS/Go/Rust/Make commands run unchanged, verification writes are confined to one trial workspace, and the assumption appears before spend and in every result. Independent review found no P0-P2 |
 | Spend authorization and preview | Complete, independently accepted | Coordinator + independent reviewer | Immutable digest-bound plans, human pre-spend preview, JSON plan-only behavior, strict simulator identity, exact caps, and honest observed over-cap accounting passed 106 focused tests plus independent adversarial review |
@@ -82,29 +79,32 @@ All of the following must be true before tagging or publishing:
 | Applied winner activation | Complete, independently accepted | Activation writer + coordinator + independent reviewer | Strict repository-root loader, nested-sidecar refusal, hash/model validation, one-use exact context, subdirectory activation, and explicit model-conflict handling passed independent refreeze as part of the 222-check baseline/activation lane |
 | ADR-015 stop attribution | Complete, independently accepted | Coordinator + spend/fairness reviewer | Structured stop reason/log fields flow provider → live runner → serialized result, budget-capped trials are inconclusive, and the accepted spend/fairness lane plus 446-test Fit aggregate are green |
 | Release metadata and publish guard | Complete, independently accepted | Metadata writer + publish writer/reviewer + coordinator | 1.0.21 metadata and changelog are current; exact-main/exact-successful-Tests production guard and changelog-backed notes have no P0/P1 review findings; P2 credential/doc hardening is integrated |
-| Final verification and release | PR open; security reruns pending | Coordinator + independent reviewer | Commit `0264cede` passed the 11-lane committed fast gate and all 19 PR-preflight lanes; PR #267 opened. Remote CI found one high CodeQL alert for a newly created applied manifest using mode `0644`. The failing-first owner-only `0600` repair passed 523 Fit/surface tests, focused static/docs checks, and independent review with no P0-P2; new committed/remote gates are pending |
+| Final verification and release | PR open; repaired tree independently accepted | Coordinator + expert writers/reviewer | The original Linux failures are repaired without weakening fail-closed behavior. A new required zero-spend Ubuntu lane installs `[harness]` plus Bubblewrap, runs ten real isolation checks, and constructs but never invokes the live driver. Full Fit is 508 passed; workflow contracts are 137 passed. Commit, committed gates, and remote Ubuntu evidence remain |
 
 ## Open release blockers
 
 ### P0 — release-stopping
 
-None in the current working tree. PR #267's CodeQL policy found one
-high-severity alert against commit `0264cede`: a newly created
-`.ctx/fit-configuration.json` was explicitly made world-readable even though it
-can contain organization-owned instruction and capability bytes. The repair
-keeps new manifests owner-only (`0600`), has a failing-first regression, and is
-independently accepted with no P0-P2 findings. Release remains stopped until
-the new committed gates and remote CodeQL accept the repaired SHA.
+None in the current working tree. PR #267's earlier CodeQL finding was repaired
+with owner-only (`0600`) applied manifests, independently accepted, and remote
+CodeQL is green on commit `2cc8667d`.
 
 ADR-016 itself has independent current-tree acceptance: repository-native
 verification is explicitly a non-adversarial trust boundary.
 
 ### P1 — must resolve or explicitly de-scope before release
 
-None. The release deliberately discloses that qualification did not include a
-paid provider call, a complete provider-plus-filesystem-MCP launch on this host
-(which lacks `npx`), or actual Linux Bubblewrap execution. Missing `npx` fails
-closed; Linux construction is covered structurally. These are evidence limits,
+None in the reviewed working tree. PR #267's earlier `unit-linux` failure is
+addressed by host-independent semantic tests, deterministic default-provider
+and release-verified default-price resolution, pre-trial refusal when the
+optional harness is absent, and a separate required Ubuntu lane that exercises
+the real Bubblewrap and `[harness]` prerequisites without model credentials.
+That new required lane must pass remotely on the exact committed SHA before the
+release is eligible.
+
+The release also deliberately discloses that qualification did not include a
+paid provider call or a complete provider-plus-filesystem-MCP launch on this
+host (which lacks `npx`). Missing `npx` fails closed. These are evidence limits,
 not claims the release makes.
 
 External release settings remain a P2 operational risk: observed `main` and
@@ -166,6 +166,9 @@ surface makes that row stale for release purposes.
 | Commit `0264cede`, 2026-08-14 | `python scripts/ci_preflight.py --profile pr` from a clean detached worktree | All 19 lanes passed; 8,761 tests, 5 skipped, 92.15% coverage; reproducible artifacts and Twine green | Valid for `0264cede`; superseded after the CodeQL repair is amended |
 | PR #267 / commit `0264cede`, 2026-08-14 | GitHub PR checks | Product/build/clean-host/static/docs/CodeQL-Python lanes green; aggregate CodeQL rejected one high world-readable-manifest alert | Release-stopping remote evidence; local repair active |
 | CodeQL permission repair working tree, 2026-08-14 | exact new-manifest mode regression, full apply/Fit/surface suites, docs/stats, Ruff/format/mypy, independent probes | Regression failed at `0644`; 64 apply tests, 523 Fit/surface tests, docs/stats, and static checks passed with `0600`; reviewer verified create/modify/rollback under `umask 000` and accepted with no P0-P2 | Accepted repair evidence; new committed and remote gates required |
+| Commit `2cc8667d`, 2026-08-14 | committed fast gate + clean detached PR preflight | All 11 fast lanes and all 19 preflight lanes passed; 8,762 tests, 5 skipped, 92.15% coverage; wheel `9986b8c6...`, sdist `099825fd...`, Twine green | Exact macOS/local release evidence; remote Linux still required |
+| PR #267 / commit `2cc8667d`, 2026-08-14 | GitHub CodeQL and Tests | CodeQL aggregate plus 15 specialized checks passed; `unit-linux` failed 8 cases (2 missing Bubblewrap, 6 missing optional harness metadata/pricing), causing aggregate CI failure | Release-stopping Linux environment-contract evidence; parallel repair active |
+| Reviewed Linux/provider remediation tree, 2026-08-14 | full Fit + Linux/provider/CLI + no-LiteLLM + workflow/CI/docs contracts | 508 Fit passed; 146 targeted passed; no-LiteLLM 72 passed/16 expected skips; workflow/CI 137 passed; docs tracker 36 passed; Ruff/format/mypy/YAML/embedded-Python/diff green | Independent integration reviewer accepted with no P0-P2; remote Ubuntu lane remains the authoritative Linux execution evidence |
 | Exact tag target | required GitHub CI and package/publish smoke | Not run | Required |
 
 No paid real-provider evaluation has been authorized or run during this
@@ -224,12 +227,33 @@ be overwritten.
 
 ## Immediate next actions
 
-1. Commit the independently accepted CodeQL permission repair.
-2. Rerun the committed fast gate and PR preflight on the repaired SHA.
-3. Require every PR check, including remote CodeQL, to be green; merge only
-   after review, then build, tag, and publish from the exact green `main` SHA.
+1. Commit the independently accepted Linux/provider/CI remediation.
+2. Run the committed fast gate and clean PR preflight against that exact SHA.
+3. Push PR #267 and require `unit-linux`, the new zero-spend live-prerequisite
+   Ubuntu lane, CodeQL, and every aggregate check to be green.
+4. Merge only after review, then build, tag, and publish from the exact green
+   `main` SHA.
 
 ## Checkpoint log
+
+- 2026-08-14: Repaired all eight `unit-linux` failures without weakening
+  production boundaries. Semantic live-runner tests now inject their executor;
+  the default model's provider and official release-verified price resolve
+  without optional LiteLLM; missing `[harness]` refuses before trial setup; and
+  a new required zero-spend Ubuntu lane installs `[harness]` plus Bubblewrap,
+  runs ten real adversarial sandbox checks, and constructs without invoking the
+  live driver. Full Fit passed 508 tests, workflow/CI contracts passed 137, and
+  independent integration review accepted with no P0-P2. Generated inventory
+  is current. Release remains stopped for commit, committed gates, and remote
+  Ubuntu evidence.
+
+- 2026-08-14: Security commit `2cc8667d` passed all 11 committed fast lanes and
+  all 19 clean PR-preflight lanes; both remote CodeQL checks and 15 specialized
+  PR checks passed. Remote `unit-linux` then failed eight environment-contract
+  cases: two reached a missing Bubblewrap boundary and six expected optional
+  LiteLLM harness metadata/pricing absent from `[dev]`. The required CI
+  aggregate consequently failed. Dispatched non-overlapping Linux-sandbox and
+  provider/pricing expert repair lanes; release remains stopped.
 
 - 2026-08-14: Committed release candidate `0264cede` passed all 11 committed
   fast-gate lanes and all 19 clean PR-preflight lanes, including 8,761 tests,

@@ -129,6 +129,164 @@ jobs:
           include-hidden-files: true
           retention-days: 7
 
+  fit-live-prerequisites-linux:
+    name: "CTX Fit live prerequisites (Linux, zero spend)"
+    needs: classify
+    if: ${{ github.event_name != 'pull_request' || (needs.classify.outputs.docs_only != 'true' && needs.classify.outputs.graph_only != 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          lfs: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f # v6.1.0
+        with:
+          node-version: "24"
+
+      - name: Install CTX Fit live dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends bubblewrap
+          python -m pip install --upgrade pip
+          python -m pip install ".[dev,harness]"
+
+      - name: Run adversarial Linux sandbox checks
+        run: |
+          python -m pytest -q --no-cov \
+            --junitxml=.ctx-fit-linux-sandbox.xml \
+            src/tests/fit/test_sandbox.py::test_repository_process_can_write_inside_but_not_beside_its_workspace \
+            src/tests/fit/test_sandbox.py::test_repository_process_cannot_read_an_ambient_temporary_secret \
+            src/tests/fit/test_sandbox.py::test_workspace_symlink_cannot_expand_the_read_boundary \
+            src/tests/fit/test_sandbox.py::test_repository_process_can_read_an_explicit_runtime_root \
+            src/tests/fit/test_sandbox.py::test_exact_read_path_does_not_expose_its_sibling \
+            src/tests/fit/test_sandbox.py::test_repository_process_cannot_read_ambient_host_configuration \
+            src/tests/fit/test_sandbox.py::test_network_enabled_process_cannot_connect_to_an_ambient_unix_socket \
+            src/tests/fit/test_sandbox.py::test_network_disabled_process_cannot_connect_to_tcp \
+            src/tests/fit/test_sandbox.py::test_repository_process_cannot_signal_an_ambient_host_process \
+            src/tests/fit/test_sandbox.py::test_repository_process_cannot_create_host_posix_shared_memory
+          python - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          report = Path(".ctx-fit-linux-sandbox.xml")
+          root = ET.parse(report).getroot()
+          suites = (root,) if root.tag == "testsuite" else tuple(root.findall("testsuite"))
+          skipped = sum(int(suite.attrib.get("skipped", "0")) for suite in suites)
+          if skipped:
+              raise SystemExit(f"real Linux sandbox checks skipped {skipped} test(s)")
+          PY
+
+      - name: Verify the zero-spend live-driver prerequisites
+        env:
+          ANTHROPIC_API_KEY: ""
+          AZURE_API_KEY: ""
+          GEMINI_API_KEY: ""
+          GOOGLE_API_KEY: ""
+          OPENAI_API_KEY: ""
+          OPENROUTER_API_KEY: ""
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from importlib.metadata import version
+          import os
+          from pathlib import Path
+          import shutil
+          import subprocess
+          import sys
+          import tempfile
+
+          import litellm  # noqa: F401
+
+          from ctx.fit.providers import _runtime_read_access, build_agent_driver
+          from ctx.fit.sandbox import sandboxed_command
+
+          provider_keys = (
+              "ANTHROPIC_API_KEY",
+              "AZURE_API_KEY",
+              "GEMINI_API_KEY",
+              "GOOGLE_API_KEY",
+              "OPENAI_API_KEY",
+              "OPENROUTER_API_KEY",
+          )
+          configured_keys = sorted(key for key in provider_keys if os.environ.get(key))
+          if configured_keys:
+              raise SystemExit(f"provider credentials reached zero-spend smoke: {configured_keys}")
+
+          missing = [
+              name for name in ("bwrap", "ctx", "node", "npx") if shutil.which(name) is None
+          ]
+          if missing:
+              raise SystemExit(f"missing live-driver executables: {missing}")
+
+          # Execute through CTX's real Linux sandbox wrapper. A command that
+          # merely finds `bwrap` does not prove that this runner permits the
+          # user/PID/network namespaces the product requires.
+          with tempfile.TemporaryDirectory(prefix="ctx-fit-linux-smoke-", dir=Path.cwd()) as tmp:
+              workspace = Path(tmp).resolve()
+              environment = {
+                  "HOME": str(workspace),
+                  "PATH": os.environ.get("PATH", os.defpath),
+                  "PYTHONUNBUFFERED": "1",
+                  "TEMP": str(workspace),
+                  "TMP": str(workspace),
+                  "TMPDIR": str(workspace),
+              }
+              read_roots, read_paths = _runtime_read_access(sys.executable)
+              command = sandboxed_command(
+                  (
+                      sys.executable,
+                      "-I",
+                      "-c",
+                      "from pathlib import Path; "
+                      "p = Path('bubblewrap-proof'); "
+                      "p.write_text('usable', encoding='utf-8'); "
+                      "print(p.read_text(encoding='utf-8'))",
+                  ),
+                  cwd=workspace,
+                  writable_root=workspace,
+                  network=False,
+                  environment=environment,
+                  read_roots=read_roots,
+                  read_paths=read_paths,
+              )
+              completed = subprocess.run(
+                  command,
+                  cwd=workspace,
+                  env=environment,
+                  capture_output=True,
+                  text=True,
+                  timeout=30,
+                  check=False,
+              )
+              if completed.returncode != 0 or completed.stdout.strip() != "usable":
+                  raise SystemExit(
+                      "CTX Bubblewrap execution failed\n"
+                      f"exit={completed.returncode}\n"
+                      f"stdout={completed.stdout[-2000:]}\n"
+                      f"stderr={completed.stderr[-2000:]}"
+                  )
+
+          # This checks the exact paid-driver construction path: optional
+          # LiteLLM import, sandbox and npx availability, and `ctx run` argv
+          # parsing. Do not invoke the returned callable; that would contact a
+          # model provider and cease to be a zero-spend smoke.
+          _constructed_driver = build_agent_driver()
+          if not callable(_constructed_driver):
+              raise SystemExit("CTX Fit did not construct a live driver")
+
+          print(f"Bubblewrap usable; LiteLLM {version('litellm')}; driver preflight passed")
+          PY
+
   similarity-integration:
     name: "Similarity precision/recall"
     needs: classify
@@ -907,6 +1065,7 @@ jobs:
       - classify
       - static
       - unit-linux
+      - fit-live-prerequisites-linux
       - similarity-integration
       - test
       - contract-compat

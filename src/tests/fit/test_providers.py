@@ -29,6 +29,8 @@ from ctx.fit.providers import (
     resolve_model_credential,
 )
 
+_REAL_REQUIRE_HARNESS_DEPENDENCY = providers._require_harness_dependency
+
 
 @pytest.fixture(autouse=True)
 def _deterministic_production_dependencies(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -39,6 +41,7 @@ def _deterministic_production_dependencies(tmp_path: Path, monkeypatch: pytest.M
     npx.chmod(0o755)
     monkeypatch.setenv("PATH", os.pathsep.join((str(tmp_path), os.environ.get("PATH", ""))))
     monkeypatch.setattr(providers, "require_sandbox_available", lambda environment: None)
+    monkeypatch.setattr(providers, "_require_harness_dependency", lambda: None)
     monkeypatch.setattr(
         providers,
         "sandboxed_command",
@@ -188,6 +191,19 @@ def test_model_credential_resolution_uses_the_ctx_run_provider_contract(
     assert resolved.configured is configured
 
 
+def test_default_model_credential_resolution_does_not_require_litellm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A clean CTX install still knows which key its own default model uses."""
+
+    monkeypatch.setitem(sys.modules, "litellm", None)
+
+    resolved = resolve_model_credential("gpt-4o-mini", environment={"OPENAI_API_KEY": "configured"})
+
+    assert resolved.environment_variable == "OPENAI_API_KEY"
+    assert resolved.configured is True
+
+
 # ── FITBUG-006: the command must be one `ctx run` accepts ──────────────────
 
 
@@ -285,6 +301,28 @@ def test_building_a_driver_refuses_when_required_isolation_tooling_is_missing(
 
     with pytest.raises(ProviderUnavailable, match=message):
         build_agent_driver(executable=str(binary))
+
+
+def test_building_a_live_driver_refuses_before_setup_when_litellm_is_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A configured key must not make a base-only CTX install look runnable."""
+
+    binary, _ = _fake_harness(tmp_path, "")
+    sandbox_checked = False
+
+    def sandbox_probe(_environment: object) -> None:
+        nonlocal sandbox_checked
+        sandbox_checked = True
+
+    monkeypatch.setitem(sys.modules, "litellm", None)
+    monkeypatch.setattr(providers, "_require_harness_dependency", _REAL_REQUIRE_HARNESS_DEPENDENCY)
+    monkeypatch.setattr(providers, "require_sandbox_available", sandbox_probe)
+
+    with pytest.raises(ProviderUnavailable, match=r"claude-ctx\[harness\]"):
+        build_agent_driver(executable=str(binary))
+
+    assert sandbox_checked is False
 
 
 def test_provider_uses_the_shared_workspace_boundary_with_only_required_read_roots(
