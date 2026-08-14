@@ -34,6 +34,11 @@ def test_linux_live_prerequisite_lane_keeps_the_base_unit_install_small() -> Non
     assert "harness" not in unit_install
     assert 'python -m pip install ".[dev,harness]"' in live_install
     assert "bubblewrap" in live_install
+    assert "apparmor-profiles" in live_install
+    assert "apparmor-utils" in live_install
+    assert "bwrap-userns-restrict" in live_install
+    assert "apparmor_parser -r" in live_install
+    assert "apparmor_restrict_unprivileged_userns=0" not in live_install
 
 
 def test_linux_live_prerequisite_lane_is_pinned_bounded_and_zero_spend() -> None:

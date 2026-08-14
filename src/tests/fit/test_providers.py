@@ -30,6 +30,8 @@ from ctx.fit.providers import (
 )
 
 _REAL_REQUIRE_HARNESS_DEPENDENCY = providers._require_harness_dependency
+_REAL_REQUIRE_OPERATIONAL_SANDBOX = providers._require_operational_sandbox
+_REAL_SANDBOXED_COMMAND = providers.sandboxed_command
 
 
 @pytest.fixture(autouse=True)
@@ -42,6 +44,7 @@ def _deterministic_production_dependencies(tmp_path: Path, monkeypatch: pytest.M
     monkeypatch.setenv("PATH", os.pathsep.join((str(tmp_path), os.environ.get("PATH", ""))))
     monkeypatch.setattr(providers, "require_sandbox_available", lambda environment: None)
     monkeypatch.setattr(providers, "_require_harness_dependency", lambda: None)
+    monkeypatch.setattr(providers, "_require_operational_sandbox", lambda environment: None)
     monkeypatch.setattr(
         providers,
         "sandboxed_command",
@@ -290,6 +293,9 @@ def test_building_a_driver_refuses_when_required_isolation_tooling_is_missing(
         def unavailable(environment: object) -> None:
             raise providers.SandboxUnavailable("sandbox unavailable")
 
+        monkeypatch.setattr(
+            providers, "_require_operational_sandbox", _REAL_REQUIRE_OPERATIONAL_SANDBOX
+        )
         monkeypatch.setattr(providers, "require_sandbox_available", unavailable)
     else:
         real_which = providers.shutil.which
@@ -323,6 +329,128 @@ def test_building_a_live_driver_refuses_before_setup_when_litellm_is_absent(
         build_agent_driver(executable=str(binary))
 
     assert sandbox_checked is False
+
+
+def test_installed_bubblewrap_that_cannot_start_a_network_namespace_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Executable presence is not proof Ubuntu permits Bubblewrap's namespace."""
+
+    binary, _ = _fake_harness(tmp_path, "")
+    observed: dict[str, object] = {}
+    run_options: dict[str, object] = {}
+
+    def sandbox_probe(command: object, **kwargs: object) -> tuple[str, ...]:
+        observed.update(kwargs)
+        return ("/usr/bin/bwrap", "--probe")
+
+    def denied(*_args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        run_options.update(kwargs)
+        return subprocess.CompletedProcess(
+            args=("/usr/bin/bwrap", "--probe"),
+            returncode=1,
+            stdout="",
+            stderr="bwrap: setting up uid map: Permission denied",
+        )
+
+    monkeypatch.setattr(providers.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(
+        providers, "_require_operational_sandbox", _REAL_REQUIRE_OPERATIONAL_SANDBOX
+    )
+    monkeypatch.setattr(providers, "require_sandbox_available", lambda _environment: None)
+    monkeypatch.setattr(providers, "sandboxed_command", sandbox_probe)
+    monkeypatch.setattr(providers.subprocess, "run", denied)
+
+    with pytest.raises(ProviderUnavailable, match="network-disabled namespace") as caught:
+        build_agent_driver(executable=str(binary))
+
+    assert "Permission denied" in str(caught.value)
+    assert "bwrap-userns-restrict" in str(caught.value)
+    assert "keep the global" in str(caught.value)
+    assert "apparmor_restrict_unprivileged_userns=0" not in str(caught.value)
+    assert observed["network"] is False
+    assert run_options["timeout"] == 15
+
+
+def test_operational_probe_uses_the_repository_linux_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The readiness probe must exercise the empty-root, no-network shape."""
+
+    observed: dict[str, object] = {}
+
+    def success(command: tuple[str, ...], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        observed["command"] = command
+        observed.update(kwargs)
+        return subprocess.CompletedProcess(args=command, returncode=0, stdout="", stderr="")
+
+    real_which = providers.shutil.which
+    monkeypatch.setattr(providers.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(
+        providers.shutil,
+        "which",
+        lambda name, **kwargs: "/usr/bin/bwrap" if name == "bwrap" else real_which(name, **kwargs),
+    )
+    monkeypatch.setattr(providers, "sandboxed_command", _REAL_SANDBOXED_COMMAND)
+    monkeypatch.setattr(providers.subprocess, "run", success)
+
+    _REAL_REQUIRE_OPERATIONAL_SANDBOX({"PATH": os.environ.get("PATH", os.defpath)})
+
+    command = observed["command"]
+    assert isinstance(command, tuple)
+    assert command[0] == "/usr/bin/bwrap"
+    assert "--unshare-user" in command
+    assert "--unshare-net" in command
+    assert tuple(command[command.index("--tmpfs") : command.index("--tmpfs") + 2]) == (
+        "--tmpfs",
+        "/",
+    )
+    assert command[-2:] == ("--", "/bin/true")
+    assert observed["timeout"] == 15
+
+
+def test_operational_probe_timeout_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: dict[str, object] = {}
+
+    def timeout(*_args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        observed.update(kwargs)
+        raise subprocess.TimeoutExpired(cmd=("bwrap", "--probe"), timeout=15)
+
+    monkeypatch.setattr(providers.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(providers, "sandboxed_command", lambda *_args, **_kwargs: ("bwrap",))
+    monkeypatch.setattr(providers.subprocess, "run", timeout)
+
+    with pytest.raises(providers.SandboxUnavailable, match="not operational"):
+        _REAL_REQUIRE_OPERATIONAL_SANDBOX({"PATH": os.environ.get("PATH", os.defpath)})
+
+    assert observed["timeout"] == 15
+
+
+def test_provider_diagnostics_reports_an_inoperable_installed_sandbox(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary, _ = _fake_harness(tmp_path, "")
+    real_which = providers.shutil.which
+
+    def which(name: str) -> str | None:
+        if name == "ctx":
+            return str(binary)
+        return real_which(name)
+
+    def unavailable(_environment: object) -> None:
+        raise providers.SandboxUnavailable(
+            "Bubblewrap is installed but the network-disabled namespace is not operational"
+        )
+
+    monkeypatch.setattr(providers.shutil, "which", which)
+    monkeypatch.setattr(providers, "_require_operational_sandbox", unavailable)
+
+    ok, detail = providers.provider_diagnostics()
+
+    assert ok is False
+    assert "network-disabled namespace is not operational" in detail
 
 
 def test_provider_uses_the_shared_workspace_boundary_with_only_required_read_roots(

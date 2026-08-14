@@ -78,6 +78,35 @@ never your repository. With a credential but a missing live prerequisite, CTX
 refuses the run before trial setup. A simulated result is refused as evidence
 for `--apply` and `--pr`.
 
+### Ubuntu 24.04 Bubblewrap prerequisite
+
+Ubuntu 24.04 restricts unprivileged user namespaces. Finding `bwrap` on `PATH`
+is therefore insufficient: CTX must be able to start the same network-disabled
+namespace used for repository commands. Install and load Ubuntu's packaged,
+scoped `bwrap-userns-restrict` AppArmor profile for `/usr/bin/bwrap`:
+
+```bash
+sudo apt update
+sudo apt install bubblewrap apparmor-profiles apparmor-utils
+if [ ! -e /etc/apparmor.d/bwrap-userns-restrict ]; then
+  sudo install -m 0644 \
+    /usr/share/apparmor/extra-profiles/bwrap-userns-restrict \
+    /etc/apparmor.d/bwrap-userns-restrict
+fi
+sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
+ctx doctor
+```
+
+Keep Ubuntu's global unprivileged-user-namespace restriction enabled. CTX uses
+the targeted Bubblewrap profile instead of weakening that system-wide security
+boundary. The profile is administrator-visible host policy for every
+`/usr/bin/bwrap` caller, not a CTX-private setting; the commands above preserve
+an existing local profile rather than overwriting it. On Linux, `ctx doctor`
+runs a bounded `/bin/true` probe inside the same no-network namespace; it
+executes no repository code and calls no model.
+See [Ubuntu's AppArmor user-namespace guidance](https://documentation.ubuntu.com/security/security-features/privilege-restriction/apparmor/#apparmor-unprivileged-user-namespace-restrictions)
+and the [packaged Bubblewrap profile](https://gitlab.com/apparmor/apparmor/-/blob/master/profiles/apparmor/profiles/extras/bwrap-userns-restrict).
+
 ### `--apply` and `--pr` are different writes
 
 `--apply` writes files into your working tree, on whatever branch you are
@@ -327,7 +356,7 @@ graph-based discovery:
     ---
 
     Current main is **v1.0.21** — MIT, tested on CPython 3.11+ for Linux and macOS,
-    8,790 test inventory. Ships seven console scripts led by `ctx` and
+    8,795 test inventory. Ships seven console scripts led by `ctx` and
     `ctx-init`. The maintenance
     tools are still shipped and still work, now via `python -m`:
     `ctx_monitor serve` (local dashboard with graph + wiki + load/unload for

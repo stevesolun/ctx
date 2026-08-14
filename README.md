@@ -1,7 +1,7 @@
 # ctx
 
 [![CI](https://github.com/stevesolun/ctx/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
-[![Tests](https://img.shields.io/badge/Tests-8790_inventory-blue.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
+[![Tests](https://img.shields.io/badge/Tests-8795_inventory-blue.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
 
 **Find the cheapest AI coding setup that actually works on your repo.**
@@ -100,6 +100,35 @@ provider credential, `--test` runs in simulation, which proves the pipeline but
 not your repository. With a credential but a missing live prerequisite, CTX
 refuses the run before trial setup. A simulated result is refused as evidence
 for `--apply` and `--pr`.
+
+#### Ubuntu 24.04: enable Bubblewrap's packaged AppArmor profile
+
+Ubuntu 24.04 restricts unprivileged user namespaces, and merely installing
+`bwrap` does not prove it can start the network-disabled namespace CTX uses for
+repository commands. Install and load Ubuntu's packaged, scoped
+`bwrap-userns-restrict` profile for `/usr/bin/bwrap`:
+
+```bash
+sudo apt update
+sudo apt install bubblewrap apparmor-profiles apparmor-utils
+if [ ! -e /etc/apparmor.d/bwrap-userns-restrict ]; then
+  sudo install -m 0644 \
+    /usr/share/apparmor/extra-profiles/bwrap-userns-restrict \
+    /etc/apparmor.d/bwrap-userns-restrict
+fi
+sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
+ctx doctor
+```
+
+Keep Ubuntu's global unprivileged-user-namespace restriction enabled; CTX uses
+the targeted Bubblewrap profile instead of weakening that system-wide security
+boundary. The profile is administrator-visible host policy for every
+`/usr/bin/bwrap` caller, not a CTX-private setting; the commands above preserve
+an existing local profile rather than overwriting it. `ctx doctor` proves this
+path with a bounded `/bin/true` probe in the same no-network namespace. It
+executes no repository code and calls no model.
+See [Ubuntu's AppArmor user-namespace guidance](https://documentation.ubuntu.com/security/security-features/privilege-restriction/apparmor/#apparmor-unprivileged-user-namespace-restrictions)
+and the [packaged Bubblewrap profile](https://gitlab.com/apparmor/apparmor/-/blob/master/profiles/apparmor/profiles/extras/bwrap-userns-restrict).
 
 ### `--apply` and `--pr` write different things
 

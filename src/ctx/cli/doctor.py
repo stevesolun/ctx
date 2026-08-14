@@ -159,11 +159,12 @@ def _check_git_binary() -> tuple[bool, str]:
 def _check_live_driver() -> tuple[bool, str]:
     """Run the real driver's no-spend prerequisite check.
 
-    This calls no model and starts no subprocess. The provider module checks
-    the CTX harness, the npx filesystem-MCP launcher, and the supported host
-    sandbox using the same builder live execution calls before creating a
-    workspace. npx itself also needs Node on the scrubbed PATH, which the
-    builder's executable lookup alone cannot establish.
+    This calls no model and executes no repository code. On Linux the provider
+    module starts one bounded ``/bin/true`` Bubblewrap probe using the same
+    network-disabled namespace repository commands require; it checks the CTX
+    harness, npx filesystem-MCP launcher, and supported host sandbox before any
+    campaign workspace exists. npx itself also needs Node on the scrubbed PATH,
+    which the builder's executable lookup alone cannot establish.
     """
 
     from ctx.fit.providers import provider_diagnostics
@@ -177,7 +178,9 @@ def _check_live_driver() -> tuple[bool, str]:
             "node is not on the PATH inherited by the isolated harness, so the "
             "npx workspace filesystem MCP cannot start"
         )
-    return True, "ctx harness, npx filesystem MCP runtime, and platform sandbox are available"
+    return True, (
+        "ctx harness, npx filesystem MCP runtime, and operational platform sandbox are available"
+    )
 
 
 def _check_verification_runtime(command: VerificationCommand) -> _Diagnostic:

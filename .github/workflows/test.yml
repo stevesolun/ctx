@@ -156,7 +156,22 @@ jobs:
       - name: Install CTX Fit live dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends bubblewrap
+          sudo apt-get install --yes --no-install-recommends \
+            apparmor-profiles \
+            apparmor-utils \
+            bubblewrap
+          # Ubuntu 24.x restricts unprivileged user namespaces by default.
+          # Load its bwrap-specific profile; never relax the host-wide sysctl.
+          bwrap_profile=/etc/apparmor.d/bwrap-userns-restrict
+          bwrap_extra_profile=/usr/share/apparmor/extra-profiles/bwrap-userns-restrict
+          if [[ ! -f "$bwrap_profile" && -f "$bwrap_extra_profile" ]]; then
+            sudo install -m 0644 "$bwrap_extra_profile" "$bwrap_profile"
+          fi
+          if [[ ! -f "$bwrap_profile" ]]; then
+            echo "Bubblewrap AppArmor user-namespace profile is unavailable" >&2
+            exit 1
+          fi
+          sudo apparmor_parser -r "$bwrap_profile"
           python -m pip install --upgrade pip
           python -m pip install ".[dev,harness]"
 

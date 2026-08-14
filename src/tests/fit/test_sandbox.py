@@ -14,6 +14,9 @@ import pytest
 from ctx.fit.sandbox import SandboxUnavailable, _macos_policy, sandboxed_command
 
 
+_CHILD_STARTED_SENTINEL = "__CTX_FIT_SANDBOX_CHILD_STARTED__"
+
+
 def _python_roots() -> tuple[Path, ...]:
     executable = Path(sys.executable)
     return (executable.absolute().parent.parent, executable.resolve().parent.parent)
@@ -38,7 +41,11 @@ def _run_python(
     (workspace / "tmp").mkdir(exist_ok=True)
     try:
         command = sandboxed_command(
-            (sys.executable, "-c", source),
+            (
+                sys.executable,
+                "-c",
+                f"print({_CHILD_STARTED_SENTINEL!r}, flush=True)\n{source}",
+            ),
             cwd=workspace,
             writable_root=workspace,
             network=network,
@@ -48,7 +55,7 @@ def _run_python(
         )
     except SandboxUnavailable as exc:
         pytest.skip(str(exc))
-    return subprocess.run(
+    completed = subprocess.run(
         command,
         cwd=workspace,
         env=environment,
@@ -57,6 +64,32 @@ def _run_python(
         timeout=30,
         check=False,
     )
+    stdout_lines = completed.stdout.splitlines(keepends=True)
+    for index, line in enumerate(stdout_lines):
+        if line.rstrip("\r\n") == _CHILD_STARTED_SENTINEL:
+            completed.stdout = "".join((*stdout_lines[:index], *stdout_lines[index + 1 :]))
+            return completed
+    raise AssertionError(
+        "sandbox child never started; a launcher failure is not isolation evidence\n"
+        f"exit={completed.returncode}\n"
+        f"stdout={completed.stdout[-1000:]}\n"
+        f"stderr={completed.stderr[-1000:]}"
+    )
+
+
+def test_sandbox_startup_failure_cannot_masquerade_as_an_isolation_denial(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    monkeypatch.setattr(
+        f"{__name__}.sandboxed_command",
+        lambda *args, **kwargs: (sys.executable, "-c", "raise SystemExit(17)"),
+    )
+
+    with pytest.raises(AssertionError, match="sandbox child never started"):
+        _run_python(workspace, "print('repository command started')")
 
 
 def test_repository_process_can_write_inside_but_not_beside_its_workspace(

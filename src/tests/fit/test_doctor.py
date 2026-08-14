@@ -326,18 +326,22 @@ def test_a_node_manifest_does_not_make_a_missing_runtime_ready(
     assert "isolated" in out
 
 
-def test_an_unavailable_sandbox_prevents_a_live_ready_verdict(
+def test_an_installed_but_inoperable_sandbox_prevents_a_live_ready_verdict(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """The live driver and its sandbox are prerequisites, not postscript warnings."""
+    """An installed binary is not ready until its no-network namespace works."""
 
     monkeypatch.setenv("OPENAI_API_KEY", "diagnostic-only-not-used")
     monkeypatch.setattr(
         doctor_module,
         "_check_live_driver",
-        lambda: (False, "a trial cannot be isolated: platform sandbox is unavailable"),
+        lambda: (
+            False,
+            "a trial cannot be isolated: Bubblewrap is installed but its network-disabled "
+            "namespace is not operational; load the packaged bwrap-userns-restrict profile",
+        ),
     )
 
     out = _doctor(_repo_with_a_derivable_task(tmp_path), capsys)
@@ -345,5 +349,6 @@ def test_an_unavailable_sandbox_prevents_a_live_ready_verdict(
     assert REFUSES not in out
     assert READY not in out
     assert "enough static evidence to plan" in out
-    assert "sandbox is unavailable" in out
+    assert "network-disabled namespace is not operational" in out
+    assert "bwrap-userns-restrict" in out
     assert "not ready for live evaluation" in out

@@ -25,6 +25,7 @@ import contextlib
 import io
 import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -68,6 +69,12 @@ _NETWORK_RUNTIME_ENV = frozenset(
     }
 )
 
+_UBUNTU_BWRAP_REPAIR = (
+    "On Ubuntu 24.04, install and load the packaged AppArmor "
+    "`bwrap-userns-restrict` profile for `/usr/bin/bwrap`; keep the global "
+    "unprivileged-user-namespace restriction enabled."
+)
+
 
 class ProviderUnavailable(RuntimeError):
     """No usable way to run a real agent was found."""
@@ -93,6 +100,48 @@ def _require_harness_dependency() -> None:
             "the live harness dependency is not installed; install "
             "`claude-ctx[harness]` before running a real CTX Fit evaluation"
         ) from exc
+
+
+def _require_operational_sandbox(environment: Mapping[str, str]) -> None:
+    """Prove Linux can start the no-network namespace trials require."""
+
+    require_sandbox_available(environment)
+    if platform.system() != "Linux":
+        return
+
+    try:
+        with tempfile.TemporaryDirectory(prefix=".ctx-fit-sandbox-probe-") as directory:
+            root = Path(directory)
+            command = sandboxed_command(
+                ("/bin/true",),
+                cwd=root,
+                writable_root=root,
+                network=False,
+                environment=environment,
+                read_paths=(Path("/bin/true"),),
+            )
+            completed = subprocess.run(
+                command,
+                cwd=str(root),
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+                env=dict(environment),
+            )
+    except (OSError, SandboxUnavailable, subprocess.SubprocessError) as exc:
+        raise SandboxUnavailable(
+            "the Bubblewrap Linux sandbox is installed but its network-disabled "
+            f"namespace is not operational: {exc}. {_UBUNTU_BWRAP_REPAIR}"
+        ) from exc
+
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()[-500:]
+        suffix = f": {detail}" if detail else f" (exit {completed.returncode})"
+        raise SandboxUnavailable(
+            "the Bubblewrap Linux sandbox is installed but its network-disabled "
+            f"namespace is not operational{suffix}. {_UBUNTU_BWRAP_REPAIR}"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -381,7 +430,7 @@ def build_agent_driver(
         )
     _require_harness_dependency()
     try:
-        require_sandbox_available({"PATH": os.environ.get("PATH", os.defpath)})
+        _require_operational_sandbox({"PATH": os.environ.get("PATH", os.defpath)})
     except SandboxUnavailable as exc:
         raise ProviderUnavailable(f"a trial cannot be isolated: {exc}") from exc
     npx_executable = shutil.which("npx")
