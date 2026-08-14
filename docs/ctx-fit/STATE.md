@@ -13,35 +13,21 @@
 
 - Updated: 2026-08-14 (Asia/Jerusalem)
 - Active goal: review, harden, verify, and release CTX Fit 1.0.21
-- Phase: release candidate verification
+- Phase: community PR security remediation
 - Release decision: **DO NOT RELEASE YET**
 - Branch: `codex/ctx-fit-release-hardening`
 - Base commit: `bd36bbea591495f8ef498a6818e7ec541fe78ebb`
+- Committed release candidate: `0264cede6dee568f0c70c390d1af95f6d66dee44`
+- Community PR: `https://github.com/stevesolun/ctx/pull/267`
 - Working tree at checkpoint:
-  - modified: `AGENTS.md`
-  - modified: root historical `STATE.md` (current-state pointer only)
-  - modified: `src/ctx/cli/fit.py`
-  - modified: `src/ctx/fit/execution.py`
-  - modified: `src/ctx/fit/experiment.py`
-  - modified: `src/ctx/fit/live_runner.py`
-  - modified: `src/ctx/fit/providers.py`
-  - modified: `src/ctx/fit/recommend.py`
-  - modified: `src/ctx/fit/apply.py`
-  - modified: `src/ctx/fit/candidates.py`
-  - modified: `src/ctx/fit/tasks.py`
-  - modified: the corresponding focused Fit tests
-  - untracked, intended source: `src/ctx/fit/sandbox.py`
-  - untracked, intended test: `src/tests/fit/test_sandbox.py`
-  - modified: `src/tests/fit/test_live_runner.py`
-  - modified: `src/tests/fit/test_providers.py`
-  - untracked, intended live state: `docs/ctx-fit/STATE.md`
+  - modified: `src/ctx/fit/apply.py` (CodeQL permission repair)
+  - modified: `src/tests/fit/test_apply.py` (failing-first regression)
+  - modified: this live state file
   - user-owned and out of scope: `.scratch/`
-- Parallel execution: active and non-duplicative. Exact-current baseline and
-  applied activation are independently accepted. The coordinator owns final
-  integration; independent reviewers are refreezing the repaired sandbox and
-  the doctor/runtime-readiness contract. Spend/fairness, sidecar-only apply,
-  release metadata, publish-chain hardening, and the multi-language dependency
-  boundary have completed their focused lanes.
+- Parallel execution: the implementation swarm and independent semantic
+  reviews are complete. The CodeQL permission repair received independent
+  ACCEPT with no P0-P2 findings; the coordinator owns committed and remote
+  reruns.
 
 ## Product destination
 
@@ -96,15 +82,19 @@ All of the following must be true before tagging or publishing:
 | Applied winner activation | Complete, independently accepted | Activation writer + coordinator + independent reviewer | Strict repository-root loader, nested-sidecar refusal, hash/model validation, one-use exact context, subdirectory activation, and explicit model-conflict handling passed independent refreeze as part of the 222-check baseline/activation lane |
 | ADR-015 stop attribution | Complete, independently accepted | Coordinator + spend/fairness reviewer | Structured stop reason/log fields flow provider → live runner → serialized result, budget-capped trials are inconclusive, and the accepted spend/fairness lane plus 446-test Fit aggregate are green |
 | Release metadata and publish guard | Complete, independently accepted | Metadata writer + publish writer/reviewer + coordinator | 1.0.21 metadata and changelog are current; exact-main/exact-successful-Tests production guard and changelog-backed notes have no P0/P1 review findings; P2 credential/doc hardening is integrated |
-| Final verification and release | Uncommitted gates green; commit/PR pending | Coordinator + independent reviewer | Settled Fit/surface: 522 passed. Final repository-wide CI-shaped run: 8,761 passed, 5 skipped. Ruff/format, mypy, strict docs, tracker/release/package-surface contracts, stats, and diff integrity are green. Reproducible artifacts and committed-history gates remain |
+| Final verification and release | PR open; security reruns pending | Coordinator + independent reviewer | Commit `0264cede` passed the 11-lane committed fast gate and all 19 PR-preflight lanes; PR #267 opened. Remote CI found one high CodeQL alert for a newly created applied manifest using mode `0644`. The failing-first owner-only `0600` repair passed 523 Fit/surface tests, focused static/docs checks, and independent review with no P0-P2; new committed/remote gates are pending |
 
 ## Open release blockers
 
 ### P0 — release-stopping
 
-None. Every implementation P0 found in the hardening reviews is repaired and
-independently accepted. Final release remains blocked on the exact-tree
-repository, package, committed-history, and CI gates below.
+None in the current working tree. PR #267's CodeQL policy found one
+high-severity alert against commit `0264cede`: a newly created
+`.ctx/fit-configuration.json` was explicitly made world-readable even though it
+can contain organization-owned instruction and capability bytes. The repair
+keeps new manifests owner-only (`0600`), has a failing-first regression, and is
+independently accepted with no P0-P2 findings. Release remains stopped until
+the new committed gates and remote CodeQL accept the repaired SHA.
 
 ADR-016 itself has independent current-tree acceptance: repository-native
 verification is explicitly a non-adversarial trust boundary.
@@ -172,8 +162,10 @@ surface makes that row stale for release purposes.
 | Base `bd36bbea`, 2026-08-13 | GitHub Tests run `31703885499` | Completed successfully | Proves the merged base only; final tag SHA needs a fresh green run |
 | Final uncommitted tree, 2026-08-14 | CI-shaped full non-integration suite | 8,761 passed, 5 skipped, 15 deprecation warnings in 262.33s | Green exact-tree behavior evidence. A prior parallel attempt had one deterministic-bridge request-count miss; the isolated test passed three times and this complete rerun passed |
 | Final uncommitted tree, 2026-08-14 | Ruff check/format, mypy, strict MkDocs, trackers/release/package surfaces, repo stats, diff integrity | Ruff green across `src hooks scripts`; 615 files formatted; mypy green on 585 files; MkDocs strict green; 135 focused contracts passed; stats and diff checks green | Required uncommitted static/documentation/release evidence complete |
-| Final committed tree | `scripts/no_mistakes_run.sh fast` | Not run | Required |
-| Final committed tree | `python scripts/ci_preflight.py --profile pr` | Not run | Required |
+| Commit `0264cede`, 2026-08-14 | `scripts/no_mistakes_run.sh fast --allow-dirty` | All 11 lanes passed in 356.89s; committed-head-only report | Valid for `0264cede`; superseded after the CodeQL repair is amended |
+| Commit `0264cede`, 2026-08-14 | `python scripts/ci_preflight.py --profile pr` from a clean detached worktree | All 19 lanes passed; 8,761 tests, 5 skipped, 92.15% coverage; reproducible artifacts and Twine green | Valid for `0264cede`; superseded after the CodeQL repair is amended |
+| PR #267 / commit `0264cede`, 2026-08-14 | GitHub PR checks | Product/build/clean-host/static/docs/CodeQL-Python lanes green; aggregate CodeQL rejected one high world-readable-manifest alert | Release-stopping remote evidence; local repair active |
+| CodeQL permission repair working tree, 2026-08-14 | exact new-manifest mode regression, full apply/Fit/surface suites, docs/stats, Ruff/format/mypy, independent probes | Regression failed at `0644`; 64 apply tests, 523 Fit/surface tests, docs/stats, and static checks passed with `0600`; reviewer verified create/modify/rollback under `umask 000` and accepted with no P0-P2 | Accepted repair evidence; new committed and remote gates required |
 | Exact tag target | required GitHub CI and package/publish smoke | Not run | Required |
 
 No paid real-provider evaluation has been authorized or run during this
@@ -232,13 +224,23 @@ be overwritten.
 
 ## Immediate next actions
 
-1. Run the settled full non-integration, Ruff, mypy, documentation, package,
-   and release-contract gates.
-2. Commit the accepted tree and run the committed fast gate and PR preflight.
-3. Open and review the hardening PR, merge only with exact-SHA CI green,
-   then build, tag, and publish from that exact `main` commit.
+1. Commit the independently accepted CodeQL permission repair.
+2. Rerun the committed fast gate and PR preflight on the repaired SHA.
+3. Require every PR check, including remote CodeQL, to be green; merge only
+   after review, then build, tag, and publish from the exact green `main` SHA.
 
 ## Checkpoint log
+
+- 2026-08-14: Committed release candidate `0264cede` passed all 11 committed
+  fast-gate lanes and all 19 clean PR-preflight lanes, including 8,761 tests,
+  reproducible package construction, Twine, clean-host, docs, and static checks.
+  Opened community PR #267. Remote CodeQL then found one high-severity
+  world-readable applied-manifest permission issue. Captured a failing-first
+  regression and repaired new manifest creation from `0644` to owner-only
+  `0600`; 64 apply tests, 523 Fit/surface checks, docs/stat checks, and focused
+  static checks pass. An independent reviewer accepted create/modify/rollback
+  behavior with no P0-P2 findings. Release is stopped pending a new commit,
+  repeated committed gates, and green remote CodeQL.
 
 - 2026-08-13: Created this live state file after confirming that root
   `STATE.md` is intentionally frozen history. Recorded the merged base,

@@ -560,9 +560,11 @@ def _stage_write(artifact: Artifact, destination: Path) -> _StagedWrite:
             os.close(backup_descriptor)
             shutil.copy2(destination, backup)
         else:
-            # Configuration files should not inherit mkstemp's private 0600
-            # mode: they are repository artifacts intended for review.
-            os.chmod(scratch, 0o644)
+            # The applied manifest can contain organization-owned instructions
+            # and capability material. Keep a newly created file private; Git
+            # can still review its bytes without granting other local users
+            # access through the working tree.
+            os.chmod(scratch, 0o600)
         return _StagedWrite(artifact, destination, scratch, backup)
     except BaseException:
         scratch.unlink(missing_ok=True)

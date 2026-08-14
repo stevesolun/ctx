@@ -442,6 +442,15 @@ def test_a_manifest_edit_after_preview_stops_all_artifact_writes(tmp_path: Path)
     assert manifest.read_text(encoding="utf-8") == late
 
 
+def test_new_applied_configuration_is_private_to_its_owner(tmp_path: Path) -> None:
+    plan = plan_apply(_recommendation(), (_candidate(),), repo_path=tmp_path)
+
+    apply_plan(plan, tmp_path)
+
+    manifest = tmp_path / CONFIGURATION_MANIFEST_PATH
+    assert manifest.stat().st_mode & 0o777 == 0o600
+
+
 def test_apply_refuses_when_evaluated_instruction_bytes_have_changed(tmp_path: Path) -> None:
     agents = tmp_path / "AGENTS.md"
     evaluated = "# Evaluated rules\n"
