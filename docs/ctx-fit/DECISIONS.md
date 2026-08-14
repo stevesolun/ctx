@@ -8,6 +8,43 @@ Status values: `ACCEPTED` · `SUPERSEDED` · `PROPOSED`
 
 ---
 
+## ADR-016 — The repository verifier is an explicit trust boundary · `ACCEPTED`
+
+**Context.** ADR-005 makes the repository's own command authoritative, but did
+not state the limit of that authority. A Python-only launcher attempted to prove
+that the verifier reached normal completion with a secret in-process witness.
+Editable source defeated it twice: once by forging the traceback filename the
+launcher trusted, and once by reading the secret from the launcher's live frame.
+Both programs exited before the assertion and still produced `verified`.
+
+**Decision.** CTX Fit executes the selected repository command unchanged and
+uses its exit status for Python, JavaScript/TypeScript, Go, and Rust. A trial is
+verified only after the original commit passes, reverting the source makes the
+same command fail, the agent changes only declared source paths, protected tests
+remain byte-for-byte unchanged, and the same command exits zero after the
+change.
+
+This is evidence for normal, non-adversarial development. CTX confines trial
+code to a throwaway workspace and protects the judge's files, but it does not
+claim that code under test cannot deliberately terminate, skip, or deceive the
+test runner whose process it inhabits. A universal same-process completion
+proof is not available: any secret or visible negative control needed by that
+process can also be observed or influenced by code executing inside it.
+
+**Consequences.**
+
+- The trust assumption is displayed in the dry run and exact pre-spend plan,
+  serialized in plan warnings, and retained in every recommendation's
+  limitations.
+- A Python-only wrapper must not replace or reject a repository-native command.
+  Framework-specific adapters may strengthen future evidence, but they cannot
+  be described as a universal adversarial proof.
+- Host isolation and judge-file integrity remain hard boundaries. Repository
+  verification can write only inside its individual throwaway workspace, not
+  the shared campaign environment or the user's machine.
+
+---
+
 ## ADR-015 — A trial stopped by a CTX-imposed bound is inconclusive, except the iteration cap · `ACCEPTED`
 
 **Context.** The verdict branch in `src/ctx/fit/live_runner.py` reads only the
@@ -183,6 +220,10 @@ retried away.
 **Consequence.** A repository with no deterministic verification is honestly
 reported as not Fit-evaluable rather than given a confident guess.
 
+ADR-016 states the authority boundary: repository-native verification is
+evidence for ordinary development, not an adversarial proof about code running
+inside the verifier itself.
+
 ---
 
 ## ADR-006 — The knowledge graph is an internal optimizer, never UX · `ACCEPTED`
@@ -204,6 +245,13 @@ out of scope and the report must say so.
 **Evidence.** The execution rig is Codex-only; `--model` is a run-level flag;
 reasoning effort is fixed by the Codex runtime contract. Claiming a harness
 comparison the experiment never ran would violate the honesty rules.
+
+**1.0.21 implementation note.** The current bounded experiment varies skill
+capabilities only. Repository instructions, the selected model, and the single
+harness are held constant across all arms; agents and MCP servers are not yet
+attached as candidate material. The profile and dry run must report this
+narrower implemented surface, even though the ADR permits later expansion
+within one harness.
 
 ---
 

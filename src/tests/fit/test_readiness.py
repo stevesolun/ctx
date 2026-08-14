@@ -133,6 +133,30 @@ def test_not_applicable_checks_leave_the_denominator(tmp_path: Path) -> None:
     assert environment.assessable < environment.possible
 
 
+def test_static_node_discovery_does_not_claim_dependencies_are_runnable(
+    tmp_path: Path, capsys
+) -> None:
+    """A package script and a test declaration do not prove vitest is installed."""
+
+    repo = tmp_path / "node-without-installed-dependencies"
+    repo.mkdir()
+    (repo / "package.json").write_text(
+        json.dumps({"scripts": {"test": "vitest"}}), encoding="utf-8"
+    )
+    (repo / "demo.test.js").write_text("test('works', () => {});\n", encoding="utf-8")
+
+    report = _score(repo)
+    verification = next(item for item in report.checks if item.check_id == "V1")
+    assert verification.state == "pass"
+    assert verification.title == "Test verification is declared"
+
+    assert ctx_main(["fit", str(repo)]) == 0
+    printed = capsys.readouterr().out
+    assert "Tests are runnable" not in printed
+    assert "static evidence needed to plan an evaluation" in printed
+    assert "already available in the repository" in printed
+
+
 def test_score_is_none_rather_than_zero_when_nothing_is_assessable(tmp_path: Path) -> None:
     report = score_readiness.__wrapped__ if False else None  # keep import used
     del report

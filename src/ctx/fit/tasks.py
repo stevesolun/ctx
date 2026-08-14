@@ -46,6 +46,22 @@ SOURCE_CAVEAT: dict[TaskSource, str] = {
     "generated": "synthesized by CTX; not work anyone actually needed done",
 }
 
+#: Language/source-suffix contract for history-derived tasks. These are the
+#: ecosystems for which CTX Fit has both stack recognition and first-class
+#: repository-native test-command discovery. Other languages may still be
+#: verifiable through a repository Makefile, but Fit does not claim a general
+#: task-derivation contract for them yet.
+TASK_LANGUAGE_SUFFIXES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("python", (".py",)),
+    ("javascript", (".js", ".jsx")),
+    ("typescript", (".ts", ".tsx")),
+    ("go", (".go",)),
+    ("rust", (".rs",)),
+)
+
+_TASK_SOURCE_SUFFIXES = frozenset(
+    suffix for _language, suffixes in TASK_LANGUAGE_SUFFIXES for suffix in suffixes
+)
 _MAX_FILES_IN_COMMIT = 6
 _GIT_TIMEOUT_SECONDS = 20
 
@@ -195,7 +211,6 @@ def derive_tasks(
 
     tasks: list[FitTask] = []
     considered = 0
-    non_python = 0
     unpreparable = 0
 
     for sha in log.split():
@@ -209,11 +224,11 @@ def derive_tasks(
             # Large commits make ambiguous tasks: too many ways to "solve" them.
             continue
 
-        python_files = [item for item in files if item.endswith(".py")]
-        if not python_files:
-            non_python += 1
-        source_paths = tuple(item for item in python_files if not _is_test_path(item))
-        test_paths = tuple(item for item in python_files if _is_test_path(item))
+        source_files = [
+            item for item in files if Path(item).suffix.lower() in _TASK_SOURCE_SUFFIXES
+        ]
+        source_paths = tuple(item for item in source_files if not _is_test_path(item))
+        test_paths = tuple(item for item in source_files if _is_test_path(item))
         if not source_paths or not test_paths:
             continue
 
@@ -261,13 +276,10 @@ def derive_tasks(
             "the task would have to remove"
         )
     if not tasks:
-        if non_python and not considered:
-            # Task derivation reads Python only, while `is_fit_evaluable` does
-            # not — so a Jest repository is told it can be evaluated and then
-            # refused. Naming the restriction is the least this can do.
+        if not considered:
             warnings.append(
-                "task derivation reads Python source only, and none of the "
-                f"{non_python} recent commit(s) examined changed a .py file"
+                "history-derived task support currently covers paired source-and-test "
+                "commits in Python, JavaScript, TypeScript, Go, and Rust"
             )
         warnings.append(
             "no commit in recent history changed both source and tests in a small "
@@ -279,6 +291,7 @@ def derive_tasks(
 __all__ = [
     "SOURCE_CAVEAT",
     "TASK_SCHEMA",
+    "TASK_LANGUAGE_SUFFIXES",
     "FitTask",
     "TaskSet",
     "TaskSource",

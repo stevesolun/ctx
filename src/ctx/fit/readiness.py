@@ -297,7 +297,9 @@ _README_CONTENT_WORDS = 20
 # --------------------------------------------------------------------------
 
 
-def _check_tests_runnable(profile: FitProfile, _root: Path) -> tuple[CheckState, tuple[str, ...]]:
+def _check_test_verification_declared(
+    profile: FitProfile, _root: Path
+) -> tuple[CheckState, tuple[str, ...]]:
     """Report verification's answer; never derive a second one.
 
     "Does this repository have tests that can judge an agent?" is one question,
@@ -866,15 +868,18 @@ RUBRIC: tuple[Check, ...] = (
     Check(
         check_id="V1",
         dimension="verification",
-        title="Tests are runnable",
+        title="Test verification is declared",
         points=18,
         agent_rationale=(
             "Without a repository-native test an agent's own claim is the only evidence, "
             "which this product forbids as proof of success."
         ),
-        remedy="Add a test suite and make sure the declared runner can execute it.",
+        remedy=(
+            "Add a test suite and declare its runner; CTX Fit checks runner and "
+            "dependency availability only when it executes a campaign."
+        ),
         blocking=True,
-        evaluate=_check_tests_runnable,
+        evaluate=_check_test_verification_declared,
     ),
     Check(
         check_id="V2",

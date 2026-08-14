@@ -47,8 +47,11 @@ flattering it.
 
 from __future__ import annotations
 
+import configparser
 import hashlib
 import os
+import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -60,8 +63,13 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from ctx.fit.candidates import CandidateConfiguration
+from ctx.fit.candidates import (
+    CandidateConfiguration,
+    CapabilityMaterial,
+    InstructionMaterial,
+)
 from ctx.fit.execution import TrialResult
+from ctx.fit.sandbox import SandboxUnavailable, sandboxed_command
 from ctx.fit.tasks import FitTask
 
 #: A trial should never hang a campaign. Exceeding this is an inconclusive
@@ -89,6 +97,12 @@ DEFAULT_REPOINT_TIMEOUT_SECONDS = 180
 #: The repository's own verify command is nearly always its test suite, and a
 #: suite cannot run against runtime dependencies alone.
 _TEST_EXTRAS: tuple[str, ...] = ("dev", "test", "tests", "testing", "develop")
+
+#: The Fit driver imposes this ceiling, so reaching it tests the ceiling rather
+#: than the candidate. The harness's iteration cap is deliberately absent: an
+#: agent that spends its whole iteration allowance without finishing has been
+#: shown to fail the task (ADR-015).
+_INCONCLUSIVE_AGENT_STOPS = frozenset({"cost_budget"})
 
 #: Files whose contents decide what the environment has to contain. When none
 #: of them is present there is no package to install -- and, just as important,
@@ -122,6 +136,9 @@ class AgentInvocation:
     verify_command: tuple[str, ...]
     capability_ids: tuple[str, ...]
     model: str | None
+    capability_materials: tuple[CapabilityMaterial, ...] = ()
+    instructions: tuple[str, ...] = ()
+    instruction_materials: tuple[InstructionMaterial, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,10 +150,111 @@ class AgentOutcome:
     output_tokens: int | None = None
     cost_usd: float | None = None
     detail: str = ""
+    stop_reason: str = ""
+    logs: str = ""
 
 
 #: Injected so the provider integration stays replaceable and testable.
 AgentDriver = Callable[[AgentInvocation], AgentOutcome]
+
+#: Repository-controlled commands use this seam. Production gets the sandboxed
+#: implementation below; tests may inject :func:`_run` when the behavior under
+#: test is above the OS boundary.
+RepositoryExecutor = Callable[
+    [tuple[str, ...], Path, int, Mapping[str, str] | None], tuple[int | None, str]
+]
+
+
+def _symlink_hop_paths(executable: Path) -> tuple[Path, ...]:
+    """Return each executable spelling encountered while resolving symlinks.
+
+    ``Path.resolve`` exposes only the first and last spellings. Seatbelt must
+    also read an intermediate link such as ``~/.local/bin/tool ->
+    /opt/homebrew/opt/tool/bin/tool -> Cellar/...``. Resolve component by
+    component, preserving each complete executable path and bounding loops at
+    the POSIX symlink traversal limit.
+    """
+
+    initial = executable.absolute()
+    observed: list[Path] = [initial]
+    pending = list(initial.parts[1:])
+    resolved = Path(initial.anchor)
+    traversed = 0
+
+    while pending:
+        candidate = resolved / pending.pop(0)
+        try:
+            target = Path(os.readlink(candidate))
+        except OSError:
+            resolved = candidate
+            continue
+
+        traversed += 1
+        if traversed > 40:
+            break
+        target_path = target if target.is_absolute() else candidate.parent / target
+        hop = Path(os.path.abspath(target_path.joinpath(*pending)))
+        if hop not in observed:
+            observed.append(hop)
+        resolved = Path(hop.anchor)
+        pending = list(hop.parts[1:])
+
+    return tuple(observed)
+
+
+def _is_within(path: Path, root: Path) -> bool:
+    """Whether ``path`` is inside ``root``, without requiring either to exist."""
+
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
+def _executable_read_access(
+    command: tuple[str, ...], environment: Mapping[str, str]
+) -> tuple[tuple[Path, ...], tuple[Path, ...]]:
+    """Return trusted runtime subtrees and exact executable spellings.
+
+    An executable selected through ``PATH`` may pass through several symlinks.
+    Each spelling is required to traverse that chain, but its parent is not a
+    runtime root: treating ``~/.local/bin/tool`` as permission to read all of
+    ``~/.local`` exposes unrelated ambient files. The CTX interpreter's final
+    runtime is trusted. A selected command receives a final runtime subtree
+    only when it is outside private host trees or belongs to the explicitly
+    selected virtual environment; otherwise its executable chain stays exact.
+    """
+
+    executables: list[tuple[Path, bool]] = [(Path(sys.executable), True)]
+    if command:
+        selected = shutil.which(command[0], path=environment.get("PATH"))
+        if selected is not None:
+            executables.append((Path(selected), False))
+
+    roots: list[Path] = []
+    paths: list[Path] = []
+    private_roots = (Path.home().resolve(), Path(tempfile.gettempdir()).resolve())
+    virtual_environment = environment.get("VIRTUAL_ENV")
+    virtual_root = Path(virtual_environment).resolve(strict=False) if virtual_environment else None
+
+    for executable, trusted_interpreter in executables:
+        hops = _symlink_hop_paths(executable)
+        for hop in hops:
+            if hop not in paths:
+                paths.append(hop)
+
+        final_root = hops[-1].parent.parent.resolve(strict=False)
+        private = any(_is_within(final_root, root) for root in private_roots)
+        explicit_virtual_environment = virtual_root is not None and _is_within(
+            final_root, virtual_root
+        )
+        if (
+            trusted_interpreter or not private or explicit_virtual_environment
+        ) and final_root not in roots:
+            roots.append(final_root)
+
+    return tuple(roots), tuple(paths)
 
 
 def _run(
@@ -164,10 +282,70 @@ def _run(
     return completed.returncode, (completed.stdout + completed.stderr)[-2000:]
 
 
+def _scrubbed_environment(runtime_root: Path) -> dict[str, str]:
+    """The complete environment visible to arbitrary repository code."""
+
+    home = runtime_root / "home"
+    temporary = runtime_root / "tmp"
+    home.mkdir(parents=True, exist_ok=True)
+    temporary.mkdir(parents=True, exist_ok=True)
+
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if name == "LANG" or name.startswith("LC_")
+    }
+    environment.update(
+        {
+            "HOME": str(home),
+            "PATH": os.environ.get("PATH", os.defpath),
+            "PYTHONUNBUFFERED": "1",
+            "TEMP": str(temporary),
+            "TMP": str(temporary),
+            "TMPDIR": str(temporary),
+        }
+    )
+    return environment
+
+
 def _packaging_evidence(workspace: Path) -> tuple[Path, ...]:
     """The files in ``workspace`` that declare what has to be installed."""
 
     return tuple(path for name in _PACKAGING_FILES if (path := workspace / name).is_file())
+
+
+def _declares_python_package(evidence: tuple[Path, ...]) -> bool:
+    """Distinguish package metadata from tools that happen to use its files."""
+
+    by_name = {path.name: path for path in evidence}
+    if "setup.py" in by_name:
+        return True
+
+    setup_cfg = by_name.get("setup.cfg")
+    if setup_cfg is not None:
+        parser = configparser.ConfigParser()
+        try:
+            parser.read_string(setup_cfg.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, configparser.Error):
+            # An unreadable or malformed packaging candidate is not evidence
+            # that the ambient interpreter is safe. Let pip diagnose it.
+            return True
+        sections = set(parser.sections())
+        if "metadata" in sections or "options" in sections:
+            return True
+        if any(section.startswith("options.") for section in sections):
+            return True
+
+    pyproject = by_name.get("pyproject.toml")
+    if pyproject is None:
+        return False
+    try:
+        declared = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError):
+        # Fail closed: a broken pyproject may still be intended to package the
+        # source, so skipping isolation would risk importing an ambient copy.
+        return True
+    return "build-system" in declared or "project" in declared
 
 
 def _dependency_digest(evidence: tuple[Path, ...]) -> str:
@@ -209,7 +387,7 @@ def _test_extra(workspace: Path) -> str | None:
     return next((extra for extra in _TEST_EXTRAS if extra in optional), None)
 
 
-def _interpreter_environment(venv: Path) -> dict[str, str]:
+def _interpreter_environment(venv: Path, runtime_root: Path) -> dict[str, str]:
     """The process environment that makes ``venv`` the interpreter in charge.
 
     The verify command is the repository's own (``python -m pytest -q``, and
@@ -223,7 +401,7 @@ def _interpreter_environment(venv: Path) -> dict[str, str]:
     this environment exists to end.
     """
 
-    environment = dict(os.environ)
+    environment = _scrubbed_environment(runtime_root)
     bin_directory = venv / ("Scripts" if os.name == "nt" else "bin")
     environment["PATH"] = os.pathsep.join(
         item for item in (str(bin_directory), environment.get("PATH", "")) if item
@@ -283,6 +461,7 @@ class CampaignEnvironment:
         base_python: str | Path | None = None,
         build_timeout: int = DEFAULT_ENVIRONMENT_TIMEOUT_SECONDS,
         repoint_timeout: int = DEFAULT_REPOINT_TIMEOUT_SECONDS,
+        repository_executor: RepositoryExecutor | None = None,
     ) -> None:
         self._base_python = Path(base_python) if base_python else Path(sys.executable)
         self._build_timeout = build_timeout
@@ -291,6 +470,17 @@ class CampaignEnvironment:
         self._venv: Path | None = None
         self._installed_digest: str | None = None
         self._unbuildable: str | None = None
+        self._repository_executor = repository_executor
+
+    @property
+    def sandbox_root(self) -> Path:
+        """The one private tree repository code may mutate in this campaign."""
+
+        if self._home is None:
+            self._home = tempfile.TemporaryDirectory(
+                prefix="ctx-fit-campaign-", ignore_cleanup_errors=True
+            )
+        return Path(self._home.name)
 
     @property
     def venv(self) -> Path | None:
@@ -302,8 +492,10 @@ class CampaignEnvironment:
         """Make ``workspace`` the code that this campaign's interpreter imports."""
 
         evidence = _packaging_evidence(workspace)
-        if not any(path.name in {"pyproject.toml", "setup.py", "setup.cfg"} for path in evidence):
-            return TrialEnvironment(account=_NOTHING_TO_INSTALL)
+        if not _declares_python_package(evidence):
+            return TrialEnvironment(
+                env=_scrubbed_environment(self.sandbox_root), account=_NOTHING_TO_INSTALL
+            )
 
         if self._unbuildable is not None:
             # An interpreter that could not be created once will not create
@@ -324,7 +516,59 @@ class CampaignEnvironment:
             return TrialEnvironment(error=error)
 
         assert self._venv is not None
-        return TrialEnvironment(env=_interpreter_environment(self._venv), account=_ISOLATED)
+        return TrialEnvironment(
+            env=_interpreter_environment(self._venv, self.sandbox_root), account=_ISOLATED
+        )
+
+    def run_repository(
+        self,
+        command: tuple[str, ...],
+        cwd: Path,
+        timeout: int,
+        env: Mapping[str, str] | None,
+        *,
+        writable_root: Path | None = None,
+    ) -> tuple[int | None, str]:
+        """Run arbitrary repository code without network authority.
+
+        Verification writes only its workspace. Package installation also
+        needs the campaign-owned environment, so that caller names the broader
+        throwaway root explicitly; neither path grants network access.
+        """
+
+        if env is None:
+            return None, "repository command has no scrubbed environment"
+        command_env = dict(env)
+        allowed_write_root = cwd if writable_root is None else writable_root
+        private = cwd / ".ctx-fit-runtime"
+        home = private / "home"
+        temporary = private / "tmp"
+        home.mkdir(parents=True, exist_ok=True)
+        temporary.mkdir(parents=True, exist_ok=True)
+        command_env.update(
+            {
+                "HOME": str(home),
+                "TEMP": str(temporary),
+                "TMP": str(temporary),
+                "TMPDIR": str(temporary),
+            }
+        )
+        if self._repository_executor is not None:
+            return self._repository_executor(command, cwd, timeout, command_env)
+        try:
+            read_roots, read_paths = _executable_read_access(command, command_env)
+            isolated = sandboxed_command(
+                command,
+                cwd=cwd,
+                writable_root=allowed_write_root,
+                network=False,
+                environment=command_env,
+                read_roots=read_roots,
+                read_paths=read_paths,
+            )
+        except SandboxUnavailable as exc:
+            return None, f"repository command could not be isolated: {exc}"
+        return _run(isolated, cwd, timeout, command_env)
 
     def close(self) -> None:
         """Remove the environment. Safe to call more than once."""
@@ -338,8 +582,7 @@ class CampaignEnvironment:
     def _build(self) -> str | None:
         """Create the interpreter. Returns a stated cause, or None on success."""
 
-        self._home = tempfile.TemporaryDirectory(prefix="ctx-fit-env-", ignore_cleanup_errors=True)
-        home = Path(self._home.name)
+        home = self.sandbox_root
         venv = home / "env"
         code, output = _run(
             (str(self._base_python), "-m", "venv", str(venv)), home, timeout=self._build_timeout
@@ -373,6 +616,7 @@ class CampaignEnvironment:
                 "pip",
                 "install",
                 "--disable-pip-version-check",
+                "--no-index",
                 "--no-input",
                 "--editable",
                 target,
@@ -395,19 +639,30 @@ class CampaignEnvironment:
         # The install runs under the same environment the verify command will,
         # so a stray ``PYTHONPATH`` cannot feed the user's source tree to a
         # build backend that imports the project to describe it.
-        installing = _interpreter_environment(self._venv)
+        installing = _interpreter_environment(self._venv, self.sandbox_root)
         failure = ""
         for attempt in attempts:
-            code, output = _run(
+            code, output = self.run_repository(
                 attempt,
                 workspace,
                 self._build_timeout if resolve else self._repoint_timeout,
                 installing,
+                # A build backend is repository-controlled code. It may write
+                # the throwaway campaign environment, but it never receives a
+                # package-index or other network window. Dependencies therefore
+                # have to be available from the repository or local installer
+                # state without reaching the network.
+                writable_root=self.sandbox_root,
             )
             if code == 0:
                 self._installed_digest = digest
                 return None
-            failure = output.strip()[-300:] or "no output"
+            # Build-backend failures are often diagnosed near the beginning
+            # (for example, a sandbox denial) and summarized generically at
+            # the end by pip. Keep the runner's existing bounded process tail
+            # rather than truncating it a second time into an unactionable
+            # "subprocess exited" message.
+            failure = output.strip()[-2000:] or "no output"
 
         # Falling through the extras attempt to the plain one and still failing
         # is reported once, on the plain install: naming the extra would send
@@ -415,7 +670,9 @@ class CampaignEnvironment:
         return (
             "the workspace could not be installed into this campaign's environment, so the "
             "code under test would have been whatever is already installed rather than the "
-            f"trial's own tree: {failure}"
+            "trial's own tree. CTX does not grant network access to repository-controlled "
+            "install or build commands; the build backend and dependencies must be available "
+            f"from the repository or local installer state: {failure}"
         )
 
 
@@ -544,20 +801,49 @@ def _revert_source_change(repo: Path, task: FitTask, destination: Path) -> str |
     return None
 
 
-def _specification_digests(workspace: Path, test_paths: tuple[str, ...]) -> dict[str, str | None]:
-    """Content digests of the files that decide the verdict.
+def _workspace_manifest(workspace: Path) -> dict[str, str]:
+    """A byte-level manifest of everything the trial agent can mutate."""
 
-    ``None`` records "not present", so a deletion reads as a change rather than
-    as an absence of evidence.
-    """
-
-    digests: dict[str, str | None] = {}
-    for path in test_paths:
+    manifest: dict[str, str] = {}
+    for path in sorted(workspace.rglob("*")):
+        relative = path.relative_to(workspace).as_posix()
         try:
-            digests[path] = hashlib.sha256((workspace / path).read_bytes()).hexdigest()
-        except OSError:
-            digests[path] = None
-    return digests
+            mode = path.lstat().st_mode
+            if stat.S_ISLNK(mode):
+                manifest[relative] = f"symlink:{os.readlink(path)}"
+            elif stat.S_ISREG(mode):
+                manifest[relative] = f"file:{hashlib.sha256(path.read_bytes()).hexdigest()}"
+            elif stat.S_ISDIR(mode):
+                manifest[relative] = "directory"
+            else:
+                manifest[relative] = f"special:{mode}"
+        except OSError as exc:
+            manifest[relative] = f"unreadable:{type(exc).__name__}"
+    return manifest
+
+
+def _outside_editable_scope(path: str, source_paths: tuple[str, ...]) -> bool:
+    """Whether ``path`` falls outside every explicit task-owned path."""
+
+    normalized = path.rstrip("/")
+    return not any(
+        normalized == source.rstrip("/") or normalized.startswith(f"{source.rstrip('/')}/")
+        for source in source_paths
+    )
+
+
+def _agent_audit_suffix(agent: AgentOutcome) -> str:
+    """Bounded audit evidence retained on every post-agent result path."""
+
+    parts: list[str] = []
+    if agent.stop_reason:
+        parts.append(f"harness stop reason: {agent.stop_reason[:120]}")
+    elif agent.detail:
+        # Backward-compatible drivers used detail as the stop-reason channel.
+        parts.append(f"harness detail: {agent.detail[:200]}")
+    if agent.logs:
+        parts.append(f"harness logs: {agent.logs[-500:]}")
+    return f"; {'; '.join(parts)}" if parts else ""
 
 
 def _drive_with_deadline(
@@ -643,7 +929,9 @@ def make_live_runner(
         # not a verdict, so it must not become an exception out of a finished
         # trial.
         with tempfile.TemporaryDirectory(
-            prefix="ctx-fit-trial-", ignore_cleanup_errors=True
+            prefix="trial-",
+            dir=campaign_environment.sandbox_root,
+            ignore_cleanup_errors=True,
         ) as scratch:
             workspace = Path(scratch) / "repo"
             error = _materialize_commit(repo, task, workspace)
@@ -674,7 +962,9 @@ def make_live_runner(
             # through, the same non-zero would come back after the agent ran,
             # and every candidate would be recorded as having failed a task
             # nothing here was ever able to judge (FITBUG-018, FITBUG-019).
-            code, output = _run(task.verify_command, workspace, verify_timeout, verify_env)
+            code, output = campaign_environment.run_repository(
+                task.verify_command, workspace, verify_timeout, verify_env
+            )
             if code != 0:
                 return result(
                     "infrastructure-failure",
@@ -696,7 +986,9 @@ def make_live_runner(
 
             # Red gate. If the reverted tree already passes, the task proves
             # nothing and must not be scored against any candidate.
-            code, output = _run(task.verify_command, workspace, verify_timeout, verify_env)
+            code, output = campaign_environment.run_repository(
+                task.verify_command, workspace, verify_timeout, verify_env
+            )
             if code is None:
                 # Not red: unknown. `None == 0` is False, so without this the
                 # gate reads a verify command that never finished as proof the
@@ -721,7 +1013,7 @@ def make_live_runner(
             # touch it, but a request is not a control: deleting or emptying the
             # one failing test makes the suite exit zero, which would otherwise
             # be recorded as a verified trial for work nobody did.
-            specification = _specification_digests(workspace, task.test_paths)
+            specification = _workspace_manifest(workspace)
 
             try:
                 agent = _drive_with_deadline(
@@ -733,6 +1025,9 @@ def make_live_runner(
                         verify_command=task.verify_command,
                         capability_ids=candidate.capability_ids,
                         model=candidate.model,
+                        capability_materials=candidate.capability_materials,
+                        instructions=candidate.instructions,
+                        instruction_materials=candidate.instruction_materials,
                     ),
                     trial_timeout,
                 )
@@ -763,14 +1058,31 @@ def make_live_runner(
             if not agent.completed and spent_nothing:
                 return result(
                     "infrastructure-failure",
+                    stop_reason=agent.stop_reason,
+                    logs=agent.logs,
                     detail=(
                         "the agent never ran and nothing was spent, so this trial says "
-                        f"nothing about the candidate: {agent.detail or 'no detail reported'}"
+                        "nothing about the candidate: "
+                        f"{agent.detail or agent.stop_reason or 'no detail reported'}"
+                        f"{_agent_audit_suffix(agent)}"
                     ),
                 )
 
-            after = _specification_digests(workspace, task.test_paths)
-            tampered = sorted(path for path in specification if after[path] != specification[path])
+            after = _workspace_manifest(workspace)
+            changed = sorted(
+                path
+                for path in specification.keys() | after.keys()
+                if specification.get(path) != after.get(path)
+            )
+            tampered = [
+                path for path in changed if _outside_editable_scope(path, task.source_paths)
+            ]
+            redirected = [
+                path
+                for path in changed
+                if (after.get(path) or "").startswith(("symlink:", "special:"))
+            ]
+            tampered = sorted(set(tampered) | set(redirected))
             if tampered:
                 # Do not even ask for a verdict: it would be the agent's.
                 return result(
@@ -778,15 +1090,28 @@ def make_live_runner(
                     input_tokens=agent.input_tokens,
                     output_tokens=agent.output_tokens,
                     cost_usd=agent.cost_usd,
+                    stop_reason=agent.stop_reason,
+                    logs=agent.logs,
                     detail=(
-                        "the tests that decide this trial were changed during it "
+                        "files outside the task's editable source paths were changed during it "
+                        "or an editable source was replaced by a symlink/special file "
                         f"({', '.join(tampered)}); the trial is void"
+                        f"{_agent_audit_suffix(agent)}"
                     ),
                 )
 
             # The repository decides. The agent's own claim is not consulted.
-            code, output = _run(task.verify_command, workspace, verify_timeout, verify_env)
-            if code is None:
+            code, output = campaign_environment.run_repository(
+                task.verify_command, workspace, verify_timeout, verify_env
+            )
+            stop_reason = agent.stop_reason or agent.detail
+            if stop_reason in _INCONCLUSIVE_AGENT_STOPS:
+                outcome = "inconclusive"
+                detail = (
+                    f"the harness stopped at {stop_reason}, a CTX-imposed bound; "
+                    "the repository result cannot turn a truncated trial into completion"
+                )
+            elif code is None:
                 outcome = "inconclusive"
                 detail = f"verification did not complete: {output[:200]}"
             elif code == 0:
@@ -796,11 +1121,15 @@ def make_live_runner(
                 outcome = "failed"
                 detail = "repository tests still failing"
 
+            detail = f"{detail}{_agent_audit_suffix(agent)}"
+
             return result(
                 outcome,
                 input_tokens=agent.input_tokens,
                 output_tokens=agent.output_tokens,
                 cost_usd=agent.cost_usd,
+                stop_reason=agent.stop_reason,
+                logs=agent.logs,
                 detail=detail,
             )
 
@@ -817,6 +1146,7 @@ __all__ = [
     "AgentInvocation",
     "AgentOutcome",
     "CampaignEnvironment",
+    "RepositoryExecutor",
     "TrialEnvironment",
     "make_live_runner",
 ]

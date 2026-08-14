@@ -10,6 +10,9 @@ verdict to every check that can actually stop `ctx fit --test`.
 from __future__ import annotations
 
 import argparse
+import json
+import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -17,6 +20,8 @@ import pytest
 
 import ctx.cli.doctor as doctor_module
 from ctx.cli.doctor import PROVIDER_ENV_VARS, cmd_doctor
+from ctx.fit.candidates import CandidateConfiguration
+from ctx.fit.experiment import ModelPrice
 
 # `ctx doctor` reports a blocking cause when model pricing cannot be read, which
 # is correct: without prices there is no cost estimate and no budget gate. That
@@ -79,6 +84,55 @@ def _repo_without_a_derivable_task(tmp_path: Path) -> Path:
     return repo
 
 
+def _node_repo_with_a_derivable_task(tmp_path: Path) -> Path:
+    """A statically evaluable Vitest repository with useful Git history."""
+
+    repo = tmp_path / "node"
+    (repo / "src").mkdir(parents=True)
+    (repo / "tests").mkdir(parents=True)
+    _init(repo)
+    (repo / "package.json").write_text(
+        json.dumps({"scripts": {"test": "vitest run"}, "devDependencies": {"vitest": "1.0.0"}}),
+        encoding="utf-8",
+    )
+    (repo / "src" / "calc.js").write_text("export const add = (a, b) => 0;\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "chore: scaffold the calc module")
+    (repo / "src" / "calc.js").write_text("export const add = (a, b) => a + b;\n", encoding="utf-8")
+    (repo / "tests" / "calc.test.js").write_text(
+        "import { test, expect } from 'vitest';\n"
+        "import { add } from '../src/calc.js';\n\n"
+        "test('adds', () => expect(add(1, 2)).toBe(3));\n",
+        encoding="utf-8",
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "feat: add addition helper")
+    return repo
+
+
+def _write_applied_model(repo: Path, model: str) -> None:
+    candidate = CandidateConfiguration(
+        candidate_id="applied",
+        role="recommended",
+        capability_ids=(),
+        model=model,
+        instructions=(),
+        selection_reason="test applied model",
+    )
+    target = repo / ".ctx" / "fit-configuration.json"
+    target.parent.mkdir(parents=True)
+    target.write_text(
+        json.dumps(
+            {
+                "schema": "ctx.fit.applied-configuration-v1",
+                "configuration_hash": candidate.configuration_hash,
+                "candidate": candidate.to_dict(),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def _doctor(repo: Path, capsys: pytest.CaptureFixture[str]) -> str:
     # Diagnostics never fail the process; the verdict is in the text.
     assert cmd_doctor(argparse.Namespace(repo=str(repo))) == 0
@@ -93,7 +147,7 @@ def test_a_failing_environment_check_reaches_the_verdict(
     monkeypatch.setattr(
         doctor_module,
         "_check_pricing",
-        lambda: (False, "litellm is not installed, so no cost estimate can be derived"),
+        lambda _model: (False, "litellm is not installed, so no cost estimate can be derived"),
     )
 
     out = _doctor(_repo_with_a_derivable_task(tmp_path), capsys)
@@ -107,10 +161,11 @@ def test_a_failing_environment_check_reaches_the_verdict(
 def test_absent_credentials_are_reported_without_blocking(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A missing key downgrades a run to simulation; it does not stop one.
+    """A missing key permits planning/simulation, never a live-ready claim.
 
-    Folding every failing check into the verdict must not overshoot into
-    refusing a command that would in fact run.
+    Simulation still exercises the deterministic pipeline, so this is not a
+    plan blocker. It also does not prove the repository or make a paid/live
+    campaign possible, so it cannot inherit the stronger ready verdict.
     """
 
     for name in PROVIDER_ENV_VARS:
@@ -119,8 +174,91 @@ def test_absent_credentials_are_reported_without_blocking(
     out = _doctor(_repo_with_a_derivable_task(tmp_path), capsys)
 
     assert REFUSES not in out
-    assert READY in out
+    assert READY not in out
+    assert "enough static evidence to plan" in out
+    assert "not yet proven runnable" in out
     assert "proves the pipeline, not this repository" in out
+
+
+def test_default_gpt_model_ignores_an_anthropic_or_ctx_only_credential(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Doctor diagnoses the selected model, not the union of ambient key names."""
+
+    for name in (*PROVIDER_ENV_VARS, "CTX_FIT_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "wrong-provider")
+    monkeypatch.setenv("CTX_FIT_API_KEY", "has-no-provider-consumer")
+
+    out = _doctor(_repo_with_a_derivable_task(tmp_path), capsys)
+
+    assert "selected model `gpt-4o-mini`" in out
+    assert "requires OPENAI_API_KEY" in out
+    assert "no matching credential is configured" in out
+    assert "matching credential configured" not in out
+
+
+def test_matching_default_model_credential_is_configured_not_authenticated(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    for name in (*PROVIDER_ENV_VARS, "CTX_FIT_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "presence-only")
+
+    out = _doctor(_repo_with_a_derivable_task(tmp_path), capsys)
+
+    assert "selected model `gpt-4o-mini`" in out
+    assert "matching credential configured: OPENAI_API_KEY" in out
+    assert "configured, not authenticated" in out
+
+
+def test_doctor_uses_the_applied_model_for_credentials_and_exact_pricing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo = _repo_with_a_derivable_task(tmp_path)
+    selected_model = "claude-sonnet-4-20250514"
+    _write_applied_model(repo, selected_model)
+    for name in (*PROVIDER_ENV_VARS, "CTX_FIT_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "presence-only")
+    observed: list[str] = []
+    actual = ModelPrice.from_litellm
+
+    def record(model: str) -> ModelPrice | None:
+        observed.append(model)
+        return actual(model)
+
+    monkeypatch.setattr(ModelPrice, "from_litellm", record)
+
+    out = _doctor(repo, capsys)
+
+    assert observed == [selected_model]
+    assert f"selected applied model `{selected_model}`" in out
+    assert "matching credential configured: ANTHROPIC_API_KEY" in out
+    assert f"exact pricing available for selected model `{selected_model}`" in out
+
+
+def test_invalid_applied_configuration_does_not_fall_back_to_default_pricing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo = _repo_with_a_derivable_task(tmp_path)
+    target = repo / ".ctx" / "fit-configuration.json"
+    target.parent.mkdir(parents=True)
+    target.write_text("{}", encoding="utf-8")
+    observed: list[str] = []
+
+    def record(model: str) -> ModelPrice | None:
+        observed.append(model)
+        return None
+
+    monkeypatch.setattr(ModelPrice, "from_litellm", record)
+
+    out = _doctor(repo, capsys)
+
+    assert observed == []
+    assert "invalid applied CTX Fit configuration" in out
+    assert "selected model is unknown" in out
+    assert "exact pricing available" not in out
 
 
 def test_a_repository_with_no_derivable_task_is_not_called_ready(
@@ -159,3 +297,53 @@ def test_a_discovered_test_command_is_not_reported_as_run(
 
     assert "test command discovered" in out
     assert "tests runnable via" not in out
+
+
+def test_a_node_manifest_does_not_make_a_missing_runtime_ready(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Static Vitest evidence cannot substitute for node/npm on the isolated PATH."""
+
+    repo = _node_repo_with_a_derivable_task(tmp_path)
+    git = shutil.which("git")
+    assert git is not None
+    isolated_path = tmp_path / "isolated-path"
+    isolated_path.mkdir()
+    os.symlink(git, isolated_path / "git")
+    monkeypatch.setenv("PATH", str(isolated_path))
+    for name in PROVIDER_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+
+    out = _doctor(repo, capsys)
+
+    assert READY not in out
+    assert "enough static evidence to plan" in out
+    assert "not yet proven runnable" in out
+    assert "node" in out
+    assert "npm" in out
+    assert "isolated" in out
+
+
+def test_an_unavailable_sandbox_prevents_a_live_ready_verdict(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The live driver and its sandbox are prerequisites, not postscript warnings."""
+
+    monkeypatch.setenv("OPENAI_API_KEY", "diagnostic-only-not-used")
+    monkeypatch.setattr(
+        doctor_module,
+        "_check_live_driver",
+        lambda: (False, "a trial cannot be isolated: platform sandbox is unavailable"),
+    )
+
+    out = _doctor(_repo_with_a_derivable_task(tmp_path), capsys)
+
+    assert REFUSES not in out
+    assert READY not in out
+    assert "enough static evidence to plan" in out
+    assert "sandbox is unavailable" in out
+    assert "not ready for live evaluation" in out

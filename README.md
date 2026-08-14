@@ -1,7 +1,7 @@
 # ctx
 
 [![CI](https://github.com/stevesolun/ctx/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
-[![Tests](https://img.shields.io/badge/Tests-8581_inventory-blue.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
+[![Tests](https://img.shields.io/badge/Tests-8782_inventory-blue.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
 
 **Find the cheapest AI coding setup that actually works on your repo.**
@@ -18,14 +18,26 @@ below the reliability floor, then minimize attributable cost, then break ties
 toward the simpler configuration. An LLM may explain a result; it never
 decides one.
 
-> **CTX Fit is not released yet.** The published `claude-ctx` package
-> ([v1.0.20](https://pypi.org/project/claude-ctx/)) contains none of it —
-> `pip install claude-ctx` gets you the older recommendation surface described
-> further down, not `ctx fit`. To use Fit today you need a source checkout.
+> **Release scope (1.0.21).** CTX Fit compares capability configurations within
+> one coding-agent harness; it does not compare Codex, Claude Code, or other
+> harnesses against one another. It recognizes and can run repository-native
+> verification commands for Python, JavaScript/TypeScript, Go, Rust, and Make,
+> and treats the selected test command as the verification authority. For an
+> installable Python project, CTX Fit builds a campaign environment and installs
+> it without network access; its build backend and dependencies must already be
+> available without downloading them. In the other ecosystems, verification is
+> supported only when the runtime is usable
+> from the host `PATH` under an isolated home and the verification dependencies
+> are already available in the repository. Final verification uses that
+> isolated home and runs without network access, so a user's package caches
+> are not a supported dependency source. This is evidence for normal
+> development; it does not prove that deliberately hostile code cannot deceive
+> its own test runner. Release qualification did not include a paid
+> live-provider trial, so inspect `ctx doctor` and the dry run before authorizing
+> spend.
 
 ```bash
-git clone https://github.com/stevesolun/ctx && cd ctx
-pip install -e .
+pip install --upgrade claude-ctx
 cd /path/to/my-project
 ctx fit
 ```
@@ -66,8 +78,9 @@ Highest-impact improvements
   1. Commit a dependency lockfile. (+9)
      no dependency lockfile is committed
 
-This repository can be evaluated: it has deterministic tests, so a candidate
-configuration can be judged on evidence rather than on an agent's own claim.
+This repository has the static evidence needed to plan an evaluation: it
+declares deterministic tests. Whether those tests can execute is checked only
+inside the campaign.
 ```
 
 Requires Python 3.11 or newer. Add `--json` for machine-readable output, or
@@ -93,22 +106,20 @@ is refused without evidence from `ctx fit --test --budget N`, and deriving the
 tasks for that evaluation uses the same read-only queries `--dry-run` uses.
 
 Each proposed change names the file and whether CTX Fit is *creating* or
-*modifying* it, and that word decides how you review and undo it. Today every
-plan contains exactly one artifact, `AGENTS.md`:
+*modifying* it. Today every plan contains exactly one CTX-owned artifact,
+`.ctx/fit-configuration.json`. The sidecar records the pinned model plus the
+exact instruction and capability bytes that were evaluated, with their hashes;
+ordinary `ctx run` invocations validate and activate that configuration.
 
 | It printed | State after the write | Review with | Undo with |
 | --- | --- | --- | --- |
-| `modify: AGENTS.md` | tracked, modified | `git diff` | `git checkout -- AGENTS.md` |
-| `create: AGENTS.md` | new and **untracked** | `git status --short` shows `?? AGENTS.md` | delete the file |
+| `modify: .ctx/fit-configuration.json` | existing sidecar replaced after a compare-and-swap check | `git diff -- .ctx/fit-configuration.json` when tracked; otherwise inspect the file directly | restore the tracked file from version control, or restore your saved copy if it was untracked |
+| `create: .ctx/fit-configuration.json` | new and **untracked** until you add it | `git status --short --untracked-files=all` and inspect the file directly | delete `.ctx/fit-configuration.json` |
 
-The `create` row is the common one, because a repository with no agent
-instruction file is exactly the repository CTX Fit's own scorer flags first
-(`Add an AGENTS.md describing the project, conventions, and how to verify a
-change. (+12)`). A file git has never seen is not in the index, so `git diff`
-prints nothing for it and `git checkout -- AGENTS.md` fails with `error:
-pathspec 'AGENTS.md' did not match any file(s) known to git`, leaving the file
-in place. CTX Fit's own closing line after a write recommends that pair without
-qualifying it; on a `create` follow the table instead.
+CTX Fit does not rewrite `AGENTS.md`, `CLAUDE.md`, or other user-authored
+instruction files. Their evaluated bytes are embedded in the sidecar instead.
+If an existing untracked sidecar matters to you, save a copy before confirming
+the write; version-control restore commands cannot recover an untracked file.
 
 **`ctx fit --pr` writes to a remote.** It creates a branch, commits the winning
 configuration, pushes it to `origin`, and opens a pull request through the
@@ -139,9 +150,10 @@ untouched. If a command fails partway, CTX Fit reports which one and how many
 ran, and how to get back to the branch you were on; the files it had already
 written stay in your working tree.
 
-**Release status:** [v1.0.20](https://github.com/stevesolun/ctx/releases/tag/v1.0.20)
-is the current GitHub and [PyPI](https://pypi.org/project/claude-ctx/) release;
-this source tree declares `1.0.21` for unreleased work.
+**Release:** [v1.0.21](https://github.com/stevesolun/ctx/releases/tag/v1.0.21)
+is the CTX Fit release. The distribution remains
+[`claude-ctx`](https://pypi.org/project/claude-ctx/); the installed command is
+`ctx`.
 
 ## Install
 
@@ -153,10 +165,9 @@ supported. On a Windows machine, run ctx inside WSL2 as a Linux installation.
 pip install claude-ctx
 ```
 
-This installs release `1.0.20`, which ships the recommendation surface below.
-Its `ctx` command is the agent-loop harness only (`ctx run`, `ctx resume`,
-`ctx sessions`); `ctx fit`, `ctx doctor` and `ctx advanced` exist only in a
-source checkout.
+Version `1.0.21` ships `ctx fit` as the primary command, plus `ctx doctor` and
+`ctx advanced`. The established agent-loop spellings (`ctx run`, `ctx resume`,
+`ctx sessions`) remain supported.
 
 ## Recommendation surface (existing)
 
@@ -184,7 +195,7 @@ parent path is unexpected.
 
 ## Privacy And Telemetry
 
-These controls are available in release `1.0.20` and the current source tree.
+These controls are available in release `1.0.21`.
 Telemetry is enabled by default in `local_redacted` mode. Events are written to
 `~/.ctx/telemetry/events.jsonl`, metrics are written to
 `~/.ctx/telemetry/metrics.jsonl`, and raw prompts and queries are removed or
@@ -217,10 +228,8 @@ The dry run inspects the local spool without exporting it.
 | Inspect the local recommendation runtime | `python -m ctx_monitor serve` | [Dashboard](https://stevesolun.github.io/ctx/dashboard/) |
 | Review or export telemetry | `ctx-telemetry-export`, `ctx-telemetry-retention` | [Telemetry](https://stevesolun.github.io/ctx/telemetry/) |
 
-This table describes the source tree. The `ctx-*` scripts are also in release
-`1.0.20`; the `ctx` subcommands other than `run`, `resume` and `sessions` are
-not. Bare `ctx` with no arguments runs the Fit profile, which is why it is not
-listed under the recommendation surface.
+This table describes release `1.0.21`. Bare `ctx` with no arguments runs the Fit
+profile, which is why it is not listed under the recommendation surface.
 
 The agent-loop harness (`run`, `resume`, `sessions`) is still there and still
 supported. It moved under `ctx advanced` so the top-level help stays about the

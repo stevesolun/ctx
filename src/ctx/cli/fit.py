@@ -18,6 +18,11 @@ import sys
 import time
 from typing import TYPE_CHECKING
 
+from ctx.fit.verification import (
+    VERIFICATION_ENVIRONMENT_ASSUMPTION,
+    VERIFIER_TRUST_ASSUMPTION,
+)
+
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ctx.fit.apply import ApplyPlan
     from ctx.fit.execution import ExecutionReport
@@ -78,8 +83,9 @@ def register(sub: argparse._SubParsersAction) -> None:
         "--yes",
         action="store_true",
         help=(
-            "Skip the confirmation step: write the files, and with --pr run the "
-            "git and gh commands that open the pull request."
+            "Confirm requested actions without prompting. With --test, this "
+            "authorizes the displayed experiment up to --budget. It never "
+            "requests --apply or --pr by itself; those remain separate flags."
         ),
     )
     parser.add_argument(
@@ -177,10 +183,11 @@ def _format_profile(profile: FitProfile) -> str:
     # sentence carries the honest scope limit.
     if profile.is_fit_evaluable:
         lines.append(
-            "This repository can be evaluated: it has deterministic tests, so a "
-            "candidate configuration can be judged on evidence rather than on an "
-            "agent's own claim."
+            "This repository has the static evidence needed to plan an evaluation: "
+            "it declares deterministic tests. Whether those tests can execute is "
+            "checked only inside the campaign."
         )
+        lines.append(VERIFICATION_ENVIRONMENT_ASSUMPTION)
         lines.append(
             "What varies between candidates here is the capability set. The model "
             "is one global choice applied to every candidate, the instruction files "
@@ -190,7 +197,7 @@ def _format_profile(profile: FitProfile) -> str:
         )
     else:
         lines.append(
-            "This repository cannot yet be evaluated honestly: without runnable "
+            "This repository cannot yet be evaluated honestly: without declared "
             "tests there is no way to tell a configuration that solved a task "
             "from one that only claimed to."
         )
@@ -205,7 +212,7 @@ def _format_profile(profile: FitProfile) -> str:
     lines.append(
         "Next: `ctx fit --dry-run` shows what a full evaluation would involve."
         if profile.is_fit_evaluable
-        else "Next: add runnable tests, then re-run `ctx fit`."
+        else "Next: add a declared test suite, then re-run `ctx fit`."
     )
     return "\n".join(lines)
 
@@ -229,6 +236,9 @@ def _format_dry_run(profile: FitProfile) -> str:
         "reliability is a requirement, not a tie-break. If nothing beats your "
         "current setup, CTX Fit says so and recommends keeping it.",
         "",
+        VERIFIER_TRUST_ASSUMPTION,
+        VERIFICATION_ENVIRONMENT_ASSUMPTION,
+        "",
         "No model was invoked and nothing was spent.",
     ]
     return "\n".join(lines)
@@ -239,8 +249,26 @@ def _format_plan(plan: ExperimentPlan) -> str:
 
     lines = ["", "Experiment plan"]
     lines.append(f"  Candidates:        {plan.candidate_count}")
+    for candidate in plan.candidates:
+        capability_count = len(candidate.capability_ids)
+        lines.append(
+            f"    - {candidate.candidate_id} ({candidate.role}; {capability_count} capabilities)"
+        )
+        capabilities = ", ".join(candidate.capability_ids) or "none added"
+        lines.append(f"      capabilities: {capabilities}")
+        lines.append(f"      model: {candidate.model or 'provider default'}")
+        lines.append(f"      configuration: {candidate.configuration_hash}")
+        instructions = ", ".join(candidate.instructions) or "none"
+        lines.append(f"      repository instructions: {instructions}")
     lines.append(f"  Tasks:             {plan.task_count or 'not yet derived'}")
+    for task in plan.tasks:
+        lines.append(f"    - {task.title} [{task.task_id}]")
+        lines.append(f"      provenance: {task.provenance}")
+        lines.append(f"      editable source: {', '.join(task.source_paths)}")
+        lines.append(f"      protected tests: {', '.join(task.test_paths)}")
+        lines.append(f"      verify: {' '.join(task.verify_command)}")
     lines.append(f"  Trials per task:   {plan.trials_per_task} (for reliability)")
+    lines.append(f"  Reliability floor: {plan.reliability_floor:.0%}")
     lines.append(f"  Total executions:  {plan.executions}")
     if plan.verification:
         lines.append(f"  Verified with:     {plan.verification[0]}")
@@ -259,13 +287,19 @@ def _format_plan(plan: ExperimentPlan) -> str:
     else:
         lines.append("  Estimated cost:    unknown")
         lines.append(f"                     {cost.basis}")
+    budget = f"${plan.budget_usd}" if plan.budget_usd is not None else "not supplied"
+    lines.append(f"  Budget ceiling:    {budget}")
 
     lines.append("")
     lines.append(
-        f"Ready to run: {plan.explanation}."
-        if plan.can_execute
+        f"Ready to confirm: {plan.explanation}."
+        if plan.can_authorize
         else f"Not runnable: {plan.explanation}."
     )
+    if plan.can_authorize:
+        status = "confirmed" if plan.authorized else "confirmation required before execution"
+        lines.append(f"  Authorization:     {status}")
+        lines.append(f"  Plan digest:       {plan.executable_digest}")
     for warning in plan.warnings:
         lines.append(f"  - {warning}")
     return "\n".join(lines)
@@ -287,14 +321,32 @@ def default_namespace(repo: str = ".") -> argparse.Namespace:
     )
 
 
-def _provider_available() -> bool:
-    """Whether real execution is possible. Absence means simulation, not failure."""
+def _provider_available(model: str) -> bool:
+    """Whether the selected model's matching credential requests a live run."""
 
-    import os
+    from ctx.fit.providers import resolve_model_credential
 
-    return any(
-        os.environ.get(name) for name in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "CTX_FIT_API_KEY")
-    )
+    return resolve_model_credential(model).configured
+
+
+def _confirm_evaluation(plan: ExperimentPlan, args: argparse.Namespace) -> bool:
+    """Obtain consent for this displayed plan, or fail closed without a TTY.
+
+    JSON is a machine contract and must remain one parseable document, so it
+    never prompts. Non-interactive callers confirm explicitly with ``--yes``;
+    an interactive caller may answer after seeing the full plan.
+    """
+
+    if args.yes:
+        return True
+    if args.json or not sys.stdin.isatty():
+        return False
+    budget = plan.budget_usd
+    try:
+        answer = input(f"\nAuthorize up to ${budget} to run exactly this experiment? [y/N] ")
+    except (EOFError, KeyboardInterrupt):
+        return False
+    return answer.strip().lower() in {"y", "yes"}
 
 
 def _banner(outcome: ExperimentOutcome) -> str:
@@ -379,6 +431,7 @@ def _json_payload(
     from ctx.fit.readiness import score_readiness
 
     payload = profile.to_dict()
+    payload["verification_environment_assumption"] = VERIFICATION_ENVIRONMENT_ASSUMPTION
     payload["readiness"] = score_readiness(profile).to_dict()
     if plan is not None:
         payload["plan"] = plan.to_dict()  # type: ignore[attr-defined]
@@ -417,7 +470,7 @@ def cmd_fit(args: argparse.Namespace) -> int:
     # Imported here rather than at the top of the module: `ctx` dispatches every
     # subcommand through this file, and a run that never plans must not pay for
     # the experiment stack.
-    from ctx.fit.experiment import resolve_experiment, run_experiment
+    from ctx.fit.experiment import authorize_experiment, resolve_experiment, run_experiment
 
     wants_plan = bool(args.dry_run or args.budget is not None or args.test)
     # One derivation, read twice. The plan below and the campaign further down
@@ -432,9 +485,10 @@ def cmd_fit(args: argparse.Namespace) -> int:
     # explicit --test, and a budget the plan must fit.
     evaluating = bool(args.test) and not args.dry_run
     outcome: ExperimentOutcome | None = None
+    profile_rendered = False
     if evaluating:
         assert experiment is not None and plan is not None
-        if not experiment.can_execute:
+        if not experiment.can_authorize:
             if not args.json:
                 print(_format_profile(profile))
                 print(_format_plan(plan))
@@ -443,12 +497,48 @@ def cmd_fit(args: argparse.Namespace) -> int:
                 print(json.dumps(_json_payload(profile, args, plan=plan), indent=2, sort_keys=True))
             return 1
 
+        if args.json:
+            # One JSON response cannot be both the review shown before spend
+            # and the result emitted after spend. Until a separate
+            # content-addressed authorization token is supplied by a second
+            # invocation, JSON remains a plan-only, zero-spend surface.
+            payload = _json_payload(profile, args, plan=plan)
+            payload["execution_refusal"] = (
+                "JSON evaluation is plan-only; review this plan and run without "
+                "--json to authorize it interactively or with --yes"
+            )
+            print(json.dumps(payload, indent=2, sort_keys=True))
+            return 1
+
+        # Human output is the pre-spend review, so it must reach the terminal
+        # before the provider stack is even imported. JSON cannot prompt or
+        # emit a second document; its safe non-interactive contract is --yes.
+        print(_format_profile(profile))
+        print(_format_plan(plan))
+        # ``--yes`` may be used with redirected output, where stdout is
+        # block-buffered. Ensure the preview is observable before the next
+        # line can enter the provider boundary.
+        sys.stdout.flush()
+        profile_rendered = True
+        if not _confirm_evaluation(plan, args):
+            if args.json:
+                print(json.dumps(_json_payload(profile, args, plan=plan), indent=2, sort_keys=True))
+            else:
+                print(
+                    "\nNothing was run and nothing was spent. Re-run with --yes "
+                    "to authorize this exact plan non-interactively."
+                )
+            return 1
+
+        experiment = authorize_experiment(experiment, expected_digest=plan.executable_digest)
+        plan = experiment.plan
+
         # Imported here rather than at the top of the function: a bare profile
         # run must not pay for the provider stack it will never touch.
         from ctx.fit.providers import ProviderUnavailable
 
         try:
-            outcome = run_experiment(experiment, live=_provider_available())
+            outcome = run_experiment(experiment, live=_provider_available(experiment.model))
         except ProviderUnavailable as exc:
             # Credentials are present, so a real run is what was asked for.
             # Falling back to simulation would answer a different question, and
@@ -457,7 +547,7 @@ def cmd_fit(args: argparse.Namespace) -> int:
             print(f"error: a real evaluation cannot run here: {exc}", file=sys.stderr)
             print(
                 "Nothing was run and nothing was spent. Install CTX so `ctx` is on "
-                "PATH, or unset the provider credentials to run in simulation.",
+                "PATH, or unset the selected model's matching credential to run in simulation.",
                 file=sys.stderr,
             )
             return 1
@@ -478,7 +568,8 @@ def cmd_fit(args: argparse.Namespace) -> int:
         )
         return 0
 
-    print(_format_profile(profile))
+    if not profile_rendered:
+        print(_format_profile(profile))
     if args.dry_run:
         print(_format_dry_run(profile))
     if plan is not None and not evaluating:

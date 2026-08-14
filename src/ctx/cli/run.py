@@ -77,6 +77,11 @@ from ctx.adapters.generic.state import (
     new_session_id,
 )
 from ctx.adapters.generic.tools import TOOL_SEPARATOR, McpRouter, McpServerConfig
+from ctx.fit.applied_configuration import (
+    APPLIED_CONFIGURATION_SCHEMA,
+    AppliedConfigurationError,
+    load_applied_configuration_for_path,
+)
 from ctx.telemetry import record_event, record_exception, telemetry_span
 from ctx.runtime.query_decision import (
     CommittedQueryDecision,
@@ -249,11 +254,23 @@ def _profile_str(profile: dict[str, Any], key: str) -> str | None:
     return value or None
 
 
-def _apply_model_profile_defaults(args: argparse.Namespace) -> str | None:
-    """Apply ctx-init's saved model profile to `ctx run` args."""
+def _apply_model_profile_defaults(
+    args: argparse.Namespace,
+    *,
+    pinned_model: str | None = None,
+) -> str | None:
+    """Resolve the run model, giving a validated applied pin precedence over saved defaults."""
     profile = _load_model_profile()
     profile_model = _profile_str(profile, "model")
-    if not args.model and profile_model:
+    explicit_model = args.model
+    if pinned_model is not None:
+        if explicit_model is not None and explicit_model != pinned_model:
+            return (
+                f"error: --model {explicit_model!r} conflicts with the applied "
+                f"CTX Fit model {pinned_model!r}"
+            )
+        args.model = pinned_model
+    elif not args.model and profile_model:
         args.model = profile_model
     if not args.model:
         return (
@@ -2026,6 +2043,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Do not attach the built-in ctx__* tool surface.",
     )
     r.add_argument(
+        "--fit-controlled-trial",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+    r.add_argument(
         "--ctx-engine-mode",
         choices=_CTX_ENGINE_MODES,
         default=None,
@@ -2268,7 +2290,21 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _cmd_run(args: argparse.Namespace) -> int:
     telemetry_started = time.perf_counter()
-    profile_error = _apply_model_profile_defaults(args)
+    if args.fit_controlled_trial:
+        # CTX Fit passes the exact candidate bytes in this invocation. Loading
+        # the repository's previously applied winner as well would contaminate
+        # every experimental arm with the same ambient configuration.
+        applied_configuration = None
+    else:
+        try:
+            applied_configuration = load_applied_configuration_for_path(Path.cwd())
+        except AppliedConfigurationError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+    profile_error = _apply_model_profile_defaults(
+        args,
+        pinned_model=(applied_configuration.model if applied_configuration is not None else None),
+    )
     if profile_error:
         print(profile_error, file=sys.stderr)
         with telemetry_span():
@@ -2524,6 +2560,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
             recommendation_context=engine_recommendation_context,
             delegate=turn_controller,
         )
+    if applied_configuration is not None:
+        turn_controller = EngineTurnController(
+            recommendation_context=applied_configuration.user_context,
+            delegate=turn_controller,
+        )
 
     compactor = None if args.no_compact else TokenBudgetCompactor()
     tool_policy = _compile_tool_policy(allow_tools, effective_ctx_deny_tools)
@@ -2562,6 +2603,15 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 else {"enabled": False}
             ),
             "ctx_engine": ctx_engine_metadata,
+            "ctx_fit_applied": (
+                {
+                    "schema": APPLIED_CONFIGURATION_SCHEMA,
+                    "configuration_hash": applied_configuration.configuration_hash,
+                    "model": applied_configuration.model,
+                }
+                if applied_configuration is not None
+                else None
+            ),
             "tool_policy": {
                 "allow": list(allow_tools),
                 "deny": list(effective_ctx_deny_tools),

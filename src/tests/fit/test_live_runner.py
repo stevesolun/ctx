@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import sys
 import threading
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
@@ -26,9 +27,12 @@ from ctx.fit.candidates import CandidateConfiguration
 from ctx.fit.execution import TrialResult
 from ctx.fit.live_runner import (
     INVALID_TESTS_MODIFIED,
+    AgentDriver,
     AgentInvocation,
     AgentOutcome,
     CampaignEnvironment,
+    _executable_read_access,
+    _run,
     make_live_runner,
 )
 from ctx.fit.tasks import FitTask
@@ -133,9 +137,155 @@ def _candidate(candidate_id: str = "candidate-a") -> CandidateConfiguration:
     )
 
 
-def _trial(repo: Path, driver: object, task: FitTask) -> TrialResult:
-    runner = make_live_runner(repo, driver)  # type: ignore[arg-type]
+def _trial(repo: Path, driver: AgentDriver, task: FitTask) -> TrialResult:
+    # Most tests in this file exercise trial semantics rather than the external
+    # OS boundary. Keep that boundary injectable so the security-specific
+    # regression below can exercise the production default without making the
+    # entire unit suite depend on a host sandbox executable.
+    runner = make_live_runner(
+        repo,
+        driver,
+        environment=CampaignEnvironment(repository_executor=_run),
+    )
     return runner(_candidate(), task, 0)
+
+
+def test_repository_verification_can_write_only_inside_its_trial_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One trial must not poison the campaign environment or a later trial."""
+
+    environment = CampaignEnvironment()
+    workspace = environment.sandbox_root / "trial-a" / "repo"
+    workspace.mkdir(parents=True)
+    observed_roots: list[Path] = []
+
+    def record_boundary(command, **kwargs):
+        observed_roots.append(kwargs["writable_root"])
+        return tuple(command)
+
+    monkeypatch.setattr("ctx.fit.live_runner.sandboxed_command", record_boundary)
+    monkeypatch.setattr("ctx.fit.live_runner._run", lambda *_args, **_kwargs: (0, ""))
+
+    try:
+        code, _ = environment.run_repository(
+            (sys.executable, "-c", "pass"),
+            workspace,
+            30,
+            {"PATH": os.environ.get("PATH", os.defpath)},
+        )
+    finally:
+        environment.close()
+
+    assert code == 0
+    assert observed_roots == [workspace]
+
+
+def test_executable_read_roots_include_every_symlink_hop(tmp_path: Path) -> None:
+    cellar = tmp_path / "Cellar" / "tool" / "1.0"
+    (cellar / "bin").mkdir(parents=True)
+    executable = cellar / "bin" / "tool"
+    executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    executable.chmod(0o755)
+
+    opt = tmp_path / "opt" / "tool"
+    opt.parent.mkdir()
+    opt.symlink_to(cellar, target_is_directory=True)
+    shim_directory = tmp_path / "home" / ".local" / "bin"
+    shim_directory.mkdir(parents=True)
+    (shim_directory / "tool").symlink_to(opt / "bin" / "tool")
+
+    roots, paths = _executable_read_access(("tool",), {"PATH": str(shim_directory)})
+
+    assert shim_directory / "tool" in paths
+    assert opt / "bin" / "tool" in paths
+    assert executable in paths
+    assert shim_directory.parent not in roots
+    assert opt not in roots
+
+    if sys.platform == "darwin":
+        environment = CampaignEnvironment()
+        workspace = environment.sandbox_root / "workspace"
+        workspace.mkdir()
+        try:
+            code, output = environment.run_repository(
+                ("tool",), workspace, 30, {"PATH": str(shim_directory)}
+            )
+        finally:
+            environment.close()
+        assert code == 0, output
+
+
+def test_path_shim_does_not_expose_ambient_siblings(tmp_path: Path) -> None:
+    local = tmp_path / "home" / ".local"
+    shim_directory = local / "bin"
+    shim_directory.mkdir(parents=True)
+    shim = shim_directory / "python"
+    shim.symlink_to(sys.executable)
+    secret = local / "ambient-secret.txt"
+    secret.write_text("MUST_NOT_CROSS", encoding="utf-8")
+
+    environment = CampaignEnvironment()
+    workspace = environment.sandbox_root / "workspace"
+    workspace.mkdir()
+    try:
+        code, output = environment.run_repository(
+            (
+                str(shim),
+                "-c",
+                f"from pathlib import Path; print(Path({str(secret)!r}).read_text())",
+            ),
+            workspace,
+            30,
+            {"PATH": str(shim_directory)},
+        )
+    finally:
+        environment.close()
+
+    assert code != 0
+    assert "MUST_NOT_CROSS" not in output
+
+
+@pytest.mark.parametrize(
+    "command",
+    (
+        ("python", "-m", "pytest", "-q"),
+        ("npm", "run", "test"),
+        ("go", "test", "./..."),
+        ("cargo", "test"),
+        ("make", "test"),
+    ),
+    ids=("python", "javascript", "go", "rust", "make"),
+)
+def test_repository_executor_receives_every_language_command_exactly(
+    tmp_path: Path, command: tuple[str, ...]
+) -> None:
+    observed: list[tuple[str, ...]] = []
+
+    def record(
+        selected: tuple[str, ...],
+        _cwd: Path,
+        _timeout: int,
+        _env: Mapping[str, str] | None,
+    ) -> tuple[int, str]:
+        observed.append(selected)
+        return 0, ""
+
+    environment = CampaignEnvironment(repository_executor=record)
+    workspace = environment.sandbox_root / "trial-a" / "repo"
+    workspace.mkdir(parents=True)
+    try:
+        code, _ = environment.run_repository(
+            command,
+            workspace,
+            30,
+            {"PATH": os.environ.get("PATH", os.defpath)},
+        )
+    finally:
+        environment.close()
+
+    assert code == 0
+    assert observed == [command]
 
 
 # --- FITBUG-004: the trial must not touch the repository it measures ---------
@@ -453,6 +603,75 @@ def test_an_agent_that_neuters_the_failing_test_is_not_recorded_verified(
     assert result.outcome == INVALID_TESTS_MODIFIED
 
 
+def test_an_agent_that_rewrites_the_verification_runner_cannot_earn_a_pass(
+    tmp_path: Path,
+) -> None:
+    """The judge is larger than the one test path named by task history."""
+
+    origin, sha = _repo_with_a_task(tmp_path)
+
+    def rewrite_the_judge(invocation: AgentInvocation) -> AgentOutcome:
+        # The source remains broken; only the repository-level judge is made to
+        # say yes. Hashing task.test_paths alone did not notice this.
+        (invocation.workspace / "run_checks.py").write_text(
+            "raise SystemExit(0)\n", encoding="utf-8"
+        )
+        return AgentOutcome(completed=True, cost_usd=0.02)
+
+    result = _trial(origin, rewrite_the_judge, _task(sha))
+
+    assert result.outcome == INVALID_TESTS_MODIFIED
+    assert "run_checks.py" in result.detail
+
+
+def test_non_python_repository_verifier_is_run_unchanged(tmp_path: Path) -> None:
+    """Repository-native verification is language-neutral, not Python-wrapped."""
+
+    shell_check = "#!/bin/sh\ngrep -q 'return a + b' src/calc.py\n"
+    origin, sha = _repo_with_a_task(
+        tmp_path,
+        scaffold_files={"check.sh": shell_check},
+    )
+    (origin / "check.sh").chmod(0o755)
+    _git(origin, "add", "check.sh")
+    _git(origin, "commit", "-q", "--amend", "--no-edit")
+    sha = _git(origin, "rev-parse", "HEAD").strip()
+    invoked: list[tuple[str, ...]] = []
+
+    def driver(invocation: AgentInvocation) -> AgentOutcome:
+        invoked.append(invocation.verify_command)
+        (invocation.workspace / "src" / "calc.py").write_text(_WORKING_ADD, encoding="utf-8")
+        return AgentOutcome(completed=True, cost_usd=0.02)
+
+    result = _trial(
+        origin,
+        driver,
+        _task(sha, verify_command=("./check.sh",)),
+    )
+
+    assert result.outcome == "verified", result.detail
+    assert result.counts_toward_reliability is True
+    assert invoked == [("./check.sh",)]
+
+
+def test_an_agent_that_writes_outside_the_tasks_editable_paths_is_void(
+    tmp_path: Path,
+) -> None:
+    """Only the task's explicit source paths are candidate-owned output."""
+
+    origin, sha = _repo_with_a_task(tmp_path)
+
+    def expand_scope(invocation: AgentInvocation) -> AgentOutcome:
+        (invocation.workspace / "src" / "calc.py").write_text(_WORKING_ADD, encoding="utf-8")
+        (invocation.workspace / "surprise.txt").write_text("not requested\n", encoding="utf-8")
+        return AgentOutcome(completed=True, cost_usd=0.03)
+
+    result = _trial(origin, expand_scope, _task(sha))
+
+    assert result.outcome == INVALID_TESTS_MODIFIED
+    assert "surprise.txt" in result.detail
+
+
 def test_a_task_with_no_test_files_cannot_be_scored(tmp_path: Path) -> None:
     """Nothing to protect means nothing to trust: the verdict is unguardable."""
 
@@ -542,6 +761,124 @@ def test_an_agent_that_burned_tokens_without_finishing_is_a_real_failure(
     assert result.cost_usd == 0.07
 
 
+def test_a_trial_stopped_by_the_per_trial_budget_is_inconclusive(
+    tmp_path: Path,
+) -> None:
+    """CTX's own dollar ceiling cannot count as evidence against a candidate."""
+
+    origin, sha = _repo_with_a_task(tmp_path)
+
+    def budget_stopped(invocation: AgentInvocation) -> AgentOutcome:
+        return AgentOutcome(
+            completed=True,
+            input_tokens=12_000,
+            output_tokens=2_500,
+            cost_usd=2.0,
+            detail="cost_budget",
+        )
+
+    result = _trial(origin, budget_stopped, _task(sha))
+
+    assert result.outcome == "inconclusive", result.detail
+    assert result.counts_toward_reliability is False
+    assert result.cost_usd == 2.0
+    assert "cost_budget" in result.detail
+
+
+def test_a_budget_capped_trial_is_inconclusive_even_when_the_tree_now_passes(
+    tmp_path: Path,
+) -> None:
+    """A CTX cap is experiment truncation, not verified completion."""
+
+    origin, sha = _repo_with_a_task(tmp_path)
+
+    def capped_after_edit(invocation: AgentInvocation) -> AgentOutcome:
+        (invocation.workspace / "src" / "calc.py").write_text(_WORKING_ADD, encoding="utf-8")
+        return AgentOutcome(
+            completed=True,
+            input_tokens=12_000,
+            output_tokens=2_500,
+            cost_usd=2.0,
+            stop_reason="cost_budget",
+            logs="bounded provider log",
+        )
+
+    result = _trial(origin, capped_after_edit, _task(sha))
+
+    assert result.outcome == "inconclusive", result.detail
+    assert result.counts_toward_reliability is False
+    assert "cost_budget" in result.detail
+    assert "bounded provider log" in result.detail
+
+
+def test_a_void_trial_still_retains_structured_stop_reason_and_logs(tmp_path: Path) -> None:
+    """Attribution evidence must survive early result paths (ADR-015)."""
+
+    origin, sha = _repo_with_a_task(tmp_path)
+
+    def capped_and_tampered(invocation: AgentInvocation) -> AgentOutcome:
+        (invocation.workspace / "tests" / "check_calc.py").write_text(
+            "# removed specification\n", encoding="utf-8"
+        )
+        return AgentOutcome(
+            completed=True,
+            cost_usd=2.0,
+            stop_reason="cost_budget",
+            logs="bounded provider log",
+        )
+
+    result = _trial(origin, capped_and_tampered, _task(sha))
+
+    assert result.outcome == INVALID_TESTS_MODIFIED
+    assert "cost_budget" in result.detail
+    assert "bounded provider log" in result.detail
+
+
+def test_a_changed_source_cannot_become_a_symlink_to_an_outside_answer(tmp_path: Path) -> None:
+    """Editable scope is not permission to redirect verification off-workspace."""
+
+    origin, sha = _repo_with_a_task(tmp_path)
+
+    def link_to_answer(invocation: AgentInvocation) -> AgentOutcome:
+        source = invocation.workspace / "src" / "calc.py"
+        source.unlink()
+        source.symlink_to(origin / "src" / "calc.py")
+        return AgentOutcome(completed=True, cost_usd=0.01)
+
+    result = _trial(origin, link_to_answer, _task(sha))
+
+    assert result.outcome == INVALID_TESTS_MODIFIED
+    assert "src/calc.py" in result.detail
+    assert "symlink" in result.detail
+
+
+def test_repository_commands_do_not_inherit_ambient_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A malicious test must not receive the launching user's secrets."""
+
+    monkeypatch.setenv("CTX_FIT_REVIEW_SECRET", "must-not-cross")
+    origin, sha = _repo_with_a_task(
+        tmp_path,
+        scaffold_files={
+            "tests/check_environment.py": (
+                "import os\nassert 'CTX_FIT_REVIEW_SECRET' not in os.environ\n"
+            )
+        },
+    )
+
+    def honest(invocation: AgentInvocation) -> AgentOutcome:
+        (invocation.workspace / "src" / "calc.py").write_text(_WORKING_ADD, encoding="utf-8")
+        return AgentOutcome(completed=True, cost_usd=0.01)
+
+    # The injected executor deliberately performs no filesystem isolation; the
+    # assertion is specifically that the environment crossing the boundary is
+    # scrubbed independently of the OS implementation.
+    result = _trial(origin, honest, _task(sha))
+
+    assert result.outcome == "verified", result.detail
+
+
 # --- FITBUG-016: the workspace has to be the code that actually runs ---------
 
 #: Enough packaging for a repository to *claim* to be installable. The trials
@@ -597,6 +934,21 @@ def test_a_trial_that_cannot_build_an_environment_refuses_and_says_why(
     assert invoked == [], "no agent should be paid to work in an environment we do not trust"
 
 
+def test_tool_only_pyproject_does_not_trigger_python_package_install(tmp_path: Path) -> None:
+    workspace = tmp_path / "native-repository"
+    workspace.mkdir()
+    (workspace / "pyproject.toml").write_text("[tool.ruff]\nline-length = 100\n", encoding="utf-8")
+    environment = CampaignEnvironment(base_python=tmp_path / "must-not-run")
+    try:
+        aimed = environment.aim_at(workspace, ("npm", "test"))
+    finally:
+        environment.close()
+
+    assert aimed.error is None
+    assert aimed.env is not None
+    assert "declares no installable Python package" in aimed.account
+
+
 def test_building_an_environment_is_bounded_by_a_timeout(tmp_path: Path) -> None:
     """A campaign must not hang while an install thinks about it."""
 
@@ -615,6 +967,35 @@ def test_building_an_environment_is_bounded_by_a_timeout(tmp_path: Path) -> None
     assert result.outcome == "infrastructure-failure", result.detail
     assert "timed out" in result.detail
     assert invoked == []
+
+
+def test_dependency_installation_never_receives_network_authority(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, _ = _src_layout_repo(tmp_path)
+    observed: list[tuple[tuple[str, ...], bool, Path]] = []
+
+    def capture_boundary(command, **kwargs):
+        observed.append((command, kwargs["network"], kwargs["writable_root"]))
+        return (sys.executable, "-c", "raise SystemExit(1)")
+
+    monkeypatch.setattr("ctx.fit.live_runner.sandboxed_command", capture_boundary)
+    environment = CampaignEnvironment()
+    campaign_root = environment.sandbox_root
+    try:
+        aimed = environment.aim_at(workspace, _PYTEST)
+    finally:
+        environment.close()
+
+    assert aimed.error is not None
+    assert "does not grant network access" in aimed.error
+    assert (
+        "dependencies must be available from the repository or local installer state" in aimed.error
+    )
+    assert observed
+    assert all("--no-index" in command for command, _network, _root in observed)
+    assert all(network is False for _command, network, _root in observed)
+    assert all(root == campaign_root for _command, _network, root in observed)
 
 
 def test_one_environment_serves_every_runner_the_campaign_builds(tmp_path: Path) -> None:
@@ -685,13 +1066,15 @@ def test_a_discarded_task_says_which_code_was_under_test(tmp_path: Path) -> None
 # --- FITBUG-016 against the thing itself: a real `pip install -e` ------------
 #
 # These are marked `integration` because they build virtual environments and
-# install into them, which needs a package index the first time. Nothing here
-# calls a model or spends money -- the cost is seconds and disk.
+# install into them. The fixture carries its own tiny editable-build backend
+# and uses unittest so the production no-network dependency boundary is tested
+# without a package index. Nothing here calls a model or spends money.
 
 _SRC_LAYOUT_PYPROJECT = """\
 [build-system]
-requires = ["setuptools>=61"]
-build-backend = "setuptools.build_meta"
+requires = []
+build-backend = "backend"
+backend-path = ["."]
 
 [project]
 name = "demo"
@@ -702,14 +1085,51 @@ package-dir = {"" = "src"}
 packages = ["demo"]
 """
 
+_SELF_CONTAINED_EDITABLE_BACKEND = """\
+from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZipFile
+
+
+def get_requires_for_build_editable(config_settings=None):
+    return []
+
+
+def build_editable(wheel_directory, config_settings=None, metadata_directory=None):
+    wheel = Path(wheel_directory) / "demo-0.1.0-py3-none-any.whl"
+    dist_info = "demo-0.1.0.dist-info"
+    with ZipFile(wheel, "w", ZIP_DEFLATED) as archive:
+        archive.writestr("demo.pth", str(Path(__file__).parent / "src"))
+        archive.writestr(
+            f"{dist_info}/WHEEL",
+            "Wheel-Version: 1.0\\nGenerator: ctx-fit-test\\n"
+            "Root-Is-Purelib: true\\nTag: py3-none-any\\n",
+        )
+        archive.writestr(
+            f"{dist_info}/METADATA",
+            "Metadata-Version: 2.1\\nName: demo\\nVersion: 0.1.0\\n",
+        )
+        archive.writestr(f"{dist_info}/RECORD", "")
+    return wheel.name
+"""
+
 _DEMO_BROKEN = "def add(a, b):\n    raise NotImplementedError\n"
 _DEMO_WORKING = "def add(a, b):\n    return a + b\n"
-_DEMO_TEST = "from demo.calc import add\n\n\ndef test_add():\n    assert add(1, 2) == 3\n"
+_DEMO_TEST = """\
+import unittest
+
+from demo.calc import add
+
+
+class AddTest(unittest.TestCase):
+    def test_add(self):
+        self.assertEqual(add(1, 2), 3)
+"""
 
 #: The repository's own test command, resolved through PATH exactly as
 #: `ctx fit` derives it for a Python project. An absolute interpreter path here
 #: would sidestep the whole question this file is asking.
 _PYTEST = ("python", "-m", "pytest", "-q")
+_UNITTEST = ("python", "-m", "unittest", "discover", "-s", "tests", "-q")
 
 
 def _src_layout_repo(root: Path) -> tuple[Path, str]:
@@ -728,10 +1148,15 @@ def _src_layout_repo(root: Path) -> tuple[Path, str]:
     _git(repo, "config", "user.name", "Fit")
 
     (repo / "pyproject.toml").write_text(_SRC_LAYOUT_PYPROJECT, encoding="utf-8")
+    (repo / "backend.py").write_text(_SELF_CONTAINED_EDITABLE_BACKEND, encoding="utf-8")
     (repo / "src" / "demo" / "__init__.py").write_text("", encoding="utf-8")
     (repo / "src" / "demo" / "calc.py").write_text(_DEMO_BROKEN, encoding="utf-8")
     (repo / "tests" / "test_other.py").write_text(
-        "def test_other():\n    assert True\n", encoding="utf-8"
+        "import unittest\n\n\n"
+        "class OtherTest(unittest.TestCase):\n"
+        "    def test_other(self):\n"
+        "        self.assertTrue(True)\n",
+        encoding="utf-8",
     )
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "chore: scaffold")
@@ -758,10 +1183,8 @@ def _venv_with(location: Path, *targets: str) -> Path:
         text=True,
         timeout=600,
     )
-    if installed.returncode != 0:  # pragma: no cover - needs an index the first time
-        pytest.skip(
-            f"the fixture could not be installed (no package index?): {installed.stderr[-300:]}"
-        )
+    if installed.returncode != 0:  # pragma: no cover - environment-dependent
+        pytest.skip(f"the self-contained fixture could not be installed: {installed.stderr[-300:]}")
     return location
 
 
@@ -791,7 +1214,7 @@ def test_a_trial_sees_the_reverted_source_under_a_real_editable_install(
     """
 
     origin, sha = _src_layout_repo(tmp_path)
-    _as_if_run_from(_venv_with(tmp_path / "userenv", "-e", str(origin), "pytest"), monkeypatch)
+    _as_if_run_from(_venv_with(tmp_path / "userenv", "-e", str(origin)), monkeypatch)
 
     invoked: list[Path] = []
 
@@ -809,7 +1232,7 @@ def test_a_trial_sees_the_reverted_source_under_a_real_editable_install(
             sha,
             source_paths=("src/demo/calc.py",),
             test_paths=("tests/test_calc.py",),
-            verify_command=_PYTEST,
+            verify_command=_UNITTEST,
         ),
     )
 
@@ -835,23 +1258,26 @@ def test_one_environment_serves_the_whole_campaign_and_follows_each_workspace(
     """
 
     origin, _ = _src_layout_repo(tmp_path)
-    _as_if_run_from(_venv_with(tmp_path / "userenv", "-e", str(origin), "pytest"), monkeypatch)
-
-    first, second = tmp_path / "trial-1", tmp_path / "trial-2"
-    for workspace in (first, second):
-        shutil.copytree(origin, workspace, ignore=shutil.ignore_patterns(".git"))
-    (second / "src" / "demo" / "calc.py").write_text(_DEMO_BROKEN, encoding="utf-8")
+    _as_if_run_from(_venv_with(tmp_path / "userenv", "-e", str(origin)), monkeypatch)
 
     environment = CampaignEnvironment()
     try:
-        assert environment.aim_at(first, _PYTEST).error is None
+        # Production trials always materialize below the campaign's one
+        # writable root. Keep this lower-level environment test honest about
+        # that security precondition as it verifies reuse and re-aiming.
+        first, second = environment.sandbox_root / "trial-1", environment.sandbox_root / "trial-2"
+        for workspace in (first, second):
+            shutil.copytree(origin, workspace, ignore=shutil.ignore_patterns(".git"))
+        (second / "src" / "demo" / "calc.py").write_text(_DEMO_BROKEN, encoding="utf-8")
+
+        assert environment.aim_at(first, _UNITTEST).error is None
         venv = environment.venv
         assert venv is not None
         # Two facts that a rebuild would destroy, rather than a stopwatch.
         built_at = (venv / "pyvenv.cfg").stat().st_mtime_ns
         (venv / "built-once.marker").write_text("x", encoding="utf-8")
 
-        aimed = environment.aim_at(second, _PYTEST)
+        aimed = environment.aim_at(second, _UNITTEST)
 
         assert aimed.error is None
         assert environment.venv == venv, "the campaign built a second environment"

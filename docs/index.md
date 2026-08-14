@@ -18,18 +18,28 @@ below the reliability floor, then minimize attributable cost, then break ties
 toward the simpler configuration. An LLM may explain a result; it never decides
 one.
 
-!!! warning "CTX Fit ships from source, not yet from PyPI"
+!!! warning "Release scope for 1.0.21"
 
-    The published `claude-ctx` package is release **1.0.20**, and it contains
-    none of CTX Fit — `pip install claude-ctx` gets you the recommendation
-    surface documented further down, whose `ctx` command is the agent-loop
-    harness (`ctx run`, `ctx resume`, `ctx sessions`). This source tree
-    declares `1.0.21` for unreleased work. To use `ctx fit` today you need a
-    source checkout.
+    CTX Fit compares capability configurations within one coding-agent
+    harness. It does not compare Codex, Claude Code, or other harnesses against
+    one another. It recognizes and can run repository-native verification
+    commands for Python, JavaScript/TypeScript, Go, Rust, and Make, and treats
+    the selected test command as the verification authority. For an installable
+    Python project, CTX Fit builds a campaign environment and installs it
+    without network access; its build backend and dependencies must already be
+    available without downloading them. In the other ecosystems, verification
+    is supported only when the runtime is usable from
+    the host `PATH` under an isolated home and the verification dependencies
+    are already available in the repository. Final verification uses that
+    isolated home and runs without network access, so a user's package caches
+    are not a supported dependency source. This is evidence for normal
+    development; it does not prove that deliberately hostile code cannot
+    deceive its own test runner. Release qualification did not include a paid
+    live-provider trial, so inspect `ctx doctor` and the dry run before
+    authorizing spend.
 
     ```bash
-    git clone https://github.com/stevesolun/ctx && cd ctx
-    pip install -e .
+    pip install --upgrade claude-ctx
     cd /path/to/my-project
     ctx fit
     ```
@@ -73,24 +83,23 @@ is refused without evidence from `ctx fit --test --budget N`, and deriving the
 tasks for that evaluation uses the same read-only queries `--dry-run` uses.
 
 Each proposed change names the file and whether CTX Fit is *creating* or
-*modifying* it, and that word decides how you review and undo it. Today every
-plan contains exactly one artifact, `AGENTS.md`:
+*modifying* it. Today every plan contains exactly one CTX-owned artifact,
+`.ctx/fit-configuration.json`. The sidecar records the pinned model plus the
+exact instruction and capability bytes that were evaluated, with their hashes;
+ordinary `ctx run` invocations validate and activate that configuration.
 
 | It printed | State after the write | Review with | Undo with |
 | --- | --- | --- | --- |
-| `modify: AGENTS.md` | tracked, modified | `git diff` | `git checkout -- AGENTS.md` |
-| `create: AGENTS.md` | new and **untracked** | `git status --short` shows `?? AGENTS.md` | delete the file |
+| `modify: .ctx/fit-configuration.json` | existing sidecar replaced after a compare-and-swap check | `git diff -- .ctx/fit-configuration.json` when tracked; otherwise inspect the file directly | restore the tracked file from version control, or restore your saved copy if it was untracked |
+| `create: .ctx/fit-configuration.json` | new and **untracked** until you add it | `git status --short --untracked-files=all` and inspect the file directly | delete `.ctx/fit-configuration.json` |
 
-!!! warning "`git checkout` cannot undo a file git has never seen"
+!!! warning "Version control cannot restore an untracked sidecar"
 
-    The `create` row is the common one, because a repository with no agent
-    instruction file is exactly the repository CTX Fit's own scorer flags first
-    (`Add an AGENTS.md describing the project, conventions, and how to verify a
-    change. (+12)`). A newly created file is not in the index, so `git diff`
-    prints nothing for it and `git checkout -- AGENTS.md` fails with `error:
-    pathspec 'AGENTS.md' did not match any file(s) known to git`, leaving the
-    file in place. CTX Fit's own closing line after a write recommends that
-    pair without qualifying it; on a `create` follow the table instead.
+    CTX Fit does not rewrite `AGENTS.md`, `CLAUDE.md`, or other user-authored
+    instruction files. Their evaluated bytes are embedded in the sidecar
+    instead. If an existing untracked sidecar matters to you, save a copy
+    before confirming the write; version-control restore commands cannot
+    recover an untracked file.
 
 **`--pr` writes to a remote.** It creates a branch, commits the winning
 configuration, pushes it to `origin`, and opens a pull request through the
@@ -121,12 +130,11 @@ tree untouched. If a command fails partway, CTX Fit reports which one and how
 many ran, and how to get back to the branch you were on; the files it had
 already written stay in your working tree.
 
-## The recommendation surface (existing, and what PyPI ships)
+## The recommendation surface (existing, and still shipped)
 
 The rest of this site documents the graph-backed recommendation layer that
-predates CTX Fit. It still ships, it still works, and it is what release
-`1.0.20` installs. It is not the product; it is the inventory and routing
-machinery underneath, useful on its own.
+predates CTX Fit. It still ships in `1.0.21` and remains the inventory and
+routing machinery underneath, useful on its own.
 
 !!! tip "Install the recommendation surface"
 
@@ -314,7 +322,7 @@ graph-based discovery:
     ---
 
     Current main is **v1.0.21** — MIT, tested on CPython 3.11+ for Linux and macOS,
-    8,581 test inventory. Ships seven console scripts led by `ctx` and
+    8,782 test inventory. Ships seven console scripts led by `ctx` and
     `ctx-init`. The maintenance
     tools are still shipped and still work, now via `python -m`:
     `ctx_monitor serve` (local dashboard with graph + wiki + load/unload for
@@ -334,8 +342,10 @@ graph-based discovery:
 - **Reliability is a filter, not a weight.** A configuration that is cheaper
   but less reliable does not win; it is discarded before cost is compared.
 - **Verification is the repository's own.** CTX Fit judges a trial with the
-  test, typecheck, lint, and build commands your repository already declares —
-  never with an agent's self-report.
+  selected test command your repository already declares — never with an
+  agent's self-report. Discovery also reports declared typecheck, lint, and
+  build commands; it does not imply that their runtimes or dependencies are
+  installed.
 - **Unknown cost stays unknown.** A cost record carries its completeness state,
   and an incomplete record is never compared as if it were complete.
 - **Explicit approval.** ctx can recommend, review, install, update, unload,

@@ -11,9 +11,12 @@ never opened.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
+import sys
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -21,26 +24,29 @@ import pytest
 
 import ctx.fit.apply as apply_module
 import ctx.fit.execution as execution_module
+import ctx.fit.experiment as experiment_module
 import ctx.fit.live_runner as live_runner_module
 import ctx.fit.providers as providers_module
 import ctx.fit.recommend as recommend_module
-import ctx.fit.release_catalog as release_catalog_module
 import ctx.fit.tasks as tasks_module
 from ctx.cli.fit import (
     _banner,
     _format_dry_run,
+    _format_plan,
     _handle_apply,
+    _provider_available,
     cmd_fit,
     default_namespace,
 )
 from ctx.fit.apply import CommandResult
-from ctx.fit.candidates import CandidateConfiguration
+from ctx.fit.candidates import CapabilityMaterial, CandidateConfiguration
 from ctx.fit.execution import CandidateOutcome, ExecutionReport, TrialResult
 from ctx.fit.experiment import (
     DEFAULT_MODEL,
     EXCHANGE_INPUT_TOKENS,
     EXCHANGE_OUTPUT_TOKENS,
     ModelPrice,
+    authorize_experiment,
     resolve_experiment,
     run_experiment,
 )
@@ -62,7 +68,6 @@ def stubbed_evaluation(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(providers_module, "build_agent_driver", lambda **k: object())
     monkeypatch.setattr(live_runner_module, "make_live_runner", lambda *a, **k: object())
-    monkeypatch.setattr(release_catalog_module, "open_release_candidate_source", lambda: None)
 
 
 def _winning_recommendation() -> Recommendation:
@@ -89,6 +94,13 @@ def _winning_recommendation() -> Recommendation:
 
 
 def _winning_candidate() -> CandidateConfiguration:
+    material = CapabilityMaterial.from_content(
+        capability_id="skill:ctx-python-testing",
+        delivery_mode="task-user-context",
+        source_identity="test-catalog#skill:ctx-python-testing",
+        catalog_entry_digest=hashlib.sha256(b"test-catalog-entry").hexdigest(),
+        content="Use the repository's Python test conventions and focused pytest feedback loops.",
+    )
     return CandidateConfiguration(
         candidate_id="lean",
         role="recommended",
@@ -96,7 +108,99 @@ def _winning_candidate() -> CandidateConfiguration:
         model=DEFAULT_MODEL,
         instructions=(),
         selection_reason="the single highest-ranked capability",
+        capability_materials=(material,),
     )
+
+
+@pytest.mark.parametrize(
+    ("credential", "expected_live"),
+    (
+        ("ANTHROPIC_API_KEY", False),
+        ("CTX_FIT_API_KEY", False),
+        ("OPENAI_API_KEY", True),
+    ),
+)
+def test_default_model_uses_only_its_matching_credential_for_live_selection(
+    monkeypatch: pytest.MonkeyPatch,
+    credential: str,
+    expected_live: bool,
+) -> None:
+    """A key for another provider must not silently choose a paid/live run."""
+
+    for name in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "CTX_FIT_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv(credential, "configured-not-authenticated")
+
+    assert _provider_available(DEFAULT_MODEL) is expected_live
+
+
+def test_live_selection_uses_the_applied_model_resolved_for_the_experiment(
+    monkeypatch: pytest.MonkeyPatch,
+    repo_with_history,
+) -> None:
+    """Applied Anthropic + Anthropic key is live even though the default is GPT."""
+
+    pytest.importorskip("litellm")
+    repo = repo_with_history(commits=3)
+    selected = replace(_winning_candidate(), model="claude-sonnet-4-20250514")
+    target = repo / ".ctx" / "fit-configuration.json"
+    target.parent.mkdir(parents=True)
+    target.write_text(
+        json.dumps(
+            {
+                "schema": "ctx.fit.applied-configuration-v1",
+                "configuration_hash": selected.configuration_hash,
+                "candidate": selected.to_dict(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    for name in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "CTX_FIT_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "configured-not-authenticated")
+
+    experiment = resolve_experiment(build_fit_profile(repo), budget_usd=500.0)
+
+    assert experiment.model == selected.model
+    assert _provider_available(experiment.model) is True
+
+
+def test_cli_binds_live_selection_to_the_resolved_applied_model(
+    monkeypatch: pytest.MonkeyPatch,
+    repo_with_history,
+) -> None:
+    """The CLI must not re-decide provider availability from its default model."""
+
+    pytest.importorskip("litellm")
+    repo = repo_with_history(commits=3)
+    selected = replace(_winning_candidate(), model="claude-sonnet-4-20250514")
+    target = repo / ".ctx" / "fit-configuration.json"
+    target.parent.mkdir(parents=True)
+    target.write_text(
+        json.dumps(
+            {
+                "schema": "ctx.fit.applied-configuration-v1",
+                "configuration_hash": selected.configuration_hash,
+                "candidate": selected.to_dict(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    observed: list[str] = []
+
+    def availability(model: str) -> bool:
+        observed.append(model)
+        return False
+
+    monkeypatch.setattr("ctx.cli.fit._provider_available", availability)
+    monkeypatch.setattr(
+        experiment_module,
+        "run_experiment",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(ProviderUnavailable("stop after probe")),
+    )
+
+    assert cmd_fit(_args(repo, test=True, budget=500.0, yes=True)) == 1
+    assert observed == [selected.model]
 
 
 def test_json_mode_refuses_apply_rather_than_reporting_success(
@@ -139,10 +243,10 @@ def test_an_unusable_harness_is_a_refusal_rather_than_a_traceback(
             "the `ctx` harness is not on PATH, so no real agent can be driven"
         )
 
-    monkeypatch.setattr("ctx.cli.fit._provider_available", lambda: True)
+    monkeypatch.setattr("ctx.cli.fit._provider_available", lambda _model: True)
     monkeypatch.setattr(providers_module, "build_agent_driver", unavailable)
 
-    exit_code = cmd_fit(_args(repo_with_history(), test=True, budget=500.0))
+    exit_code = cmd_fit(_args(repo_with_history(), test=True, budget=500.0, yes=True))
 
     assert exit_code == 1
     err = capsys.readouterr().err
@@ -176,6 +280,130 @@ def test_the_budget_gate_prices_the_whole_agent_loop_not_one_exchange(repo_with_
     )
 
 
+def test_noninteractive_evaluation_previews_the_exact_plan_before_refusing_without_yes(
+    monkeypatch: pytest.MonkeyPatch,
+    repo_with_history,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Automation gets a complete preview and cannot accidentally start spending."""
+
+    pytest.importorskip("litellm")
+    repo = repo_with_history(commits=3)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(
+        experiment_module,
+        "run_experiment",
+        lambda *_a, **_k: pytest.fail("execution started before confirmation"),
+    )
+
+    assert cmd_fit(_args(repo, test=True, budget=500.0)) == 1
+
+    output = capsys.readouterr().out
+    assert "Experiment plan" in output
+    assert "baseline" in output
+    assert "revert-" in output
+    assert "Total executions:" in output
+    assert "Estimated cost:" in output
+    assert "Budget ceiling:    $500.0" in output
+    assert "does not prove that code under test cannot deliberately" in output
+    assert "--yes" in output
+    assert "Nothing was run and nothing was spent" in output
+
+
+def test_json_evaluation_never_prompts_and_requires_yes_before_execution(
+    monkeypatch: pytest.MonkeyPatch,
+    repo_with_history,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """JSON stays one machine-readable document and fails closed without consent."""
+
+    pytest.importorskip("litellm")
+    repo = repo_with_history(commits=3)
+    monkeypatch.setattr(
+        experiment_module,
+        "run_experiment",
+        lambda *_a, **_k: pytest.fail("JSON execution started without --yes"),
+    )
+
+    assert cmd_fit(_args(repo, json=True, test=True, budget=500.0)) == 1
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert captured.err == ""
+    assert payload["plan"]["authorized"] is False
+    assert payload["plan"]["candidate_ids"]
+    assert payload["plan"]["tasks"]
+    assert any(
+        "does not prove that code under test cannot deliberately" in warning
+        for warning in payload["plan"]["warnings"]
+    )
+
+
+def test_yes_authorizes_the_displayed_plan_but_does_not_request_apply(
+    monkeypatch: pytest.MonkeyPatch,
+    repo_with_history,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--yes confirms requested work; it never adds a write request of its own."""
+
+    pytest.importorskip("litellm")
+    repo = repo_with_history(commits=3)
+    observed: dict[str, object] = {}
+
+    def stop_after_boundary(experiment, *, live: bool):
+        observed["authorized"] = experiment.plan.authorized
+        observed["preview"] = capsys.readouterr().out
+        observed["live"] = live
+        raise ProviderUnavailable("intentional boundary probe")
+
+    monkeypatch.setattr(experiment_module, "run_experiment", stop_after_boundary)
+    monkeypatch.setattr("ctx.cli.fit._provider_available", lambda _model: True)
+
+    assert cmd_fit(_args(repo, test=True, budget=500.0, yes=True)) == 1
+
+    assert observed["authorized"] is True
+    preview = str(observed["preview"])
+    assert "Experiment plan" in preview
+    assert "Authorization:     confirmation required" in preview
+    assert not (repo / "AGENTS.md").exists()
+
+
+def test_json_yes_still_emits_only_a_zero_spend_plan(
+    monkeypatch: pytest.MonkeyPatch,
+    repo_with_history,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    pytest.importorskip("litellm")
+    repo = repo_with_history(commits=3)
+    monkeypatch.setattr("ctx.cli.fit._provider_available", lambda _model: False)
+    monkeypatch.setattr("builtins.input", lambda *_a, **_k: pytest.fail("JSON must never prompt"))
+
+    monkeypatch.setattr(
+        experiment_module,
+        "run_experiment",
+        lambda *_a, **_k: pytest.fail("JSON must never cross the spending boundary"),
+    )
+
+    assert cmd_fit(_args(repo, json=True, test=True, budget=500.0, yes=True)) == 1
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["plan"]["authorized"] is False
+    assert "plan-only" in payload["execution_refusal"]
+    assert "execution" not in payload
+
+
+def test_plan_render_names_every_candidate_and_task(repo_with_history) -> None:
+    pytest.importorskip("litellm")
+    experiment = resolve_experiment(
+        build_fit_profile(repo_with_history(commits=3)), budget_usd=500.0
+    )
+
+    rendered = _format_plan(experiment.plan)
+
+    assert all(candidate.candidate_id in rendered for candidate in experiment.candidates.candidates)
+    assert all(task.title in rendered for task in experiment.tasks.tasks)
+
+
 def test_the_dry_run_script_describes_what_the_product_actually_does(repo_with_history) -> None:
     """The rehearsal has to match the performance: --pr now opens the pull request."""
 
@@ -185,6 +413,13 @@ def test_the_dry_run_script_describes_what_the_product_actually_does(repo_with_h
     assert "no branch is created" not in script  # --pr creates one (FITBUG-036)
     assert "open the pull request" in script
     assert "nothing is ever merged" in script
+    candidate_line = next(line for line in script.splitlines() if "bounded candidates" in line)
+    assert candidate_line.endswith("ctx-capability-set")
+    assert "repository-instructions" not in candidate_line
+    assert "model" not in candidate_line
+    assert "already available in the repository" in script
+    assert "isolated HOME" in script
+    assert "without network access" in script
 
 
 # --------------------------------------------------------------------------
@@ -255,12 +490,13 @@ def test_apply_writes_the_configuration_and_runs_no_git_command(
     )
 
     assert exit_code == 0
-    assert (tmp_path / "AGENTS.md").exists()
+    assert (tmp_path / ".ctx" / "fit-configuration.json").exists()
+    assert not (tmp_path / "AGENTS.md").exists()
     assert commands.calls == []  # no branch, no commit, no push
     out = capsys.readouterr().out
     assert "no branch was created" in out
     assert "git diff" in out
-    assert "git checkout -- AGENTS.md" in out
+    assert "git checkout -- .ctx/fit-configuration.json" in out
 
 
 def test_pr_announces_every_command_before_running_any_of_them(
@@ -282,7 +518,7 @@ def test_pr_announces_every_command_before_running_any_of_them(
     assert match is not None
     branch = match.group(0)
     assert f"git checkout -b {branch}" in out
-    assert "git add -- AGENTS.md" in out
+    assert "git add -- .ctx/fit-configuration.json" in out
     assert "git commit -m 'Optimize AI coding configuration using CTX Fit'" in out
     assert f"git push --set-upstream origin {branch}" in out
     assert "gh pr create --title" in out
@@ -311,7 +547,8 @@ def test_pr_with_yes_opens_the_pull_request_it_announced(
         ("git", "push"),
         ("gh", "pr"),
     ]
-    assert (tmp_path / "AGENTS.md").exists()
+    assert (tmp_path / ".ctx" / "fit-configuration.json").exists()
+    assert not (tmp_path / "AGENTS.md").exists()
     out = capsys.readouterr().out
     assert "https://github.com/octocat/repo/pull/7" in out
     assert "never merges" in out
@@ -394,9 +631,9 @@ def test_a_command_that_fails_is_reported_as_it_was_announced(
     assert f"Stopped at `{announced}`" in captured.err
     assert "2 of 5 commands ran" in captured.err
     # The write happens before the first command, so the undo has to name it.
-    assert "AGENTS.md is written into the working tree" in captured.err
-    assert "git checkout -- AGENTS.md" in captured.err
-    assert (tmp_path / "AGENTS.md").exists()
+    assert ".ctx/fit-configuration.json is written into the working tree" in captured.err
+    assert "git checkout -- .ctx/fit-configuration.json" in captured.err
+    assert (tmp_path / ".ctx" / "fit-configuration.json").exists()
 
 
 def test_asking_for_both_apply_and_pr_says_which_one_ran(
@@ -418,7 +655,9 @@ def test_asking_for_both_apply_and_pr_says_which_one_ran(
 
 
 def test_a_real_run_does_not_announce_itself_as_a_simulation(
-    stubbed_evaluation: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    stubbed_evaluation: None,
+    monkeypatch: pytest.MonkeyPatch,
+    repo_with_history,
 ) -> None:
     """The banner used to contradict the report and the JSON of the same run."""
 
@@ -428,8 +667,14 @@ def test_a_real_run_does_not_announce_itself_as_a_simulation(
         lambda *a, **k: ExecutionReport(trials_run=3, budget_usd=0.20, spent_usd=0.14),
     )
 
+    pytest.importorskip("litellm")
     outcome = run_experiment(
-        resolve_experiment(build_fit_profile(tmp_path), budget_usd=0.20), live=True
+        (
+            lambda experiment: authorize_experiment(
+                experiment, expected_digest=experiment.plan.executable_digest
+            )
+        )(resolve_experiment(build_fit_profile(repo_with_history(commits=3)), budget_usd=500.0)),
+        live=True,
     )
     banner = _banner(outcome)
 
@@ -438,10 +683,10 @@ def test_a_real_run_does_not_announce_itself_as_a_simulation(
     assert "$0.14" in banner
 
 
-def test_only_tasks_that_produced_evidence_are_counted(
+def test_recommendation_receives_the_full_declared_task_field(
     stubbed_evaluation: None, monkeypatch: pytest.MonkeyPatch, repo_with_history
 ) -> None:
-    """A task abandoned or lost to infrastructure is not evidence about anything."""
+    """Partial evidence cannot shrink the authorized comparison after execution."""
 
     report = ExecutionReport(
         outcomes=(
@@ -458,7 +703,9 @@ def test_only_tasks_that_produced_evidence_are_counted(
     )
     recorded: dict[str, int] = {}
 
-    def fake_recommend(*_: object, task_count: int, trials_per_task: int) -> object:
+    def fake_recommend(
+        *_: object, task_count: int, trials_per_task: int, **_identity: object
+    ) -> object:
         recorded["task_count"] = task_count
         return object()
 
@@ -466,10 +713,18 @@ def test_only_tasks_that_produced_evidence_are_counted(
     monkeypatch.setattr(recommend_module, "recommend", fake_recommend)
 
     repo = repo_with_history(commits=3)
-    run_experiment(resolve_experiment(build_fit_profile(repo), budget_usd=0.20), live=True)
+    run_experiment(
+        (
+            lambda experiment: authorize_experiment(
+                experiment, expected_digest=experiment.plan.executable_digest
+            )
+        )(resolve_experiment(build_fit_profile(repo), budget_usd=500.0)),
+        live=True,
+    )
 
-    # Three tasks were derived from this history; one produced a scored trial.
-    assert recorded["task_count"] == 1
+    # Three tasks were authorized; an infrastructure failure cannot silently
+    # shrink that field to the one task that happened to produce scored evidence.
+    assert recorded["task_count"] == 3
 
 
 def test_a_test_run_derives_its_tasks_once(
@@ -494,9 +749,9 @@ def test_a_test_run_derives_its_tasks_once(
     monkeypatch.setattr(tasks_module, "derive_tasks", counting)
     # Simulated, so the real catalog can supply candidates and the plan can
     # reach "ready" without any provider stack being involved.
-    monkeypatch.setattr("ctx.cli.fit._provider_available", lambda: False)
+    monkeypatch.setattr("ctx.cli.fit._provider_available", lambda _model: False)
     monkeypatch.setattr(execution_module, "execute_trials", lambda *a, **k: ExecutionReport())
 
-    assert cmd_fit(_args(repo_with_history(), test=True, budget=500.0)) == 0
+    assert cmd_fit(_args(repo_with_history(), test=True, budget=500.0, yes=True)) == 0
 
     assert len(derivations) == 1

@@ -96,6 +96,15 @@ most often get argued from first principles again:
 Where a planning document under `docs/ctx-fit/` and the code disagree, the code
 and its tests are the ground truth.
 
+## Live working state
+
+`docs/ctx-fit/STATE.md` is the canonical operational checkpoint for active,
+long-running CTX Fit work. At the start of each resumed run, read it after this
+file and the decision log, then reconcile it with the actual branch, working
+tree, tests, and active agents. Update it after a meaningful repair, new
+blocker, verification result, handoff, commit, merge, or release action. Never
+treat an agent self-report or a check from an older tree as current evidence.
+
 ## Repository gotchas
 
 - The project is migrating from legacy flat modules (`src/*.py`) to the `ctx`
@@ -112,7 +121,8 @@ and its tests are the ground truth.
 `STATE.md` and `docs/plans/unified-capability-engine.md` describe the *previous*
 goal — a unified event-sourced capability engine — which was superseded by the
 CTX Fit pivot (ADR-001, ADR-002). They are kept as historical records. Do not
-resume work from them and do not treat `STATE.md` as live state.
+resume work from them and do not treat root `STATE.md` as live state. Current
+state lives in `docs/ctx-fit/STATE.md`.
 
 ## On-demand workflows
 

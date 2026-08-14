@@ -93,7 +93,7 @@ release metadata update.
 ## Design decisions
 
 CTX Fit has a decision log. Before proposing a change to how Fit works, read it
-— fourteen ADRs (ADR-001 through ADR-014) are `ACCEPTED`, and they are not
+— sixteen ADRs (ADR-001 through ADR-016) are `ACCEPTED`, and they are not
 open for re-litigation without new evidence.
 
 - [`docs/ctx-fit/DECISIONS.md`](docs/ctx-fit/DECISIONS.md) — the ADRs
@@ -195,12 +195,14 @@ still allow three automated repair attempts.
 ## Release publishing
 
 PyPI publishes must run from a version tag that matches `pyproject.toml`; manual
-PyPI workflow dispatch is disabled. The publish workflow resolves the full and
-runtime graph tarballs from matching GitHub release cache assets first. If a
-checked-out Git LFS pointer is newer than the cache, it performs a targeted
-`git lfs pull` for that artifact only, enforces the configured pointer size cap,
-verifies SHA-256 and byte size, then runs graph validation before building and
-publishing the package.
+PyPI workflow dispatch is disabled. The tagged commit must be the exact current
+`main` head and the latest canonical `Tests` workflow for that exact SHA must be
+a successful `main` push run. The publish workflow verifies those facts before
+building. It resolves the full and runtime graph tarballs from matching GitHub
+release cache assets first. If a checked-out Git LFS pointer is newer than the
+cache, it performs a targeted `git lfs pull` for that artifact only, enforces the
+configured pointer size cap, verifies SHA-256 and byte size, then runs graph
+validation before building and publishing the package.
 
 ## Commit conventions
 

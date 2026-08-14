@@ -36,6 +36,7 @@ _INSTRUCTION_FILES: tuple[str, ...] = (
 
 #: Configuration describing tools an agent may reach for.
 _TOOL_CONFIG_PATHS: tuple[str, ...] = (
+    ".ctx/fit-configuration.json",
     ".mcp.json",
     ".claude/settings.json",
     ".claude/settings.local.json",
@@ -169,30 +170,22 @@ def _dimensions(verification: VerificationInventory) -> tuple[OptimizationDimens
             name="ctx-capability-set",
             evaluable=verifiable,
             reason=(
-                "skills, agents, and MCP servers can be varied inside one "
-                "counterbalanced baseline-versus-candidate pair"
+                "skills can be varied inside one counterbalanced "
+                "baseline-versus-candidate pair; agents and MCP servers are not "
+                "currently attached or evaluated"
                 if verifiable
                 else blocked
             ),
         ),
         OptimizationDimension(
             name="repository-instructions",
-            evaluable=verifiable,
-            reason=(
-                "instruction text is delivered as prepared context on the same path"
-                if verifiable
-                else blocked
-            ),
+            evaluable=False,
+            reason="the repository's instruction material is held constant across candidates",
         ),
         OptimizationDimension(
             name="model",
-            evaluable=verifiable,
-            reason=(
-                "the model is a run-level setting, so models compare across pinned "
-                "runs rather than inside one pair, which is a weaker control"
-                if verifiable
-                else blocked
-            ),
+            evaluable=False,
+            reason="one run-level model is held constant across every candidate",
         ),
         OptimizationDimension(
             name="coding-harness",

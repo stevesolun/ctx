@@ -9,8 +9,10 @@ difference, so the checks have to live at the seam itself.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -18,12 +20,30 @@ from pathlib import Path
 import pytest
 
 from ctx.fit import providers
+from ctx.fit.candidates import CapabilityMaterial, InstructionMaterial
 from ctx.fit.live_runner import AgentInvocation
 from ctx.fit.providers import (
     CapabilityNotApplicable,
     ProviderUnavailable,
     build_agent_driver,
+    resolve_model_credential,
 )
+
+
+@pytest.fixture(autouse=True)
+def _deterministic_production_dependencies(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Supply process-level stand-ins for the production sandbox and MCP host."""
+
+    npx = tmp_path / "npx"
+    npx.write_text(f"#!{sys.executable}\nraise SystemExit(0)\n", encoding="utf-8")
+    npx.chmod(0o755)
+    monkeypatch.setenv("PATH", os.pathsep.join((str(tmp_path), os.environ.get("PATH", ""))))
+    monkeypatch.setattr(providers, "require_sandbox_available", lambda environment: None)
+    monkeypatch.setattr(
+        providers,
+        "sandboxed_command",
+        lambda command, **kwargs: tuple(command),
+    )
 
 
 def _invocation(
@@ -31,7 +51,28 @@ def _invocation(
     *,
     model: str | None = None,
     capability_ids: tuple[str, ...] = ("skill:ctx-python-testing",),
+    instruction_body: str | None = None,
 ) -> AgentInvocation:
+    materials = tuple(
+        CapabilityMaterial.from_content(
+            capability_id=capability_id,
+            delivery_mode="task-user-context",
+            source_identity=f"test-catalog#{capability_id}",
+            catalog_entry_digest=hashlib.sha256(capability_id.encode()).hexdigest(),
+            content=(
+                providers._shipped_skill_bodies()[capability_id]
+                if hasattr(providers, "_shipped_skill_bodies")
+                else f"Exact test material for {capability_id}"
+            ),
+        )
+        for capability_id in capability_ids
+        if capability_id.startswith("skill:") and capability_id != "skill:nothing-ships-this"
+    )
+    instruction_materials = (
+        (InstructionMaterial.from_content(path="AGENTS.md", content=instruction_body),)
+        if instruction_body is not None
+        else ()
+    )
     return AgentInvocation(
         workspace=workspace,
         task_title="Reject empty capability ids",
@@ -39,6 +80,9 @@ def _invocation(
         verify_command=("pytest", "-q", "src/tests/fit"),
         capability_ids=capability_ids,
         model=model,
+        capability_materials=materials,
+        instructions=tuple(item.path for item in instruction_materials),
+        instruction_materials=instruction_materials,
     )
 
 
@@ -101,6 +145,49 @@ def _fake_harness(tmp_path: Path, stdout: str, *, exit_code: int = 0) -> tuple[P
     return script, argv_path
 
 
+def _fake_harness_with_environment(tmp_path: Path, stdout: str) -> tuple[Path, Path, Path]:
+    """A stand-in that records both argv and the exact inherited environment."""
+
+    script, argv_path = _fake_harness(tmp_path, stdout)
+    env_path = tmp_path / "env.json"
+    original = script.read_text(encoding="utf-8")
+    script.write_text(
+        original.replace(
+            "import json, sys\n",
+            f"import json, os, sys\njson.dump(dict(os.environ), open({str(env_path)!r}, 'w'))\n",
+        ),
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return script, argv_path, env_path
+
+
+@pytest.mark.parametrize(
+    ("model", "environment", "expected_name", "configured"),
+    (
+        ("gpt-4o-mini", {"ANTHROPIC_API_KEY": "wrong"}, "OPENAI_API_KEY", False),
+        ("gpt-4o-mini", {"OPENAI_API_KEY": "right"}, "OPENAI_API_KEY", True),
+        (
+            "anthropic/claude-sonnet-4-20250514",
+            {"ANTHROPIC_API_KEY": "right"},
+            "ANTHROPIC_API_KEY",
+            True,
+        ),
+        ("gpt-4o-mini", {"CTX_FIT_API_KEY": "unused"}, "OPENAI_API_KEY", False),
+    ),
+)
+def test_model_credential_resolution_uses_the_ctx_run_provider_contract(
+    model: str,
+    environment: dict[str, str],
+    expected_name: str,
+    configured: bool,
+) -> None:
+    resolved = resolve_model_credential(model, environment=environment)
+
+    assert resolved.environment_variable == expected_name
+    assert resolved.configured is configured
+
+
 # ── FITBUG-006: the command must be one `ctx run` accepts ──────────────────
 
 
@@ -137,6 +224,161 @@ def test_the_driven_command_parses_against_the_real_ctx_run_parser(tmp_path: Pat
     assert args.json is True
     assert args.model == "openai/gpt-5.5"
     assert args.task.startswith("Reject empty capability ids")
+
+
+def test_a_trial_gets_only_a_workspace_rooted_filesystem_tool_surface(tmp_path: Path) -> None:
+    """A coding trial without edit tools measures nothing about coding ability.
+
+    The surface is deliberately one existing MCP preset, rooted by the
+    subprocess cwd.  Built-in CTX tools, Git, shell, and any second MCP server
+    are absent, so the model cannot turn a repository trial into ambient host
+    access.
+    """
+
+    from ctx.cli.run import _build_parser, _parse_mcp_spec
+
+    binary, argv_path = _fake_harness(tmp_path, _real_ctx_run_json_stdout())
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    build_agent_driver(executable=str(binary))(_invocation(workspace))
+
+    argv = json.loads(argv_path.read_text(encoding="utf-8"))
+    args = _build_parser().parse_args(argv)
+    configs = tuple(_parse_mcp_spec(spec) for spec in args.mcp)
+
+    assert args.no_ctx_tools is True
+    assert args.mcp == ["filesystem:."]
+    assert args.allow_tool == ["filesystem__*"]
+    assert len(configs) == 1
+    assert configs[0].name == "filesystem"
+    assert configs[0].args[-1] == "."
+    assert not any(name.startswith(("ctx__", "git__", "shell__")) for name in args.allow_tool)
+
+
+@pytest.mark.parametrize(
+    ("missing", "message"),
+    (("sandbox", "isolated"), ("npx", "filesystem MCP")),
+)
+def test_building_a_driver_refuses_when_required_isolation_tooling_is_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    missing: str,
+    message: str,
+) -> None:
+    """A paid campaign must not discover an absent boundary after it starts."""
+
+    binary, _ = _fake_harness(tmp_path, "")
+    if missing == "sandbox":
+
+        def unavailable(environment: object) -> None:
+            raise providers.SandboxUnavailable("sandbox unavailable")
+
+        monkeypatch.setattr(providers, "require_sandbox_available", unavailable)
+    else:
+        real_which = providers.shutil.which
+        monkeypatch.setattr(
+            providers.shutil,
+            "which",
+            lambda name: None if name == missing else real_which(name),
+        )
+
+    with pytest.raises(ProviderUnavailable, match=message):
+        build_agent_driver(executable=str(binary))
+
+
+def test_provider_uses_the_shared_workspace_boundary_with_only_required_read_roots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary, _ = _fake_harness(tmp_path, _real_ctx_run_json_stdout())
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    observed: dict[str, object] = {}
+
+    def capture(command: object, **kwargs: object) -> tuple[str, ...]:
+        observed.update(kwargs)
+        return tuple(command)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(providers, "sandboxed_command", capture)
+
+    build_agent_driver(executable=str(binary))(_invocation(workspace))
+
+    assert observed["cwd"] == workspace
+    assert observed["writable_root"] == workspace
+    assert observed["network"] is True
+    read_roots = observed["read_roots"]
+    assert isinstance(read_roots, tuple)
+    assert Path.home() not in read_roots
+    read_paths = observed["read_paths"]
+    assert isinstance(read_paths, tuple)
+    assert binary in read_paths
+
+
+def test_provider_runtime_access_tracks_multihop_shims_without_broadening_them(
+    tmp_path: Path,
+) -> None:
+    cellar = tmp_path / "cellar" / "fake" / "1"
+    (cellar / "bin").mkdir(parents=True)
+    executable = cellar / "bin" / "fake-ctx"
+    executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    executable.chmod(0o755)
+    opt = tmp_path / "opt" / "fake"
+    opt.parent.mkdir()
+    opt.symlink_to(cellar, target_is_directory=True)
+    shim = tmp_path / "shim" / "bin" / "fake-ctx"
+    shim.parent.mkdir(parents=True)
+    shim.symlink_to(opt / "bin" / "fake-ctx")
+
+    roots, paths = providers._runtime_read_access(str(shim))
+
+    assert shim in paths
+    assert opt / "bin" / "fake-ctx" in paths
+    assert executable in paths
+    assert shim.parent.parent not in roots
+    assert cellar in roots
+
+
+def test_a_trial_subprocess_inherits_only_required_runtime_and_provider_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ambient host credentials must not become agent or MCP credentials."""
+
+    allowed_credentials = {
+        "OPENAI_API_KEY": "openai-test",
+        "ANTHROPIC_API_KEY": "anthropic-test",
+        "CTX_FIT_API_KEY": "ctx-fit-test",
+    }
+    for name, value in allowed_credentials.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "must-not-cross")
+    monkeypatch.setenv("GH_TOKEN", "must-not-cross")
+    monkeypatch.setenv("UNRELATED_API_KEY", "must-not-cross")
+    monkeypatch.setenv("PYTHONPATH", "/ambient/source")
+    monkeypatch.setenv("VIRTUAL_ENV", "/ambient/venv")
+
+    binary, _, env_path = _fake_harness_with_environment(tmp_path, _real_ctx_run_json_stdout())
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    build_agent_driver(executable=str(binary))(_invocation(workspace, model="gpt-4o-mini"))
+
+    inherited = json.loads(env_path.read_text(encoding="utf-8"))
+    assert inherited.get("OPENAI_API_KEY") == allowed_credentials["OPENAI_API_KEY"]
+    assert "ANTHROPIC_API_KEY" not in inherited
+    assert "CTX_FIT_API_KEY" not in inherited
+    assert inherited["PATH"] == os.environ["PATH"]
+    assert Path(inherited["HOME"]).is_relative_to(workspace)
+    assert Path(inherited["TMPDIR"]).is_relative_to(workspace)
+    assert (
+        not {
+            "AWS_SECRET_ACCESS_KEY",
+            "GH_TOKEN",
+            "UNRELATED_API_KEY",
+            "PYTHONPATH",
+            "VIRTUAL_ENV",
+        }
+        & inherited.keys()
+    )
 
 
 def test_building_a_driver_refuses_when_the_command_would_be_rejected(
@@ -190,6 +432,8 @@ def test_cost_and_tokens_are_read_from_real_harness_output(tmp_path: Path) -> No
     assert outcome.input_tokens == 18_432
     assert outcome.output_tokens == 2_105
     assert outcome.detail == "done"
+    assert outcome.stop_reason == "done"
+    assert outcome.logs == ""
 
 
 def test_an_unmeasured_cost_stays_unknown(tmp_path: Path) -> None:
@@ -260,19 +504,48 @@ def _python_repo(tmp_path: Path) -> Path:
     return repo
 
 
-def test_the_agent_receives_the_shipped_body_of_each_capability(tmp_path: Path) -> None:
-    """A configured capability has to arrive as content, not as a name.
+def test_the_agent_receives_the_candidate_bound_body_not_a_reresolved_catalog(
+    tmp_path: Path,
+) -> None:
+    """The configuration hash must name the bytes the trial actually runs."""
 
-    Asserted against the catalog's own bytes rather than a phrase from the
-    prompt template, because prose about a capability is not the capability.
-    """
+    material = CapabilityMaterial.from_content(
+        capability_id="skill:ctx-python-testing",
+        delivery_mode="task-user-context",
+        source_identity="test-catalog#custom-revision",
+        catalog_entry_digest=hashlib.sha256(b"custom entry").hexdigest(),
+        content="A candidate-bound revision that is not in the package catalog.",
+    )
+    invocation = _invocation(tmp_path, capability_ids=())
+    invocation = AgentInvocation(
+        workspace=invocation.workspace,
+        task_title=invocation.task_title,
+        files_to_change=invocation.files_to_change,
+        verify_command=invocation.verify_command,
+        capability_ids=(material.capability_id,),
+        model=invocation.model,
+        capability_materials=(material,),
+    )
 
-    body = providers._shipped_skill_bodies().get("skill:ctx-python-testing")
-    assert body, "the shipped catalog no longer carries this skill; this test is stale"
+    task = _task_sent(tmp_path, invocation)
 
-    task = _task_sent(tmp_path, _invocation(tmp_path, capability_ids=("skill:ctx-python-testing",)))
+    assert material.content in task
 
-    assert body in task
+
+def test_the_agent_receives_exact_bound_repository_instructions_and_controlled_mode(
+    tmp_path: Path,
+) -> None:
+    instruction = "# Exact evaluated instructions\n\nDo the narrow thing.  \n"
+    invocation = _invocation(tmp_path, instruction_body=instruction)
+    binary, argv_path = _fake_harness(tmp_path, _real_ctx_run_json_stdout())
+
+    build_agent_driver(executable=str(binary))(invocation)
+
+    argv = json.loads(argv_path.read_text(encoding="utf-8"))
+    task = argv[argv.index("--task") + 1]
+    assert "--fit-controlled-trial" in argv
+    assert instruction in task
+    assert invocation.instruction_materials[0].content_sha256 in task
 
 
 def test_candidates_from_the_real_generator_run_different_commands(tmp_path: Path) -> None:
@@ -308,6 +581,9 @@ def test_candidates_from_the_real_generator_run_different_commands(tmp_path: Pat
                     verify_command=("pytest", "-q"),
                     capability_ids=candidate.capability_ids,
                     model=candidate.model,
+                    capability_materials=candidate.capability_materials,
+                    instructions=candidate.instructions,
+                    instruction_materials=candidate.instruction_materials,
                 ),
                 max_iterations=25,
                 per_trial_budget_usd=2.0,
@@ -343,8 +619,8 @@ def test_a_capability_the_driver_cannot_apply_is_refused_not_ignored(tmp_path: P
     assert isinstance(caught.value, ProviderUnavailable)
 
 
-def test_a_capability_with_no_shipped_material_is_refused(tmp_path: Path) -> None:
-    """An id with nothing behind it must not silently become the baseline."""
+def test_a_capability_with_no_bound_material_is_refused(tmp_path: Path) -> None:
+    """An id with no content identity must not silently become the baseline."""
 
     binary, _ = _fake_harness(tmp_path, _real_ctx_run_json_stdout())
     workspace = tmp_path / "workspace"

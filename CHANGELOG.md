@@ -5,14 +5,41 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.21] - 2026-08-14
+
+[Compare 1.0.20...1.0.21](https://github.com/stevesolun/ctx/compare/v1.0.20...v1.0.21).
+
 ### Added
 
+- Added CTX Fit as the primary `ctx` experience: free local repository
+  profiling, readiness and repository-native verification discovery,
+  history-derived representative tasks, bounded candidate planning, explicit
+  budget authorization, repeated trials, and a deterministic "cheapest that
+  reliably works" recommendation.
+- Added reviewable application of a winning configuration through the
+  content-addressed `.ctx/fit-configuration.json` sidecar. `ctx run` validates
+  and activates the sidecar's exact pinned model, instruction bytes, and
+  capability bytes; `ctx fit --pr` can put that same artifact in a pull
+  request.
 - Added the LoopFlow/custom agent-loop adapter
   (`python -m ctx.adapters.loopflow`) for permissioned pre-plan skill, agent,
   MCP, ctx MCP server, and user-owned model harness recommendations.
 
 ### Changed
 
+- Made the top-level `ctx` command lead with CTX Fit while preserving the
+  existing `run`, `resume`, and `sessions` harness spellings and the graph-backed
+  recommendation surface.
+- Bound evaluation authorization to the exact candidate, task, reliability,
+  trial-count, and budget plan; incomplete, one-sided, simulated, or
+  cost-incomplete evidence cannot produce an applicable winner.
+- Limited the documented 1.0.21 comparison claim to capability configurations
+  within one coding-agent harness. Repository-native verification covers
+  Python, JavaScript/TypeScript, Go, Rust, and Make under an explicit
+  trusted-verifier assumption. Repository installation and final verification
+  run without network access, so build backends, runtimes, and dependencies
+  must already be locally available; no paid live-provider trial is claimed as
+  release evidence.
 - Aligned docs deploy, release publish, PR docs-check, and local preflight on
   the canonical bug-smoke, feature, dashboard, and toolbox public-docs tracker
   suite.
@@ -31,6 +58,15 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Isolated agent edits and repository verification in throwaway workspaces,
+  removed ambient secret and host-write authority from the evaluated agent,
+  protected the verification judge and test inputs from candidate edits, and
+  made unsupported or interrupted verification inconclusive instead of
+  manufacturing a successful result.
+- Preserved exact current/applied configuration identity across baseline,
+  treatment, recommendation, apply, and later activation, including strict
+  content hashes, compare-and-swap writes, symlink refusal, and transactional
+  rollback.
 - Redacted runtime lifecycle free-text fields before storing local events so
   evidence, commands, summaries, triggers, reasons, and statuses do not retain
   secrets or local filesystem paths.
@@ -1785,6 +1821,7 @@ pass. Full test suite: **1316 passed, 2 skipped**.
 - 5 dead imports removed (`os`, `Mapping`, `timedelta` from
   `ctx_lifecycle`; `Path` from `intake_gate`, `intake_pipeline`).
 
+[1.0.21]: https://github.com/stevesolun/ctx/releases/tag/v1.0.21
 [1.0.20]: https://github.com/stevesolun/ctx/releases/tag/v1.0.20
 [1.0.19]: https://github.com/stevesolun/ctx/releases/tag/v1.0.19
 [1.0.18]: https://github.com/stevesolun/ctx/releases/tag/v1.0.18
