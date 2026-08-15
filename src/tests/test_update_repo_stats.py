@@ -839,3 +839,37 @@ def test_uncollected_importorskip_tests_are_added_to_collection_count(
 
     stdout = "src/tests/test_present.py::test_present\n1 test collected\n"
     assert urs._uncollected_importorskip_test_count(stdout) == 2
+
+
+def test_module_importorskip_inventory_is_independent_of_optional_dependency(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(urs, "REPO_ROOT", tmp_path)
+    tests_dir = tmp_path / "src" / "tests"
+    tests_dir.mkdir(parents=True)
+    (tests_dir / "test_optional.py").write_text(
+        "import pytest\n"
+        "pytest.importorskip('optional_dependency')\n"
+        "def test_parameterized(): pass\n"
+        "def test_plain(): pass\n",
+        encoding="utf-8",
+    )
+    (tests_dir / "test_function_skip.py").write_text(
+        "import pytest\n"
+        "def test_function_skip():\n"
+        "    pytest.importorskip('optional_dependency')\n",
+        encoding="utf-8",
+    )
+
+    dependency_present = (
+        "tests/test_optional.py::test_parameterized[first]\n"
+        "tests/test_optional.py::test_parameterized[second]\n"
+        "tests/test_optional.py::test_plain\n"
+        "tests/test_function_skip.py::test_function_skip\n"
+        "4 tests collected\n"
+    )
+    dependency_absent = "tests/test_function_skip.py::test_function_skip\n1 test collected\n"
+
+    assert urs._module_importorskip_test_delta(dependency_present) == -1
+    assert urs._module_importorskip_test_delta(dependency_absent) == 2
