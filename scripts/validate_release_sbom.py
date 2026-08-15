@@ -8,7 +8,7 @@ from pathlib import Path
 import re
 import tomllib
 from typing import Any, Iterable
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 from packaging.markers import default_environment
 from packaging.requirements import InvalidRequirement, Requirement
@@ -73,6 +73,82 @@ def _identity(component: dict[str, Any], label: str) -> tuple[str, str, str]:
     except InvalidVersion as exc:
         raise ValueError(f"{label} has invalid version: {version!r}") from exc
     return name, version, purl
+
+
+def _canonical_pypi_purl(name: str, version: str) -> str:
+    return f"pkg:pypi/{quote(canonicalize_name(name), safe='-._~')}@{quote(version, safe='-._~')}"
+
+
+def _bind_purl(
+    component: dict[str, Any],
+    *,
+    expected_name: str,
+    expected_version: str,
+    label: str,
+) -> None:
+    raw_name = component.get("name")
+    version = component.get("version")
+    if not isinstance(raw_name, str) or canonicalize_name(raw_name) != expected_name:
+        raise ValueError(f"{label} name does not match project metadata")
+    if version != expected_version:
+        raise ValueError(f"{label} version does not match project metadata")
+
+    expected_purl = _canonical_pypi_purl(raw_name, expected_version)
+    existing = component.get("purl")
+    if existing is not None:
+        name, bound_version, _ = _identity(component, label)
+        if name != expected_name or bound_version != expected_version:
+            raise ValueError(f"{label} package URL does not match project metadata")
+        return
+    component["purl"] = expected_purl
+
+
+def bind_release_component_purl(sbom_path: Path, pyproject_path: Path) -> None:
+    """Bind generator-omitted project PURLs without changing graph references."""
+    sbom = _load_object(sbom_path, "JSON SBOM")
+    project = _project_metadata(pyproject_path)
+    project_name = project.get("name")
+    project_version = project.get("version")
+    if not isinstance(project_name, str) or not isinstance(project_version, str):
+        raise ValueError("project name and version must be strings")
+    expected_name = canonicalize_name(project_name)
+
+    metadata = sbom.get("metadata")
+    root = metadata.get("component") if isinstance(metadata, dict) else None
+    if not isinstance(root, dict) or root.get("type") != "application":
+        raise ValueError("SBOM metadata must identify the release application")
+
+    raw_components = sbom.get("components")
+    if not isinstance(raw_components, list):
+        raise ValueError("CycloneDX SBOM must contain a components array")
+    installed = [
+        component
+        for component in raw_components
+        if isinstance(component, dict)
+        and isinstance(component.get("name"), str)
+        and canonicalize_name(component["name"]) == expected_name
+        and component.get("version") == project_version
+    ]
+    if len(installed) > 1:
+        raise ValueError("SBOM must contain at most one installed release component")
+
+    _bind_purl(
+        root,
+        expected_name=expected_name,
+        expected_version=project_version,
+        label="SBOM release component",
+    )
+    if installed:
+        _bind_purl(
+            installed[0],
+            expected_name=expected_name,
+            expected_version=project_version,
+            label="SBOM installed release component",
+        )
+    sbom_path.write_text(
+        json.dumps(sbom, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _component_maps(
@@ -318,6 +394,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--pyproject", type=Path, default=Path("pyproject.toml"))
     parser.add_argument("--inventory", type=Path, required=True)
     parser.add_argument(
+        "--bind-root-purl",
+        action="store_true",
+        help="bind the generator-omitted project PURLs before validation",
+    )
+    parser.add_argument(
         "--extra",
         action="append",
         dest="extras",
@@ -332,6 +413,8 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     selected_extras = tuple(args.extras) or RELEASE_RUNTIME_EXTRAS
     try:
+        if args.bind_root_purl:
+            bind_release_component_purl(args.sbom, args.pyproject)
         validate_release_sbom(
             args.sbom,
             args.pyproject,

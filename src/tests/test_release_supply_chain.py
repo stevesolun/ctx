@@ -17,6 +17,7 @@ import yaml  # type: ignore[import-untyped]
 
 from scripts.validate_release_sbom import (
     RELEASE_RUNTIME_EXTRAS,
+    bind_release_component_purl,
     validate_release_sbom,
 )
 
@@ -374,6 +375,112 @@ def test_release_sbom_validator_rejects_wrong_release_identity(
         _validate(tmp_path, sbom, inventory)
 
 
+def test_release_sbom_binder_adds_missing_root_purl_reproducibly(
+    tmp_path: Path,
+) -> None:
+    sbom, inventory = _fixture_data()
+    root = sbom["metadata"]["component"]
+    root.pop("purl")
+    old_root_ref = root["bom-ref"]
+    root["bom-ref"] = "root-component"
+    root_dependency = next(
+        dependency for dependency in sbom["dependencies"] if dependency["ref"] == old_root_ref
+    )
+    root_dependency["ref"] = root["bom-ref"]
+    installed = {
+        "type": "library",
+        "name": root["name"],
+        "version": root["version"],
+        "bom-ref": f"{root['name']}=={root['version']}",
+    }
+    sbom["components"].append(installed)
+    sbom["dependencies"].append({"ref": installed["bom-ref"], "dependsOn": []})
+    sbom_path = _write_json(tmp_path, "release.cdx.json", sbom)
+
+    bind_release_component_purl(sbom_path, PYPROJECT_PATH)
+    first = sbom_path.read_bytes()
+    bound = json.loads(first)
+    assert bound["metadata"]["component"]["purl"] == ("pkg:pypi/claude-ctx@1.0.21")
+    assert bound["metadata"]["component"]["bom-ref"] == "root-component"
+    bound_installed = next(
+        component for component in bound["components"] if component["name"] == "claude-ctx"
+    )
+    assert bound_installed["purl"] == "pkg:pypi/claude-ctx@1.0.21"
+    assert bound_installed["bom-ref"] == "claude-ctx==1.0.21"
+    validate_release_sbom(
+        sbom_path,
+        PYPROJECT_PATH,
+        _write_json(tmp_path, "resolved-environment.json", inventory),
+    )
+
+    bind_release_component_purl(sbom_path, PYPROJECT_PATH)
+    assert sbom_path.read_bytes() == first
+
+
+def test_release_sbom_binder_accepts_wheel_environment_root_only(
+    tmp_path: Path,
+) -> None:
+    sbom, inventory = _fixture_data()
+    root = sbom["metadata"]["component"]
+    root.pop("purl")
+    old_root_ref = root["bom-ref"]
+    root["bom-ref"] = "root-component"
+    root_dependency = next(
+        dependency for dependency in sbom["dependencies"] if dependency["ref"] == old_root_ref
+    )
+    root_dependency["ref"] = root["bom-ref"]
+    sbom_path = _write_json(tmp_path, "release.cdx.json", sbom)
+
+    bind_release_component_purl(sbom_path, PYPROJECT_PATH)
+    validate_release_sbom(
+        sbom_path,
+        PYPROJECT_PATH,
+        _write_json(tmp_path, "resolved-environment.json", inventory),
+    )
+
+
+def test_release_sbom_binder_refuses_duplicate_installed_project_components(
+    tmp_path: Path,
+) -> None:
+    sbom, _ = _fixture_data()
+    root = sbom["metadata"]["component"]
+    root.pop("purl")
+    installed = {
+        "type": "library",
+        "name": root["name"],
+        "version": root["version"],
+        "bom-ref": f"{root['name']}=={root['version']}",
+    }
+    sbom["components"].extend((installed, copy.deepcopy(installed)))
+
+    with pytest.raises(ValueError, match="at most one installed release component"):
+        bind_release_component_purl(
+            _write_json(tmp_path, "release.cdx.json", sbom),
+            PYPROJECT_PATH,
+        )
+
+
+def test_release_sbom_binder_refuses_mismatched_existing_project_purl(
+    tmp_path: Path,
+) -> None:
+    sbom, _ = _fixture_data()
+    root = sbom["metadata"]["component"]
+    root["purl"] = "pkg:pypi/unrelated@1.0.21"
+    installed = {
+        "type": "library",
+        "name": root["name"],
+        "version": root["version"],
+        "bom-ref": f"{root['name']}=={root['version']}",
+    }
+    sbom["components"].append(installed)
+
+    with pytest.raises(ValueError, match="package URL name does not match"):
+        bind_release_component_purl(
+            _write_json(tmp_path, "release.cdx.json", sbom),
+            PYPROJECT_PATH,
+        )
+
+
 def test_publish_workflow_resolves_all_extras_before_validated_sbom() -> None:
     build = _workflow()["jobs"]["build"]
     steps = _steps(build)
@@ -406,6 +513,8 @@ def test_publish_workflow_resolves_all_extras_before_validated_sbom() -> None:
     assert "from importlib.metadata import distributions" in generate
     assert "python -m cyclonedx_py environment" in generate
     assert generate.count("python -m cyclonedx_py environment") == 2
+    assert generate.count("python scripts/validate_release_sbom.py") == 2
+    assert generate.count("--bind-root-purl") == 2
     assert "--output-reproducible" in generate
     assert "cmp release-sbom/claude-ctx.cdx.json" in generate
     assert "--inventory release-sbom/resolved-environment.json" in generate
