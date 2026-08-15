@@ -647,7 +647,7 @@ jobs:
             --sbom release-sbom/claude-ctx.cdx.json \
             --pyproject pyproject.toml \
             --inventory release-sbom/resolved-environment.json \
-            --bind-root-purl \
+            --bind-release-identity \
             --extra ann \
             --extra browser \
             --extra embeddings \
@@ -659,7 +659,7 @@ jobs:
             --sbom release-sbom/claude-ctx.repeat.cdx.json \
             --pyproject pyproject.toml \
             --inventory release-sbom/resolved-environment.json \
-            --bind-root-purl \
+            --bind-release-identity \
             --extra ann \
             --extra browser \
             --extra embeddings \

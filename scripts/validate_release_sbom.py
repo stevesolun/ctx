@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
+from hashlib import sha256
 import json
 from pathlib import Path
 import re
 import tomllib
 from typing import Any, Iterable
 from urllib.parse import quote, unquote
+from uuid import NAMESPACE_URL, RFC_4122, UUID, uuid5
 
 from packaging.markers import default_environment
 from packaging.requirements import InvalidRequirement, Requirement
@@ -79,6 +81,30 @@ def _canonical_pypi_purl(name: str, version: str) -> str:
     return f"pkg:pypi/{quote(canonicalize_name(name), safe='-._~')}@{quote(version, safe='-._~')}"
 
 
+def _canonical_release_serial(sbom: dict[str, Any]) -> str:
+    canonical = json.dumps(
+        {key: value for key, value in sbom.items() if key != "serialNumber"},
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    content_identity = f"ctx:cyclonedx:{sha256(canonical).hexdigest()}"
+    return f"urn:uuid:{uuid5(NAMESPACE_URL, content_identity)}"
+
+
+def _validate_release_serial(sbom: dict[str, Any]) -> str:
+    raw = sbom.get("serialNumber")
+    if not isinstance(raw, str) or not raw.startswith("urn:uuid:"):
+        raise ValueError("SBOM must have a canonical RFC 4122 serial number")
+    try:
+        value = UUID(raw.removeprefix("urn:uuid:"))
+    except ValueError as exc:
+        raise ValueError("SBOM must have a canonical RFC 4122 serial number") from exc
+    if raw != f"urn:uuid:{value}" or value.variant != RFC_4122 or value.version is None:
+        raise ValueError("SBOM must have a canonical RFC 4122 serial number")
+    return raw
+
+
 def _bind_purl(
     component: dict[str, Any],
     *,
@@ -103,8 +129,8 @@ def _bind_purl(
     component["purl"] = expected_purl
 
 
-def bind_release_component_purl(sbom_path: Path, pyproject_path: Path) -> None:
-    """Bind generator-omitted project PURLs without changing graph references."""
+def bind_release_sbom_identity(sbom_path: Path, pyproject_path: Path) -> None:
+    """Bind generator-omitted release identity without changing graph references."""
     sbom = _load_object(sbom_path, "JSON SBOM")
     project = _project_metadata(pyproject_path)
     project_name = project.get("name")
@@ -112,7 +138,6 @@ def bind_release_component_purl(sbom_path: Path, pyproject_path: Path) -> None:
     if not isinstance(project_name, str) or not isinstance(project_version, str):
         raise ValueError("project name and version must be strings")
     expected_name = canonicalize_name(project_name)
-
     metadata = sbom.get("metadata")
     root = metadata.get("component") if isinstance(metadata, dict) else None
     if not isinstance(root, dict) or root.get("type") != "application":
@@ -145,6 +170,12 @@ def bind_release_component_purl(sbom_path: Path, pyproject_path: Path) -> None:
             expected_version=project_version,
             label="SBOM installed release component",
         )
+    expected_serial = _canonical_release_serial(sbom)
+    existing_serial = sbom.get("serialNumber")
+    if existing_serial is None:
+        sbom["serialNumber"] = expected_serial
+    elif existing_serial != expected_serial:
+        raise ValueError("SBOM serial number does not match normalized document")
     sbom_path.write_text(
         json.dumps(sbom, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -317,6 +348,7 @@ def validate_release_sbom(
     project_version = project.get("version")
     if not isinstance(project_name, str) or not isinstance(project_version, str):
         raise ValueError("project name and version must be strings")
+    _validate_release_serial(sbom)
     root_name, root_version, _ = _identity(root, "SBOM release component")
     if root_name != canonicalize_name(project_name):
         raise ValueError("SBOM release component name does not match pyproject.toml")
@@ -387,6 +419,9 @@ def validate_release_sbom(
             if _marker_applies(child, selected_extras_for_name):
                 pending.append((component_ref, child))
 
+    if sbom["serialNumber"] != _canonical_release_serial(sbom):
+        raise ValueError("SBOM serial number does not match normalized document")
+
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -394,9 +429,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--pyproject", type=Path, default=Path("pyproject.toml"))
     parser.add_argument("--inventory", type=Path, required=True)
     parser.add_argument(
-        "--bind-root-purl",
+        "--bind-release-identity",
         action="store_true",
-        help="bind the generator-omitted project PURLs before validation",
+        help="bind generator-omitted project PURLs and document serial before validation",
     )
     parser.add_argument(
         "--extra",
@@ -413,8 +448,8 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     selected_extras = tuple(args.extras) or RELEASE_RUNTIME_EXTRAS
     try:
-        if args.bind_root_purl:
-            bind_release_component_purl(args.sbom, args.pyproject)
+        if args.bind_release_identity:
+            bind_release_sbom_identity(args.sbom, args.pyproject)
         validate_release_sbom(
             args.sbom,
             args.pyproject,

@@ -17,7 +17,7 @@ import yaml  # type: ignore[import-untyped]
 
 from scripts.validate_release_sbom import (
     RELEASE_RUNTIME_EXTRAS,
-    bind_release_component_purl,
+    bind_release_sbom_identity,
     validate_release_sbom,
 )
 
@@ -126,6 +126,7 @@ def _fixture_data() -> tuple[dict[str, Any], dict[str, Any]]:
     sbom = {
         "bomFormat": "CycloneDX",
         "specVersion": "1.6",
+        "serialNumber": "urn:uuid:3c3996e4-b710-5f49-b37f-4e2e83b2d379",
         "version": 1,
         "metadata": {
             "component": {
@@ -375,12 +376,33 @@ def test_release_sbom_validator_rejects_wrong_release_identity(
         _validate(tmp_path, sbom, inventory)
 
 
-def test_release_sbom_binder_adds_missing_root_purl_reproducibly(
+def test_release_sbom_validator_rejects_missing_serial_number(
+    tmp_path: Path,
+) -> None:
+    sbom, inventory = _fixture_data()
+    sbom.pop("serialNumber")
+
+    with pytest.raises(ValueError, match="serial number"):
+        _validate(tmp_path, sbom, inventory)
+
+
+def test_release_sbom_validator_rejects_malformed_serial_number(
+    tmp_path: Path,
+) -> None:
+    sbom, inventory = _fixture_data()
+    sbom["serialNumber"] = "not-a-uuid"
+
+    with pytest.raises(ValueError, match="RFC 4122 serial number"):
+        _validate(tmp_path, sbom, inventory)
+
+
+def test_release_sbom_binder_adds_missing_release_identity_reproducibly(
     tmp_path: Path,
 ) -> None:
     sbom, inventory = _fixture_data()
     root = sbom["metadata"]["component"]
     root.pop("purl")
+    sbom.pop("serialNumber")
     old_root_ref = root["bom-ref"]
     root["bom-ref"] = "root-component"
     root_dependency = next(
@@ -397,9 +419,11 @@ def test_release_sbom_binder_adds_missing_root_purl_reproducibly(
     sbom["dependencies"].append({"ref": installed["bom-ref"], "dependsOn": []})
     sbom_path = _write_json(tmp_path, "release.cdx.json", sbom)
 
-    bind_release_component_purl(sbom_path, PYPROJECT_PATH)
+    bind_release_sbom_identity(sbom_path, PYPROJECT_PATH)
     first = sbom_path.read_bytes()
     bound = json.loads(first)
+    assert bound["serialNumber"] == "urn:uuid:af88226c-5afc-523b-bb54-45e4a8318203"
+    assert all(bound.get(field) for field in ("bomFormat", "serialNumber", "specVersion"))
     assert bound["metadata"]["component"]["purl"] == ("pkg:pypi/claude-ctx@1.0.21")
     assert bound["metadata"]["component"]["bom-ref"] == "root-component"
     bound_installed = next(
@@ -413,7 +437,7 @@ def test_release_sbom_binder_adds_missing_root_purl_reproducibly(
         _write_json(tmp_path, "resolved-environment.json", inventory),
     )
 
-    bind_release_component_purl(sbom_path, PYPROJECT_PATH)
+    bind_release_sbom_identity(sbom_path, PYPROJECT_PATH)
     assert sbom_path.read_bytes() == first
 
 
@@ -423,6 +447,7 @@ def test_release_sbom_binder_accepts_wheel_environment_root_only(
     sbom, inventory = _fixture_data()
     root = sbom["metadata"]["component"]
     root.pop("purl")
+    sbom.pop("serialNumber")
     old_root_ref = root["bom-ref"]
     root["bom-ref"] = "root-component"
     root_dependency = next(
@@ -431,7 +456,7 @@ def test_release_sbom_binder_accepts_wheel_environment_root_only(
     root_dependency["ref"] = root["bom-ref"]
     sbom_path = _write_json(tmp_path, "release.cdx.json", sbom)
 
-    bind_release_component_purl(sbom_path, PYPROJECT_PATH)
+    bind_release_sbom_identity(sbom_path, PYPROJECT_PATH)
     validate_release_sbom(
         sbom_path,
         PYPROJECT_PATH,
@@ -454,7 +479,7 @@ def test_release_sbom_binder_refuses_duplicate_installed_project_components(
     sbom["components"].extend((installed, copy.deepcopy(installed)))
 
     with pytest.raises(ValueError, match="at most one installed release component"):
-        bind_release_component_purl(
+        bind_release_sbom_identity(
             _write_json(tmp_path, "release.cdx.json", sbom),
             PYPROJECT_PATH,
         )
@@ -475,10 +500,43 @@ def test_release_sbom_binder_refuses_mismatched_existing_project_purl(
     sbom["components"].append(installed)
 
     with pytest.raises(ValueError, match="package URL name does not match"):
-        bind_release_component_purl(
+        bind_release_sbom_identity(
             _write_json(tmp_path, "release.cdx.json", sbom),
             PYPROJECT_PATH,
         )
+
+
+def test_release_sbom_binder_refuses_conflicting_serial_number(
+    tmp_path: Path,
+) -> None:
+    sbom, _ = _fixture_data()
+    sbom["serialNumber"] = "urn:uuid:12345678-1234-1234-1234-123456789012"
+
+    with pytest.raises(ValueError, match="serial number"):
+        bind_release_sbom_identity(
+            _write_json(tmp_path, "release.cdx.json", sbom),
+            PYPROJECT_PATH,
+        )
+
+
+def test_release_sbom_binder_changes_serial_when_document_content_changes(
+    tmp_path: Path,
+) -> None:
+    first, _ = _fixture_data()
+    second = copy.deepcopy(first)
+    first.pop("serialNumber")
+    second.pop("serialNumber")
+    second["components"][0]["description"] = "materially different BOM content"
+    first_path = _write_json(tmp_path, "first.cdx.json", first)
+    second_path = _write_json(tmp_path, "second.cdx.json", second)
+
+    bind_release_sbom_identity(first_path, PYPROJECT_PATH)
+    bind_release_sbom_identity(second_path, PYPROJECT_PATH)
+
+    assert (
+        json.loads(first_path.read_text())["serialNumber"]
+        != json.loads(second_path.read_text())["serialNumber"]
+    )
 
 
 def test_publish_workflow_resolves_all_extras_before_validated_sbom() -> None:
@@ -514,7 +572,7 @@ def test_publish_workflow_resolves_all_extras_before_validated_sbom() -> None:
     assert "python -m cyclonedx_py environment" in generate
     assert generate.count("python -m cyclonedx_py environment") == 2
     assert generate.count("python scripts/validate_release_sbom.py") == 2
-    assert generate.count("--bind-root-purl") == 2
+    assert generate.count("--bind-release-identity") == 2
     assert "--output-reproducible" in generate
     assert "cmp release-sbom/claude-ctx.cdx.json" in generate
     assert "--inventory release-sbom/resolved-environment.json" in generate

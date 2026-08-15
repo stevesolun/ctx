@@ -13,22 +13,25 @@
 
 - Updated: 2026-08-16 (Asia/Jerusalem)
 - Active goal: review, harden, verify, and release CTX Fit 1.0.21
-- Phase: SBOM recovery commit verified and ready for remote review
+- Phase: remote review of the pinned-attestation CycloneDX compatibility repair
 - Release decision: **DO NOT RELEASE YET**
-- Branch: `codex/ctx-fit-sbom-release`
-- Base commit: `c1d8405b4f0c57d84408e49871fc027890e40a5d`
-- Last merged release candidate: `c1d8405b4f0c57d84408e49871fc027890e40a5d`
-- Latest merged PR: `https://github.com/stevesolun/ctx/pull/269`
+- Branch: `codex/ctx-fit-sbom-attestation`
+- Base commit: `2714f9be88a1c3a3b680e344b25a962829d18ca8`
+- Active repair commit: `b3145c49`
+- Last merged release candidate: `2714f9be88a1c3a3b680e344b25a962829d18ca8`
+- Latest merged PR: `https://github.com/stevesolun/ctx/pull/270`
 - Follow-up scope at checkpoint:
-  - deterministic PyPI-PURL binding for generator-shaped release SBOMs, the
-    production workflow invocation, focused regressions, and this checkpoint
+  - deterministic content-derived CycloneDX serial binding for the pinned
+    attestation action, exact compatibility regressions, and this checkpoint
   - user-owned and out of scope: `.scratch/`
-- Parallel execution: PR #269 is merged; exact-main Tests, CodeQL, docs, and
-  Hugging Face synchronization are green. Production publish run `31910688624`
-  failed closed before every upload/publish step when the pinned CycloneDX
-  generator omitted project PURLs. Independent release and SBOM reviewers
-  reproduced the contract mismatch while the coordinator owns the narrow TDD
-  repair and controlled unpublished-tag recovery.
+- Parallel execution: PR #270 is merged; exact-main Tests run `31912497654`
+  and CodeQL run `31912497612` are green. Publish run `31913053842` proved the
+  PURL/closure repair, build, package smokes, and graph paths, then failed
+  closed because the pinned attestation action requires CycloneDX's optional
+  `serialNumber`. The narrow content-derived serial repair is committed as
+  `b3145c49`; independent format and recovery reviewers accepted it with no
+  P0-P2 findings, and its committed fast gate plus all 19 PR-preflight lanes
+  are green. Remote review/merge is next.
 
 ## Product destination
 
@@ -83,7 +86,7 @@ All of the following must be true before tagging or publishing:
 | Applied winner activation | Complete, independently accepted | Activation writer + coordinator + independent reviewer | Strict repository-root loader, nested-sidecar refusal, hash/model validation, one-use exact context, subdirectory activation, and explicit model-conflict handling passed independent refreeze as part of the 222-check baseline/activation lane |
 | ADR-015 stop attribution | Complete, independently accepted | Coordinator + spend/fairness reviewer | Structured stop reason/log fields flow provider → live runner → serialized result, budget-capped trials are inconclusive, and the accepted spend/fairness lane plus 446-test Fit aggregate are green |
 | Release metadata and publish guard | Complete, independently accepted | Metadata writer + publish writer/reviewer + coordinator | 1.0.21 metadata and changelog are current; exact-main/exact-successful-Tests production guard and changelog-backed notes have no P0/P1 review findings; P2 credential/doc hardening is integrated |
-| Final verification and release | SBOM recovery ready for remote review | Coordinator + release/SBOM reviewers | PR #269 merged as `c1d8405b`; its exact-main Tests, CodeQL, docs, and Hugging Face sync succeeded. Annotated tag object `2514da44` pointed `v1.0.21` to that exact commit. Publish run `31910688624` passed provenance, graph, stats, static, clean-host, build, package checks, wheel/all-extras smoke, then failed closed because cyclonedx-bom 7.3.0 omits the required PyPI PURL from the generated release root while CTX correctly requires it. It uploaded zero artifacts; attest/release/PyPI jobs skipped, GitHub release is absent, and PyPI returns 404. Repair commit `4ff0e890` is independently accepted; its committed fast gate passed 8,779 tests with 92.16% coverage and its 19-lane PR preflight passed, including reproducible wheel/sdist and Twine. Push, PR, fresh exact-main CI, and explicit delete/recreate of the still-unpublished tag remain. |
+| Final verification and release | Attestation compatibility repair ready for remote review | Coordinator + release/SBOM reviewers | PR #270 merged as `2714f9be`; exact-main Tests and CodeQL succeeded. Recovered annotated tag object `bcd5632d` points to that exact commit. Publish run `31913053842` passed the repaired SBOM normalization/strict closure gate and the complete build job. Package and graph provenance attestations were created, but the SBOM attestation failed because pinned `actions/attest@f7c74d...` requires an optional top-level CycloneDX serial; release/PyPI jobs skipped, GitHub release is absent, and PyPI is still 404. Commit `b3145c49` derives a deterministic RFC-4122 UUIDv5 from canonical normalized BOM content, validates exact equality, proves pinned-action recognition, and has independent acceptance plus green committed fast and 19-lane PR-preflight gates. PR, fresh exact-main CI, audited partial-attestation cleanup, and another explicit unpublished-tag recovery remain. |
 
 ## Open release blockers
 
@@ -98,20 +101,19 @@ verification is explicitly a non-adversarial trust boundary.
 
 ### P1 — must resolve or explicitly de-scope before release
 
-One active blocker remains. cyclonedx-bom 7.3.0 intentionally emits the
-pyproject root without its optional PURL and can do the same for a matching
-installed local-project component; CTX's stricter release validator requires
-the relevant PyPI identities. Production
-run `31910688624` therefore failed deterministically at SBOM validation after
-all package smokes but before artifact upload, attestation, GitHub release, or
-PyPI publication. The repair derives the canonical PURL from verified project
-name/version, binds the root and optional matching component without changing
-bom-refs or dependency edges, refuses conflicts and duplicates, normalizes
-both generator outputs, and retains the strict validator. Commit `4ff0e890`
-passed the committed fast gate and all 19 PR-preflight lanes, and independent
-review accepted the exact commit with no P0-P2 finding. Push, follow-up
-review/merge, and a new exact-main Tests success remain mandatory before
-controlled tag recovery.
+One active blocker remains at the remote-release boundary. The PURL repair is merged and passed its exact
+production gate, but cyclonedx-bom 7.3.0 also removes `serialNumber` under
+reproducible output. CycloneDX 1.6 permits that omission; pinned
+`actions/attest@f7c74d...` has a narrower parser requiring truthy `bomFormat`,
+`specVersion`, and `serialNumber`. Run `31913053842` therefore failed only at
+the SBOM attestation. The active repair binds a canonical UUIDv5 derived from
+the normalized BOM content with the serial omitted, so byte-identical BOMs are
+reproducible and materially different BOMs get different identities. It
+refuses conflicts and requires exact recomputation after strict dependency
+closure validation. Focused regressions and exact uploaded-artifact schema/
+parser probes are green; commit `b3145c49` passed the committed fast gate and
+all 19 PR-preflight lanes. Review/merge and a new exact-main Tests success
+remain mandatory before controlled tag recovery.
 
 The release also deliberately discloses that qualification did not include a
 paid provider call or a complete provider-plus-filesystem-MCP launch on this
@@ -245,17 +247,48 @@ be overwritten.
 
 ## Immediate next actions
 
-1. Push accepted commit `4ff0e890`, open the narrow SBOM-recovery PR, and merge
-   only with required checks green.
-2. Require a fresh successful exact-main Tests run. Reconfirm that failed run
-   `31910688624` has zero artifacts, GitHub release is absent, and PyPI is 404;
-   then explicitly delete the old local/remote `v1.0.21` tag and recreate an
-   annotated tag on the new exact tested main commit without a force-push.
+1. Push commit `b3145c49`, open the narrow serial-repair PR, and merge it only
+   with required checks green.
+2. Require a fresh successful exact-main Tests run. Archive and remove the
+   transient Actions artifacts and deletable GitHub attestation records from
+   run `31913053842`, recording that Rekor history remains. Reconfirm GitHub
+   release absence and PyPI 404; then explicitly delete/recreate the annotated
+   `v1.0.21` tag on the new exact tested main commit without a force-push.
 3. Monitor production publish to completion, then verify PyPI, GitHub release
    assets/attestations, clean install, and Hugging Face synchronization before
    declaring the release complete.
 
 ## Checkpoint log
+
+- 2026-08-16: Committed the independently accepted CycloneDX serial repair as
+  `b3145c49`. Its committed fast gate passed 8,783 tests, 5 skips, 92.16%
+  coverage, static checks, and clean-host/package contracts. The authoritative
+  PR preflight then passed all 19 lanes, including the same 8,783-test unit
+  equivalent, strict documentation, telemetry, similarity, browser security,
+  clean-host installation, reproducible distribution build, and Twine.
+  Reproducible artifact SHA-256 values are
+  `40c8e88adb6ffcd6159ed30eddc25162db6e5e17bb6f0ac035ad2162857b70d7`
+  for the wheel and
+  `ce6fb0da869d8b3b5c6ff27327940f494b98f4c4efb34d466704983144368a6f`
+  for the sdist. Only the user-owned `.scratch/` remains untracked; push and
+  remote PR review are next.
+
+- 2026-08-16: Merged PR #270 as exact main `2714f9be`; exact-main Tests run
+  `31912497654` and CodeQL run `31912497612` succeeded. Explicitly deleted the
+  still-unpublished old `v1.0.21` tag and created annotated object `bcd5632d`
+  on that exact tested commit, without force-updating it. Publish run
+  `31913053842` passed provenance, graph, stats, static/clean-host/canaries,
+  reproducible build, distribution checks, wheel and all-runtime-extras smoke,
+  deterministic PURL normalization, strict dependency closure, and artifact
+  upload. Package/graph provenance attestations `40948323` and `40948329` were
+  created, then the SBOM attestation failed closed: the valid CycloneDX 1.6
+  file omitted optional `serialNumber`, while pinned `actions/attest` requires
+  it. Release-assets and PyPI jobs skipped; GitHub release remains absent and
+  PyPI 1.0.21 remains 404. The exact uploaded SBOM independently passes the
+  official 1.6 schema. A failing-first repair now derives a content-addressed
+  UUIDv5 serial, refuses conflicts, requires exact recomputation, and passes
+  28 focused supply-chain tests plus the pinned action's three-field probe.
+  Public inventory is now 8,780.
 
 - 2026-08-16: Committed the accepted SBOM repair as `4ff0e890`. Its committed
   fast gate passed 8,779 tests, 5 skips, 92.16% coverage, static checks, and the
