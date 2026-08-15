@@ -13,7 +13,7 @@
 
 - Updated: 2026-08-16 (Asia/Jerusalem)
 - Active goal: review, harden, verify, and release CTX Fit 1.0.21
-- Phase: recover the failed pre-publication SBOM gate
+- Phase: SBOM recovery commit verified and ready for remote review
 - Release decision: **DO NOT RELEASE YET**
 - Branch: `codex/ctx-fit-sbom-release`
 - Base commit: `c1d8405b4f0c57d84408e49871fc027890e40a5d`
@@ -83,7 +83,7 @@ All of the following must be true before tagging or publishing:
 | Applied winner activation | Complete, independently accepted | Activation writer + coordinator + independent reviewer | Strict repository-root loader, nested-sidecar refusal, hash/model validation, one-use exact context, subdirectory activation, and explicit model-conflict handling passed independent refreeze as part of the 222-check baseline/activation lane |
 | ADR-015 stop attribution | Complete, independently accepted | Coordinator + spend/fairness reviewer | Structured stop reason/log fields flow provider → live runner → serialized result, budget-capped trials are inconclusive, and the accepted spend/fairness lane plus 446-test Fit aggregate are green |
 | Release metadata and publish guard | Complete, independently accepted | Metadata writer + publish writer/reviewer + coordinator | 1.0.21 metadata and changelog are current; exact-main/exact-successful-Tests production guard and changelog-backed notes have no P0/P1 review findings; P2 credential/doc hardening is integrated |
-| Final verification and release | SBOM recovery active | Coordinator + release/SBOM reviewers | PR #269 merged as `c1d8405b`; its exact-main Tests, CodeQL, docs, and Hugging Face sync succeeded. Annotated tag object `2514da44` pointed `v1.0.21` to that exact commit. Publish run `31910688624` passed provenance, graph, stats, static, clean-host, build, package checks, wheel/all-extras smoke, then failed closed because cyclonedx-bom 7.3.0 omits the required PyPI PURL from the generated release root while CTX correctly requires it. It uploaded zero artifacts; attest/release/PyPI jobs skipped, GitHub release is absent, and PyPI returns 404. TDD repair is focused-green; commit, PR, fresh exact-main CI, and explicit delete/recreate of the still-unpublished tag remain. |
+| Final verification and release | SBOM recovery ready for remote review | Coordinator + release/SBOM reviewers | PR #269 merged as `c1d8405b`; its exact-main Tests, CodeQL, docs, and Hugging Face sync succeeded. Annotated tag object `2514da44` pointed `v1.0.21` to that exact commit. Publish run `31910688624` passed provenance, graph, stats, static, clean-host, build, package checks, wheel/all-extras smoke, then failed closed because cyclonedx-bom 7.3.0 omits the required PyPI PURL from the generated release root while CTX correctly requires it. It uploaded zero artifacts; attest/release/PyPI jobs skipped, GitHub release is absent, and PyPI returns 404. Repair commit `4ff0e890` is independently accepted; its committed fast gate passed 8,779 tests with 92.16% coverage and its 19-lane PR preflight passed, including reproducible wheel/sdist and Twine. Push, PR, fresh exact-main CI, and explicit delete/recreate of the still-unpublished tag remain. |
 
 ## Open release blockers
 
@@ -107,8 +107,9 @@ all package smokes but before artifact upload, attestation, GitHub release, or
 PyPI publication. The repair derives the canonical PURL from verified project
 name/version, binds the root and optional matching component without changing
 bom-refs or dependency edges, refuses conflicts and duplicates, normalizes
-both generator outputs, and retains the strict validator. Focused behavior and
-workflow tests plus static checks are green; committed gates, follow-up
+both generator outputs, and retains the strict validator. Commit `4ff0e890`
+passed the committed fast gate and all 19 PR-preflight lanes, and independent
+review accepted the exact commit with no P0-P2 finding. Push, follow-up
 review/merge, and a new exact-main Tests success remain mandatory before
 controlled tag recovery.
 
@@ -244,8 +245,8 @@ be overwritten.
 
 ## Immediate next actions
 
-1. Independently refreeze and commit the SBOM identity repair; run committed
-   release gates, push the narrow PR, and merge only with required checks green.
+1. Push accepted commit `4ff0e890`, open the narrow SBOM-recovery PR, and merge
+   only with required checks green.
 2. Require a fresh successful exact-main Tests run. Reconfirm that failed run
    `31910688624` has zero artifacts, GitHub release is absent, and PyPI is 404;
    then explicitly delete the old local/remote `v1.0.21` tag and recreate an
@@ -255,6 +256,19 @@ be overwritten.
    declaring the release complete.
 
 ## Checkpoint log
+
+- 2026-08-16: Committed the accepted SBOM repair as `4ff0e890`. Its committed
+  fast gate passed 8,779 tests, 5 skips, 92.16% coverage, static checks, and the
+  clean-host contract. The authoritative PR preflight passed all 19 lanes:
+  inventory/policy/static checks, the same 8,779-test unit equivalent, A-Z and
+  compatibility canaries, clean-host installation, public docs contracts,
+  strict MkDocs, telemetry, similarity, browser security, reproducible build,
+  and Twine. Reproducible artifact digests were
+  `748a0862e379a2dc0e8b8a671484225be588d80d9372e9412368377ac6cbfc32`
+  for the wheel and
+  `5c08024e5c88161ac7ed56f05edb4b7a26a91fc2861cc0188f0c98b96dac7a7e`
+  for the sdist. Independent review accepted exact commit `4ff0e890` with no
+  P0-P2 finding. Only the user-owned `.scratch/` remains untracked.
 
 - 2026-08-16: Merged PR #269 as exact main `c1d8405b`; main Tests run
   `31910183189`, CodeQL, docs, and Hugging Face sync all succeeded. Created
