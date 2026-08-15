@@ -13,7 +13,7 @@
 
 - Updated: 2026-08-16 (Asia/Jerusalem)
 - Active goal: review, harden, verify, and release CTX Fit 1.0.21
-- Phase: deterministic release-stat repair before the final tag
+- Phase: deterministic release-stat follow-up ready for remote review
 - Release decision: **DO NOT RELEASE YET**
 - Branch: `codex/ctx-fit-stats-determinism`
 - Base commit: `7cf8fb62065d5e6c5db21ac943ba09f7eb0ce1b5`
@@ -82,7 +82,7 @@ All of the following must be true before tagging or publishing:
 | Applied winner activation | Complete, independently accepted | Activation writer + coordinator + independent reviewer | Strict repository-root loader, nested-sidecar refusal, hash/model validation, one-use exact context, subdirectory activation, and explicit model-conflict handling passed independent refreeze as part of the 222-check baseline/activation lane |
 | ADR-015 stop attribution | Complete, independently accepted | Coordinator + spend/fairness reviewer | Structured stop reason/log fields flow provider → live runner → serialized result, budget-capped trials are inconclusive, and the accepted spend/fairness lane plus 446-test Fit aggregate are green |
 | Release metadata and publish guard | Complete, independently accepted | Metadata writer + publish writer/reviewer + coordinator | 1.0.21 metadata and changelog are current; exact-main/exact-successful-Tests production guard and changelog-backed notes have no P0/P1 review findings; P2 credential/doc hardening is integrated |
-| Final verification and release | Narrow follow-up repair active | Coordinator + release/LFS reviewers | PR #267 merged as `7cf8fb62`; exact-main Tests, CodeQL, all platform/build lanes, and the required Ubuntu zero-spend lane are green. The exact graph archives are preserved in the validated `graph-artifacts-v1.0.21-7cf8fb62` prerelease. A clean `[dev]` Hugging Face run exposed optional-dependency-dependent generated stats (8,771 before the new regression versus 8,795 with extras), which would also stop production publish. The normalization repair is focused-green and now yields 8,772 after adding its regression; it needs committed gates, a follow-up PR, and fresh exact-main CI before tagging. |
+| Final verification and release | Follow-up ready to push | Coordinator + release/LFS reviewers | PR #267 merged as `7cf8fb62`; exact-main Tests, CodeQL, all platform/build lanes, and the required Ubuntu zero-spend lane are green. The exact graph archives are preserved in the validated `graph-artifacts-v1.0.21-7cf8fb62` prerelease. Commit `ca2b5799` makes the public inventory invariant at 8,772; its committed fast gate passed 8,775 tests with 92.16% coverage and its clean PR preflight passed all 16 lanes, including reproducible wheel/sdist and Twine. Independent review reproduced 8,772 with and without optional extras and accepted with no P0-P2. The narrow PR, merge, and fresh exact-main CI remain before tagging. |
 
 ## Open release blockers
 
@@ -105,9 +105,11 @@ Linux `[dev]` release environment; Hugging Face attempt 2 failed on that exact
 disagreement, and production publish runs the same check. The TDD repair
 normalizes every such module to its static definitions in both environments.
 Its focused regression, full stats test file, Ruff, and mypy are green; the
-generated inventory is now 8,772 because the repair adds one test. Commit,
-clean release gates, follow-up review/merge, and a new exact-main Tests success
-remain mandatory before tagging.
+generated inventory is now 8,772 because the repair adds one test. Commit
+`ca2b5799` passed the committed fast gate and all clean PR-preflight lanes, and
+independent review reproduced the same count in full-extra and clean `[dev]`
+environments. Follow-up review/merge and a new exact-main Tests success remain
+mandatory before tagging.
 
 The release also deliberately discloses that qualification did not include a
 paid provider call or a complete provider-plus-filesystem-MCP launch on this
@@ -241,15 +243,25 @@ be overwritten.
 
 ## Immediate next actions
 
-1. Finish and independently review the deterministic stats repair; run the
-   proportional docs/release checks plus committed fast and PR-preflight gates.
-2. Push and merge the narrow follow-up PR only after its required checks pass;
+1. Push the independently accepted deterministic-stats follow-up and open the
+   narrow PR.
+2. Merge it only after its required checks pass;
    require a fresh successful exact-main Tests run on the resulting merge.
 3. Tag that exact `main` as `v1.0.21`, let the hardened production workflow
    publish, then verify PyPI, GitHub release assets/attestations, clean install,
    and Hugging Face synchronization before declaring the release complete.
 
 ## Checkpoint log
+
+- 2026-08-16: Committed the deterministic inventory repair as `ca2b5799`.
+  Its committed fast gate passed all lanes, including 8,775 tests, 5 skips,
+  92.16% coverage, static checks, clean-host, and package contracts. The clean
+  PR preflight passed all 16 lanes; reproducible wheel SHA-256 is `07bbd80a...`,
+  reproducible sdist SHA-256 is `5f224abd...`, and Twine passed. Independent
+  refreeze repeated 206 release/docs/workflow tests and proved the normalized
+  8,772 inventory in both full-extra and fresh clean `[dev]` environments, with
+  no P0-P2 findings. Only remote review/merge and new exact-main evidence remain
+  before tagging.
 
 - 2026-08-16: PR #267 merged as exact main `7cf8fb62`. Its main-push Tests run
   `31908356448`, CodeQL, Linux/macOS matrices, package/build lanes, and required
