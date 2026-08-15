@@ -356,7 +356,7 @@ graph-based discovery:
     ---
 
     Current main is **v1.0.21** — MIT, tested on CPython 3.11+ for Linux and macOS,
-    8,772 test inventory. Ships seven console scripts led by `ctx` and
+    8,776 test inventory. Ships seven console scripts led by `ctx` and
     `ctx-init`. The maintenance
     tools are still shipped and still work, now via `python -m`:
     `ctx_monitor serve` (local dashboard with graph + wiki + load/unload for

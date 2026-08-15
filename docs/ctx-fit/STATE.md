@@ -13,21 +13,22 @@
 
 - Updated: 2026-08-16 (Asia/Jerusalem)
 - Active goal: review, harden, verify, and release CTX Fit 1.0.21
-- Phase: deterministic release-stat follow-up ready for remote review
+- Phase: SBOM recovery commit verified and ready for remote review
 - Release decision: **DO NOT RELEASE YET**
-- Branch: `codex/ctx-fit-stats-determinism`
-- Base commit: `7cf8fb62065d5e6c5db21ac943ba09f7eb0ce1b5`
-- Last merged release candidate: `7cf8fb62065d5e6c5db21ac943ba09f7eb0ce1b5`
-- Community PR: `https://github.com/stevesolun/ctx/pull/267`
+- Branch: `codex/ctx-fit-sbom-release`
+- Base commit: `c1d8405b4f0c57d84408e49871fc027890e40a5d`
+- Last merged release candidate: `c1d8405b4f0c57d84408e49871fc027890e40a5d`
+- Latest merged PR: `https://github.com/stevesolun/ctx/pull/269`
 - Follow-up scope at checkpoint:
-  - optional-dependency-invariant repository test inventory, its regression,
-    generated README/docs counts, and this checkpoint
+  - deterministic PyPI-PURL binding for generator-shaped release SBOMs, the
+    production workflow invocation, focused regressions, and this checkpoint
   - user-owned and out of scope: `.scratch/`
-- Parallel execution: PR #267 is merged and its exact-main Tests, CodeQL,
-  Linux/macOS, packaging, and required Ubuntu sandbox lanes are green. A
-  release auditor isolated the final stats blocker while a separate read-only
-  LFS audit inventories safe post-release cleanup; the coordinator owns this
-  narrow repair, release synthesis, tagging, and publication.
+- Parallel execution: PR #269 is merged; exact-main Tests, CodeQL, docs, and
+  Hugging Face synchronization are green. Production publish run `31910688624`
+  failed closed before every upload/publish step when the pinned CycloneDX
+  generator omitted project PURLs. Independent release and SBOM reviewers
+  reproduced the contract mismatch while the coordinator owns the narrow TDD
+  repair and controlled unpublished-tag recovery.
 
 ## Product destination
 
@@ -82,7 +83,7 @@ All of the following must be true before tagging or publishing:
 | Applied winner activation | Complete, independently accepted | Activation writer + coordinator + independent reviewer | Strict repository-root loader, nested-sidecar refusal, hash/model validation, one-use exact context, subdirectory activation, and explicit model-conflict handling passed independent refreeze as part of the 222-check baseline/activation lane |
 | ADR-015 stop attribution | Complete, independently accepted | Coordinator + spend/fairness reviewer | Structured stop reason/log fields flow provider → live runner → serialized result, budget-capped trials are inconclusive, and the accepted spend/fairness lane plus 446-test Fit aggregate are green |
 | Release metadata and publish guard | Complete, independently accepted | Metadata writer + publish writer/reviewer + coordinator | 1.0.21 metadata and changelog are current; exact-main/exact-successful-Tests production guard and changelog-backed notes have no P0/P1 review findings; P2 credential/doc hardening is integrated |
-| Final verification and release | Follow-up ready to push | Coordinator + release/LFS reviewers | PR #267 merged as `7cf8fb62`; exact-main Tests, CodeQL, all platform/build lanes, and the required Ubuntu zero-spend lane are green. The exact graph archives are preserved in the validated `graph-artifacts-v1.0.21-7cf8fb62` prerelease. Commit `ca2b5799` makes the public inventory invariant at 8,772; its committed fast gate passed 8,775 tests with 92.16% coverage and its clean PR preflight passed all 16 lanes, including reproducible wheel/sdist and Twine. Independent review reproduced 8,772 with and without optional extras and accepted with no P0-P2. The narrow PR, merge, and fresh exact-main CI remain before tagging. |
+| Final verification and release | SBOM recovery ready for remote review | Coordinator + release/SBOM reviewers | PR #269 merged as `c1d8405b`; its exact-main Tests, CodeQL, docs, and Hugging Face sync succeeded. Annotated tag object `2514da44` pointed `v1.0.21` to that exact commit. Publish run `31910688624` passed provenance, graph, stats, static, clean-host, build, package checks, wheel/all-extras smoke, then failed closed because cyclonedx-bom 7.3.0 omits the required PyPI PURL from the generated release root while CTX correctly requires it. It uploaded zero artifacts; attest/release/PyPI jobs skipped, GitHub release is absent, and PyPI returns 404. Repair commit `4ff0e890` is independently accepted; its committed fast gate passed 8,779 tests with 92.16% coverage and its 19-lane PR preflight passed, including reproducible wheel/sdist and Twine. Push, PR, fresh exact-main CI, and explicit delete/recreate of the still-unpublished tag remain. |
 
 ## Open release blockers
 
@@ -97,19 +98,20 @@ verification is explicitly a non-adversarial trust boundary.
 
 ### P1 — must resolve or explicitly de-scope before release
 
-One active blocker remains. `src/update_repo_stats.py` counted parametrized
-tests from module-level `pytest.importorskip` modules when optional extras were
-installed, but substituted only static test definitions when those extras were
-absent. This made the public inventory 8,795 locally and 8,771 in the clean
-Linux `[dev]` release environment; Hugging Face attempt 2 failed on that exact
-disagreement, and production publish runs the same check. The TDD repair
-normalizes every such module to its static definitions in both environments.
-Its focused regression, full stats test file, Ruff, and mypy are green; the
-generated inventory is now 8,772 because the repair adds one test. Commit
-`ca2b5799` passed the committed fast gate and all clean PR-preflight lanes, and
-independent review reproduced the same count in full-extra and clean `[dev]`
-environments. Follow-up review/merge and a new exact-main Tests success remain
-mandatory before tagging.
+One active blocker remains. cyclonedx-bom 7.3.0 intentionally emits the
+pyproject root without its optional PURL and can do the same for a matching
+installed local-project component; CTX's stricter release validator requires
+the relevant PyPI identities. Production
+run `31910688624` therefore failed deterministically at SBOM validation after
+all package smokes but before artifact upload, attestation, GitHub release, or
+PyPI publication. The repair derives the canonical PURL from verified project
+name/version, binds the root and optional matching component without changing
+bom-refs or dependency edges, refuses conflicts and duplicates, normalizes
+both generator outputs, and retains the strict validator. Commit `4ff0e890`
+passed the committed fast gate and all 19 PR-preflight lanes, and independent
+review accepted the exact commit with no P0-P2 finding. Push, follow-up
+review/merge, and a new exact-main Tests success remain mandatory before
+controlled tag recovery.
 
 The release also deliberately discloses that qualification did not include a
 paid provider call or a complete provider-plus-filesystem-MCP launch on this
@@ -243,15 +245,47 @@ be overwritten.
 
 ## Immediate next actions
 
-1. Push the independently accepted deterministic-stats follow-up and open the
-   narrow PR.
-2. Merge it only after its required checks pass;
-   require a fresh successful exact-main Tests run on the resulting merge.
-3. Tag that exact `main` as `v1.0.21`, let the hardened production workflow
-   publish, then verify PyPI, GitHub release assets/attestations, clean install,
-   and Hugging Face synchronization before declaring the release complete.
+1. Push accepted commit `4ff0e890`, open the narrow SBOM-recovery PR, and merge
+   only with required checks green.
+2. Require a fresh successful exact-main Tests run. Reconfirm that failed run
+   `31910688624` has zero artifacts, GitHub release is absent, and PyPI is 404;
+   then explicitly delete the old local/remote `v1.0.21` tag and recreate an
+   annotated tag on the new exact tested main commit without a force-push.
+3. Monitor production publish to completion, then verify PyPI, GitHub release
+   assets/attestations, clean install, and Hugging Face synchronization before
+   declaring the release complete.
 
 ## Checkpoint log
+
+- 2026-08-16: Committed the accepted SBOM repair as `4ff0e890`. Its committed
+  fast gate passed 8,779 tests, 5 skips, 92.16% coverage, static checks, and the
+  clean-host contract. The authoritative PR preflight passed all 19 lanes:
+  inventory/policy/static checks, the same 8,779-test unit equivalent, A-Z and
+  compatibility canaries, clean-host installation, public docs contracts,
+  strict MkDocs, telemetry, similarity, browser security, reproducible build,
+  and Twine. Reproducible artifact digests were
+  `748a0862e379a2dc0e8b8a671484225be588d80d9372e9412368377ac6cbfc32`
+  for the wheel and
+  `5c08024e5c88161ac7ed56f05edb4b7a26a91fc2861cc0188f0c98b96dac7a7e`
+  for the sdist. Independent review accepted exact commit `4ff0e890` with no
+  P0-P2 finding. Only the user-owned `.scratch/` remains untracked.
+
+- 2026-08-16: Merged PR #269 as exact main `c1d8405b`; main Tests run
+  `31910183189`, CodeQL, docs, and Hugging Face sync all succeeded. Created
+  annotated `v1.0.21` tag object `2514da44` on that commit. Production publish
+  run `31910688624` passed provenance, graph, stats, static, clean-host,
+  canaries, reproducible build/package checks, wheel smoke, and all-runtime-
+  extras smoke, then failed closed at SBOM validation: cyclonedx-bom 7.3.0
+  omits the release root PURL. Zero workflow artifacts were
+  uploaded; attest/release-assets/PyPI jobs skipped; GitHub release is absent;
+  PyPI 1.0.21 remains 404. A failing-first generator-shaped regression now
+  drives deterministic binding of the root and optional matching installed
+  component without changing graph references; conflicting identities and
+  duplicates fail closed. A fresh wheel-only all-runtime-extras environment
+  reproduced the production root-only shape: both pinned-generator outputs
+  passed strict closure validation after binding and remained byte-identical.
+  The integrated release/workflow selector passed 190 tests, and the generated
+  public inventory is now 8,776.
 
 - 2026-08-16: Committed the deterministic inventory repair as `ca2b5799`.
   Its committed fast gate passed all lanes, including 8,775 tests, 5 skips,

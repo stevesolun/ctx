@@ -643,11 +643,11 @@ jobs:
             --mc-type application \
             --output-file release-sbom/claude-ctx.repeat.cdx.json \
             .venv-smoke/bin/python
-          cmp release-sbom/claude-ctx.cdx.json release-sbom/claude-ctx.repeat.cdx.json
           python scripts/validate_release_sbom.py \
             --sbom release-sbom/claude-ctx.cdx.json \
             --pyproject pyproject.toml \
             --inventory release-sbom/resolved-environment.json \
+            --bind-root-purl \
             --extra ann \
             --extra browser \
             --extra embeddings \
@@ -655,6 +655,19 @@ jobs:
             --extra harness \
             --extra viz \
             --spec-version 1.6
+          python scripts/validate_release_sbom.py \
+            --sbom release-sbom/claude-ctx.repeat.cdx.json \
+            --pyproject pyproject.toml \
+            --inventory release-sbom/resolved-environment.json \
+            --bind-root-purl \
+            --extra ann \
+            --extra browser \
+            --extra embeddings \
+            --extra gcf \
+            --extra harness \
+            --extra viz \
+            --spec-version 1.6
+          cmp release-sbom/claude-ctx.cdx.json release-sbom/claude-ctx.repeat.cdx.json
           rm release-sbom/claude-ctx.repeat.cdx.json
           rm release-sbom/resolved-environment.json
 
