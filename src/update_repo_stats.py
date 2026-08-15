@@ -21,6 +21,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import ast
 import contextlib
 import gzip
 import io
@@ -589,26 +590,62 @@ def _pytest_collect(interpreter: str) -> int | None:
     return None
 
 
-def _uncollected_importorskip_test_count(collected_stdout: str) -> int:
-    """Count tests hidden by module-level pytest.importorskip during collection."""
+def _has_module_importorskip(tree: ast.Module) -> bool:
+    """Return whether a module directly skips collection on an optional import."""
+    for statement in tree.body:
+        value: ast.expr | None = None
+        if isinstance(statement, ast.Expr):
+            value = statement.value
+        elif isinstance(statement, (ast.Assign, ast.AnnAssign)):
+            value = statement.value
+        if not isinstance(value, ast.Call):
+            continue
+        function = value.func
+        if (
+            isinstance(function, ast.Attribute)
+            and function.attr == "importorskip"
+            and isinstance(function.value, ast.Name)
+            and function.value.id == "pytest"
+        ):
+            return True
+    return False
+
+
+def _module_importorskip_test_delta(collected_stdout: str) -> int:
+    """Normalize optional module inventories to their test definitions.
+
+    Installed optional dependencies can expand parametrized tests while absent
+    dependencies hide the entire module.  The public inventory must not depend
+    on which extras happen to be installed in the process updating docs.
+    """
     tests_dir = REPO_ROOT / "src" / "tests"
     if not tests_dir.exists():
         return 0
 
-    count = 0
+    delta = 0
     for path in tests_dir.rglob("test_*.py"):
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
+            tree = ast.parse(text, filename=str(path))
+        except (OSError, SyntaxError):
             continue
-        if "pytest.importorskip(" not in text:
+        if not _has_module_importorskip(tree):
             continue
         repo_rel = path.relative_to(REPO_ROOT).as_posix()
         src_rel = path.relative_to(REPO_ROOT / "src").as_posix()
-        if repo_rel in collected_stdout or src_rel in collected_stdout:
-            continue
-        count += sum(1 for line in text.splitlines() if re.match(r"\s*def\s+test_", line))
-    return count
+        collected = sum(
+            1
+            for line in collected_stdout.splitlines()
+            if line.startswith(f"{repo_rel}::") or line.startswith(f"{src_rel}::")
+        )
+        definitions = sum(1 for line in text.splitlines() if re.match(r"\s*def\s+test_", line))
+        delta += definitions - collected
+    return delta
+
+
+def _uncollected_importorskip_test_count(collected_stdout: str) -> int:
+    """Compatibility wrapper for the normalized optional-module delta."""
+    return _module_importorskip_test_delta(collected_stdout)
 
 
 def _read_committed_test_count() -> int | None:

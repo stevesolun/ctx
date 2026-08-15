@@ -11,22 +11,23 @@
 
 ## Checkpoint
 
-- Updated: 2026-08-15 (Asia/Jerusalem)
+- Updated: 2026-08-16 (Asia/Jerusalem)
 - Active goal: review, harden, verify, and release CTX Fit 1.0.21
-- Phase: final Linux mount-boundary repair and exact-SHA remote verification
+- Phase: deterministic release-stat follow-up ready for remote review
 - Release decision: **DO NOT RELEASE YET**
-- Branch: `codex/ctx-fit-release-hardening`
-- Base commit: `bd36bbea591495f8ef498a6818e7ec541fe78ebb`
-- Last pushed release candidate: `c4aaa22e5115ea85e1da9781ce2643057ac5070b`
+- Branch: `codex/ctx-fit-stats-determinism`
+- Base commit: `7cf8fb62065d5e6c5db21ac943ba09f7eb0ce1b5`
+- Last merged release candidate: `7cf8fb62065d5e6c5db21ac943ba09f7eb0ce1b5`
 - Community PR: `https://github.com/stevesolun/ctx/pull/267`
-- Working tree at checkpoint:
-  - modified: Linux private-root mount policy, POSIX-shared-memory privacy
-    evidence, the required Ubuntu selector, and this checkpoint
+- Follow-up scope at checkpoint:
+  - optional-dependency-invariant repository test inventory, its regression,
+    generated README/docs counts, and this checkpoint
   - user-owned and out of scope: `.scratch/`
-- Parallel execution: the CI/profile, sandbox-evidence, and production
-  readiness repairs are complete. Independent security refreeze accepted the
-  integrated tree with no P0-P2 findings; the coordinator owns state,
-  committed gates, push, and remote verification.
+- Parallel execution: PR #267 is merged and its exact-main Tests, CodeQL,
+  Linux/macOS, packaging, and required Ubuntu sandbox lanes are green. A
+  release auditor isolated the final stats blocker while a separate read-only
+  LFS audit inventories safe post-release cleanup; the coordinator owns this
+  narrow repair, release synthesis, tagging, and publication.
 
 ## Product destination
 
@@ -81,7 +82,7 @@ All of the following must be true before tagging or publishing:
 | Applied winner activation | Complete, independently accepted | Activation writer + coordinator + independent reviewer | Strict repository-root loader, nested-sidecar refusal, hash/model validation, one-use exact context, subdirectory activation, and explicit model-conflict handling passed independent refreeze as part of the 222-check baseline/activation lane |
 | ADR-015 stop attribution | Complete, independently accepted | Coordinator + spend/fairness reviewer | Structured stop reason/log fields flow provider → live runner → serialized result, budget-capped trials are inconclusive, and the accepted spend/fairness lane plus 446-test Fit aggregate are green |
 | Release metadata and publish guard | Complete, independently accepted | Metadata writer + publish writer/reviewer + coordinator | 1.0.21 metadata and changelog are current; exact-main/exact-successful-Tests production guard and changelog-backed notes have no P0/P1 review findings; P2 credential/doc hardening is integrated |
-| Final verification and release | PR open; second remote Ubuntu repair active | Coordinator + expert writers/reviewer | Commit `c4aaa22e` passed all 11 fast lanes and all 19 clean PR-preflight lanes. Its required Ubuntu job proved the AppArmor/startup repair, then found that Bubblewrap's private tmpfs root remained writable beside the workspace and that the old POSIX-shm test mistook private creation for host leakage. The current repair remounts only the private root read-only and proves Linux shm name isolation while retaining the macOS denial; focused security/static checks are green. New committed gates and exact-SHA remote Ubuntu evidence remain |
+| Final verification and release | Follow-up ready to push | Coordinator + release/LFS reviewers | PR #267 merged as `7cf8fb62`; exact-main Tests, CodeQL, all platform/build lanes, and the required Ubuntu zero-spend lane are green. The exact graph archives are preserved in the validated `graph-artifacts-v1.0.21-7cf8fb62` prerelease. Commit `ca2b5799` makes the public inventory invariant at 8,772; its committed fast gate passed 8,775 tests with 92.16% coverage and its clean PR preflight passed all 16 lanes, including reproducible wheel/sdist and Twine. Independent review reproduced 8,772 with and without optional extras and accepted with no P0-P2. The narrow PR, merge, and fresh exact-main CI remain before tagging. |
 
 ## Open release blockers
 
@@ -96,22 +97,19 @@ verification is explicitly a non-adversarial trust boundary.
 
 ### P1 — must resolve or explicitly de-scope before release
 
-None outside the active Linux mount-boundary repair, whose authoritative Ubuntu
-evidence is still missing. PR run `31840406705`, job `94895906939`, proved that
-finding `bwrap` on `PATH` was insufficient on Ubuntu 24.04: AppArmor denied
-Bubblewrap's loopback setup with `Failed RTM_NEWADDR`, so three positive checks
-failed and seven denial checks had not proved their child started. The accepted
-repair keeps `--unshare-net` and the global user-namespace restriction, loads
-Ubuntu's packaged `bwrap-userns-restrict` profile, requires an exact child-start
-sentinel in every isolation test, and makes doctor/live setup run a bounded
-no-network canary before a campaign. PR run `31843023765`, job `94903820786`,
-then proved all sandbox children started and 8 of 10 boundaries passed. Its two
-failures were a stricter-policy gap, not demonstrated host escapes: the private
-tmpfs root allowed a same-spelled sibling write, and private `/dev/shm` allowed
-POSIX-shm creation. The current repair makes the private root read-only while
-preserving the workspace submount, and replaces the Linux creation-denial
-assumption with a same-name host/sandbox isolation proof. The exact committed
-SHA must pass that real Ubuntu lane before the release is eligible.
+One active blocker remains. `src/update_repo_stats.py` counted parametrized
+tests from module-level `pytest.importorskip` modules when optional extras were
+installed, but substituted only static test definitions when those extras were
+absent. This made the public inventory 8,795 locally and 8,771 in the clean
+Linux `[dev]` release environment; Hugging Face attempt 2 failed on that exact
+disagreement, and production publish runs the same check. The TDD repair
+normalizes every such module to its static definitions in both environments.
+Its focused regression, full stats test file, Ruff, and mypy are green; the
+generated inventory is now 8,772 because the repair adds one test. Commit
+`ca2b5799` passed the committed fast gate and all clean PR-preflight lanes, and
+independent review reproduced the same count in full-extra and clean `[dev]`
+environments. Follow-up review/merge and a new exact-main Tests success remain
+mandatory before tagging.
 
 The release also deliberately discloses that qualification did not include a
 paid provider call or a complete provider-plus-filesystem-MCP launch on this
@@ -245,14 +243,37 @@ be overwritten.
 
 ## Immediate next actions
 
-1. Commit the independently accepted Linux private-root/shm evidence repair and
-   run committed fast and PR-preflight gates on that exact history.
-2. Push PR #267 and require the repaired zero-spend Ubuntu lane, `unit-linux`,
-   CodeQL, and every aggregate check to be green on that exact SHA.
-3. Hand off the green PR for human merge. Build, tag, and publish only from the
-   resulting exact green `main` SHA.
+1. Push the independently accepted deterministic-stats follow-up and open the
+   narrow PR.
+2. Merge it only after its required checks pass;
+   require a fresh successful exact-main Tests run on the resulting merge.
+3. Tag that exact `main` as `v1.0.21`, let the hardened production workflow
+   publish, then verify PyPI, GitHub release assets/attestations, clean install,
+   and Hugging Face synchronization before declaring the release complete.
 
 ## Checkpoint log
+
+- 2026-08-16: Committed the deterministic inventory repair as `ca2b5799`.
+  Its committed fast gate passed all lanes, including 8,775 tests, 5 skips,
+  92.16% coverage, static checks, clean-host, and package contracts. The clean
+  PR preflight passed all 16 lanes; reproducible wheel SHA-256 is `07bbd80a...`,
+  reproducible sdist SHA-256 is `5f224abd...`, and Twine passed. Independent
+  refreeze repeated 206 release/docs/workflow tests and proved the normalized
+  8,772 inventory in both full-extra and fresh clean `[dev]` environments, with
+  no P0-P2 findings. Only remote review/merge and new exact-main evidence remain
+  before tagging.
+
+- 2026-08-16: PR #267 merged as exact main `7cf8fb62`. Its main-push Tests run
+  `31908356448`, CodeQL, Linux/macOS matrices, package/build lanes, and required
+  zero-spend Ubuntu sandbox job all succeeded. Published and independently
+  re-downloaded the validated graph cache prerelease
+  `graph-artifacts-v1.0.21-7cf8fb62`; full/runtime/catalog assets match their
+  committed size and SHA-256 contracts. Hugging Face retry hydrated from that
+  cache, then exposed a release-stat environment dependency: 8,795 tests with
+  optional extras versus 8,771 under clean `[dev]`. A failing-first regression
+  now drives AST-based module-level `importorskip` normalization; focused tests
+  and static checks pass, and the added regression makes the invariant public
+  count 8,772. No `v1.0.21` tag, GitHub release, or PyPI version exists yet.
 
 - 2026-08-15: Commit `c4aaa22e` passed all 11 committed fast lanes and all 19
   clean detached PR-preflight lanes, including 8,774 tests, 5 skips, 92.16%
