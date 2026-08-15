@@ -288,7 +288,7 @@ def test_an_invalid_pyproject_still_says_so(tmp_path: Path) -> None:
 # sentence `ctx fit` prints to the user, not only on a helper's return value.
 # --------------------------------------------------------------------------
 
-_CAN_BE_EVALUATED = "This repository can be evaluated"
+_CAN_BE_EVALUATED = "This repository has the static evidence needed to plan an evaluation"
 _CANNOT_BE_EVALUATED = "This repository cannot yet be evaluated honestly"
 
 
@@ -909,6 +909,23 @@ def test_test_files_that_declare_no_test_case_are_not_executable_tests(tmp_path:
     assert build_fit_profile(repo).is_fit_evaluable is False
 
 
+def test_a_generic_tests_directory_does_not_invent_pytest_for_a_node_repository(
+    tmp_path: Path,
+) -> None:
+    _write(
+        tmp_path / "package.json",
+        '{"scripts":{"test":"vitest run"},"devDependencies":{"vitest":"1.0.0"}}',
+    )
+    _write(tmp_path / "tests" / "example.test.js", "test('works', () => {});\n")
+
+    inventory = discover_verification(tmp_path)
+
+    test_commands = tuple(
+        command.command for command in inventory.commands if command.kind == "test"
+    )
+    assert test_commands == (("npm", "run", "test"),)
+
+
 def test_one_screen_never_both_blocks_on_tests_and_promises_evaluation(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -927,7 +944,7 @@ def test_one_screen_never_both_blocks_on_tests_and_promises_evaluation(
 
     assert _CAN_BE_EVALUATED not in printed
     assert _CANNOT_BE_EVALUATED in printed
-    assert "Tests are runnable" in printed  # still blocking, and now consistently
+    assert "Test verification is declared" in printed  # still blocking, and now consistently
 
 
 def test_a_real_test_case_keeps_the_repository_evaluable(tmp_path: Path) -> None:

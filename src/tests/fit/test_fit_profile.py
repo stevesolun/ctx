@@ -8,6 +8,7 @@ import pytest
 from ctx.cli.run import main as ctx_main
 from ctx.fit import build_fit_profile, discover_verification
 from ctx.fit.profile import FIT_PROFILE_SCHEMA
+from ctx.fit.verification import VERIFICATION_ENVIRONMENT_ASSUMPTION
 
 
 def _python_repo(tmp_path: Path, *, with_pytest: bool = True) -> Path:
@@ -101,6 +102,19 @@ def test_harness_dimension_is_never_claimed_evaluable(tmp_path: Path) -> None:
     assert "single harness" in harness.reason
 
 
+def test_only_the_skill_capability_set_is_varied_inside_one_experiment(tmp_path: Path) -> None:
+    profile = build_fit_profile(_with_tests(_python_repo(tmp_path)))
+    dimensions = {item.name: item for item in profile.dimensions}
+
+    assert [item.name for item in profile.dimensions if item.evaluable] == ["ctx-capability-set"]
+    assert "skills" in dimensions["ctx-capability-set"].reason
+    assert "agents and MCP servers are not" in dimensions["ctx-capability-set"].reason
+    assert dimensions["repository-instructions"].evaluable is False
+    assert "held constant" in dimensions["repository-instructions"].reason
+    assert dimensions["model"].evaluable is False
+    assert "held constant" in dimensions["model"].reason
+
+
 def test_detects_existing_ai_configuration(tmp_path: Path) -> None:
     repo = _python_repo(tmp_path)
     (repo / "AGENTS.md").write_text("# agents\n", encoding="utf-8")
@@ -115,6 +129,17 @@ def test_detects_existing_ai_configuration(tmp_path: Path) -> None:
     assert "AGENTS.md" in config.instruction_files
     assert ".mcp.json" in config.tool_config_files
     assert dict(config.capability_counts)["skills"] == 1
+
+
+def test_detects_applied_fit_configuration_as_current_tooling(tmp_path: Path) -> None:
+    repo = _python_repo(tmp_path)
+    target = repo / ".ctx" / "fit-configuration.json"
+    target.parent.mkdir(parents=True)
+    target.write_text("{}", encoding="utf-8")
+
+    config = build_fit_profile(repo).existing_ai_config
+
+    assert ".ctx/fit-configuration.json" in config.tool_config_files
 
 
 def test_node_repository_uses_the_lockfile_runner(tmp_path: Path) -> None:
@@ -182,6 +207,8 @@ def test_ctx_fit_subcommand_runs_without_spending(
     payload = json.loads(capsys.readouterr().out)
     assert payload["schema"] == FIT_PROFILE_SCHEMA
     assert payload["is_fit_evaluable"] is True
+    assert payload["verification"]["commands"][0]["validated"] is False
+    assert payload["verification_environment_assumption"] == VERIFICATION_ENVIRONMENT_ASSUMPTION
 
 
 def test_ctx_fit_dry_run_states_cost_is_not_calculable(
@@ -195,6 +222,7 @@ def test_ctx_fit_dry_run_states_cost_is_not_calculable(
     output = capsys.readouterr().out
     assert exit_code == 0
     assert "No model was invoked and nothing was spent." in output
+    assert "does not prove that code under test cannot deliberately" in output
     # The product must never present a meaningless figure: a scratch repository
     # yields no tasks, so there is no experiment to price and no dollar amount
     # is shown.

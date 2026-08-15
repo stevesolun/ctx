@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 from pathlib import Path
+import subprocess
 import tomllib
 from typing import Any
 
@@ -172,6 +174,74 @@ def _steps(job: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {str(step["name"]): step for step in steps if isinstance(step, dict) and "name" in step}
 
 
+def _run_production_guard(
+    tmp_path: Path,
+    *,
+    tag_sha: str,
+    main_sha: str,
+    expected_sha: str,
+    workflow_runs: list[dict[str, Any]],
+) -> subprocess.CompletedProcess[str]:
+    guard = _steps(_workflow()["jobs"]["build"])[
+        "Verify production tag is the exact tested main commit"
+    ]["run"]
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    git = bin_dir / "git"
+    git.write_text(
+        """#!/bin/sh
+set -eu
+if [ "$1" = "fetch" ]; then
+  exit 0
+fi
+if [ "$1" = "rev-parse" ] && [ "$2" = "HEAD^{commit}" ]; then
+  printf '%s\\n' "$FAKE_TAG_SHA"
+  exit 0
+fi
+if [ "$1" = "rev-parse" ] && [ "$2" = "refs/remotes/origin/main^{commit}" ]; then
+  printf '%s\\n' "$FAKE_MAIN_SHA"
+  exit 0
+fi
+exit 91
+""",
+        encoding="utf-8",
+    )
+    git.chmod(0o755)
+    gh = bin_dir / "gh"
+    gh.write_text(
+        """#!/bin/sh
+set -eu
+expected="api --method GET repos/acme/ctx/actions/workflows/test.yml/runs -f head_sha=$FAKE_TAG_SHA -f branch=main -f event=push -f per_page=100"
+if [ "$*" != "$expected" ]; then
+  printf 'unexpected gh arguments: %s\\n' "$*" >&2
+  exit 92
+fi
+printf '%s' "$FAKE_WORKFLOW_RUNS"
+""",
+        encoding="utf-8",
+    )
+    gh.chmod(0o755)
+    env = os.environ.copy()
+    env.update(
+        {
+            "EXPECTED_RELEASE_SHA": expected_sha,
+            "FAKE_MAIN_SHA": main_sha,
+            "FAKE_TAG_SHA": tag_sha,
+            "FAKE_WORKFLOW_RUNS": json.dumps({"workflow_runs": workflow_runs}),
+            "GITHUB_REPOSITORY": "acme/ctx",
+            "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
+        }
+    )
+    return subprocess.run(
+        ["bash", "-c", guard],
+        cwd=tmp_path,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
 def test_release_sbom_validator_accepts_resolved_all_extras_closure(
     tmp_path: Path,
 ) -> None:
@@ -311,7 +381,7 @@ def test_publish_workflow_resolves_all_extras_before_validated_sbom() -> None:
     install = steps["Smoke install all runtime extras"]["run"]
     generate = steps["Generate and validate CycloneDX runtime SBOM"]["run"]
 
-    assert build["permissions"] == {"contents": "read"}
+    assert build["permissions"] == {"actions": "read", "contents": "read"}
     assert "cyclonedx-bom==7.3.0" in steps["Install release tooling"]["run"]
     assert names.index("Smoke install wheel") < names.index("Smoke install all runtime extras")
     assert names.index("Smoke install all runtime extras") < names.index(
@@ -359,7 +429,7 @@ def test_attestation_covers_every_published_artifact_and_blocks_publish() -> Non
         "id-token": "write",
         "attestations": "write",
     }
-    assert jobs["build"]["permissions"] == {"contents": "read"}
+    assert jobs["build"]["permissions"] == {"actions": "read", "contents": "read"}
     assert publish["permissions"] == {"contents": "read", "id-token": "write"}
 
     provenance = attest_steps["Attest release provenance"]
@@ -397,6 +467,195 @@ def test_attestation_covers_every_published_artifact_and_blocks_publish() -> Non
     assert release_assets["needs"] == ["build", "attest"]
     assert "secrets." not in workflow_text
     assert "snyk" not in workflow_text.lower()
+
+
+def test_production_publish_requires_exact_main_sha_and_latest_successful_tests(
+    tmp_path: Path,
+) -> None:
+    sha = "a" * 40
+    result = _run_production_guard(
+        tmp_path,
+        tag_sha=sha,
+        main_sha=sha,
+        expected_sha=sha,
+        workflow_runs=[
+            {
+                "id": 41,
+                "run_number": 12,
+                "run_attempt": 1,
+                "head_sha": sha,
+                "head_branch": "main",
+                "event": "push",
+                "status": "completed",
+                "conclusion": "success",
+            }
+        ],
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert f"release provenance verified: sha={sha} tests_run_id=41" in result.stdout
+
+
+def test_production_publish_rejects_tag_that_is_not_exact_main_head(tmp_path: Path) -> None:
+    result = _run_production_guard(
+        tmp_path,
+        tag_sha="a" * 40,
+        main_sha="b" * 40,
+        expected_sha="a" * 40,
+        workflow_runs=[],
+    )
+
+    assert result.returncode != 0
+    assert "is not the exact origin/main head" in result.stderr
+
+
+def test_production_publish_rejects_checkout_that_differs_from_workflow_sha(
+    tmp_path: Path,
+) -> None:
+    result = _run_production_guard(
+        tmp_path,
+        tag_sha="a" * 40,
+        main_sha="a" * 40,
+        expected_sha="b" * 40,
+        workflow_runs=[],
+    )
+
+    assert result.returncode != 0
+    assert "does not match workflow SHA" in result.stderr
+
+
+def test_production_publish_rejects_latest_failed_test_run_even_after_older_success(
+    tmp_path: Path,
+) -> None:
+    sha = "c" * 40
+    common = {
+        "head_sha": sha,
+        "head_branch": "main",
+        "event": "push",
+        "status": "completed",
+    }
+    result = _run_production_guard(
+        tmp_path,
+        tag_sha=sha,
+        main_sha=sha,
+        expected_sha=sha,
+        workflow_runs=[
+            {
+                **common,
+                "id": 51,
+                "run_number": 20,
+                "run_attempt": 1,
+                "conclusion": "success",
+            },
+            {
+                **common,
+                "id": 52,
+                "run_number": 21,
+                "run_attempt": 1,
+                "conclusion": "failure",
+            },
+        ],
+    )
+
+    assert result.returncode != 0
+    assert "latest exact-SHA Tests workflow run is not successful" in result.stderr
+
+
+def test_production_publish_rejects_non_main_or_non_push_test_evidence(tmp_path: Path) -> None:
+    sha = "d" * 40
+    result = _run_production_guard(
+        tmp_path,
+        tag_sha=sha,
+        main_sha=sha,
+        expected_sha=sha,
+        workflow_runs=[
+            {
+                "id": 61,
+                "run_number": 22,
+                "run_attempt": 1,
+                "head_sha": sha,
+                "head_branch": "feature",
+                "event": "pull_request",
+                "status": "completed",
+                "conclusion": "success",
+            }
+        ],
+    )
+
+    assert result.returncode != 0
+    assert "no main-push Tests workflow run exists" in result.stderr
+
+
+def test_github_release_uses_exact_tagged_changelog_section(tmp_path: Path) -> None:
+    release_steps = _steps(_workflow()["jobs"]["release-assets"])
+    assert release_steps["Checkout release metadata"]["with"] == {
+        "lfs": False,
+        "persist-credentials": False,
+    }
+    extract = release_steps["Extract exact version notes from changelog"]["run"]
+    (tmp_path / "CHANGELOG.md").write_text(
+        """# Changelog
+
+## [Unreleased]
+
+- Future change.
+
+## [1.2.3] - 2026-08-14
+
+### Added
+
+- Useful shipped behavior.
+
+## [1.2.2] - 2026-08-01
+
+- Previous behavior.
+""",
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env["TAG_NAME"] = "v1.2.3"
+
+    result = subprocess.run(
+        ["bash", "-c", extract],
+        cwd=tmp_path,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    notes = (tmp_path / "release-notes.md").read_text(encoding="utf-8")
+    assert notes.startswith("## [1.2.3] - 2026-08-14")
+    assert "Useful shipped behavior." in notes
+    assert "Previous behavior." not in notes
+    upload = release_steps["Upload graph assets and SBOM to GitHub release"]["run"]
+    assert "--verify-tag" in upload
+    assert upload.count("--notes-file release-notes.md") == 2
+    assert '--notes "ctx $TAG_NAME"' not in upload
+
+
+def test_github_release_refuses_missing_version_changelog_section(tmp_path: Path) -> None:
+    release_steps = _steps(_workflow()["jobs"]["release-assets"])
+    extract = release_steps["Extract exact version notes from changelog"]["run"]
+    (tmp_path / "CHANGELOG.md").write_text(
+        "# Changelog\n\n## [Unreleased]\n\n- Future change.\n",
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env["TAG_NAME"] = "v1.2.3"
+
+    result = subprocess.run(
+        ["bash", "-c", extract],
+        cwd=tmp_path,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "expected one CHANGELOG.md section for 1.2.3, found 0" in result.stderr
 
 
 def test_release_keeps_existing_publish_gates_and_exposes_sbom() -> None:

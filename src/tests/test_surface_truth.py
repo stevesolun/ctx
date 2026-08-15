@@ -14,6 +14,7 @@ copy of the prose, so the doc cannot drift while the test stays green.
 
 from __future__ import annotations
 
+import hashlib
 import re
 import subprocess
 import tomllib
@@ -170,6 +171,34 @@ def test_docs_front_door_leads_with_ctx_fit() -> None:
     assert "ctx fit" in lead.lower(), "the docs home page never names the command"
 
 
+def test_release_front_doors_describe_1_0_21_without_old_install_claims() -> None:
+    """The release docs must not send a 1.0.21 user back to source or 1.0.20."""
+
+    version = _pyproject()["project"]["version"]
+    assert version == "1.0.21"
+
+    for surface in (README, DOCS / "index.md"):
+        text = _flat(surface.read_text(encoding="utf-8"))
+        assert "CTX Fit is not released yet" not in text
+        assert "not yet from PyPI" not in text
+        assert "1.0.20 installs" not in text
+        assert "contains none of CTX Fit" not in text
+        assert "pip install --upgrade claude-ctx" in text
+        assert "one coding-agent harness" in text
+        assert "selected test" in text
+        assert "verification authority" in text
+        assert "does not prove" in text
+        assert "already available in the repository" in text
+        assert "isolated home" in text.lower()
+        assert "without network access" in text
+        assert "live-provider trial" in text
+
+    changelog = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert "## [1.0.21] - 2026-08-14" in changelog
+    assert "compare/v1.0.20...v1.0.21" in changelog
+    assert "[1.0.21]: https://github.com/stevesolun/ctx/releases/tag/v1.0.21" in changelog
+
+
 def test_section_landing_pages_point_at_the_product() -> None:
     """A reader landing mid-site from a search result must not be stranded.
 
@@ -242,45 +271,61 @@ def _observed_apply_outcomes(workspace: Path) -> dict[str, dict[str, object]]:
     """Run the real planner and writer, and record what git can see afterwards.
 
     The documentation assertions below are written against this measurement
-    rather than against a remembered fact. `--apply` writes `AGENTS.md`, whose
-    action depends on whether the repository already had one; a `create` lands
-    untracked, where `git diff` and `git checkout` -- the pair the docs used to
-    prescribe unconditionally -- do nothing and fail respectively. If `--apply`
-    ever starts staging what it writes, this dictionary changes and the doc
-    assertions fail rather than quietly describing the old behaviour.
+    rather than against a remembered fact. `--apply` writes the CTX-owned
+    `.ctx/fit-configuration.json` sidecar, whose action depends on whether an
+    owned manifest already exists. A `create` lands untracked, where `git diff`
+    and `git checkout` -- the pair the CLI still prints unconditionally -- do
+    nothing and fail respectively. If `--apply` ever starts staging what it
+    writes, this dictionary changes and the doc assertions fail rather than
+    quietly describing the old behaviour.
     """
 
     from ctx.fit.apply import apply_plan, plan_apply
-    from ctx.fit.candidates import CandidateConfiguration
+    from ctx.fit.candidates import CapabilityMaterial, CandidateConfiguration
     from ctx.fit.recommend import RankedCandidate, Recommendation
 
-    candidate = CandidateConfiguration(
-        candidate_id="lean",
-        role="recommended",
-        capability_ids=("skill:ctx-python-testing",),
-        model=None,
-        instructions=(),
-        selection_reason="the single highest-ranked capability",
-    )
-    recommendation = Recommendation(
-        schema="ctx.fit.recommendation-v1",
-        verdict="recommend-change",
-        winner_id="lean",
-        ranked=(
-            RankedCandidate(
-                candidate_id="lean",
-                reliability=1.0,
-                verified=9,
-                scored=9,
-                total_cost_usd=0.45,
-                capability_count=1,
-                qualified=True,
+    capability_id = "skill:ctx-python-testing"
+
+    def candidate(body: str) -> CandidateConfiguration:
+        material = CapabilityMaterial.from_content(
+            capability_id=capability_id,
+            delivery_mode="task-user-context",
+            source_identity=f"package:ctx.assets/runtime-availability.json#{capability_id}",
+            catalog_entry_digest=hashlib.sha256(b"surface-truth-catalog-entry").hexdigest(),
+            content=body,
+        )
+        return CandidateConfiguration(
+            candidate_id="lean",
+            role="recommended",
+            capability_ids=(capability_id,),
+            model="openai/test-model",
+            instructions=(),
+            selection_reason="the single highest-ranked capability",
+            capability_materials=(material,),
+        )
+
+    def recommendation() -> Recommendation:
+        return Recommendation(
+            schema="ctx.fit.recommendation-v1",
+            verdict="recommend-change",
+            winner_id="lean",
+            ranked=(
+                RankedCandidate(
+                    candidate_id="lean",
+                    reliability=1.0,
+                    verified=9,
+                    scored=9,
+                    total_cost_usd=0.45,
+                    capability_count=1,
+                    qualified=True,
+                ),
             ),
-        ),
-        reasoning=("lean verified 9/9",),
-        limitations=("only 3 tasks were evaluated.",),
-        confidence="medium",
-    )
+            reasoning=("lean verified 9/9",),
+            limitations=("only 3 tasks were evaluated.",),
+            confidence="medium",
+        )
+
+    winning_candidate = candidate("# Python testing\n\nRun the repository's own tests.\n")
 
     observed: dict[str, dict[str, object]] = {}
     for name, preexisting in (("without", False), ("with", True)):
@@ -290,12 +335,20 @@ def _observed_apply_outcomes(workspace: Path) -> dict[str, dict[str, object]]:
         _git(repo, "config", "user.email", "surface-truth@example.invalid")
         _git(repo, "config", "user.name", "surface truth")
         (repo / "README.md").write_text("demo\n", encoding="utf-8")
-        if preexisting:
-            (repo / "AGENTS.md").write_text("# Agents\n\nhand written\n", encoding="utf-8")
         _git(repo, "add", "-A")
         _git(repo, "commit", "-qm", "init")
 
-        plan = plan_apply(recommendation, (candidate,), repo_path=repo, run_id="test")
+        if preexisting:
+            previous_candidate = candidate("# Python testing\n\nUse pytest.\n")
+            previous_plan = plan_apply(
+                recommendation(), (previous_candidate,), repo_path=repo, run_id="previous"
+            )
+            assert previous_plan.can_apply, previous_plan.explanation
+            apply_plan(previous_plan, repo)
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-qm", "existing CTX Fit configuration")
+
+        plan = plan_apply(recommendation(), (winning_candidate,), repo_path=repo, run_id="test")
         assert plan.can_apply, plan.explanation
         (artifact,) = plan.artifacts
         apply_plan(plan, repo)
@@ -304,7 +357,9 @@ def _observed_apply_outcomes(workspace: Path) -> dict[str, dict[str, object]]:
         # the review commands after it would report an empty diff for the
         # `modify` case too and hide the difference this test exists to pin.
         shows_in_diff = bool(_git(repo, "diff").stdout.strip())
-        shows_in_status = artifact.path in _git(repo, "status", "--short").stdout
+        shows_in_status = (
+            artifact.path in _git(repo, "status", "--short", "--untracked-files=all").stdout
+        )
         checkout = _git(repo, "checkout", "--", artifact.path)
         observed[artifact.action] = {
             "path": artifact.path,
@@ -329,7 +384,7 @@ def test_apply_writes_a_created_file_that_git_checkout_cannot_undo(tmp_path: Pat
         f"`--apply` no longer produces both a create and a modify: {observed}"
     )
     assert observed["create"] == {
-        "path": "AGENTS.md",
+        "path": ".ctx/fit-configuration.json",
         "git_diff_shows_it": False,
         "git_checkout_undoes_it": False,
         "git_status_shows_it": True,
@@ -345,32 +400,30 @@ def test_documented_undo_for_apply_matches_the_action_it_documents(
 ) -> None:
     """The undo a surface prescribes has to be the undo that works.
 
-    Both surfaces told the reader to review with `git diff` and discard with
-    `git checkout` on the file `--apply` names. That is true only when the file
-    was already tracked; on a repository with no `AGENTS.md` -- the one CTX Fit's
-    own scorer flags first -- the write is a create, `git diff` prints nothing
-    and `git checkout` exits 1 with `pathspec ... did not match`.
+    A newly created sidecar is untracked, so plain `git diff` does not show it
+    and version control cannot restore it. An existing tracked sidecar is a
+    normal modification and can be reviewed and restored through git.
     """
 
     observed = _observed_apply_outcomes(tmp_path)
     apply_half, _ = _write_section(surface)
 
     for action in sorted(observed):
-        assert f"{action}: AGENTS.md" in apply_half, (
+        assert f"{action}: .ctx/fit-configuration.json" in apply_half, (
             f"{surface} does not distinguish the `{action}` case, but `--apply` "
             f"produces it and it is undone differently: {observed[action]}"
         )
 
     assert "untracked" in apply_half, (
-        f"{surface} does not say that a created AGENTS.md is untracked, which is "
+        f"{surface} does not say that a created sidecar is untracked, which is "
         "the whole reason `git checkout` cannot discard it"
     )
     assert "git status" in apply_half, (
         f"{surface} names no command that shows an untracked create; `git diff` does not"
     )
-    assert "did not match any file(s) known to git" in apply_half, (
-        f"{surface} does not show the reader the error `git checkout` actually "
-        "prints on a created file, so they cannot recognise it"
+    assert "cannot recover an untracked file" in apply_half, (
+        f"{surface} does not tell the reader that version control cannot restore "
+        "an untracked sidecar"
     )
 
 
@@ -412,14 +465,12 @@ def test_docs_qualify_the_undo_line_that_ctx_fit_prints_after_a_write() -> None:
     handler = _handle_apply_source()
     unconditional = "git checkout" in handler and "untracked" not in handler
 
+    assert unconditional, "the CLI now qualifies its undo advice; remove the docs caveat test"
     for surface in WRITE_SURFACES:
         apply_half, _ = _write_section(surface)
-        qualified = "without qualifying it" in apply_half
-        assert qualified is unconditional, (
-            f"{surface} and the CLI disagree: `_handle_apply` prints its "
-            f"`git checkout` advice unconditionally={unconditional}, but the "
-            f"page carries the caveat={qualified}. Either the caveat is missing "
-            "or the CLI was fixed and the caveat is now stale."
+        assert "cannot recover an untracked file" in apply_half, (
+            f"{surface} does not qualify the unconditional `git checkout` advice "
+            "for a newly created sidecar"
         )
 
 
@@ -489,10 +540,11 @@ def test_fit_help_and_docs_agree_that_pr_needs_gh() -> None:
 def test_fit_package_never_touches_the_user_home_directory() -> None:
     """The dashboard and docs both claim `ctx fit` writes nothing to `~/.claude`.
 
-    Verified at the source rather than by prose: no module under `ctx/fit/`
-    resolves the home directory at all, so it cannot write there. The
-    `.claude/...` string literals in `profile.py` are repository-relative reads
-    of the *analyzed* repository and are excluded by requiring a home lookup.
+    The sandbox and live runner resolve the ambient home only to deny untrusted
+    trial code access to it and to prevent an executable shim there from
+    widening the readable runtime roots. The `.claude/...` string literals in
+    `profile.py` are repository-relative reads of the *analyzed* repository and
+    are excluded by requiring a home lookup.
     """
 
     offenders = [
@@ -500,10 +552,15 @@ def test_fit_package_never_touches_the_user_home_directory() -> None:
         for path in sorted((REPO_ROOT / "src" / "ctx" / "fit").glob("*.py"))
         if re.search(r"Path\.home\(\)|expanduser|os\.environ\[.HOME.\]", path.read_text("utf-8"))
     ]
-    assert offenders == [], (
-        "the dashboard and docs claim `ctx fit` writes nothing under ~/.claude, "
-        f"but these modules resolve the home directory: {offenders}"
+    assert offenders == ["src/ctx/fit/live_runner.py", "src/ctx/fit/sandbox.py"], (
+        f"home lookups are permitted only at the trial deny boundaries; found: {offenders}"
     )
+    live_runner = (REPO_ROOT / "src/ctx/fit/live_runner.py").read_text(encoding="utf-8")
+    sandbox = (REPO_ROOT / "src/ctx/fit/sandbox.py").read_text(encoding="utf-8")
+    assert "private_roots = (Path.home().resolve()" in live_runner
+    assert "private_roots = (_real(Path.home())" in sandbox
+    assert '"--tmpfs"' in sandbox
+    assert "(deny file-read*" in sandbox
 
 
 def test_dashboard_home_says_it_holds_no_fit_state() -> None:

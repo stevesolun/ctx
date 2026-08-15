@@ -9,8 +9,9 @@
 > below out of scope for the product.
 >
 > Nothing in this file describes the current product, the current critical
-> path, or the current next actions. For those, read `AGENTS.md` and
-> `docs/ctx-fit/`. This file is retained only as a record of what was built,
+> path, or the current next actions. For those, read `AGENTS.md` and the live
+> [`docs/ctx-fit/STATE.md`](docs/ctx-fit/STATE.md) checkpoint. This file is
+> retained only as a record of what was built,
 > what was accepted, and on what evidence — it is a real engineering log and is
 > useful when working on the code under `src/ctx/engine/` and
 > `src/ctx/runtime/`, which still exists.

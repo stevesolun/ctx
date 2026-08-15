@@ -32,25 +32,28 @@ to change nothing. A pull request is a stronger claim than a file write, so it
 refuses on all of those too, and on more besides.
 
 **Nothing the user wrote is destroyed, and nothing outside the repository is
-touched.** The generated document lives inside a delimited block that CTX Fit
-owns; every other byte of an existing file is carried through untouched. A
-destination that is a symbolic link is refused rather than followed: writing
-through it would edit a file the preview never named, possibly outside the
+touched.** The exact winner is a CTX-owned, content-addressed sidecar; harness
+instruction files such as ``AGENTS.md`` are never changed. A destination or
+ancestor that is a symbolic link is refused rather than followed: writing
+through it would edit a path the preview never named, possibly outside the
 repository entirely, where git cannot show it and the PR's rollback advice
 cannot undo it (FITBUG-010, FITBUG-011). The same principle gates the pull
 request: uncommitted work CTX Fit did not write is never carried into a CTX Fit
-branch or commit. That is decided by content, not by filename — `git add --
-AGENTS.md` stages a whole file, so a user's unrelated edit *inside* a file CTX
-Fit writes has to stop the pull request just as their unrelated file does.
+branch or commit.
 
 **Nothing is merged.** This opens a pull request. A human merges.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import shlex
+import shutil
+import stat
 import subprocess
+import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -60,6 +63,8 @@ from ctx.fit.candidates import CandidateConfiguration
 from ctx.fit.recommend import Recommendation
 
 APPLY_SCHEMA = "ctx.fit.apply-v1"
+APPLIED_CONFIGURATION_SCHEMA = "ctx.fit.applied-configuration-v1"
+CONFIGURATION_MANIFEST_PATH = ".ctx/fit-configuration.json"
 
 BRANCH_PREFIX = "ctx-fit"
 
@@ -75,6 +80,7 @@ ApplyRefusal = Literal[
     "no-verdict",
     "keep-current",
     "winner-not-found",
+    "winner-not-reproducible",
     "unsafe-destination",
 ]
 
@@ -91,6 +97,9 @@ REFUSAL_EXPLANATION: dict[ApplyRefusal, str] = {
     "no-verdict": "the evidence does not support a change, so there is nothing to apply",
     "keep-current": ("your current setup already won, so the correct action is to change nothing"),
     "winner-not-found": "the winning candidate is not among the configurations supplied",
+    "winner-not-reproducible": (
+        "the winning candidate does not contain the exact configuration CTX Fit evaluated"
+    ),
     "unsafe-destination": (
         "a file this change would write cannot be written safely, and CTX Fit will "
         "not edit a file it did not name"
@@ -111,18 +120,46 @@ class Artifact:
     content: str
     action: Literal["create", "modify"]
     reason: str
+    ownership: Literal["owned-block", "whole-file"] = "whole-file"
     #: Bytes of pre-existing, user-authored content this artifact carries
     #: through unchanged, ignoring surrounding blank space and any block CTX
     #: Fit itself wrote on an earlier run. Zero on a create.
     preserved_bytes: int = 0
+    #: Digest of the exact pre-preview bytes, or None when the path was absent.
+    #: Applying a stale preview is refused instead of overwriting intervening
+    #: user edits.
+    expected_preimage_sha256: str | None = None
 
     def to_dict(self) -> dict[str, object]:
+        encoded = self.content.encode("utf-8")
         return {
             "path": self.path,
             "action": self.action,
             "reason": self.reason,
-            "bytes": len(self.content.encode("utf-8")),
+            "bytes": len(encoded),
+            "content_sha256": hashlib.sha256(encoded).hexdigest(),
+            "content": self.content,
             "preserved_bytes": self.preserved_bytes,
+            "ownership": self.ownership,
+            "expected_preimage_sha256": self.expected_preimage_sha256,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class RequiredInputPreimage:
+    """One immutable repository input the preview and apply must share."""
+
+    path: str
+    content_sha256: str
+    file_type: Literal["regular-file"] = "regular-file"
+    allow_symlinks: Literal[False] = False
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "path": self.path,
+            "content_sha256": self.content_sha256,
+            "file_type": self.file_type,
+            "allow_symlinks": self.allow_symlinks,
         }
 
 
@@ -135,6 +172,7 @@ class ApplyPlan:
     branch: str
     pr_title: str
     pr_body: str
+    required_input_preimages: tuple[RequiredInputPreimage, ...] = ()
     refusal: ApplyRefusal | None = None
     #: What, specifically, was wrong on this run. The refusal names the class of
     #: problem; a class alone left users guessing which of several causes fired.
@@ -157,6 +195,7 @@ class ApplyPlan:
             "artifacts": [item.to_dict() for item in self.artifacts],
             "branch": self.branch,
             "pr_title": self.pr_title,
+            "required_input_preimages": [item.to_dict() for item in self.required_input_preimages],
             "can_apply": self.can_apply,
             "refusal": self.refusal,
             "refusal_detail": self.refusal_detail,
@@ -167,7 +206,8 @@ class ApplyPlan:
 def _owned_block(body: str) -> str:
     """Wrap generated prose in the markers that say who owns it."""
 
-    return f"{OWNED_BLOCK_START}\n{body.strip()}\n{OWNED_BLOCK_END}\n"
+    separator = "" if body.endswith("\n") else "\n"
+    return f"{OWNED_BLOCK_START}\n{body}{separator}{OWNED_BLOCK_END}\n"
 
 
 def _merge_owned_block(existing: str, block: str) -> str:
@@ -180,16 +220,23 @@ def _merge_owned_block(existing: str, block: str) -> str:
     recover, while the preview said only "modify: AGENTS.md" (FITBUG-011).
     """
 
-    if not existing.strip():
+    if not existing:
         return block
 
     start = existing.find(OWNED_BLOCK_START)
     end = existing.find(OWNED_BLOCK_END, start + 1) if start != -1 else -1
     if start != -1 and end != -1:
         head = existing[:start]
-        tail = existing[end + len(OWNED_BLOCK_END) :].lstrip("\n")
+        tail_start = end + len(OWNED_BLOCK_END)
+        # `_owned_block` owns one newline after its closing marker. Remove
+        # exactly that byte when replacing the block; every later newline or
+        # space belongs to the user and must survive byte for byte.
+        if existing[tail_start : tail_start + 1] == "\n":
+            tail_start += 1
+        tail = existing[tail_start:]
         return f"{head}{block}{tail}"
-    return f"{existing.rstrip()}\n\n{block}"
+    separator = "" if existing.endswith("\n\n") else "\n" if existing.endswith("\n") else "\n\n"
+    return f"{existing}{separator}{block}"
 
 
 def _user_authored(existing: str) -> str:
@@ -225,45 +272,110 @@ def _read_destination(target: Path) -> tuple[str, str | None]:
     if not target.is_file():
         return "", f"{target.name} is not a regular file"
     try:
-        return target.read_text(encoding="utf-8"), None
+        with target.open("r", encoding="utf-8", newline="") as handle:
+            content = handle.read()
+        return content, None
     except (OSError, UnicodeDecodeError) as exc:
         # Content that cannot be read cannot be preserved, and a file whose
         # contents are unknown must not be replaced.
         return "", f"{target.name} could not be read, so its contents cannot be preserved: {exc}"
 
 
-def _agents_md(winner: CandidateConfiguration, recommendation: Recommendation) -> str:
-    ranked = next(
-        (item for item in recommendation.ranked if item.candidate_id == winner.candidate_id),
-        None,
+def _unsafe_owned_markers(existing: str) -> str | None:
+    """Reject any reserved-marker shape except zero blocks or one exact block."""
+
+    starts = existing.count(OWNED_BLOCK_START)
+    ends = existing.count(OWNED_BLOCK_END)
+    if starts == ends == 0:
+        return None
+    start = existing.find(OWNED_BLOCK_START)
+    end = existing.find(OWNED_BLOCK_END)
+    if starts == ends == 1 and start < end:
+        return None
+    return (
+        "AGENTS.md has unbalanced, nested, or multiple reserved CTX Fit block markers; "
+        "CTX Fit cannot tell generated bytes from user-authored bytes"
     )
-    lines = [
-        "# AI coding configuration",
-        "",
-        "This configuration was selected by CTX Fit: it was the cheapest setup that",
-        "reliably passed real tasks from this repository's own history.",
-        "",
-        "## Capabilities",
-        "",
-    ]
-    if winner.capability_ids:
-        lines.extend(f"- `{capability}`" for capability in winner.capability_ids)
-    else:
-        lines.append("- none; the repository's existing setup was sufficient")
-    lines.extend(["", "## Evidence", ""])
-    if ranked is not None:
-        lines.append(
-            f"- verified {ranked.verified}/{ranked.scored} trials"
-            + (f" at ${ranked.total_cost_usd}" if ranked.total_cost_usd is not None else "")
-        )
-    lines.extend(f"- {line}" for line in recommendation.reasoning)
-    lines.extend(["", f"Confidence: {recommendation.confidence}.", ""])
-    if recommendation.limitations:
-        lines.append("## Limitations")
-        lines.append("")
-        lines.extend(f"- {line}" for line in recommendation.limitations)
-        lines.append("")
-    return "\n".join(lines)
+
+
+def _manifest_content(winner: CandidateConfiguration) -> str:
+    payload = {
+        "schema": APPLIED_CONFIGURATION_SCHEMA,
+        "configuration_hash": winner.configuration_hash,
+        "candidate": winner.to_dict(),
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+
+
+def _is_owned_manifest(existing: str) -> bool:
+    try:
+        payload = json.loads(existing)
+    except json.JSONDecodeError:
+        return False
+    return (
+        isinstance(payload, dict)
+        and payload.get("schema") == APPLIED_CONFIGURATION_SCHEMA
+        and isinstance(payload.get("configuration_hash"), str)
+        and isinstance(payload.get("candidate"), dict)
+    )
+
+
+def _preimage_digest(existing: str, *, exists: bool) -> str | None:
+    if not exists:
+        return None
+    return hashlib.sha256(existing.encode("utf-8")).hexdigest()
+
+
+def _symlinked_parent(root: Path, relative: Path) -> Path | None:
+    """First symlink between *root* and a destination's parent, if any."""
+
+    current = root
+    for part in relative.parent.parts:
+        current = current / part
+        if current.is_symlink():
+            return current
+        if current.exists() and not current.is_dir():
+            break
+    return None
+
+
+def _instruction_preimage_error(root: Path, winner: CandidateConfiguration) -> str:
+    """Why the repository no longer matches evaluated instruction bytes."""
+
+    for material in winner.instruction_materials:
+        relative = Path(material.path)
+        if symlink := _symlinked_parent(root, relative):
+            return f"{material.path} now traverses the symbolic link {symlink.name}"
+        target = root / relative
+        if not target.is_file() or target.is_symlink():
+            return f"{material.path} is no longer the evaluated regular file"
+        content, unsafe = _read_destination(target)
+        if unsafe is not None:
+            return f"{material.path} cannot be verified: {unsafe}"
+        digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        if digest != material.content_sha256:
+            return f"{material.path} changed after the winning configuration was evaluated"
+    return ""
+
+
+def _required_input_error(root: Path, required: RequiredInputPreimage) -> str:
+    """Why an approved required input no longer has its previewed bytes."""
+
+    relative = Path(required.path)
+    if relative.is_absolute() or ".." in relative.parts:
+        return f"{required.path} is not a safe repository-relative input path"
+    if symlink := _symlinked_parent(root, relative):
+        return f"{required.path} now traverses the symbolic link {symlink.name}"
+    target = root / relative
+    if target.is_symlink() or not target.is_file():
+        return f"{required.path} is no longer the previewed regular file"
+    content, unsafe = _read_destination(target)
+    if unsafe is not None:
+        return f"{required.path} cannot be verified: {unsafe}"
+    digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    if digest != required.content_sha256:
+        return f"{required.path} changed after the preview was created"
+    return ""
 
 
 def _pr_body(winner: CandidateConfiguration, recommendation: Recommendation) -> str:
@@ -275,6 +387,24 @@ def _pr_body(winner: CandidateConfiguration, recommendation: Recommendation) -> 
         "### Winning configuration",
         "",
         f"`{winner.candidate_id}` — {winner.selection_reason}",
+        "",
+        f"- Model: `{winner.model}`",
+        "- Repository instruction material: "
+        + (
+            ", ".join(
+                f"`{item.path}` (`{item.content_sha256}`)" for item in winner.instruction_materials
+            )
+            or "none"
+        ),
+        f"- Configuration hash: `{winner.configuration_hash}`",
+        "- Capability material: "
+        + (
+            ", ".join(
+                f"`{item.capability_id}` (`{item.content_sha256}`)"
+                for item in winner.capability_materials
+            )
+            or "none"
+        ),
         "",
         "### How candidates compared",
         "",
@@ -351,21 +481,38 @@ def plan_apply(
     )
     if winner is None:
         return refuse("winner-not-found")
-
+    if error := winner.reproducibility_error:
+        return refuse("winner-not-reproducible", error)
     root = Path(repo_path)
-    target = root / "AGENTS.md"
-    existing, unsafe = _read_destination(target)
-    if unsafe is not None:
-        return refuse("unsafe-destination", unsafe)
+    if error := _instruction_preimage_error(root, winner):
+        return refuse("winner-not-reproducible", error)
 
-    block = _owned_block(_agents_md(winner, recommendation))
+    manifest_target = root / CONFIGURATION_MANIFEST_PATH
+    if symlink := _symlinked_parent(root, Path(CONFIGURATION_MANIFEST_PATH)):
+        return refuse(
+            "unsafe-destination",
+            f"{CONFIGURATION_MANIFEST_PATH} has the symbolic-link parent {symlink.name}",
+        )
+    manifest_existing, unsafe = _read_destination(manifest_target)
+    if unsafe is not None:
+        return refuse("unsafe-destination", f"{CONFIGURATION_MANIFEST_PATH}: {unsafe}")
+    if manifest_target.exists() and not _is_owned_manifest(manifest_existing):
+        return refuse(
+            "unsafe-destination",
+            f"{CONFIGURATION_MANIFEST_PATH} exists but is not a CTX Fit "
+            "applied-configuration manifest",
+        )
+
     artifacts = (
         Artifact(
-            path="AGENTS.md",
-            content=_merge_owned_block(existing, block),
-            action="modify" if target.is_file() else "create",
-            reason="records the winning capability set and the evidence behind it",
-            preserved_bytes=len(_user_authored(existing).strip().encode("utf-8")),
+            path=CONFIGURATION_MANIFEST_PATH,
+            content=_manifest_content(winner),
+            action="modify" if manifest_target.is_file() else "create",
+            reason="machine-readable content-addressed winning configuration for a harness",
+            ownership="whole-file",
+            expected_preimage_sha256=_preimage_digest(
+                manifest_existing, exists=manifest_target.exists()
+            ),
         ),
     )
 
@@ -375,18 +522,68 @@ def plan_apply(
         branch=branch,
         pr_title=title,
         pr_body=_pr_body(winner, recommendation),
+        required_input_preimages=tuple(
+            RequiredInputPreimage(path=item.path, content_sha256=item.content_sha256)
+            for item in winner.instruction_materials
+        ),
     )
 
 
-def _write_atomically(destination: Path, content: str) -> None:
-    """Replace a file in one step, so an interrupted write cannot truncate it."""
+@dataclass(frozen=True, slots=True)
+class _StagedWrite:
+    artifact: Artifact
+    destination: Path
+    scratch: Path
+    backup: Path | None
 
-    scratch = destination.with_name(f".{destination.name}.ctx-fit.tmp")
+
+def _temporary_sibling(destination: Path, suffix: str) -> tuple[int, Path]:
+    file_descriptor, name = tempfile.mkstemp(
+        prefix=f".{destination.name}.ctx-fit-",
+        suffix=suffix,
+        dir=destination.parent,
+    )
+    return file_descriptor, Path(name)
+
+
+def _stage_write(artifact: Artifact, destination: Path) -> _StagedWrite:
+    """Prepare replacement and rollback bytes without changing the destination."""
+
+    file_descriptor, scratch = _temporary_sibling(destination, ".tmp")
+    backup: Path | None = None
     try:
-        scratch.write_text(content, encoding="utf-8")
-        os.replace(scratch, destination)
-    finally:
+        with os.fdopen(file_descriptor, "w", encoding="utf-8", newline="") as handle:
+            handle.write(artifact.content)
+        if destination.exists():
+            os.chmod(scratch, stat.S_IMODE(destination.stat().st_mode))
+            backup_descriptor, backup = _temporary_sibling(destination, ".bak")
+            os.close(backup_descriptor)
+            shutil.copy2(destination, backup)
+        else:
+            # The applied manifest can contain organization-owned instructions
+            # and capability material. Keep a newly created file private; Git
+            # can still review its bytes without granting other local users
+            # access through the working tree.
+            os.chmod(scratch, 0o600)
+        return _StagedWrite(artifact, destination, scratch, backup)
+    except BaseException:
         scratch.unlink(missing_ok=True)
+        if backup is not None:
+            backup.unlink(missing_ok=True)
+        raise
+
+
+def _commit_staged_write(staged: Path, destination: Path) -> None:
+    """Single replacement seam, injectable in the transaction failure test."""
+
+    os.replace(staged, destination)
+
+
+def _rollback_committed_write(staged: _StagedWrite) -> None:
+    if staged.backup is None:
+        staged.destination.unlink(missing_ok=True)
+    else:
+        os.replace(staged.backup, staged.destination)
 
 
 def apply_plan(plan: ApplyPlan, repo_path: str | Path) -> tuple[str, ...]:
@@ -406,25 +603,72 @@ def apply_plan(plan: ApplyPlan, repo_path: str | Path) -> tuple[str, ...]:
 
     root = Path(repo_path)
     root_resolved = root.resolve()
-    written: list[str] = []
+    for required in plan.required_input_preimages:
+        if error := _required_input_error(root, required):
+            raise ValueError(f"refusing stale required input: {error}")
+    destinations: list[tuple[Artifact, Path]] = []
     for artifact in plan.artifacts:
         relative = Path(artifact.path)
         if relative.is_absolute() or ".." in relative.parts:
             raise ValueError(f"refusing to write outside the repository: {artifact.path}")
 
         destination = root / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
         if destination.is_symlink():
             raise ValueError(
                 f"refusing to write through the symbolic link {artifact.path}: it would "
                 f"change {os.readlink(destination)}, which this plan never named"
             )
+        if symlink := _symlinked_parent(root, relative):
+            raise ValueError(
+                f"refusing to write {artifact.path}: its parent {symlink.name} is a symbolic link"
+            )
         if not destination.parent.resolve().is_relative_to(root_resolved):
             raise ValueError(f"refusing to write outside the repository: {artifact.path}")
 
-        _write_atomically(destination, artifact.content)
-        written.append(artifact.path)
-    return tuple(written)
+        current, unsafe = _read_destination(destination)
+        if unsafe is not None:
+            raise ValueError(f"refusing unsafe destination {artifact.path}: {unsafe}")
+        current_digest = _preimage_digest(current, exists=destination.exists())
+        if current_digest != artifact.expected_preimage_sha256:
+            raise ValueError(
+                f"refusing to write {artifact.path}: it changed after the preview was created"
+            )
+        destinations.append((artifact, destination))
+
+    created_parents: list[Path] = []
+    staged_writes: list[_StagedWrite] = []
+    committed: list[_StagedWrite] = []
+    try:
+        for artifact, destination in destinations:
+            if not destination.parent.exists():
+                destination.parent.mkdir(parents=True)
+                created_parents.append(destination.parent)
+            if symlink := _symlinked_parent(root, Path(artifact.path)):
+                raise ValueError(
+                    f"refusing to write {artifact.path}: its parent {symlink.name} is a "
+                    "symbolic link"
+                )
+            staged_writes.append(_stage_write(artifact, destination))
+
+        for staged in staged_writes:
+            _commit_staged_write(staged.scratch, staged.destination)
+            committed.append(staged)
+    except BaseException:
+        for staged in reversed(committed):
+            _rollback_committed_write(staged)
+        raise
+    finally:
+        for staged in staged_writes:
+            staged.scratch.unlink(missing_ok=True)
+            if staged.backup is not None:
+                staged.backup.unlink(missing_ok=True)
+        for parent in reversed(created_parents):
+            try:
+                parent.rmdir()
+            except OSError:
+                pass
+
+    return tuple(artifact.path for artifact, _destination in destinations)
 
 
 # --------------------------------------------------------------------------
@@ -685,14 +929,19 @@ def _unrelated_changes(
     and those coincide only when `ctx fit` was run from the top of the tree.
     """
 
-    ours = {(plan_root / artifact.path).resolve() for artifact in plan.artifacts}
+    ours = {(plan_root / artifact.path).resolve(): artifact for artifact in plan.artifacts}
     unrelated: list[str] = []
     for path in _changed_paths(status_output):
         absolute = (repo_root / path).resolve()
-        if absolute in ours and _is_ctx_fit_output(
-            _worktree_content(absolute), _committed_content(path, repo_root=repo_root, run=run)
-        ):
-            continue
+        artifact = ours.get(absolute)
+        if artifact is not None:
+            worktree = _worktree_content(absolute)
+            if artifact.ownership == "whole-file" and worktree == artifact.content:
+                continue
+            if artifact.ownership == "owned-block" and _is_ctx_fit_output(
+                worktree, _committed_content(path, repo_root=repo_root, run=run)
+            ):
+                continue
         unrelated.append(path)
     return tuple(unrelated)
 
@@ -849,9 +1098,11 @@ def open_pull_request(
 
 
 __all__ = [
+    "APPLIED_CONFIGURATION_SCHEMA",
     "APPLY_SCHEMA",
     "BRANCH_PREFIX",
     "COMMAND_TIMEOUT_SECONDS",
+    "CONFIGURATION_MANIFEST_PATH",
     "DEFAULT_REMOTE",
     "OWNED_BLOCK_END",
     "OWNED_BLOCK_START",
@@ -865,6 +1116,7 @@ __all__ = [
     "PullRequestPlan",
     "PullRequestRefusal",
     "PullRequestResult",
+    "RequiredInputPreimage",
     "apply_plan",
     "open_pull_request",
     "plan_apply",

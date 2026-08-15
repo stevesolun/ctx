@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -10,12 +12,19 @@ import pytest
 import ctx.fit.execution as execution_module
 from ctx.cli.run import main as ctx_main
 from ctx.engine.planner import BoundedCapabilityPlanner
-from ctx.fit.candidates import CandidateSet, generate_candidates
+from ctx.fit.candidates import (
+    CandidateSet,
+    CapabilityMaterial,
+    CandidateConfiguration,
+    generate_candidates,
+)
 from ctx.fit.execution import ExecutionReport
 from ctx.fit.experiment import (
+    DEFAULT_MODEL,
     DEFAULT_TRIALS_PER_TASK,
     EXPERIMENT_PLAN_SCHEMA,
     ModelPrice,
+    authorize_experiment,
     plan_experiment,
     resolve_experiment,
     run_experiment,
@@ -25,6 +34,32 @@ from ctx.fit.release_catalog import open_release_candidate_source
 from ctx.fit.tasks import FitTask
 
 PRICE = ModelPrice(model="test-model", usd_per_million_input=3.0, usd_per_million_output=15.0)
+
+
+def test_default_model_exact_price_is_available_without_litellm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Budget enforcement is part of base CTX Fit, not the optional live harness."""
+
+    monkeypatch.setitem(sys.modules, "litellm", None)
+
+    price = ModelPrice.from_litellm(DEFAULT_MODEL)
+
+    assert price is not None
+    assert price.model == "gpt-4o-mini"
+    assert price.usd_per_million_input == 0.15
+    assert price.usd_per_million_output == 0.60
+    assert "OpenAI" in price.source
+
+
+def test_unknown_model_price_stays_unknown_without_litellm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The clean-install fallback must not invent rates for arbitrary models."""
+
+    monkeypatch.setitem(sys.modules, "litellm", None)
+
+    assert ModelPrice.from_litellm("unknown/provider-model") is None
 
 
 def _repo(tmp_path: Path, *, tests: bool = True) -> Path:
@@ -66,6 +101,114 @@ def _tasks(count: int) -> tuple[FitTask, ...]:
 def _plan(tmp_path: Path, *, task_count: int = 0, **kwargs: object):
     profile = build_fit_profile(_repo(tmp_path))
     return plan_experiment(profile, _candidates(profile), _tasks(task_count), **kwargs)  # type: ignore[arg-type]
+
+
+def test_authorization_digest_detects_budget_and_campaign_size_tampering(
+    tmp_path: Path,
+) -> None:
+    plan = _plan(
+        tmp_path,
+        task_count=1,
+        budget_usd=1000,
+        price=PRICE,
+    )
+    authorized = replace(
+        plan,
+        authorized=True,
+        authorization_digest=plan.executable_digest,
+    )
+
+    assert authorized.can_execute is True
+    assert replace(authorized, budget_usd=1001).can_execute is False
+    changed_size = replace(
+        authorized,
+        trials_per_task=100,
+        executions=authorized.candidate_count * authorized.task_count * 100,
+    )
+
+    assert changed_size.can_authorize is True
+    assert changed_size.can_execute is False
+
+
+def test_resolve_uses_the_applied_model_for_every_arm_and_for_pricing(
+    repo_with_history,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = repo_with_history(commits=3)
+    material = CapabilityMaterial.from_content(
+        capability_id="skill:ctx-python-testing",
+        delivery_mode="task-user-context",
+        source_identity="package:catalog#skill:ctx-python-testing",
+        catalog_entry_digest="a" * 64,
+        content="# Current applied capability\n",
+    )
+    candidate = CandidateConfiguration(
+        candidate_id="prior-winner",
+        role="lean",
+        capability_ids=(material.capability_id,),
+        model="openai/gpt-5.5",
+        instructions=(),
+        selection_reason="The content-addressed winner currently active in this repository.",
+        capability_materials=(material,),
+    )
+    target = repo / ".ctx" / "fit-configuration.json"
+    target.parent.mkdir(parents=True)
+    target.write_text(
+        json.dumps(
+            {
+                "schema": "ctx.fit.applied-configuration-v1",
+                "configuration_hash": candidate.configuration_hash,
+                "candidate": candidate.to_dict(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    priced: list[str] = []
+
+    def price(model: str) -> ModelPrice:
+        priced.append(model)
+        return PRICE
+
+    monkeypatch.setattr(ModelPrice, "from_litellm", staticmethod(price))
+
+    experiment = resolve_experiment(
+        build_fit_profile(repo), budget_usd=500.0, model="different-model"
+    )
+
+    assert experiment.model == candidate.model
+    assert priced == [candidate.model]
+    assert all(item.model == candidate.model for item in experiment.candidates.candidates)
+
+
+def test_resolve_prices_the_single_model_in_the_generated_candidate_field(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repo(tmp_path)
+    profile = build_fit_profile(repo)
+    generated = _candidates(profile)
+    field = replace(
+        generated,
+        candidates=tuple(replace(candidate, model="model-b") for candidate in generated.candidates),
+    )
+    priced: list[str] = []
+
+    def price_model(model: str) -> ModelPrice:
+        priced.append(model)
+        return PRICE
+
+    monkeypatch.setattr("ctx.fit.candidates.generate_candidates", lambda *_a, **_k: field)
+    monkeypatch.setattr(
+        ModelPrice,
+        "from_litellm",
+        staticmethod(price_model),
+    )
+
+    experiment = resolve_experiment(profile, budget_usd=500.0, model="model-a")
+
+    assert experiment.model == "model-b"
+    assert priced == ["model-b"]
+    assert experiment.plan_matches is True
 
 
 # --------------------------------------------------------------------------
@@ -120,7 +263,8 @@ def test_a_priced_plan_within_budget_is_ready(tmp_path: Path) -> None:
 
     assert plan.cost.is_known
     assert plan.decision == "ready"
-    assert plan.can_execute is True
+    assert plan.can_authorize is True
+    assert plan.can_execute is False
 
 
 def test_unevaluable_repository_is_blocked_before_cost_is_considered(tmp_path: Path) -> None:
@@ -152,6 +296,27 @@ def test_an_infinite_budget_is_not_a_budget(tmp_path: Path) -> None:
 
     assert plan.decision == "blocked-invalid-budget"
     assert plan.can_execute is False
+
+
+def test_a_negative_budget_is_not_an_authorization(tmp_path: Path) -> None:
+    plan = _plan(tmp_path, task_count=2, budget_usd=-1.0, price=PRICE)
+
+    assert plan.decision == "blocked-invalid-budget"
+    assert plan.can_authorize is False
+
+
+def test_a_non_finite_cost_estimate_is_not_treated_as_known(tmp_path: Path) -> None:
+    invalid_price = ModelPrice(
+        model="broken-price",
+        usd_per_million_input=float("nan"),
+        usd_per_million_output=1.0,
+    )
+
+    plan = _plan(tmp_path, task_count=2, budget_usd=1000.0, price=invalid_price)
+
+    assert plan.cost.is_known is False
+    assert plan.decision == "blocked-unknown-cost"
+    assert plan.can_authorize is False
 
 
 def test_a_finite_budget_still_passes_the_validity_check(tmp_path: Path) -> None:
@@ -217,6 +382,26 @@ def test_too_few_trials_warns_that_reliability_is_unproven(tmp_path: Path) -> No
     plan = _plan(tmp_path, task_count=2, trials_per_task=1, budget_usd=1000.0, price=PRICE)
 
     assert any("below the" in warning for warning in plan.warnings)
+
+
+def test_plan_discloses_the_repository_verifier_trust_boundary(tmp_path: Path) -> None:
+    plan = _plan(tmp_path, task_count=2, budget_usd=1000.0, price=PRICE)
+
+    assert any(
+        "does not prove that code under test cannot deliberately" in warning
+        for warning in plan.warnings
+    )
+
+
+def test_plan_discloses_native_verification_dependency_boundary(tmp_path: Path) -> None:
+    plan = _plan(tmp_path, task_count=2, budget_usd=1000.0, price=PRICE)
+
+    assert any(
+        "already available in the repository" in warning
+        and "isolated HOME" in warning
+        and "without network access" in warning
+        for warning in plan.warnings
+    )
 
 
 def test_cost_is_a_range_not_false_precision(tmp_path: Path) -> None:
@@ -314,6 +499,21 @@ def test_the_campaign_verifies_with_the_command_the_plan_named(
     assert all(task.verify_command == experiment.verify_command for task in experiment.tasks.tasks)
 
 
+def test_plan_summary_names_the_verifier_its_tasks_will_actually_run(tmp_path: Path) -> None:
+    profile = build_fit_profile(_repo(tmp_path))
+    task = replace(_tasks(1)[0], verify_command=("npm", "run", "test"))
+
+    plan = plan_experiment(
+        profile,
+        _candidates(profile),
+        (task,),
+        budget_usd=1000.0,
+        price=PRICE,
+    )
+
+    assert plan.verification == ("npm run test",)
+
+
 def test_the_fallback_verify_command_is_the_one_the_module_declares(
     monkeypatch, repo_with_history
 ) -> None:
@@ -350,11 +550,45 @@ def test_resolving_an_experiment_executes_nothing(tmp_path: Path, repo_with_hist
 
     experiment = resolve_experiment(build_fit_profile(repo), budget_usd=500.0)
 
-    assert experiment.plan.can_execute is True
+    assert experiment.plan.can_authorize is True
+    assert experiment.plan.can_execute is False
     # Nothing ran, so no task has been observed to start red -- and a task that
     # has not been observed is not evidence of anything yet.
     assert all(task.starts_red is None for task in experiment.tasks.tasks)
     assert subprocess_status(repo) == ""
+
+
+def test_authorization_changes_only_the_confirmation_state(
+    repo_with_history,
+) -> None:
+    pytest.importorskip("litellm")
+    experiment = resolve_experiment(
+        build_fit_profile(repo_with_history(commits=3)), budget_usd=500.0
+    )
+
+    authorized = authorize_experiment(experiment, expected_digest=experiment.plan.executable_digest)
+
+    assert authorized.plan.authorized is True
+    assert authorized.plan.can_execute is True
+    assert authorized.plan.budget_usd == experiment.plan.budget_usd
+    assert authorized.plan.candidates == experiment.plan.candidates
+    assert authorized.plan.tasks == experiment.plan.tasks
+    assert authorized.plan.executions == experiment.plan.executions
+
+
+def test_authorization_refuses_when_current_ai_configuration_changed_after_preview(
+    repo_with_history,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = repo_with_history(commits=3)
+    monkeypatch.setattr(ModelPrice, "from_litellm", staticmethod(lambda _model: PRICE))
+    experiment = resolve_experiment(build_fit_profile(repo), budget_usd=500.0)
+    installed = repo / ".claude" / "skills" / "current" / "SKILL.md"
+    installed.parent.mkdir(parents=True)
+    installed.write_text("---\nname: current\n---\n\n# Current\n", encoding="utf-8")
+
+    with pytest.raises(PermissionError, match="current baseline changed"):
+        authorize_experiment(experiment, expected_digest=experiment.plan.executable_digest)
 
 
 def subprocess_status(repo: Path) -> str:

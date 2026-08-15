@@ -1,7 +1,17 @@
-"""
-ctx — Alive skill system + model-agnostic harness for Claude Code and other LLMs.
+"""CTX Fit plus the established ctx integration and recommendation APIs.
 
-Four delivery surfaces (pick what fits your integration):
+The primary product surface profiles a repository, evaluates a bounded set of
+AI coding capability configurations with repository-native verification, and
+materializes the cheapest configuration that reliably works::
+
+    ctx fit
+    ctx fit --dry-run
+    ctx fit --test --budget 10
+    ctx fit --apply
+
+Version 1.0.21 compares capability configurations within one coding-agent
+harness; it does not claim a cross-harness benchmark. The compatibility
+surfaces below remain available for direct integration:
 
   1. **MCP server** — attach from any MCP host (Claude Code, Claude
      Agent SDK, Cline, Goose, OpenHands, custom):
@@ -24,6 +34,7 @@ Four delivery surfaces (pick what fits your integration):
 See docs/harness/attaching-to-hosts.md for host-specific recipes.
 
 Package layout:
+    ctx.fit        - CTX Fit profiling, experiments, recommendation, and apply
     ctx.core       - provider-agnostic business logic (graph, quality,
                      wiki, resolve, bundle)
     ctx.adapters   - host-specific integration code

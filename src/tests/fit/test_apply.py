@@ -1,15 +1,21 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import shlex
 import subprocess
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+import ctx.fit.apply as apply_module
 from ctx.fit.apply import (
+    APPLIED_CONFIGURATION_SCHEMA,
     APPLY_SCHEMA,
+    CONFIGURATION_MANIFEST_PATH,
+    OWNED_BLOCK_END,
     OWNED_BLOCK_START,
     ApplyPlan,
     Artifact,
@@ -20,18 +26,37 @@ from ctx.fit.apply import (
     plan_pull_request,
     run_command,
 )
-from ctx.fit.candidates import CandidateConfiguration
+from ctx.fit.candidates import CapabilityMaterial, CandidateConfiguration, InstructionMaterial
 from ctx.fit.recommend import RankedCandidate, Recommendation
 
 
 def _candidate(name: str = "lean") -> CandidateConfiguration:
+    content = (
+        "---\n"
+        "name: ctx-python-testing\n"
+        "description: Exact evaluated testing guidance.\n"
+        "---\n\n"
+        "# ctx Python Testing\n\n"
+        "Run the narrowest deterministic regression first.\n"
+    )
     return CandidateConfiguration(
         candidate_id=name,
         role="recommended",
         capability_ids=("skill:ctx-python-testing",),
-        model=None,
+        model="gpt-4o-mini",
         instructions=(),
         selection_reason="the single highest-ranked capability, to test whether less is enough",
+        capability_materials=(
+            CapabilityMaterial.from_content(
+                capability_id="skill:ctx-python-testing",
+                delivery_mode="task-user-context",
+                source_identity=(
+                    "package:ctx.assets/runtime-availability.json#skill:ctx-python-testing"
+                ),
+                catalog_entry_digest=hashlib.sha256(b"skill:ctx-python-testing").hexdigest(),
+                content=content,
+            ),
+        ),
     )
 
 
@@ -142,12 +167,16 @@ def test_applying_writes_the_previewed_content_exactly(tmp_path: Path) -> None:
 
     written = apply_plan(plan, tmp_path)
 
-    assert written == ("AGENTS.md",)
-    assert (tmp_path / "AGENTS.md").read_text(encoding="utf-8") == plan.artifacts[0].content
+    assert written == (CONFIGURATION_MANIFEST_PATH,)
+    assert not (tmp_path / "AGENTS.md").exists()
+    assert (tmp_path / CONFIGURATION_MANIFEST_PATH).read_text(encoding="utf-8") == plan.artifacts[
+        0
+    ].content
 
 
-def test_existing_file_is_reported_as_a_modification(tmp_path: Path) -> None:
-    (tmp_path / "AGENTS.md").write_text("# existing\n", encoding="utf-8")
+def test_existing_owned_manifest_is_reported_as_a_modification(tmp_path: Path) -> None:
+    first = plan_apply(_recommendation(), (_candidate(),), repo_path=tmp_path)
+    apply_plan(first, tmp_path)
 
     plan = plan_apply(_recommendation(), (_candidate(),), repo_path=tmp_path)
 
@@ -183,14 +212,104 @@ def test_branch_is_namespaced(tmp_path: Path) -> None:
     assert plan.branch == "ctx-fit/2026-08-09"
 
 
-def test_generated_agents_md_records_evidence_not_just_the_answer(tmp_path: Path) -> None:
+def test_apply_writes_no_harness_instruction_file(
+    tmp_path: Path,
+) -> None:
+    """Post-run evidence belongs in the PR, not in future agents' instructions."""
+
     plan = plan_apply(_recommendation(), (_candidate(),), repo_path=tmp_path)
 
-    content = plan.artifacts[0].content
-    assert "skill:ctx-python-testing" in content
-    assert "verified 9/9 trials" in content
-    assert "Confidence: medium" in content
-    assert "## Limitations" in content
+    assert [artifact.path for artifact in plan.artifacts] == [CONFIGURATION_MANIFEST_PATH]
+    assert not (tmp_path / "AGENTS.md").exists()
+    assert "verified 9/9 trials" in plan.pr_body
+    assert "**Confidence:** medium" in plan.pr_body
+    assert "only 3 tasks were evaluated" in plan.pr_body
+
+
+def test_apply_materializes_the_exact_evaluated_configuration(tmp_path: Path) -> None:
+    """The artifact must be usable without resolving an ID from a later catalog."""
+
+    winner = _candidate()
+    material = winner.capability_materials[0]
+
+    plan = plan_apply(_recommendation(), (winner,), repo_path=tmp_path)
+
+    manifest = json.loads(plan.artifacts[0].content)
+    applied = manifest["candidate"]["capability_materials"][0]
+    assert applied == material.to_dict()
+    assert manifest["configuration_hash"] == winner.configuration_hash
+
+
+def test_apply_emits_a_canonical_machine_readable_configuration_manifest(
+    tmp_path: Path,
+) -> None:
+    winner = _candidate()
+
+    first = plan_apply(_recommendation(), (winner,), repo_path=tmp_path)
+    second = plan_apply(_recommendation(), (winner,), repo_path=tmp_path)
+    manifest = next(
+        artifact for artifact in first.artifacts if artifact.path == CONFIGURATION_MANIFEST_PATH
+    )
+    payload = json.loads(manifest.content)
+
+    assert payload == {
+        "candidate": winner.to_dict(),
+        "configuration_hash": winner.configuration_hash,
+        "schema": APPLIED_CONFIGURATION_SCHEMA,
+    }
+    assert (
+        manifest.content == json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    )
+    assert (
+        next(
+            artifact.content
+            for artifact in second.artifacts
+            if artifact.path == CONFIGURATION_MANIFEST_PATH
+        )
+        == manifest.content
+    )
+    assert manifest.ownership == "whole-file"
+    assert len(first.artifacts) == 1
+
+
+def test_apply_does_not_normalize_the_evaluated_material_bytes(tmp_path: Path) -> None:
+    body = "# Exact body\n\nKeep these trailing spaces.  \n\n"
+    original = _candidate().capability_materials[0]
+    material = CapabilityMaterial.from_content(
+        capability_id=original.capability_id,
+        delivery_mode=original.delivery_mode,
+        source_identity=original.source_identity,
+        catalog_entry_digest=original.catalog_entry_digest,
+        content=body,
+    )
+    winner = replace(_candidate(), capability_materials=(material,))
+
+    plan = plan_apply(_recommendation(), (winner,), repo_path=tmp_path)
+
+    payload = json.loads(plan.artifacts[0].content)
+    assert payload["candidate"]["capability_materials"][0]["content"] == body
+
+
+def test_machine_manifest_json_escapes_marker_like_metadata(tmp_path: Path) -> None:
+    winner = replace(_candidate(), model=f"gpt-4o-mini {OWNED_BLOCK_END}")
+
+    plan = plan_apply(_recommendation(), (winner,), repo_path=tmp_path)
+
+    assert plan.can_apply is True
+    assert json.loads(plan.artifacts[0].content)["candidate"]["model"] == winner.model
+
+
+def test_apply_refuses_a_winner_that_cannot_be_reproduced(
+    tmp_path: Path,
+) -> None:
+    winner = replace(_candidate(), model=None)
+
+    plan = plan_apply(_recommendation(), (winner,), repo_path=tmp_path)
+
+    assert plan.can_apply is False
+    assert plan.refusal == "winner-not-reproducible"
+    assert "mutable provider default" in plan.explanation
+    assert plan.artifacts == ()
 
 
 # --------------------------------------------------------------------------
@@ -220,8 +339,8 @@ def _shared_file_outside(tmp_path: Path) -> tuple[Path, Path]:
     return repo, shared
 
 
-def test_a_symlinked_agents_md_is_refused_instead_of_followed(tmp_path: Path) -> None:
-    """Writing through the link edits a file the preview never named."""
+def test_a_symlinked_agents_md_is_untouched(tmp_path: Path) -> None:
+    """Apply does not inspect or write a harness instruction destination."""
 
     repo, shared = _shared_file_outside(tmp_path)
     _link(repo / "AGENTS.md", shared)
@@ -229,14 +348,57 @@ def test_a_symlinked_agents_md_is_refused_instead_of_followed(tmp_path: Path) ->
 
     plan = plan_apply(_recommendation(), (_candidate(),), repo_path=repo)
 
-    assert plan.refusal == "unsafe-destination"
-    assert plan.can_apply is False
-    assert plan.artifacts == ()
-    assert "symbolic link" in plan.explanation
+    assert plan.can_apply is True
+    apply_plan(plan, repo)
     assert shared.read_text(encoding="utf-8") == before
 
 
-def test_a_symlink_that_appears_after_the_preview_is_still_not_followed(
+def test_a_symlinked_machine_manifest_is_refused_instead_of_followed(tmp_path: Path) -> None:
+    repo, shared = _shared_file_outside(tmp_path)
+    manifest = repo / CONFIGURATION_MANIFEST_PATH
+    manifest.parent.mkdir(parents=True)
+    _link(manifest, shared)
+    before = shared.read_text(encoding="utf-8")
+
+    plan = plan_apply(_recommendation(), (_candidate(),), repo_path=repo)
+
+    assert plan.refusal == "unsafe-destination"
+    assert plan.artifacts == ()
+    assert CONFIGURATION_MANIFEST_PATH in plan.explanation
+    assert shared.read_text(encoding="utf-8") == before
+
+
+def test_a_symlinked_manifest_parent_is_refused_before_reading_outside(
+    tmp_path: Path,
+) -> None:
+    repo, shared = _shared_file_outside(tmp_path)
+    _link(repo / ".ctx", shared.parent)
+    before = shared.read_text(encoding="utf-8")
+
+    plan = plan_apply(_recommendation(), (_candidate(),), repo_path=repo)
+
+    assert plan.refusal == "unsafe-destination"
+    assert "symbolic-link parent .ctx" in plan.explanation
+    assert shared.read_text(encoding="utf-8") == before
+
+
+def test_a_symlinked_manifest_parent_inside_the_repository_is_refused(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    user_owned = repo / "user-owned"
+    user_owned.mkdir()
+    _link(repo / ".ctx", user_owned)
+
+    plan = plan_apply(_recommendation(), (_candidate(),), repo_path=repo)
+
+    assert plan.refusal == "unsafe-destination"
+    assert "symbolic-link parent .ctx" in plan.explanation
+    assert not (user_owned / "fit-configuration.json").exists()
+
+
+def test_an_agents_symlink_that_appears_after_preview_is_still_untouched(
     tmp_path: Path,
 ) -> None:
     """A plan is previewed, then applied: the destination can change in between."""
@@ -248,10 +410,131 @@ def test_a_symlink_that_appears_after_the_preview_is_still_not_followed(
     assert plan.can_apply is True
     _link(repo / "AGENTS.md", shared)
 
-    with pytest.raises(ValueError, match="symbolic link"):
-        apply_plan(plan, repo)
+    apply_plan(plan, repo)
 
     assert shared.read_text(encoding="utf-8") == before
+
+
+def test_an_agents_edit_after_preview_is_not_overwritten(tmp_path: Path) -> None:
+    target = tmp_path / "AGENTS.md"
+    target.write_text("# Initial rules\n", encoding="utf-8")
+    plan = plan_apply(_recommendation(), (_candidate(),), repo_path=tmp_path)
+    late = "# Initial rules\n\nDo not overwrite this late edit.\n"
+    target.write_text(late, encoding="utf-8")
+
+    apply_plan(plan, tmp_path)
+
+    assert target.read_text(encoding="utf-8") == late
+    assert (tmp_path / CONFIGURATION_MANIFEST_PATH).exists()
+
+
+def test_a_manifest_edit_after_preview_stops_all_artifact_writes(tmp_path: Path) -> None:
+    plan = plan_apply(_recommendation(), (_candidate(),), repo_path=tmp_path)
+    manifest = tmp_path / CONFIGURATION_MANIFEST_PATH
+    manifest.parent.mkdir(parents=True)
+    late = '{"belongs_to":"the user now"}\n'
+    manifest.write_text(late, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="changed after the preview"):
+        apply_plan(plan, tmp_path)
+
+    assert not (tmp_path / "AGENTS.md").exists()
+    assert manifest.read_text(encoding="utf-8") == late
+
+
+def test_new_applied_configuration_is_private_to_its_owner(tmp_path: Path) -> None:
+    plan = plan_apply(_recommendation(), (_candidate(),), repo_path=tmp_path)
+
+    apply_plan(plan, tmp_path)
+
+    manifest = tmp_path / CONFIGURATION_MANIFEST_PATH
+    assert manifest.stat().st_mode & 0o777 == 0o600
+
+
+def test_apply_refuses_when_evaluated_instruction_bytes_have_changed(tmp_path: Path) -> None:
+    agents = tmp_path / "AGENTS.md"
+    evaluated = "# Evaluated rules\n"
+    agents.write_text(evaluated, encoding="utf-8")
+    winner = replace(
+        _candidate(),
+        instructions=("AGENTS.md",),
+        instruction_materials=(
+            InstructionMaterial.from_content(path="AGENTS.md", content=evaluated),
+        ),
+    )
+    agents.write_text("# Changed rules\n", encoding="utf-8")
+
+    plan = plan_apply(_recommendation(), (winner,), repo_path=tmp_path)
+
+    assert plan.refusal == "winner-not-reproducible"
+    assert "changed after the winning configuration was evaluated" in plan.explanation
+    assert plan.artifacts == ()
+
+
+def test_apply_rechecks_instruction_preimages_after_the_preview(tmp_path: Path) -> None:
+    agents = tmp_path / "AGENTS.md"
+    evaluated = "# Evaluated rules\n"
+    agents.write_text(evaluated, encoding="utf-8")
+    winner = replace(
+        _candidate(),
+        instructions=("AGENTS.md",),
+        instruction_materials=(
+            InstructionMaterial.from_content(path="AGENTS.md", content=evaluated),
+        ),
+    )
+    plan = plan_apply(_recommendation(), (winner,), repo_path=tmp_path)
+    assert plan.can_apply is True
+    assert plan.required_input_preimages[0].to_dict() == {
+        "path": "AGENTS.md",
+        "content_sha256": hashlib.sha256(evaluated.encode("utf-8")).hexdigest(),
+        "file_type": "regular-file",
+        "allow_symlinks": False,
+    }
+    agents.write_text("# Changed after preview\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="stale required input.*changed after the preview"):
+        apply_plan(plan, tmp_path)
+
+    assert not (tmp_path / CONFIGURATION_MANIFEST_PATH).exists()
+
+
+def test_a_second_artifact_write_failure_rolls_back_the_first(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = tmp_path / "first.json"
+    first.write_bytes(b"original bytes\r\n")
+    original = first.read_bytes()
+    plan = ApplyPlan(
+        schema=APPLY_SCHEMA,
+        artifacts=(
+            Artifact(
+                path="first.json",
+                content="replacement\n",
+                action="modify",
+                reason="transaction test",
+                expected_preimage_sha256=hashlib.sha256(original).hexdigest(),
+            ),
+            Artifact(path="second.json", content="second\n", action="create", reason="test"),
+        ),
+        branch="ctx-fit/run",
+        pr_title="test",
+        pr_body="test",
+    )
+    real_commit = apply_module._commit_staged_write
+
+    def fail_manifest(staged: Path, destination: Path) -> None:
+        if destination == tmp_path / "second.json":
+            raise OSError("simulated second replacement failure")
+        real_commit(staged, destination)
+
+    monkeypatch.setattr(apply_module, "_commit_staged_write", fail_manifest)
+
+    with pytest.raises(OSError, match="second replacement failure"):
+        apply_plan(plan, tmp_path)
+
+    assert first.read_bytes() == original
+    assert not (tmp_path / "second.json").exists()
 
 
 def test_a_path_that_escapes_the_repository_is_refused(tmp_path: Path) -> None:
@@ -285,13 +568,89 @@ def test_hand_written_content_survives_an_apply(tmp_path: Path) -> None:
     apply_plan(plan, tmp_path)
     after = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
 
-    assert "never touch migrations/" in after
-    assert "contact: platform@example.com" in after
-    assert "skill:ctx-python-testing" in after  # and the new evidence is there too
-    assert plan.artifacts[0].preserved_bytes == len(_HAND_WRITTEN.strip().encode("utf-8"))
+    assert after == _HAND_WRITTEN
+    assert plan.artifacts[0].path == CONFIGURATION_MANIFEST_PATH
 
 
-def test_applying_twice_replaces_the_previous_block_instead_of_stacking(
+def test_every_existing_byte_survives_when_the_block_is_first_added(tmp_path: Path) -> None:
+    hand_written = "# My instructions\n\nKeep the final whitespace.  \n\n"
+    (tmp_path / "AGENTS.md").write_text(hand_written, encoding="utf-8")
+
+    apply_plan(plan_apply(_recommendation(), (_candidate(),), repo_path=tmp_path), tmp_path)
+
+    assert (tmp_path / "AGENTS.md").read_text(encoding="utf-8").startswith(hand_written)
+
+
+def test_a_prior_owned_block_is_left_untouched(tmp_path: Path) -> None:
+    head = "# House rules\n\n"
+    tail = "\n\nKeep both blank lines and these spaces.  \n"
+    previous = f"{head}{OWNED_BLOCK_START}\n# old generated content\n{OWNED_BLOCK_END}{tail}"
+    (tmp_path / "AGENTS.md").write_text(previous, encoding="utf-8")
+
+    apply_plan(plan_apply(_recommendation(), (_candidate(),), repo_path=tmp_path), tmp_path)
+
+    after = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
+    assert after == previous
+
+
+@pytest.mark.parametrize(
+    "original",
+    [
+        f"# Rules\n\n{OWNED_BLOCK_START}\nThis belongs to the user.\n",
+        f"{OWNED_BLOCK_START}\nouter\n{OWNED_BLOCK_START}\ninner\n{OWNED_BLOCK_END}\n",
+        f"{OWNED_BLOCK_START}\none\n{OWNED_BLOCK_END}\n{OWNED_BLOCK_START}\ntwo\n{OWNED_BLOCK_END}\n",
+        f"{OWNED_BLOCK_END}\nuser text\n{OWNED_BLOCK_START}\n",
+    ],
+    ids=["unbalanced", "nested", "multiple", "reversed"],
+)
+def test_ambiguous_legacy_reserved_markers_are_left_untouched(
+    tmp_path: Path,
+    original: str,
+) -> None:
+    target = tmp_path / "AGENTS.md"
+    target.write_text(original, encoding="utf-8")
+
+    plan = plan_apply(_recommendation(), (_candidate(),), repo_path=tmp_path)
+
+    assert plan.can_apply is True
+    apply_plan(plan, tmp_path)
+    assert target.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.parametrize(
+    "original",
+    [
+        b"# Windows rules\r\n\r\nKeep CRLF and spaces.  \r\n",
+        b"# Mixed\r\nLF line\nCR line\rTrailing spaces.  \r\n",
+    ],
+    ids=["crlf", "mixed-newlines"],
+)
+def test_user_newline_bytes_survive_the_owned_block_splice(
+    tmp_path: Path,
+    original: bytes,
+) -> None:
+    target = tmp_path / "AGENTS.md"
+    target.write_bytes(original)
+
+    apply_plan(plan_apply(_recommendation(), (_candidate(),), repo_path=tmp_path), tmp_path)
+
+    assert target.read_bytes().startswith(original)
+
+
+def test_an_unowned_file_at_the_manifest_path_is_refused(tmp_path: Path) -> None:
+    target = tmp_path / CONFIGURATION_MANIFEST_PATH
+    target.parent.mkdir(parents=True)
+    original = '{"belongs_to":"the user"}\n'
+    target.write_text(original, encoding="utf-8")
+
+    plan = plan_apply(_recommendation(), (_candidate(),), repo_path=tmp_path)
+
+    assert plan.refusal == "unsafe-destination"
+    assert "not a CTX Fit applied-configuration manifest" in plan.explanation
+    assert target.read_text(encoding="utf-8") == original
+
+
+def test_applying_twice_never_adds_an_instruction_block(
     tmp_path: Path,
 ) -> None:
     (tmp_path / "AGENTS.md").write_text(_HAND_WRITTEN, encoding="utf-8")
@@ -302,10 +661,7 @@ def test_applying_twice_replaces_the_previous_block_instead_of_stacking(
         apply_plan(plans[-1], tmp_path)
     after = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
 
-    # The second run's own block is not counted as content it preserved.
-    assert plans[1].artifacts[0].preserved_bytes == plans[0].artifacts[0].preserved_bytes
-
-    assert after.count(OWNED_BLOCK_START) == 1
+    assert after.count(OWNED_BLOCK_START) == 0
     assert after.count("never touch migrations/") == 1
 
 
@@ -340,10 +696,19 @@ def test_the_no_verdict_refusal_reports_the_cause_the_recommendation_found(
 
 
 def test_plan_is_serializable_and_versioned(tmp_path: Path) -> None:
-    payload = plan_apply(_recommendation(), (_candidate(),), repo_path=tmp_path).to_dict()
+    plan = plan_apply(_recommendation(), (_candidate(),), repo_path=tmp_path)
+    payload = plan.to_dict()
 
     assert json.loads(json.dumps(payload, sort_keys=True))["schema"] == APPLY_SCHEMA
     assert payload["can_apply"] is True
+    artifact = payload["artifacts"][0]  # type: ignore[index]
+    assert artifact["content"] == plan.artifacts[0].content  # type: ignore[index]
+    assert (
+        artifact["content_sha256"]
+        == hashlib.sha256(  # type: ignore[index]
+            plan.artifacts[0].content.encode("utf-8")
+        ).hexdigest()
+    )
 
 
 # --------------------------------------------------------------------------
@@ -434,7 +799,7 @@ def test_the_announced_commands_are_exactly_the_commands_that_run(tmp_path: Path
     assert pull_request.can_open is True
     assert pull_request.commands == (
         ("git", "checkout", "-b", "ctx-fit/2026-08-13"),
-        ("git", "add", "--", "AGENTS.md"),
+        ("git", "add", "--", CONFIGURATION_MANIFEST_PATH),
         ("git", "commit", "-m", _TITLE),
         ("git", "push", "--set-upstream", "origin", "ctx-fit/2026-08-13"),
         ("gh", "pr", "create", "--title", _TITLE, "--body-file", "-"),
@@ -442,7 +807,7 @@ def test_the_announced_commands_are_exactly_the_commands_that_run(tmp_path: Path
     # Planning is allowed to probe, never to change: the announcement has to be
     # complete before anything happens.
     assert _mutating(runner.calls) == ()
-    assert not (tmp_path / "AGENTS.md").exists()
+    assert not (tmp_path / CONFIGURATION_MANIFEST_PATH).exists()
 
     result = open_pull_request(plan, pull_request, tmp_path, runner=runner)
 
@@ -450,7 +815,9 @@ def test_the_announced_commands_are_exactly_the_commands_that_run(tmp_path: Path
     assert _mutating(runner.calls) == pull_request.commands
     assert result.url == "https://github.com/octocat/repo/pull/7"
     assert runner.stdin[pull_request.commands[-1]] == plan.pr_body
-    assert (tmp_path / "AGENTS.md").read_text(encoding="utf-8") == plan.artifacts[0].content
+    assert (tmp_path / CONFIGURATION_MANIFEST_PATH).read_text(encoding="utf-8") == plan.artifacts[
+        0
+    ].content
 
 
 def test_unrelated_uncommitted_work_stops_the_pull_request_before_anything_runs(
@@ -653,7 +1020,7 @@ def test_the_file_ctx_fit_itself_writes_does_not_count_as_dirty(
     if committed is not None:
         _commit(repo, "AGENTS.md", committed)
     apply_plan(_plan_for(repo), repo)  # exactly what `--apply` does
-    assert "AGENTS.md" in _git(repo, "status", "--porcelain")
+    assert ".ctx/" in _git(repo, "status", "--porcelain")
 
     pull_request = plan_pull_request(_plan_for(repo), repo, runner=_real_git())
 
@@ -687,7 +1054,7 @@ def test_the_users_own_edits_inside_our_file_stop_the_pull_request(
     assert pull_request.refusal == "dirty-worktree"
     # Naming the file is not enough: a user who has just run `--apply` knows
     # CTX Fit wrote AGENTS.md, and "uncommitted: AGENTS.md" reads as a bug.
-    assert "AGENTS.md (which holds changes of your own as well)" in pull_request.explanation
+    assert "uncommitted: AGENTS.md" in pull_request.explanation
     assert _mutating(runner.calls) == ()
     assert _state(repo) == before
     assert "drop the customer database" in (repo / "AGENTS.md").read_text(encoding="utf-8")
@@ -822,7 +1189,9 @@ def test_the_pull_request_is_actually_opened_against_a_real_repository(tmp_path:
     assert result.url == "https://github.com/octocat/repo/pull/12"
     assert _git(repo, "rev-parse", "--abbrev-ref", "HEAD").strip() == "ctx-fit/e2e"
     assert _git(repo, "log", "-1", "--format=%s").strip() == _TITLE
-    assert _git(repo, "show", "--name-only", "--format=", "HEAD").split() == ["AGENTS.md"]
+    assert _git(repo, "show", "--name-only", "--format=", "HEAD").split() == [
+        ".ctx/fit-configuration.json",
+    ]
     assert "refs/heads/ctx-fit/e2e" in _git(repo, "ls-remote", "--heads", "origin")
     assert _git(repo, "status", "--porcelain") == ""  # nothing left behind uncommitted
     assert runner.stdin[pull_request.commands[-1]] == plan.pr_body

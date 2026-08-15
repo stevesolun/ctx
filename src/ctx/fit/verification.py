@@ -24,6 +24,35 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+#: The exact authority boundary behind every ``verified`` trial. Repository
+#: commands are useful evidence for ordinary development, not a malware oracle:
+#: code under test runs inside its own verifier process and can deliberately
+#: influence that process in ways no same-process nonce can universally prevent.
+VERIFIER_TRUST_ASSUMPTION = (
+    "CTX Fit treats the repository's selected test command as the verification "
+    "authority. It protects the declared tests and editable scope, but does not "
+    "prove that code under test cannot deliberately terminate, skip, or deceive "
+    "its own test runner."
+)
+
+#: What ``discover_verification`` cannot establish without executing the
+#: repository.  The Python campaign path can construct an environment for an
+#: installable Python package; the other native command forms deliberately do
+#: not grow an implicit package-manager phase.  Naming the isolated HOME and
+#: disabled network is important: a tool visible on PATH is not enough if it
+#: expects to resolve dependencies from a user's package cache at verify time.
+VERIFICATION_ENVIRONMENT_ASSUMPTION = (
+    "For an installable Python project, CTX Fit builds a campaign environment and "
+    "installs it without network access; its build backend and dependencies must be "
+    "available without downloading them. "
+    "JavaScript/TypeScript, Go, Rust, and Make verification is supported only when "
+    "the runtime is usable from the host PATH under an isolated HOME and the "
+    "verification dependencies are already available in the repository. Final "
+    "verification uses that isolated HOME "
+    "and runs without network access, so user package caches are not a supported "
+    "dependency source."
+)
+
 VerificationKind = Literal["test", "lint", "typecheck", "build"]
 
 #: Confidence is deliberately coarse. It ranks candidates for presentation and
@@ -277,6 +306,7 @@ def _discover_python(root: Path) -> tuple[list[VerificationCommand], list[str]]:
     pyproject, pyproject_problem = _load_toml(pyproject_path)
     tools = pyproject.get("tool")
     tools = tools if isinstance(tools, dict) else {}
+    has_python_tests = False
 
     setup_cfg_evidence = _setup_cfg_pytest_evidence(root)
     tox_evidence = _tox_pytest_evidence(root)
@@ -313,7 +343,15 @@ def _discover_python(root: Path) -> tuple[list[VerificationCommand], list[str]]:
                 evidence=(detail,),
             )
         )
-    elif (root / "tests").is_dir() or list(root.glob("test_*.py"))[:1]:
+    else:
+        tests_directory = root / "tests"
+        try:
+            has_python_tests = next(root.glob("test_*.py"), None) is not None or (
+                tests_directory.is_dir() and next(tests_directory.rglob("*.py"), None) is not None
+            )
+        except OSError:
+            has_python_tests = False
+    if not found and has_python_tests:
         found.append(
             VerificationCommand(
                 kind="test",
@@ -917,6 +955,8 @@ def discover_verification(repo_path: str | Path) -> VerificationInventory:
 
 __all__ = [
     "Confidence",
+    "VERIFICATION_ENVIRONMENT_ASSUMPTION",
+    "VERIFIER_TRUST_ASSUMPTION",
     "VerificationCommand",
     "VerificationInventory",
     "VerificationKind",

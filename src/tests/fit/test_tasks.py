@@ -4,7 +4,15 @@ import json
 import subprocess
 from pathlib import Path
 
-from ctx.fit.tasks import SOURCE_CAVEAT, TASK_SCHEMA, FitTask, derive_tasks
+import pytest
+
+from ctx.fit.tasks import (
+    SOURCE_CAVEAT,
+    TASK_LANGUAGE_SUFFIXES,
+    TASK_SCHEMA,
+    FitTask,
+    derive_tasks,
+)
 
 VERIFY = ("python", "-m", "pytest", "-q")
 
@@ -51,6 +59,30 @@ def _git_init(repo: Path) -> None:
     _git(repo, "config", "user.name", "Test")
 
 
+def _repo_with_language_history(
+    tmp_path: Path,
+    *,
+    source_path: str,
+    test_path: str,
+) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    source = repo / source_path
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("first version\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "chore: scaffold source")
+
+    source.write_text("second version\n", encoding="utf-8")
+    test = repo / test_path
+    test.parent.mkdir(parents=True, exist_ok=True)
+    test.write_text("repository-native test\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "feat: change source with its test")
+    return repo
+
+
 def test_derives_a_task_from_a_paired_source_and_test_commit(tmp_path: Path) -> None:
     result = derive_tasks(_repo_with_history(tmp_path), verify_command=VERIFY)
 
@@ -60,6 +92,16 @@ def test_derives_a_task_from_a_paired_source_and_test_commit(tmp_path: Path) -> 
     assert task.source_paths == ("src/calc.py",)
     assert task.test_paths == ("tests/test_calc.py",)
     assert task.title.startswith("feat: add addition helper")
+
+
+def test_task_language_contract_names_only_first_class_verified_ecosystems() -> None:
+    assert dict(TASK_LANGUAGE_SUFFIXES) == {
+        "python": (".py",),
+        "javascript": (".js", ".jsx"),
+        "typescript": (".ts", ".tsx"),
+        "go": (".go",),
+        "rust": (".rs",),
+    }
 
 
 def test_provenance_is_an_exact_commit(tmp_path: Path) -> None:
@@ -183,32 +225,53 @@ def test_a_commit_that_deletes_its_test_is_never_offered_as_a_task(tmp_path: Pat
     assert "chore: drop the calc test" not in titles
 
 
-def test_a_non_python_repository_is_told_why_no_task_was_derived(tmp_path: Path) -> None:
-    """Nothing upstream restricts evaluability to Python, so this must be said.
-
-    A Jest repository is told it can be evaluated and is then refused; without
-    naming the restriction, the refusal names no cause the user can act on.
-    """
-
-    repo = tmp_path / "node"
-    (repo / "src").mkdir(parents=True)
-    (repo / "tests").mkdir()
-    _git_init(repo)
-    (repo / "src" / "calc.js").write_text("export const add = (a, b) => a + b;\n", encoding="utf-8")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-m", "chore: scaffold")
-    (repo / "src" / "calc.js").write_text(
-        "export const add = (a, b) => a + b;\nexport const sub = (a, b) => a - b;\n",
-        encoding="utf-8",
+@pytest.mark.parametrize(
+    ("source_path", "test_path", "verify_command"),
+    [
+        ("src/calc.py", "tests/test_calc.py", ("python", "-m", "pytest", "-q")),
+        ("src/calc.js", "tests/calc.test.js", ("npm", "run", "test")),
+        ("src/calc.jsx", "tests/calc.test.jsx", ("npm", "run", "test")),
+        ("src/calc.ts", "tests/calc.test.ts", ("npm", "run", "test")),
+        ("src/calc.tsx", "tests/calc.test.tsx", ("npm", "run", "test")),
+        ("calc.go", "calc_test.go", ("go", "test", "./...")),
+        ("src/lib.rs", "tests/lib_test.rs", ("cargo", "test")),
+    ],
+)
+def test_derives_tasks_for_every_supported_language_source_suffix(
+    tmp_path: Path,
+    source_path: str,
+    test_path: str,
+    verify_command: tuple[str, ...],
+) -> None:
+    repo = _repo_with_language_history(
+        tmp_path,
+        source_path=source_path,
+        test_path=test_path,
     )
-    (repo / "tests" / "calc.test.js").write_text("test('sub', () => {});\n", encoding="utf-8")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-m", "feat: sub")
 
-    result = derive_tasks(repo, verify_command=VERIFY)
+    result = derive_tasks(repo, verify_command=verify_command)
+
+    assert len(result.tasks) == 1
+    assert result.tasks[0].source_paths == (source_path,)
+    assert result.tasks[0].test_paths == (test_path,)
+    assert result.tasks[0].verify_command == verify_command
+
+
+def test_an_unsupported_language_history_reports_the_narrow_task_contract(
+    tmp_path: Path,
+) -> None:
+    repo = _repo_with_language_history(
+        tmp_path,
+        source_path="src/Calc.java",
+        test_path="tests/CalcTest.java",
+    )
+
+    result = derive_tasks(repo, verify_command=("make", "test"))
 
     assert result.tasks == ()
-    assert any("Python source only" in warning for warning in result.warnings)
+    assert any(
+        "Python, JavaScript, TypeScript, Go, and Rust" in warning for warning in result.warnings
+    )
 
 
 def test_repository_without_git_refuses_rather_than_inventing_tasks(tmp_path: Path) -> None:
