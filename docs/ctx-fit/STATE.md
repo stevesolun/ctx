@@ -12,26 +12,25 @@
 ## Checkpoint
 
 - Updated: 2026-08-16 (Asia/Jerusalem)
-- Active goal: review, harden, verify, and release CTX Fit 1.0.21
-- Phase: remote review of the pinned-attestation CycloneDX compatibility repair
-- Release decision: **DO NOT RELEASE YET**
-- Branch: `codex/ctx-fit-sbom-attestation`
-- Base commit: `2714f9be88a1c3a3b680e344b25a962829d18ca8`
-- Active repair commit: `b3145c49`
-- Last merged release candidate: `2714f9be88a1c3a3b680e344b25a962829d18ca8`
-- Latest merged PR: `https://github.com/stevesolun/ctx/pull/270`
+- Active goal: CTX Fit 1.0.21 post-release record and maintenance handoff
+- Phase: released; public verification complete
+- Release decision: **RELEASED / ACCEPTED**
+- Branch: `codex/ctx-fit-release-complete`
+- Release commit: `38a33f8784e2bf408430a98fed81206c2cf39d00`
+- Release tag object: `a7b8e78559fda1d44dca844393458272071ae89b`
+- Latest merged PR: `https://github.com/stevesolun/ctx/pull/271`
 - Follow-up scope at checkpoint:
-  - deterministic content-derived CycloneDX serial binding for the pinned
-    attestation action, exact compatibility regressions, and this checkpoint
+  - migrate graph distribution from Git LFS pointers to exact release assets,
+    then ask GitHub Support to purge the historical remote LFS objects
+  - add repository/environment protection rules as defense in depth
   - user-owned and out of scope: `.scratch/`
-- Parallel execution: PR #270 is merged; exact-main Tests run `31912497654`
-  and CodeQL run `31912497612` are green. Publish run `31913053842` proved the
-  PURL/closure repair, build, package smokes, and graph paths, then failed
-  closed because the pinned attestation action requires CycloneDX's optional
-  `serialNumber`. The narrow content-derived serial repair is committed as
-  `b3145c49`; independent format and recovery reviewers accepted it with no
-  P0-P2 findings, and its committed fast gate plus all 19 PR-preflight lanes
-  are green. Remote review/merge is next.
+- Parallel execution: complete. Independent product, security, spend,
+  activation, packaging, release, Linux, SBOM, and recovery reviewers accepted
+  the shipped tree. Exact-main Tests run `31914958343`, CodeQL run
+  `31914958371`, and Hugging Face sync `31914958347` are green. Production
+  publish run `31915534546` completed successfully, including reproducible
+  package build, package and graph provenance, CycloneDX attestation, release
+  assets, and PyPI Trusted Publishing.
 
 ## Product destination
 
@@ -86,39 +85,24 @@ All of the following must be true before tagging or publishing:
 | Applied winner activation | Complete, independently accepted | Activation writer + coordinator + independent reviewer | Strict repository-root loader, nested-sidecar refusal, hash/model validation, one-use exact context, subdirectory activation, and explicit model-conflict handling passed independent refreeze as part of the 222-check baseline/activation lane |
 | ADR-015 stop attribution | Complete, independently accepted | Coordinator + spend/fairness reviewer | Structured stop reason/log fields flow provider → live runner → serialized result, budget-capped trials are inconclusive, and the accepted spend/fairness lane plus 446-test Fit aggregate are green |
 | Release metadata and publish guard | Complete, independently accepted | Metadata writer + publish writer/reviewer + coordinator | 1.0.21 metadata and changelog are current; exact-main/exact-successful-Tests production guard and changelog-backed notes have no P0/P1 review findings; P2 credential/doc hardening is integrated |
-| Final verification and release | Attestation compatibility repair ready for remote review | Coordinator + release/SBOM reviewers | PR #270 merged as `2714f9be`; exact-main Tests and CodeQL succeeded. Recovered annotated tag object `bcd5632d` points to that exact commit. Publish run `31913053842` passed the repaired SBOM normalization/strict closure gate and the complete build job. Package and graph provenance attestations were created, but the SBOM attestation failed because pinned `actions/attest@f7c74d...` requires an optional top-level CycloneDX serial; release/PyPI jobs skipped, GitHub release is absent, and PyPI is still 404. Commit `b3145c49` derives a deterministic RFC-4122 UUIDv5 from canonical normalized BOM content, validates exact equality, proves pinned-action recognition, and has independent acceptance plus green committed fast and 19-lane PR-preflight gates. PR, fresh exact-main CI, audited partial-attestation cleanup, and another explicit unpublished-tag recovery remain. |
+| Final verification and release | Complete, publicly verified | Coordinator + release/SBOM reviewers | PR #271 merged as release commit `38a33f8784e2bf408430a98fed81206c2cf39d00`; exact-main Tests, CodeQL, and Hugging Face sync succeeded. Annotated tag `v1.0.21` peels to that commit. Publish run `31915534546` completed every build, attestation, release-asset, and PyPI job. Public wheel/SBOM digests, Sigstore/Rekor attestations, clean installation, `pip check`, version output, and a minimal `ctx fit --json` repository profile were independently verified. |
 
 ## Open release blockers
 
 ### P0 — release-stopping
 
-None in the current working tree. PR #267's earlier CodeQL finding was repaired
-with owner-only (`0600`) applied manifests, independently accepted, and remote
-CodeQL is green on commit `2cc8667d`.
-
-ADR-016 itself has independent current-tree acceptance: repository-native
-verification is explicitly a non-adversarial trust boundary.
+None. All definition-of-done conditions were closed before publication.
 
 ### P1 — must resolve or explicitly de-scope before release
 
-One active blocker remains at the remote-release boundary. The PURL repair is merged and passed its exact
-production gate, but cyclonedx-bom 7.3.0 also removes `serialNumber` under
-reproducible output. CycloneDX 1.6 permits that omission; pinned
-`actions/attest@f7c74d...` has a narrower parser requiring truthy `bomFormat`,
-`specVersion`, and `serialNumber`. Run `31913053842` therefore failed only at
-the SBOM attestation. The active repair binds a canonical UUIDv5 derived from
-the normalized BOM content with the serial omitted, so byte-identical BOMs are
-reproducible and materially different BOMs get different identities. It
-refuses conflicts and requires exact recomputation after strict dependency
-closure validation. Focused regressions and exact uploaded-artifact schema/
-parser probes are green; commit `b3145c49` passed the committed fast gate and
-all 19 PR-preflight lanes. Review/merge and a new exact-main Tests success
-remain mandatory before controlled tag recovery.
+None. The CycloneDX PURL and deterministic content-derived RFC-4122 UUIDv5
+serial repairs passed the production generator, strict closure validator, and
+pinned attestation action in publish run `31915534546`.
 
-The release also deliberately discloses that qualification did not include a
-paid provider call or a complete provider-plus-filesystem-MCP launch on this
-host (which lacks `npx`). Missing `npx` fails closed. These are evidence limits,
-not claims the release makes.
+The release deliberately discloses that qualification did not include a paid
+provider call. The required Ubuntu lane proved Bubblewrap, Node, `npx`, the
+optional harness, and zero-spend driver construction without invoking a model.
+This is an evidence limit, not a claim the release makes.
 
 External release settings remain a P2 operational risk: observed `main` and
 the `pypi` environment have no server-side protection rules. The workflow now
@@ -189,15 +173,16 @@ surface makes that row stale for release purposes.
 | Commit `c4aaa22e`, 2026-08-15 | committed fast gate + clean detached PR preflight | All 11 fast lanes and all 19 preflight lanes passed; 8,774 tests, 5 skipped, 92.16% coverage; wheel `e9770d99...`, sdist `a0d86319...`, Twine green | Exact local release evidence; remote Ubuntu still required |
 | PR #267 / commit `c4aaa22e`, 2026-08-15 | required Ubuntu live-prerequisite lane | AppArmor profile loaded and every child started; 8 passed, while a private-root sibling write and private POSIX-shm creation contradicted the old denial assertions | Release-stopping policy/evidence mismatch; directly drove private-root remount and same-name shm isolation proof |
 | Linux private-root repair tree, 2026-08-15 | sandbox/provider/doctor/workflow focused + static | 64 passed; Ruff, format, mypy, and diff check passed; independent review found no P0/P1 | Fresh local evidence; committed gates and exact-SHA Ubuntu remain |
-| Exact tag target | required GitHub CI and package/publish smoke | Not run | Required |
+| Release commit `38a33f87`, 2026-08-16 | local committed fast gate and clean PR preflight | 8,783 passed, 5 skipped, 92.16% coverage; all 11 fast lanes and all 19 preflight lanes passed; reproducible wheel/sdist and Twine green | Final local release evidence |
+| PR #271 / head `6a409de9`, 2026-08-16 | GitHub Tests and CodeQL | Tests run `31914512225` and CodeQL run `31914512301` succeeded; unit-linux passed 8,680 with 50 skips and 91.32% coverage | Accepted merge evidence |
+| Exact release commit `38a33f87`, 2026-08-16 | canonical main CI and graph distribution | Tests `31914958343`, CodeQL `31914958371`, and Hugging Face sync `31914958347` succeeded | Exact tag provenance evidence |
+| Annotated tag `v1.0.21`, 2026-08-16 | production publish and public smoke | Publish `31915534546` succeeded; GitHub release, PyPI wheel/sdist, SBOM, package/graph/SBOM attestations, clean install, `pip check`, version, and minimal-repository Fit profile verified | Release complete |
 
 No paid real-provider evaluation has been authorized or run during this
 hardening pass. A simulated or injected driver is not evidence of live provider
 quality. Any paid canary requires a separately stated budget and consent.
-TestPyPI does not yet contain a `claude-ctx` project, so its first Trusted
-Publisher path is also unproven. Do not consume the 1.0.21 TestPyPI filename on
-anything except the final release candidate because published filenames cannot
-be overwritten.
+TestPyPI does not yet contain a `claude-ctx` project, so that optional staging
+path remains unproven. Production PyPI Trusted Publishing succeeded.
 
 ## Execution and review loops
 
@@ -247,18 +232,64 @@ be overwritten.
 
 ## Immediate next actions
 
-1. Push commit `b3145c49`, open the narrow serial-repair PR, and merge it only
-   with required checks green.
-2. Require a fresh successful exact-main Tests run. Archive and remove the
-   transient Actions artifacts and deletable GitHub attestation records from
-   run `31913053842`, recording that Rekor history remains. Reconfirm GitHub
-   release absence and PyPI 404; then explicitly delete/recreate the annotated
-   `v1.0.21` tag on the new exact tested main commit without a force-push.
-3. Monitor production publish to completion, then verify PyPI, GitHub release
-   assets/attestations, clean install, and Hugging Face synchronization before
-   declaring the release complete.
+1. Keep release assets plus their exact manifests as the canonical graph
+   distribution path, then remove the two graph tarballs and LFS tracking rules
+   in a separately reviewed post-release migration.
+2. Ask GitHub Support to purge historical repository LFS objects after that
+   migration. Removing pointers or rewriting Git history alone does not release
+   GitHub's billed LFS storage.
+3. Add `main`, tag, and `pypi` environment protection rules as defense in depth;
+   the shipped workflow already enforces exact-main and exact-successful-Tests
+   provenance.
 
 ## Checkpoint log
+
+- 2026-08-16: Released CTX Fit 1.0.21. PR #271 merged as exact commit
+  `38a33f8784e2bf408430a98fed81206c2cf39d00`; canonical Tests run
+  `31914958343`, CodeQL run `31914958371`, and Hugging Face sync
+  `31914958347` succeeded. The recovered annotated tag object
+  `a7b8e78559fda1d44dca844393458272071ae89b` peels to that commit without a
+  force update. Production publish run `31915534546` completed build, package
+  provenance, graph provenance, CycloneDX attestation, release assets, and PyPI
+  Trusted Publishing. Public release:
+  `https://github.com/stevesolun/ctx/releases/tag/v1.0.21`; public package:
+  `https://pypi.org/project/claude-ctx/1.0.21/`.
+- 2026-08-16: Independently downloaded and verified the public artifacts. PyPI
+  wheel SHA-256 is
+  `aa0c6bd75412788df31f38fe43e3c6f5f6504a4e6a3b95d8126a3ddab9c5610a`;
+  sdist SHA-256 is
+  `fde373139a5de2f5543dcdc605b2533797a1c9c4fabfae357118bd778a5ed8f3`;
+  release SBOM SHA-256 is
+  `e83d0f62c6bc5207a6531a1bd2eaff485efd9babca214fa937cbb44cfaf6264d`.
+  The SBOM is CycloneDX 1.6 for `claude-ctx` 1.0.21 with exact PyPI PURL and
+  deterministic serial `urn:uuid:15633df7-79c8-5a2c-b5d9-bbebf39ac64e`.
+  Sigstore/Rekor verification bound package provenance and the SBOM predicate
+  to the exact tag, source commit, and pinned publish workflow. GitHub
+  attestations are package provenance `40951384` / Rekor `2481664308`, graph
+  provenance `40951389` / Rekor `2481664588`, and package CycloneDX binding
+  `40951393` / Rekor `2481664719`. PyPI publish transparency indices are
+  `2481670714` for the wheel and `2481670637` for the sdist. Versioned and
+  unversioned PyPI JSON, Simple, and `pip index` all resolve 1.0.21. A fresh
+  public install selected 1.0.21; `ctx --version`, `pip check`, and a minimal
+  repository's read-only `ctx fit --json` profile passed.
+- 2026-08-16: Archived the failed publish recovery evidence outside the
+  repository at
+  `/Users/steves/Steves_Files/Work/Research_and_Papers/ctx-release-recovery-31913053842`;
+  its `SHA256SUMS` digest is
+  `10cc282df0122fce3f99b6dff395d1b7764d0239c84adc915d3613751caaa5ed`.
+  After offline attestation verification, deleted exact failed-run Actions
+  artifacts `9254254768`, `9254254867`, and `9254257587`, plus exact GitHub
+  attestation records `40948323` and `40948329`. Rekor entries `2480992277`
+  and `2480992911` intentionally remain as transparency history. This freed
+  about 420 MB of Actions storage, not Git LFS storage.
+- 2026-08-16: Audited Git LFS. Only the full and runtime graph tarballs are LFS
+  tracked; reachable history contains 45 unique objects totaling 12.131 GiB.
+  Standard verified pruning has zero safe local candidates. The current pair is
+  preserved as exact release assets, but 23 historical objects totaling about
+  6.653 GiB lack release backup. GitHub continues billing remote LFS objects
+  after pointer deletion/history rewriting, so safe quota recovery requires a
+  reviewed release-asset migration followed by a GitHub Support purge; no
+  destructive history rewrite was performed.
 
 - 2026-08-16: Committed the independently accepted CycloneDX serial repair as
   `b3145c49`. Its committed fast gate passed 8,783 tests, 5 skips, 92.16%
