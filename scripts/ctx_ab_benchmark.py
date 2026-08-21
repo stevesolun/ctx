@@ -127,6 +127,44 @@ _NON_INTENT_MATCH_TAGS = frozenset(
         "offline",
     }
 )
+
+
+def hydrate_production_catalog_archive(*, root: Path = ROOT) -> Path:
+    """Hydrate the release-pinned production catalog when a clean clone lacks it."""
+    archive = root / "graph" / "wiki-graph-runtime.tar.gz"
+    resolver = root / "scripts" / "graph_release_manifest.py"
+    manifest = root / "graph" / "release-artifacts.json"
+    command = [
+        sys.executable,
+        str(resolver),
+        "hydrate",
+        "--repo-root",
+        str(root),
+        "--manifest",
+        str(manifest),
+        "--artifact",
+        "graph/wiki-graph-runtime.tar.gz",
+    ]
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=root,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError("production catalog release hydration failed") from exc
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()
+        suffix = f": {detail[-2000:]}" if detail else ""
+        raise RuntimeError(f"production catalog release hydration failed{suffix}")
+    if archive.is_symlink() or not archive.is_file():
+        raise RuntimeError("production catalog release hydration produced no regular archive")
+    return archive
+
+
 SUCCESSFUL_CTX_RUN_STOP_REASONS = frozenset({"completed"})
 SUCCESSFUL_LIFECYCLE_STATUSES = frozenset({"completed", "successful"})
 ENTITY_TRANSITION_ACTIONS = frozenset(
@@ -11803,6 +11841,11 @@ def _run_main(
             )
     if holdout_requested and not all(value is not None for value in holdout_values):
         raise SystemExit("official holdout execution requires every holdout and verifier argument")
+    if args.engine == PRODUCTION_CATALOG_ENGINE and not args.list:
+        try:
+            hydrate_production_catalog_archive()
+        except RuntimeError as exc:
+            raise SystemExit(str(exc)) from exc
     if holdout_requested:
         if args.engine != PRODUCTION_CATALOG_ENGINE:
             raise SystemExit("official holdout execution requires codex-production-catalog")

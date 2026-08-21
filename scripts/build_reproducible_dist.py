@@ -771,7 +771,6 @@ def _export_git_tree(repo_root: Path, git_ref: str, target: Path) -> Path:
     target.mkdir(parents=True)
     archive_path = target / "source.tar"
     env = dict(os.environ)
-    env["GIT_LFS_SKIP_SMUDGE"] = "1"
     try:
         with archive_path.open("wb") as archive:
             result = subprocess.run(

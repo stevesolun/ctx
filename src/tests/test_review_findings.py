@@ -25,6 +25,7 @@ import pack_full_wiki_tar  # noqa: E402
 import sync_huggingface  # noqa: E402
 import validate_graph_artifacts as vga  # noqa: E402
 from ctx import dashboard_entities  # noqa: E402
+from ctx.core.graph import release_artifacts  # noqa: E402
 from ctx.core.wiki import wiki_queue_worker  # noqa: E402
 from ctx.utils._secret_scan import find_inline_secret_arg  # noqa: E402
 
@@ -225,54 +226,47 @@ def test_graph_markdown_host_path_scan_covers_key_value_delimiters(payload: byte
 
 
 @pytest.mark.parametrize(
-    "workflow_path",
+    ("workflow_path", "expected_invocations"),
     [
-        ".github/workflows/huggingface-sync.yml",
-        ".github/workflows/publish.yml",
-        ".github/workflows/test.yml",
+        (".github/workflows/huggingface-sync.yml", 1),
+        (".github/workflows/publish.yml", 1),
+        (".github/workflows/test.yml", 3),
     ],
 )
-def test_graph_workflow_searches_release_cache_before_lfs_fallback(
+def test_graph_workflows_use_one_strict_release_manifest_resolver(
     workflow_path: str,
+    expected_invocations: int,
 ) -> None:
     workflow = (ROOT / workflow_path).read_text(encoding="utf-8")
-    resolve_script = workflow[workflow.index("def hydrate_from_release") :]
-
-    release_search = resolve_script.index("for release in load_releases():")
-    lfs_fallback = resolve_script.rindex(
-        "hydrate_from_lfs(path_name, expected_oid, expected_size, hydrated_min_size)"
+    resolver = (
+        "python scripts/graph_release_manifest.py hydrate --manifest graph/release-artifacts.json"
     )
 
-    assert release_search < lfs_fallback
-    assert (
-        "hydrate_from_lfs(path_name, expected_oid, expected_size, hydrated_min_size)"
-        not in resolve_script[:release_search]
+    assert workflow.count(resolver) == expected_invocations
+    assert "git lfs" not in workflow.lower()
+    assert "GIT_LFS_" not in workflow
+
+
+def test_preflight_hydrates_strict_manifest_before_graph_validation() -> None:
+    checks, _notes = ci_preflight.select_checks(
+        base_ref="origin/main",
+        files=["graph/release-artifacts.json"],
+        profile="pr",
+        python="python",
     )
-    assert 'if expected_oid != fallback["sha256"]' not in resolve_script
+    names = [check.name for check in checks]
+    hydrate = next(check for check in checks if check.name == "hydrate graph release assets")
 
-
-def test_preflight_refuses_oversized_graph_lfs_pointer_before_pull(
-    monkeypatch: Any,
-    tmp_path: Path,
-    capsys: Any,
-) -> None:
-    monkeypatch.setattr(ci_preflight, "REPO_ROOT", tmp_path)
-    artifact = tmp_path / "graph" / "wiki-graph.tar.gz"
-    artifact.parent.mkdir()
-    max_size = ci_preflight.GRAPH_LFS_MAX_FALLBACK_SIZES["graph/wiki-graph.tar.gz"]
-    artifact.write_text(
-        f"version https://git-lfs.github.com/spec/v1\noid sha256:{'a' * 64}\nsize {max_size + 1}\n",
-        encoding="utf-8",
+    assert names.index("hydrate graph release assets") < names.index("graph artifact validation")
+    assert hydrate.argv == (
+        "python",
+        "scripts/graph_release_manifest.py",
+        "hydrate",
+        "--manifest",
+        "graph/release-artifacts.json",
+        "--repo-root",
+        ".",
     )
-    monkeypatch.setattr(ci_preflight.shutil, "which", lambda _name: "/usr/bin/git")
-
-    def fail_run(*_args: Any, **_kwargs: Any) -> None:
-        raise AssertionError("git lfs pull should not run")
-
-    monkeypatch.setattr(ci_preflight.subprocess, "run", fail_run)
-
-    assert ci_preflight.hydrate_graph_lfs_artifacts() == 1
-    assert "exceeds cap" in capsys.readouterr().err
 
 
 def test_hf_card_export_uploads_docs_and_changelog(
@@ -666,7 +660,7 @@ def test_entity_search_fallback_returns_wiki_relative_path(tmp_path: Path) -> No
     assert str(tmp_path) not in results[0]["path"]
 
 
-def test_lfs_pointer_probe_does_not_full_read_hydrated_artifact(
+def test_release_manifest_hash_probe_does_not_full_read_artifact(
     monkeypatch: Any,
     tmp_path: Path,
 ) -> None:
@@ -679,4 +673,7 @@ def test_lfs_pointer_probe_does_not_full_read_hydrated_artifact(
 
     monkeypatch.setattr(Path, "read_bytes", fail_read_bytes)
 
-    assert ci_preflight._read_lfs_pointer(artifact) is None
+    assert release_artifacts.file_sha256_and_size(artifact) == (
+        sha256(b"hydrated graph payload").hexdigest(),
+        len(b"hydrated graph payload"),
+    )

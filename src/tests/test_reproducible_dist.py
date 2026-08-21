@@ -431,7 +431,7 @@ def test_git_tree_export_disables_lfs_smudging(
         "HEAD",
     ]
     assert isinstance(captured["env"], dict)
-    assert captured["env"]["GIT_LFS_SKIP_SMUDGE"] == "1"
+    assert "GIT_LFS_SKIP_SMUDGE" not in captured["env"]
 
 
 def test_dev_dependencies_include_no_isolation_build_backend() -> None:

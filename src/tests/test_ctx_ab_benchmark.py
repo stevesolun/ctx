@@ -2522,6 +2522,67 @@ def test_catalog_archive_validation_rejects_traversal(tmp_path: Path) -> None:
         benchmark.validate_catalog_archive(archive)
 
 
+def test_production_catalog_hydration_uses_the_strict_release_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "repo"
+    script = root / "scripts" / "graph_release_manifest.py"
+    manifest = root / "graph" / "release-artifacts.json"
+    archive = root / "graph" / "wiki-graph-runtime.tar.gz"
+    script.parent.mkdir(parents=True)
+    manifest.parent.mkdir(parents=True)
+    script.write_text("# resolver\n", encoding="utf-8")
+    manifest.write_text("{}\n", encoding="utf-8")
+    calls: list[tuple[list[str], Path]] = []
+
+    def fake_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append((command, kwargs["cwd"]))
+        archive.write_bytes(b"hydrated")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(benchmark.subprocess, "run", fake_run)
+
+    assert benchmark.hydrate_production_catalog_archive(root=root) == archive
+    assert calls == [
+        (
+            [
+                sys.executable,
+                str(script),
+                "hydrate",
+                "--repo-root",
+                str(root),
+                "--manifest",
+                str(manifest),
+                "--artifact",
+                "graph/wiki-graph-runtime.tar.gz",
+            ],
+            root,
+        )
+    ]
+
+
+def test_production_catalog_hydration_rejects_an_existing_tampered_archive(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "repo"
+    archive = root / "graph" / "wiki-graph-runtime.tar.gz"
+    archive.parent.mkdir(parents=True)
+    archive.write_bytes(b"tampered-unmanifested-catalog")
+    calls: list[list[str]] = []
+
+    def reject_manifest(command: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 1, stdout="", stderr="artifact mismatch")
+
+    monkeypatch.setattr(benchmark.subprocess, "run", reject_manifest)
+
+    with pytest.raises(RuntimeError, match="artifact mismatch"):
+        benchmark.hydrate_production_catalog_archive(root=root)
+    assert len(calls) == 1
+
+
 def _write_runtime_availability(
     path: Path,
     *,

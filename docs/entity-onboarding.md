@@ -49,10 +49,9 @@ the update is treated like a release step.
    fields, likely benefits, regressions, and security findings. Do not pass
    `--update-existing` until those findings are acceptable.
 3. Run the security/cyber check below.
-4. Park heavyweight graph artifacts locally before rebuilds:
-   `python scripts/graph_artifact_guard.py park`. This keeps background Git
-   integrations from repeatedly LFS-cleaning the full wiki tarball while it is
-   still changing.
+4. Keep heavyweight graph archives local while rebuilding. They are ignored by
+   Git and must never be force-added; only the content-addressed release
+   manifest is committed.
 5. Drain the wiki queue for local runtime use:
    `python -m ctx.core.wiki.wiki_queue_worker --wiki ~/.claude/skill-wiki --limit 1`. This updates the
    wiki index, writes wiki overlay packs, attempts incremental ANN graph attach
@@ -78,12 +77,23 @@ the update is treated like a release step.
 9. Refresh published counts with `python src/update_repo_stats.py`.
 10. Verify the changed entity can be recommended through
    `ctx-scan-repo --repo . --recommend` or `ctx__recommend_bundle`.
-11. Unpark and stage the graph artifacts once the release candidate is final:
-    `python scripts/graph_artifact_guard.py unpark`, then `git add` the graph
-    artifacts intentionally. Run `python scripts/graph_artifact_guard.py prune`
-    after interrupted Git/LFS runs or after release staging to clean prunable
-    local LFS cache entries. Add `--include-git-prune` only when you explicitly
-    want repo-wide dangling Git objects removed too.
+11. Once the release candidate is final, publish all five graph files to a
+    draft `graph-artifacts-*` GitHub prerelease, verify their GitHub sizes and
+    digests, then publish that prerelease. Refresh and validate the tracked
+    manifest, and commit only the manifest plus the three small tracked files:
+
+    ```bash
+    python scripts/graph_release_manifest.py refresh \
+      --manifest graph/release-artifacts.json \
+      --source-release-tag graph-artifacts-<identity>
+    python scripts/graph_release_manifest.py validate \
+      --manifest graph/release-artifacts.json
+    git add graph/release-artifacts.json graph/communities.json \
+      graph/entity-overlays.jsonl graph/skills-sh-catalog.json.gz
+    ```
+
+    Never add either `wiki-graph*.tar.gz` archive to Git; CI hydrates the exact
+    prerelease bytes named by the manifest.
 
 The durable wiki worker drains `entity-upsert`, `graph-export`,
 `skill-index-refresh`, `tar-refresh`, and `artifact-promotion` jobs. Use

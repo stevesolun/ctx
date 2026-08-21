@@ -6,9 +6,9 @@ Run by the pre-commit hook so README/docs badges and inline counts never drift
 from reality. Reads only committed files and a live pytest collection.
 
 Sources of truth:
-  - graph/wiki-graph.tar.gz              -> graph/report/entity counts
+  - graph/release-artifacts.json          -> exact release asset identities
+  - graph/wiki-graph-stats.json           -> graph/report/entity counts
   - scripts/ci_preflight.py GRAPH_VALIDATE_ARGS -> exact release fallback
-  - graph/wiki-graph-runtime.tar.gz      -> runtime graph/report counts
   - graph/communities.json               -> current community export
   - graph/skills-sh-catalog.json.gz      -> hydrated skill body counts
   - pytest --collect-only -q             -> test inventory count
@@ -134,6 +134,19 @@ def _int_from_json(value: object) -> int | None:
     return None
 
 
+def _release_manifest_artifact_identity(path: str) -> tuple[str, int] | None:
+    manifest_path = REPO_ROOT / "graph" / "release-artifacts.json"
+    if not manifest_path.exists():
+        return None
+    try:
+        from ctx.core.graph.release_artifacts import load_manifest
+
+        artifact = load_manifest(manifest_path).artifact_for_path(path)
+    except (ImportError, KeyError, ValueError):
+        return None
+    return artifact.sha256, artifact.size
+
+
 def _read_graph_artifact_stats() -> dict[str, int | None] | None:
     """Read the shipped graph stats sidecar after checking artifact identity.
 
@@ -145,7 +158,7 @@ def _read_graph_artifact_stats() -> dict[str, int | None] | None:
     sidecar = graph_dir / _GRAPH_STATS_SIDECAR
     tarball = graph_dir / "wiki-graph.tar.gz"
     promotion = graph_dir / "wiki-graph.tar.gz.promotion.json"
-    if not sidecar.exists() or not tarball.exists():
+    if not sidecar.exists():
         return None
     try:
         payload = json.loads(sidecar.read_text(encoding="utf-8"))
@@ -157,7 +170,15 @@ def _read_graph_artifact_stats() -> dict[str, int | None] | None:
         expected_sha = str(artifact.get("sha256") or "").strip().lower()
         if expected_size is None or len(expected_sha) != 64:
             return None
-        if tarball.stat().st_size != expected_size:
+        manifest_identity = _release_manifest_artifact_identity("graph/wiki-graph.tar.gz")
+        if manifest_identity is not None and manifest_identity != (expected_sha, expected_size):
+            return None
+        if tarball.exists():
+            if tarball.is_symlink() or not tarball.is_file():
+                return None
+            if tarball.stat().st_size != expected_size:
+                return None
+        elif manifest_identity is None:
             return None
         if promotion.exists():
             promotion_payload = json.loads(promotion.read_text(encoding="utf-8"))
@@ -490,14 +511,14 @@ def read_graph_stats() -> dict:
     Priority:
       1. ``graph/wiki-graph-stats.json`` — the checked sidecar for the
          shipped graph artifact. This keeps docs/About updates fast while
-         still tying counts to the promoted tarball hash and size.
-      2. ``graph/wiki-graph.tar.gz`` — the tarball that ships in
-         releases. Pinned and canonical, but slow to enumerate.
+         still tying counts to the release manifest's exact hash and size.
+      2. ``graph/wiki-graph.tar.gz`` — the release-manifest-pinned tarball
+         when it has been hydrated locally. Canonical but slow to enumerate.
       3. ``scripts/ci_preflight.py`` graph contract counts — fallback
-         when a source checkout has not downloaded the release tarball.
+         when a source checkout has not hydrated the release tarball.
       4. ``~/.claude/skill-wiki/graphify-out/graph.json`` — the user's
          live wiki. Used only when the tarball isn't present (e.g. a
-         bare clone without the release asset downloaded).
+         bare clone without the release asset hydrated).
 
     Without this priority the pre-commit hook can silently publish stale
     contract numbers or whatever the user last re-graphified instead of
@@ -754,29 +775,16 @@ def format_edges(n: int) -> str:
 
 
 def _full_wiki_tarball_mib() -> int | None:
-    """Return the shipped full wiki tarball MiB, following Git LFS pointers."""
+    """Return the full release wiki tarball size from its pinned manifest."""
+    identity = _release_manifest_artifact_identity("graph/wiki-graph.tar.gz")
+    if identity is not None:
+        return round(identity[1] / (1024 * 1024))
     tarball = REPO_ROOT / "graph" / "wiki-graph.tar.gz"
     if not tarball.exists():
         return None
-    size = _git_lfs_pointer_size(tarball)
-    if size is None:
-        size = tarball.stat().st_size
-    return round(size / (1024 * 1024))
-
-
-def _git_lfs_pointer_size(path: Path) -> int | None:
-    try:
-        if path.stat().st_size > 1024:
-            return None
-        text = path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
+    if tarball.is_symlink() or not tarball.is_file():
         return None
-    if not text.startswith("version https://git-lfs.github.com/spec/v1\n"):
-        return None
-    match = re.search(r"^size (\d+)$", text, re.MULTILINE)
-    if match is None:
-        return None
-    return int(match.group(1))
+    return round(tarball.stat().st_size / (1024 * 1024))
 
 
 Replacement = tuple[re.Pattern[str], str]

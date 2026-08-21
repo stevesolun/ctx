@@ -26,9 +26,9 @@ What it does:
      ``~/.claude/settings.json``.
   6. Optionally: installs the initial graph/wiki archive if missing.
      Skipped unless the wizard or ``--graph`` asks for it. Source
-     checkouts use ``graph/wiki-graph-runtime.tar.gz`` by default and
-     fall back to the full ``graph/wiki-graph.tar.gz`` archive; pip installs
-     download the matching release asset.
+     checkouts use a locally hydrated ``graph/wiki-graph-runtime.tar.gz`` by
+     default and fall back to the full ``graph/wiki-graph.tar.gz`` archive;
+     otherwise they download the matching verified release asset.
 
 Idempotent: re-running only writes what's missing. Never overwrites
 a user's config or hook settings without an explicit ``--force`` flag.
@@ -61,6 +61,7 @@ from ctx.core.install_policy_store import (
     load_current_install_policy,
     persist_install_policy,
 )
+from ctx.core.graph.release_artifacts import load_manifest, release_asset_url
 from ctx.engine.installation import INSTALL_CONSENT_MODES, InstallConsentPolicy
 from ctx.utils._fs_utils import safe_atomic_write_text
 
@@ -250,6 +251,7 @@ _GRAPH_ENTITY_OVERLAY_SCORE_FIELDS = (
     "token_sim",
 )
 _GRAPH_ENTITY_OVERLAY_SHA256 = "2d7c22c5a520172ee2d3b73bb579079cd9946cebcad4eeed7b18d3282284f269"
+_GRAPH_ENTITY_OVERLAY_SIZE = 98_513
 _GRAPH_ARCHIVE_NAMES = {
     "runtime": _GRAPH_RUNTIME_ARCHIVE_NAME,
     "full": _GRAPH_ARCHIVE_NAME,
@@ -257,6 +259,10 @@ _GRAPH_ARCHIVE_NAMES = {
 _GRAPH_ARCHIVE_SHA256 = {
     "runtime": "d4a39836aab5f558b546842580b2e20c523b9a9ab901ed681f84c09b5c4d6515",
     "full": "2ce8a945c17a7345df9d27d8f101319a9f963b0fc85d399f104630bc06a7c4a0",
+}
+_GRAPH_ARCHIVE_SIZE = {
+    "runtime": 110_283_462,
+    "full": 295_151_086,
 }
 _GRAPH_RELEASE_URL = "https://github.com/stevesolun/ctx/releases/download/v{version}/{archive_name}"
 _GRAPH_REQUIRED_FILES = frozenset(
@@ -352,18 +358,38 @@ def build_graph(
     temp_dir: tempfile.TemporaryDirectory[str] | None = None
     archive = None if graph_url is not None else _find_local_graph_archive(install_mode)
     try:
+        source_contract = (
+            _source_graph_release_contract(install_mode) if graph_url is None else None
+        )
         if archive is None:
             temp_dir = tempfile.TemporaryDirectory(prefix="ctx-graph-download-")
             archive = Path(temp_dir.name) / _graph_archive_name(install_mode)
-            url = graph_url or _release_graph_url(install_mode)
-            expected_sha256 = _expected_graph_archive_sha256(
-                install_mode=install_mode,
-                graph_url=graph_url,
-                graph_sha256=graph_sha256,
-                allow_unverified_graph_url=allow_unverified_graph_url,
-            )
+            url: str
+            expected_sha256: str | None
+            expected_size: int | None
+            if source_contract is not None:
+                url, expected_sha256, expected_size = source_contract
+            else:
+                url = graph_url or _release_graph_url(install_mode)
+                expected_sha256 = _expected_graph_archive_sha256(
+                    install_mode=install_mode,
+                    graph_url=graph_url,
+                    graph_sha256=graph_sha256,
+                    allow_unverified_graph_url=allow_unverified_graph_url,
+                )
+                expected_size = (
+                    _GRAPH_ARCHIVE_SIZE[install_mode]
+                    if graph_url is None or graph_url == _release_graph_url(install_mode)
+                    else None
+                )
             print(f"Downloading pre-built graph from {url}")
-            _download_graph_archive(archive, url=url, expected_sha256=expected_sha256)
+            download_args: dict[str, Any] = {
+                "url": url,
+                "expected_sha256": expected_sha256,
+            }
+            if expected_size is not None:
+                download_args["expected_size"] = expected_size
+            _download_graph_archive(archive, **download_args)
         else:
             _verify_local_graph_archive(archive, requested_install_mode=install_mode)
             print(f"Installing pre-built graph from {archive}")
@@ -413,20 +439,9 @@ def _find_local_graph_archive(install_mode: str = "runtime") -> Path | None:
         graph_dir / archive_name for archive_name in archive_names for graph_dir in graph_dirs
     ]
     for candidate in candidates:
-        if candidate.is_file() and not _is_lfs_pointer_file(candidate):
+        if candidate.is_file() and not candidate.is_symlink():
             return candidate
     return None
-
-
-def _is_lfs_pointer_file(path: Path) -> bool:
-    """Return True when a graph archive path is only a Git LFS pointer."""
-    try:
-        if path.stat().st_size > 1024:
-            return False
-        with path.open("rb") as fh:
-            return fh.readline().strip() == b"version https://git-lfs.github.com/spec/v1"
-    except OSError:
-        return False
 
 
 def _find_local_graph_entity_overlay() -> Path | None:
@@ -454,6 +469,7 @@ def _install_graph_entity_overlay(
                 candidate,
                 url=_release_asset_url(_GRAPH_ENTITY_OVERLAY_NAME),
                 expected_sha256=_GRAPH_ENTITY_OVERLAY_SHA256,
+                expected_size=_GRAPH_ENTITY_OVERLAY_SIZE,
             )
         except OSError:
             temp_dir.cleanup()
@@ -519,6 +535,16 @@ def _release_graph_url(install_mode: str = "runtime") -> str:
     return _release_asset_url(_graph_archive_name(install_mode))
 
 
+def _source_graph_release_contract(install_mode: str) -> tuple[str, str, int] | None:
+    """Return the source checkout's manifest-pinned archive contract, when present."""
+    manifest_path = Path(__file__).resolve().parent.parent / "graph" / "release-artifacts.json"
+    if not manifest_path.exists() and not manifest_path.is_symlink():
+        return None
+    manifest = load_manifest(manifest_path)
+    artifact = manifest.artifact_for_path(f"graph/{_graph_archive_name(install_mode)}")
+    return release_asset_url(manifest, artifact), artifact.sha256, artifact.size
+
+
 def _release_asset_url(asset_name: str) -> str:
     return _GRAPH_RELEASE_URL.format(
         version=_package_version(),
@@ -554,18 +580,26 @@ def _expected_graph_archive_sha256(
 
 def _verify_local_graph_archive(archive: Path, *, requested_install_mode: str) -> None:
     archive_mode = "full" if archive.name == _GRAPH_ARCHIVE_NAME else requested_install_mode
-    expected = _GRAPH_ARCHIVE_SHA256.get(archive_mode)
+    source_contract = _source_graph_release_contract(archive_mode)
+    if source_contract is None:
+        expected = _GRAPH_ARCHIVE_SHA256.get(archive_mode)
+        expected_size = None
+    else:
+        _url, expected, expected_size = source_contract
     if expected is None:
         return
     hasher = hashlib.sha256()
+    size = 0
     with archive.open("rb") as fh:
         while chunk := fh.read(1024 * 1024):
             hasher.update(chunk)
+            size += len(chunk)
     actual = hasher.hexdigest()
-    if actual.lower() != expected.lower():
+    if (expected_size is not None and size != expected_size) or actual.lower() != expected.lower():
         raise ValueError(
             "local graph archive checksum mismatch: "
-            f"{archive} expected {expected.lower()} got {actual.lower()}"
+            f"{archive} expected {expected.lower()} size {expected_size or 'unspecified'} "
+            f"got {actual.lower()} size {size}"
         )
 
 
@@ -585,25 +619,43 @@ def _download_graph_archive(
     *,
     url: str,
     expected_sha256: str | None,
+    expected_size: int | None = None,
 ) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     hasher = hashlib.sha256()
-    with urllib.request.urlopen(url, timeout=120) as response:  # noqa: S310
-        with destination.open("wb") as fh:
-            while True:
-                chunk = response.read(1024 * 1024)
-                if not chunk:
-                    break
-                fh.write(chunk)
-                hasher.update(chunk)
-    if expected_sha256 is not None:
+    size = 0
+    file_descriptor, temp_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.",
+        suffix=".download",
+        dir=destination.parent,
+    )
+    temp = Path(temp_name)
+    try:
+        with os.fdopen(file_descriptor, "wb") as fh:
+            with urllib.request.urlopen(url, timeout=120) as response:  # noqa: S310
+                while True:
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    if expected_size is not None and size > expected_size:
+                        raise ValueError(
+                            "graph archive size mismatch: "
+                            f"expected {expected_size} got more than {expected_size}"
+                        )
+                    fh.write(chunk)
+                    hasher.update(chunk)
         actual_sha256 = hasher.hexdigest()
-        if actual_sha256.lower() != expected_sha256.lower():
-            destination.unlink(missing_ok=True)
+        if expected_size is not None and size != expected_size:
+            raise ValueError(f"graph archive size mismatch: expected {expected_size} got {size}")
+        if expected_sha256 is not None and actual_sha256.lower() != expected_sha256.lower():
             raise ValueError(
                 "graph archive checksum mismatch: "
                 f"expected {expected_sha256.lower()} got {actual_sha256.lower()}"
             )
+        os.replace(temp, destination)
+    finally:
+        temp.unlink(missing_ok=True)
 
 
 def _extract_graph_archive(
@@ -2583,9 +2635,9 @@ def main(argv: list[str] | None = None) -> int:
         "--graph",
         action="store_true",
         help=(
-            "Install the pre-built knowledge graph after setup. Uses local "
-            "graph/wiki-graph.tar.gz when present; otherwise downloads the "
-            "matching release asset."
+            "Install the pre-built knowledge graph after setup. Uses a local "
+            "hydrated graph archive when present; otherwise downloads the "
+            "matching verified release asset."
         ),
     )
     parser.add_argument(

@@ -434,7 +434,7 @@ def test_no_test_policy_requires_tests_for_release_sync_artifact_scripts() -> No
     for script in (
         "scripts/sync_huggingface.py",
         "scripts/pack_full_wiki_tar.py",
-        "scripts/graph_artifact_guard.py",
+        "scripts/graph_release_manifest.py",
     ):
         result = evaluate_policy([script], (), {script: "+print('changed')\n"})
 
@@ -449,20 +449,15 @@ def test_ci_workflows_default_to_read_only_token_permissions() -> None:
         assert "\npermissions:\n  contents: read\n" in workflow
 
 
-def test_graph_artifact_job_uses_release_asset_fallback_for_lfs_budget() -> None:
+def test_graph_artifact_job_uses_exact_release_manifest() -> None:
     workflow = Path(".github/workflows/test.yml").read_text(encoding="utf-8")
 
-    assert "Resolve graph artifacts from release assets or targeted LFS" in workflow
-    assert "Resolving graph artifacts from release cache, or targeted Git LFS" in workflow
-    assert 'tag_name.startswith("graph-artifacts-")' in workflow
-    assert "sha256:{expected_oid} size:{expected_size}" in workflow
-    assert "Pointer for {path_name} is not in release cache" in workflow
-    assert "searching release caches before targeted Git LFS" in workflow
-    assert '"git", "lfs", "pull", "--include", path_name' in workflow
-    assert "GIT_LFS_ACTIVITYTIMEOUT" in workflow
-    assert "Hydrated {path_name} from" in workflow
-    assert "graph/wiki-graph-runtime.tar.gz" in workflow
+    assert "Resolve graph artifacts from exact release manifest" in workflow
+    assert (
+        "python scripts/graph_release_manifest.py hydrate --manifest graph/release-artifacts.json"
+    ) in workflow
     assert "python src/validate_graph_artifacts.py" in workflow
+    assert "git lfs" not in workflow.lower()
     assert "validating pointer metadata only" not in workflow
 
 
@@ -515,13 +510,11 @@ def test_publish_static_gate_uses_canonical_python_target() -> None:
 def test_publish_workflow_validates_and_uploads_graph_assets() -> None:
     workflow = Path(".github/workflows/publish.yml").read_text(encoding="utf-8")
 
-    assert "Resolve release graph artifacts from release assets" in workflow
-    assert "Resolving graph artifacts from release cache, or targeted Git LFS" in workflow
-    assert "searching release caches before targeted Git LFS" in workflow
-    assert '"git", "lfs", "pull", "--include", path_name' in workflow
-    assert "verify_hydrated_file(graph_tar, expected_oid, expected_size)" in workflow
-    assert 'tag_name.startswith("graph-artifacts-")' in workflow
-    assert "sha256:{expected_oid} size:{expected_size}" in workflow
+    assert "Resolve release graph artifacts from exact release manifest" in workflow
+    assert (
+        "python scripts/graph_release_manifest.py hydrate --manifest graph/release-artifacts.json"
+    ) in workflow
+    assert "git lfs" not in workflow.lower()
     assert "Validate release graph artifacts" in workflow
     assert "python src/validate_graph_artifacts.py" in workflow
     assert "python src/update_repo_stats.py --check" in workflow

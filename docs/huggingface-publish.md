@@ -2,8 +2,9 @@
 
 ctx publishes the GitHub repository as the public Hugging Face dataset repo
 [`Stevesolun/ctx`](https://huggingface.co/datasets/Stevesolun/ctx). The
-dataset repo is a clean `git ls-files` snapshot, including the shipped graph
-tarball and catalog artifacts, not local review reports or ignored caches.
+dataset repo is a clean `git ls-files` snapshot plus the two exact archives
+declared by `graph/release-artifacts.json`, not local review reports or ignored
+caches.
 
 ## What gets uploaded
 
@@ -20,10 +21,10 @@ by git.
 ## Automatic publish
 
 Every push to `main` runs `.github/workflows/huggingface-sync.yml`. The job
-checks out source without spending Git LFS bandwidth, hydrates the required
-graph artifacts from matching GitHub release cache assets, and falls back to a
-targeted `git lfs pull` only when a pointer is newer than the cache and within
-the configured size cap. It then installs the sync dependencies and calls
+checks out source, strictly validates `graph/release-artifacts.json`, and
+hydrates only its two large archives from the named GitHub release. It verifies
+all five graph assets by exact size and SHA-256, with no Git LFS fallback. It
+then installs the sync dependencies and calls
 `scripts/sync_huggingface.py`. It publishes only when the repository secret
 `HF_TOKEN` is configured. On the canonical
 `stevesolun/ctx` repository, a missing token is a hard failure so main cannot
@@ -36,17 +37,15 @@ or packaging changes always run the full dataset sync so tracked files cannot
 drift behind GitHub.
 
 The sync script is still the contract: it exports the tracked git snapshot,
-adds Hugging Face repo-card metadata, validates README/docs stats, verifies the
-graph artifacts are hydrated rather than LFS pointers, and refuses to publish
-stale or corrupt artifacts.
+adds the two manifest-declared archives, adds Hugging Face repo-card metadata,
+validates README/docs stats, and refuses missing, stale, or corrupt artifacts.
 
 ## Manual publish
 
 Use the repository sync script. It exports tracked files plus the validated
 local graph artifacts, adds the Hugging Face repo-card frontmatter to the
-uploaded `README.md`, and refuses to publish if the full wiki tarball, runtime
-wiki tarball, or compressed skill index is missing, too small, or still a Git
-LFS pointer.
+uploaded `README.md`, and refuses to publish if the manifest or any full wiki,
+runtime wiki, or compressed skill-index byte identity is missing or mismatched.
 
 Full sync uploads the exported tree with `delete_patterns="*"`, so files removed
 from the current git snapshot are removed remotely in the same commit.

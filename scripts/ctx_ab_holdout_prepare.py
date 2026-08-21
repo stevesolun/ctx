@@ -844,6 +844,7 @@ def create_protocol(
     root: Path = ROOT,
 ) -> str:
     """Create an authenticated acquisition-frozen V2 protocol."""
+    benchmark.hydrate_production_catalog_archive(root=root)
     state = _repository_state(root)
     output = _resolved_path(output_path)
     exposure_file = _resolved_path(exposure_ledger_path)

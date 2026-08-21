@@ -1,7 +1,7 @@
 # ctx
 
 [![CI](https://github.com/stevesolun/ctx/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
-[![Tests](https://img.shields.io/badge/Tests-8780_inventory-blue.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
+[![Tests](https://img.shields.io/badge/Tests-8803_inventory-blue.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
 
 **Find the cheapest AI coding setup that actually works on your repo.**
@@ -218,9 +218,10 @@ ctx-init --graph --model-mode skip
 ctx-scan-repo --repo . --recommend
 ```
 
-`ctx-init --graph` uses the bundled runtime artifact in a source checkout or
-downloads the matching release asset for a package install. The full packed
-wiki is optional; see the [knowledge graph guide](https://stevesolun.github.io/ctx/knowledge-graph/).
+`ctx-init --graph` uses a verified local runtime artifact when one is already
+cached, otherwise it downloads the exact content-addressed GitHub release asset.
+The heavyweight archives are not stored in Git or Git LFS. The full packed wiki
+is optional; see the [knowledge graph guide](https://stevesolun.github.io/ctx/knowledge-graph/).
 
 Every clean graph install seeds nine project-owned, MIT-licensed, no-key
 fallbacks: `ctx-python-testing`, `ctx-python-state-protocols`,

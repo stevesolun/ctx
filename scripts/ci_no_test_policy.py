@@ -30,7 +30,7 @@ RELEASE_GENERATED_STATS_FILES = {
 }
 MAINTAINER_SCRIPT_CONTRACT_FILES = {
     "scripts/clean_host_contract.py",
-    "scripts/graph_artifact_guard.py",
+    "scripts/graph_release_manifest.py",
     "scripts/pack_full_wiki_tar.py",
     "scripts/sync_huggingface.py",
 }

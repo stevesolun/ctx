@@ -614,6 +614,7 @@ def test_attestation_covers_every_published_artifact_and_blocks_publish() -> Non
     assert graph_download["with"]["name"] == "graph-release-assets"
     assert graph_attest["if"] == "needs.build.outputs.graph_assets_available == 'true'"
     published_graph_paths = {
+        "release-artifacts.json",
         "wiki-graph.tar.gz",
         "wiki-graph-runtime.tar.gz",
         "skills-sh-catalog.json.gz",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import sys
 import tarfile
 from pathlib import Path
@@ -16,15 +17,47 @@ if str(SCRIPTS_DIR) not in sys.path:
 import sync_huggingface  # noqa: E402
 
 
+RELEASE_ARTIFACT_SPECS = (
+    ("graph/communities.json", "communities.json", False),
+    ("graph/entity-overlays.jsonl", "entity-overlays.jsonl", False),
+    ("graph/skills-sh-catalog.json.gz", "skills-sh-catalog.json.gz", False),
+    ("graph/wiki-graph-runtime.tar.gz", "wiki-graph-runtime.tar.gz", True),
+    ("graph/wiki-graph.tar.gz", "wiki-graph.tar.gz", True),
+)
+
+
 def _required_hydrated_artifacts() -> tuple[Path, ...]:
     return tuple(sync_huggingface.HYDRATED_ARTIFACT_MIN_BYTES)
 
 
 def _write_small_hydrated_artifacts(repo: Path) -> None:
-    for rel in _required_hydrated_artifacts():
-        path = repo / rel
+    artifacts: list[dict[str, object]] = []
+    for path_name, asset_name, hydrate in RELEASE_ARTIFACT_SPECS:
+        rel = Path(path_name)
+        path = repo / path_name
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(b"\x1f\x8b" + rel.name.encode("utf-8"))
+        payload = b"\x1f\x8b" + rel.name.encode("utf-8")
+        path.write_bytes(payload)
+        artifacts.append(
+            {
+                "path": path_name,
+                "asset_name": asset_name,
+                "size": len(payload),
+                "sha256": hashlib.sha256(payload).hexdigest(),
+                "hydrate": hydrate,
+            }
+        )
+    (repo / "graph" / "release-artifacts.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "repository": "stevesolun/ctx",
+                "source_release_tag": "v-test",
+                "artifacts": artifacts,
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 def _tiny_hydrated_min_bytes() -> dict[Path, int]:
@@ -162,15 +195,12 @@ def test_hf_sync_workflow_uses_secret_and_hardened_script() -> None:
 
     assert "HF_TOKEN: ${{ secrets.HF_TOKEN }}" in text
     assert "lfs: false" in text
-    assert "Resolving graph artifacts from release cache, or targeted Git LFS" in text
-    assert "searching release caches before targeted Git LFS" in text
-    assert '"git", "lfs", "pull", "--include", path_name' in text
-    assert "verify_hydrated_file(artifact, expected_oid, expected_size)" in text
-    assert 'tag_name.startswith("graph-artifacts-")' in text
-    assert "latest_tag" not in text
-    for artifact in _required_hydrated_artifacts():
-        assert artifact.as_posix() in text
-        assert f'hydrate_from_release("{artifact.as_posix()}"' in text
+    assert "Hydrate required graph artifacts from exact release manifest" in text
+    assert (
+        "python scripts/graph_release_manifest.py hydrate --manifest graph/release-artifacts.json"
+    ) in text
+    assert "git lfs" not in text.lower()
+    assert "GIT_LFS_" not in text
     assert "scripts/sync_huggingface.py" in text
     assert "--repo-type dataset" in text
     assert "--repo-type model" not in text
@@ -441,7 +471,7 @@ def test_hf_graph_validation_rejects_stale_exact_counts(tmp_path: Path, monkeypa
         raise AssertionError("expected stale graph artifact rejection")
 
 
-def test_hf_export_requires_hydrated_artifacts_to_match_lfs_pointer(
+def test_hf_export_requires_artifacts_to_match_release_manifest(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -451,27 +481,12 @@ def test_hf_export_requires_hydrated_artifacts_to_match_lfs_pointer(
     graph_dir.mkdir()
     _write_small_hydrated_artifacts(repo)
     artifact = graph_dir / "wiki-graph.tar.gz"
-    expected = b"\x1f\x8bcurrent-full-graph"
-    artifact.write_bytes(expected)
-    expected_oid = hashlib.sha256(expected).hexdigest()
-    pointer = (
-        "version https://git-lfs.github.com/spec/v1\n"
-        f"oid sha256:{expected_oid}\n"
-        f"size {len(expected)}\n"
-    )
 
     monkeypatch.setattr(
         sync_huggingface,
         "HYDRATED_ARTIFACT_MIN_BYTES",
         _tiny_hydrated_min_bytes(),
     )
-
-    def fake_git_bytes(_repo: Path, *_args: str) -> bytes:
-        if _args[-1] == "HEAD:graph/wiki-graph.tar.gz":
-            return pointer.encode("utf-8")
-        raise sync_huggingface.subprocess.CalledProcessError(1, list(_args))
-
-    monkeypatch.setattr(sync_huggingface, "_git_bytes", fake_git_bytes)
     monkeypatch.setattr(
         sync_huggingface,
         "_validate_graph_artifact_integrity",
@@ -481,15 +496,11 @@ def test_hf_export_requires_hydrated_artifacts_to_match_lfs_pointer(
     sync_huggingface._assert_hydrated_artifacts(repo)
 
     artifact.write_bytes(b"\x1f\x8bstale-full-graph")
-    try:
+    with pytest.raises(RuntimeError, match="release manifest"):
         sync_huggingface._assert_hydrated_artifacts(repo)
-    except RuntimeError as exc:
-        assert "does not match HEAD LFS pointer" in str(exc)
-    else:
-        raise AssertionError("expected stale LFS asset rejection")
 
 
-def test_hf_export_skips_lfs_pointer_check_for_binary_git_artifact(
+def test_hf_export_rejects_incomplete_release_manifest_identity(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -498,30 +509,50 @@ def test_hf_export_skips_lfs_pointer_check_for_binary_git_artifact(
     graph_dir = repo / "graph"
     graph_dir.mkdir()
     _write_small_hydrated_artifacts(repo)
-    artifact = graph_dir / "wiki-graph.tar.gz"
-    artifact.write_bytes(b"\x1f\x8bcurrent-full-graph")
-
-    def fake_git_bytes(_repo: Path, *_args: str) -> bytes:
-        if _args[-1] == "HEAD:graph/wiki-graph.tar.gz":
-            return b"\x1f\x8bcommitted-binary-graph"
-        raise sync_huggingface.subprocess.CalledProcessError(1, list(_args))
+    manifest_path = graph_dir / "release-artifacts.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artifacts"].pop()
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
     monkeypatch.setattr(
         sync_huggingface,
         "HYDRATED_ARTIFACT_MIN_BYTES",
         _tiny_hydrated_min_bytes(),
     )
-    monkeypatch.setattr(sync_huggingface, "_git_bytes", fake_git_bytes)
     monkeypatch.setattr(
         sync_huggingface,
         "_validate_graph_artifact_integrity",
         lambda _repo: None,
     )
 
-    sync_huggingface._assert_hydrated_artifacts(repo)
+    with pytest.raises(RuntimeError, match="invalid graph release manifest"):
+        sync_huggingface._assert_hydrated_artifacts(repo)
 
 
-def test_hf_export_rejects_corrupt_large_graph_artifact(tmp_path: Path, monkeypatch) -> None:
+def test_hf_export_rejects_release_manifest_for_other_repository(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_small_hydrated_artifacts(repo)
+    manifest_path = repo / "graph" / "release-artifacts.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["repository"] = "other/ctx"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(
+        sync_huggingface,
+        "HYDRATED_ARTIFACT_MIN_BYTES",
+        _tiny_hydrated_min_bytes(),
+    )
+
+    with pytest.raises(RuntimeError, match="manifest repository must"):
+        sync_huggingface._assert_hydrated_artifacts(repo)
+
+
+def test_hf_export_rejects_corrupt_graph_before_deep_validation(
+    tmp_path: Path, monkeypatch
+) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     graph_dir = repo / "graph"
@@ -554,10 +585,6 @@ def test_hf_export_rejects_corrupt_large_graph_artifact(tmp_path: Path, monkeypa
         ),
     )
 
-    try:
+    with pytest.raises(RuntimeError, match="does not match graph release manifest") as exc_info:
         sync_huggingface._assert_hydrated_artifacts(repo)
-    except RuntimeError as exc:
-        assert "graph artifact integrity validation failed" in str(exc)
-        assert "wiki-graph.tar.gz" in str(exc)
-    else:
-        raise AssertionError("expected corrupt graph artifact rejection")
+    assert "wiki-graph.tar.gz" in str(exc_info.value)

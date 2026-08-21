@@ -25,6 +25,7 @@ The runtime recommendation paths use this graph in these ways:
 
 | File | Contents |
 |---|---|
+| `release-artifacts.json` | Canonical source release plus exact path, name, size, SHA-256, and hydration policy for the five published graph assets |
 | `wiki-graph-runtime.tar.gz` | Fast install artifact used by default `ctx-init --graph`: `graphify-out/*`, the skill index, 207 harness pages, wiki index files, and Obsidian metadata needed for recommendations and harness dry-runs without expanding every entity page |
 | `wiki-graph.tar.gz` | Full LLM-wiki: direct harness/root pages, wiki-packed skill/agent/MCP/converted/concept pages, `graphify-out/graph.json`, `graph-delta.json`, export manifest, communities, skill indexes, SkillSpector stamps, and Obsidian metadata |
 | `skillspector-audit.jsonl.gz` | Compact per-skill audit records produced by a ctx-run static `--no-llm` pass with [NVIDIA SkillSpector](https://github.com/NVIDIA/SkillSpector). This is not NVIDIA endorsement or certification. The same gzip is embedded in `wiki-graph.tar.gz` as `security/skillspector-audit.jsonl.gz`. |
@@ -117,6 +118,7 @@ ctx-init --graph
 Full wiki extraction:
 
 ```bash
+python scripts/graph_release_manifest.py hydrate --manifest graph/release-artifacts.json
 mkdir -p ~/.claude/skill-wiki
 tar xzf graph/wiki-graph.tar.gz -C ~/.claude/skill-wiki/
 ```
@@ -145,10 +147,10 @@ python src/validate_graph_artifacts.py --deep \
   --expected-harness-pages 207
 ```
 
-PR graph checks hydrate tarball pointers from matching GitHub release assets
-first. If a PR points at a new Git LFS object that is not in the release cache,
-CI performs a targeted `git lfs pull` for that artifact and verifies its
-pointer SHA-256 and size before validation.
+PR graph checks validate `graph/release-artifacts.json`, verify the three small
+tracked files, and hydrate only the two archives from its exact GitHub release.
+Every file is checked by byte size and SHA-256 before graph validation; there is
+no Git LFS fallback.
 
 Manual sanity checks:
 
@@ -242,35 +244,29 @@ ctx-graph-store validate \
   --db ~/.claude/skill-wiki/graphify-out/graph-store.sqlite3
 ```
 
-For release artifact rebuilds:
+For release artifact rebuilds, keep the two archives local and ignored:
 
 ```bash
-python scripts/graph_artifact_guard.py park
 ctx-wiki-graphify
 python src/validate_graph_artifacts.py --deep
 python src/update_repo_stats.py --check
 ```
 
-`park` sets Git's local `skip-worktree` bit for the heavyweight generated
-archives: `graph/wiki-graph.tar.gz`, `graph/wiki-graph-runtime.tar.gz`, and
-the compressed skill index. Keep them parked while graph/wiki generation,
-validation, dashboard smoke, and stats checks are still in progress. This
-prevents background Git integrations from repeatedly staging hundreds of
-megabytes through the Git LFS clean filter. When the release candidate is final,
-unpark and stage the artifacts exactly once:
+Upload all five graph files to a draft `graph-artifacts-*` prerelease, verify
+the uploaded size/digest tuples, and publish the prerelease. Then bind that
+source in the manifest and commit only the manifest plus the three small files:
 
 ```bash
-python scripts/graph_artifact_guard.py unpark
-git add graph/wiki-graph.tar.gz graph/wiki-graph-runtime.tar.gz \
-  graph/skills-sh-catalog.json.gz graph/communities.json graph/entity-overlays.jsonl
-python scripts/graph_artifact_guard.py prune
+python scripts/graph_release_manifest.py refresh \
+  --manifest graph/release-artifacts.json \
+  --source-release-tag graph-artifacts-<identity>
+python scripts/graph_release_manifest.py validate \
+  --manifest graph/release-artifacts.json
+git add graph/release-artifacts.json graph/communities.json \
+  graph/entity-overlays.jsonl graph/skills-sh-catalog.json.gz
 ```
 
-If a local Git integration gets interrupted while artifacts are dirty,
-`python scripts/graph_artifact_guard.py prune` removes prunable local LFS cache
-entries. It does not delete tracked graph files, rewrite history, or change the
-remote LFS store. Repo-wide `git prune --expire=now` is intentionally opt-in via
-`--include-git-prune` because it can discard unrelated dangling recovery objects.
+The ignored `wiki-graph*.tar.gz` files are release payloads, never Git inputs.
 
 For a bulk skill refresh, update the existing shipped tarball through the
 release refresh path:
@@ -337,11 +333,9 @@ backups, transient `.lock` files, `.ctx/` queue state, local generated markdown
 catalogs, and host-user paths must not appear in the shipped tarball.
 
 Version-tag PyPI publishes use the same graph artifact contract. The publish
-workflow resolves the full and runtime tarballs from previous release or graph
-cache assets first; if a checked-out LFS pointer is newer than the cache, it
-hydrates only that artifact with a size-capped `git lfs pull`, verifies the
-pointer SHA-256 and byte size, validates graph artifacts, uploads release
-assets, then publishes the package.
+workflow hydrates the two archives from the manifest's exact source release,
+verifies all five assets, validates the graph, uploads and attests the manifest
+and graph assets, then publishes the package.
 
 ## Implementation Notes
 
