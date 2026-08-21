@@ -13,12 +13,12 @@
 
 - Updated: 2026-08-21 (Asia/Jerusalem)
 - Active goal: retire Git LFS safely after CTX Fit 1.0.21
-- Phase: PR #275 CodeQL permission repair accepted; push/recheck pending
-- Release decision: **1.0.21 REMAINS RELEASED; LFS MIGRATION IN PROGRESS**
-- Branch: `codex/remove-git-lfs`
+- Phase: LFS migration merged and local cleanup complete; remote purge pending
+- Release decision: **1.0.21 REMAINS RELEASED; LFS MIGRATION MERGED; REMOTE PURGE PENDING**
+- Branch: `codex/lfs-cleanup-state`
 - Release commit: `38a33f8784e2bf408430a98fed81206c2cf39d00`
 - Release tag object: `a7b8e78559fda1d44dca844393458272071ae89b`
-- Latest merged PR: `https://github.com/stevesolun/ctx/pull/271`
+- Latest merged PR: `https://github.com/stevesolun/ctx/pull/275`
 - Follow-up scope at checkpoint:
   - migrate graph distribution from Git LFS pointers to exact release assets,
     then ask GitHub Support to purge the historical remote LFS objects
@@ -32,15 +32,22 @@
   package build, package and graph provenance, CycloneDX attestation, release
   assets, and PyPI Trusted Publishing.
 - LFS migration execution: three parallel lanes completed repository resolver,
-  workflow migration, and independent storage/identity audit. The working tree
-  now removes the two tracked archive pointers, LFS hooks/rules/fallbacks, and
+  workflow migration, and independent storage/identity audit. Merged `main`
+  removes the two tracked archive pointers, LFS hooks/rules/fallbacks, and
   obsolete park/prune tooling; strict release-manifest hydration replaces them.
   Focused integrated evidence is 326 passed plus 113 reviewer-adjacent tests;
   full non-integration passed 8,812 tests with 5 skips; the authoritative PR
   preflight passed all 21 lanes. The final committed clean-checkout gate passed
   all 12 lanes after selectively hydrating the runtime catalog before unit
   tests. Independent final audit accepted the repaired tree with no P0-P2
-  findings. No remote LFS object has been purged yet.
+  findings. PR #275 merged as `b62b78d7` after 19 successful checks and one
+  intentionally skipped matrix placeholder. A detached checkout of that exact
+  merge, with no Git LFS executable or local archives, hydrated and deeply
+  validated the 405,434,548-byte release pair. Local cleanup removed
+  1,968,180,750 bytes of release-backed LFS cache objects, 197,656,624 bytes of
+  stale temporary packs, and the untracked 405,434,548-byte working pair: at
+  least 2,571,271,922 bytes (2.395 GiB) total. No remote LFS object has been
+  purged yet.
 
 ## Product destination
 
@@ -96,7 +103,7 @@ All of the following must be true before tagging or publishing:
 | ADR-015 stop attribution | Complete, independently accepted | Coordinator + spend/fairness reviewer | Structured stop reason/log fields flow provider → live runner → serialized result, budget-capped trials are inconclusive, and the accepted spend/fairness lane plus 446-test Fit aggregate are green |
 | Release metadata and publish guard | Complete, independently accepted | Metadata writer + publish writer/reviewer + coordinator | 1.0.21 metadata and changelog are current; exact-main/exact-successful-Tests production guard and changelog-backed notes have no P0/P1 review findings; P2 credential/doc hardening is integrated |
 | Final verification and release | Complete, publicly verified | Coordinator + release/SBOM reviewers | PR #271 merged as release commit `38a33f8784e2bf408430a98fed81206c2cf39d00`; exact-main Tests, CodeQL, and Hugging Face sync succeeded. Annotated tag `v1.0.21` peels to that commit. Publish run `31915534546` completed every build, attestation, release-asset, and PyPI job. Public wheel/SBOM digests, Sigstore/Rekor attestations, clean installation, `pip check`, version output, and a minimal `ctx fit --json` repository profile were independently verified. |
-| Retire Git LFS | In progress; remote permission repair accepted | Coordinator + manifest/workflow writers + independent auditor | 45 historical objects total 12.131 GiB because each compressed archive revision is stored whole. Current useful pair is 405,434,548 bytes and is independently preserved and attested in release v1.0.21. Strict five-asset manifest, shared resolver, workflow/local consumers, clean-clone benchmark hydration, hook/rule/tool cleanup, 8,812-test non-integration run, all 21 PR-preflight lanes, and all 12 committed clean-checkout lanes are green. PR #275 CodeQL rejected world-readable refreshed manifest output; a failing-first regression now proves owner-only `0600`, 74 focused/static checks pass, and independent review accepted atomic replacement/failure behavior with no P0-P2. |
+| Retire Git LFS | Repository and local cleanup complete; remote purge pending GitHub Support | Coordinator + manifest/workflow writers + independent auditor | 45 historical objects total 12.131 GiB because each compressed archive revision is stored whole. Current useful pair is 405,434,548 bytes and is independently preserved and attested in release v1.0.21. PR #275 merged as `b62b78d7` after 19 successful checks. A clean post-merge checkout hydrated and deeply validated both release assets without Git LFS. The local checkout has no LFS objects, LFS directory, LFS configuration, tracked LFS paths, or Git garbage; `git fsck --no-dangling` is clean. At least 2.395 GiB was freed locally. GitHub still retains and bills the historical remote objects until Support purges them. |
 
 ## Open release blockers
 
@@ -193,6 +200,9 @@ surface makes that row stale for release purposes.
 | First committed LFS migration gate, commit `9e0fb368`, 2026-08-21 | isolated committed-head local-fast | Static, graph, docs, telemetry, similarity, browser, package, clean-host, canary, contract, and policy lanes passed; unit lane failed 123 benchmark/holdout fixtures because its clean worktree correctly lacked the now-untracked runtime archive | Valid red evidence: clean CI test jobs must selectively hydrate the 110,283,462-byte runtime catalog before pytest. Failing-first workflow/local contracts added; repair rerun pending |
 | Repaired committed LFS migration, commit `72d1ad73`, 2026-08-21 | complete 12-lane committed-head local-fast, split only to avoid repeating an identical five-minute unit lane | Selective runtime hydration followed by the isolated unit lane passed 8,806 tests with 5 skips and 92.16% coverage. The other 11 exact-commit lanes passed static, policy, canary, contract, clean-host, docs, full graph hydration/deep validation, telemetry, similarity, browser security, reproducible package, and Twine checks | Valid complete committed-history evidence for the implementation commit; state-only checkpoint follow-up requires proportional docs/stats validation |
 | PR #275 head `a7f49bc4`, 2026-08-21 | GitHub Tests and CodeQL | 15 specialized Tests checks passed while unit and graph jobs were still running; CodeQL analysis completed but security aggregation opened alert #23 (`py/overly-permissive-file`, high) because manifest refresh explicitly changed its atomic temp file to world-readable `0644` | Valid red evidence. Failing-first owner-only regression passes at `0600`; 74 focused/static checks passed and independent reviewer verified atomic replacement, rollback, cleanup, and supported-platform behavior with no P0-P2. Repair push/recheck pending |
+| PR #275 final head `52ddcba6`, 2026-08-21 | GitHub Tests and CodeQL | 19 checks succeeded and one matrix placeholder was intentionally skipped; unit-linux, graph artifact, package smoke, clean-host, similarity, browser, telemetry, CodeQL, and required aggregation were green | Accepted merge evidence; permission repair and complete LFS migration are remotely verified |
+| Merged `main` `b62b78d7`, 2026-08-21 | detached clean-host release hydration and deep graph validation | Without Git LFS or local graph archives, hydrated runtime SHA-256 `d4a39836...` (110,283,462 bytes) and full SHA-256 `2ce8a945...` (295,151,086 bytes); validated 79,958 nodes, 1,778,069 edges, and all catalog member counts | Exact post-merge proof that release assets replace the LFS operational dependency |
+| Local checkout after merge, 2026-08-21 | LFS/config/garbage cleanup and repository integrity | No `.git/lfs`, LFS config, LFS-tracked path, or Git garbage remains; `git fsck --no-dangling` passed. `.scratch/` remains untouched | Local retirement complete; remote billed-object deletion remains external |
 
 No paid real-provider evaluation has been authorized or run during this
 hardening pass. A simulated or injected driver is not evidence of live provider
@@ -248,20 +258,59 @@ path remains unproven. Production PyPI Trusted Publishing succeeded.
 
 ## Immediate next actions
 
-1. Complete independent review of the CodeQL permission repair, push it to PR
-   #275, and merge only after every required remote check passes.
-2. Verify a fresh post-merge checkout hydrates the exact v1.0.21 release assets;
-   then prune the release-backed local LFS cache and disable repository LFS.
-3. Ask GitHub Support to purge all 45 historical LFS objects (12.131 GiB).
+1. Ask GitHub Support to purge all 45 historical LFS objects (12.131 GiB).
    Pointer removal alone does not release GitHub's billed remote storage.
-4. Recheck billed storage after Support confirms purge and after the next
+2. Recheck billed storage after Support confirms purge and after the next
    billing-cycle reset.
-5. Add `main`, tag, and `pypi` environment protection rules as defense in depth;
+3. Add `main`, tag, and `pypi` environment protection rules as defense in depth;
    the shipped workflow already enforces exact-main and exact-successful-Tests
    provenance.
 
+### GitHub Support handoff
+
+Support contact: `https://support.github.com/contact`
+
+**Subject:** Purge retired Git LFS objects for `stevesolun/ctx`
+
+**Request:**
+
+> Repository: `https://github.com/stevesolun/ctx`
+>
+> We merged the no-history-rewrite Git LFS retirement in PR #275, merge commit
+> `b62b78d704ec54b3ff43e333982eef713a33c8df`. The repository no longer tracks,
+> downloads, uploads, or needs any Git LFS object. Current graph artifacts are
+> exact, attested GitHub Release assets and were verified from a clean checkout.
+>
+> Please purge every Git LFS object associated with this repository: 45 unique
+> objects totaling 13,025,281,486 bytes (12.131 GiB), and confirm when the
+> repository's billed LFS storage is cleared. We explicitly do not want the
+> repository deleted/recreated and do not need a history rewrite.
+>
+> The Enterprise Cloud repository LFS DELETE endpoint returned HTTP 404 for this
+> personal GitHub.com repository (request ID
+> `C027:354872:36D09:4F64A:6A88AD3E`), so the safe self-service route is not
+> available.
+
 ## Checkpoint log
 
+- 2026-08-21: PR #275 final head `52ddcba6` passed 19 remote checks with one
+  intentionally skipped matrix placeholder and merged to `main` as
+  `b62b78d704ec54b3ff43e333982eef713a33c8df`. CodeQL, unit-linux, full graph,
+  clean-host, similarity, browser security, packaging, and required aggregation
+  were green. A detached checkout of the exact merge had neither Git LFS nor
+  local graph archives; stdlib hydration downloaded the 110,283,462-byte
+  runtime and 295,151,086-byte full assets with exact manifest digests, then
+  deep validation passed 79,958 nodes and 1,778,069 edges.
+- 2026-08-21: Completed safe local cleanup without rewriting history or touching
+  `.scratch/`. Removed all seven release-backed LFS cache objects
+  (1,968,180,750 bytes), the now-untracked working graph pair (405,434,548
+  bytes), and four stale Git temporary packs (197,656,624 bytes): at least
+  2,571,271,922 bytes (2.395 GiB) freed. Removed obsolete checkout-local LFS
+  configuration and empty cache metadata. No LFS-tracked path, `.git/lfs`
+  directory, LFS config, or Git garbage remains; `git fsck --no-dangling`
+  passed. The safe GitHub REST disable attempt returned HTTP 404 because that
+  endpoint is not available for this personal repository. Remote object purge
+  is now a prepared GitHub Support handoff, not a code or local-disk blocker.
 - 2026-08-21: Began the safe Git LFS retirement on branch
   `codex/remove-git-lfs` from `a62a7ff6`. Independent audit counted 45 whole
   compressed archive objects totaling 13,025,281,486 bytes (12.131 GiB): 31
