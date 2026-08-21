@@ -1476,8 +1476,9 @@
 <h1 id="hugging-face-publish">Hugging Face Publish<a class="headerlink" href="#hugging-face-publish" title="Permanent link">&para;</a></h1>
 <p>ctx publishes the GitHub repository as the public Hugging Face dataset repo
 <a href="https://huggingface.co/datasets/Stevesolun/ctx"><code>Stevesolun/ctx</code></a>. The
-dataset repo is a clean <code>git ls-files</code> snapshot, including the shipped graph
-tarball and catalog artifacts, not local review reports or ignored caches.</p>
+dataset repo is a clean <code>git ls-files</code> snapshot plus the two exact archives
+declared by <code>graph/release-artifacts.json</code>, not local review reports or ignored
+caches.</p>
 <h2 id="what-gets-uploaded">What gets uploaded<a class="headerlink" href="#what-gets-uploaded" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Tracked source, docs, tests, and packaging files.</li>
@@ -1491,10 +1492,10 @@ tarball and catalog artifacts, not local review reports or ignored caches.</p>
 by git.</p>
 <h2 id="automatic-publish">Automatic publish<a class="headerlink" href="#automatic-publish" title="Permanent link">&para;</a></h2>
 <p>Every push to <code>main</code> runs <code>.github/workflows/huggingface-sync.yml</code>. The job
-checks out source without spending Git LFS bandwidth, hydrates the required
-graph artifacts from matching GitHub release cache assets, and falls back to a
-targeted <code>git lfs pull</code> only when a pointer is newer than the cache and within
-the configured size cap. It then installs the sync dependencies and calls
+checks out source, strictly validates <code>graph/release-artifacts.json</code>, and
+hydrates only its two large archives from the named GitHub release. It verifies
+all five graph assets by exact size and SHA-256, with no Git LFS fallback. It
+then installs the sync dependencies and calls
 <code>scripts/sync_huggingface.py</code>. It publishes only when the repository secret
 <code>HF_TOKEN</code> is configured. On the canonical
 <code>stevesolun/ctx</code> repository, a missing token is a hard failure so main cannot
@@ -1505,15 +1506,13 @@ successfully with a notice because forks are not trusted publishing sources.</p>
 or packaging changes always run the full dataset sync so tracked files cannot
 drift behind GitHub.</p>
 <p>The sync script is still the contract: it exports the tracked git snapshot,
-adds Hugging Face repo-card metadata, validates README/docs stats, verifies the
-graph artifacts are hydrated rather than LFS pointers, and refuses to publish
-stale or corrupt artifacts.</p>
+adds the two manifest-declared archives, adds Hugging Face repo-card metadata,
+validates README/docs stats, and refuses missing, stale, or corrupt artifacts.</p>
 <h2 id="manual-publish">Manual publish<a class="headerlink" href="#manual-publish" title="Permanent link">&para;</a></h2>
 <p>Use the repository sync script. It exports tracked files plus the validated
 local graph artifacts, adds the Hugging Face repo-card frontmatter to the
-uploaded <code>README.md</code>, and refuses to publish if the full wiki tarball, runtime
-wiki tarball, or compressed skill index is missing, too small, or still a Git
-LFS pointer.</p>
+uploaded <code>README.md</code>, and refuses to publish if the manifest or any full wiki,
+runtime wiki, or compressed skill-index byte identity is missing or mismatched.</p>
 <p>Full sync uploads the exported tree with <code>delete_patterns="*"</code>, so files removed
 from the current git snapshot are removed remotely in the same commit.
 Card-only sync exports only <code>README.md</code>, <code>CHANGELOG.md</code>, and tracked <code>docs/**</code>

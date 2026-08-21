@@ -1667,8 +1667,10 @@ setup that reliably works on a repository. See the <a href="../">home page</a>.
 This page documents the older graph-backed recommendation layer, which
 still ships and is what the published PyPI release installs.</p>
 </div>
-<p>A pre-built weighted graph of skills, agents, MCP servers, and
-harnesses in the ctx ecosystem, shipped as <code>graph/wiki-graph.tar.gz</code>.
+<p>A pre-built weighted graph of skills, agents, MCP servers, and harnesses in the
+ctx ecosystem, shipped as content-addressed GitHub release assets. The tracked
+<code>graph/release-artifacts.json</code> manifest binds the release source, names, sizes,
+and SHA-256 digests; the large archives themselves are not stored in Git.
 The on-disk JSON and <code>resolve_graph</code> Python API are harness-aware, including
 plain-slug graph walks from <code>harness:&lt;slug&gt;</code> nodes. <code>python -m ctx_monitor</code>
 exposes skill/agent/MCP/harness wiki and graph views. Harness installation,
@@ -1751,9 +1753,10 @@ shipped tarball.</p>
 </tbody>
 </table>
 <h2 id="install">Install<a class="headerlink" href="#install" title="Permanent link">&para;</a></h2>
-<p>Use <code>ctx-init --graph</code> to install the fast runtime graph. Source checkouts use
-<code>graph/wiki-graph-runtime.tar.gz</code>; pip installs download the matching GitHub
-release asset for the installed package version. This installs
+<p>Use <code>ctx-init --graph</code> to install the fast runtime graph. Source checkouts use a
+verified local cache when present or hydrate the manifest-declared release
+asset; pip installs download the matching GitHub release asset for the installed
+package version. This installs
 <code>graphify-out/*</code>, the skill index used by recommendations, and
 the harness pages used by <code>python -m harness_install</code>:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>ctx-init<span class="w"> </span>--graph
@@ -1780,11 +1783,12 @@ micro-skill pipelines, direct harness pages, and Obsidian vault metadata,
 request the full wiki artifact explicitly:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>ctx-init<span class="w"> </span>--graph<span class="w"> </span>--graph-install-mode<span class="w"> </span>full
 </span></code></pre></div>
-<p>Manual extraction is still supported for offline/source installs. Extract the
-full tarball into your <code>~/.claude/skill-wiki/</code> when you want local wiki
-browsing through ctx's merged pack/local view:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>~/.claude/skill-wiki
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>tar<span class="w"> </span>xzf<span class="w"> </span>graph/wiki-graph.tar.gz<span class="w"> </span>-C<span class="w"> </span>~/.claude/skill-wiki/
+<p>Manual extraction is still supported after hydrating the manifest. Extract the
+full tarball into your <code>~/.claude/skill-wiki/</code> when you want local wiki browsing
+through ctx's merged pack/local view:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>python<span class="w"> </span>scripts/graph_release_manifest.py<span class="w"> </span>hydrate<span class="w"> </span>--manifest<span class="w"> </span>graph/release-artifacts.json
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>~/.claude/skill-wiki
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>tar<span class="w"> </span>xzf<span class="w"> </span>graph/wiki-graph.tar.gz<span class="w"> </span>-C<span class="w"> </span>~/.claude/skill-wiki/
 </span></code></pre></div>
 <p>The extracted tree also opens directly as an Obsidian vault — the
 <code>.obsidian/</code> config ships inside the tarball — so you can use

@@ -1625,10 +1625,9 @@ the update is treated like a release step.</p>
    fields, likely benefits, regressions, and security findings. Do not pass
    <code>--update-existing</code> until those findings are acceptable.</li>
 <li>Run the security/cyber check below.</li>
-<li>Park heavyweight graph artifacts locally before rebuilds:
-   <code>python scripts/graph_artifact_guard.py park</code>. This keeps background Git
-   integrations from repeatedly LFS-cleaning the full wiki tarball while it is
-   still changing.</li>
+<li>Keep heavyweight graph archives local while rebuilding. They are ignored by
+   Git and must never be force-added; only the content-addressed release
+   manifest is committed.</li>
 <li>Drain the wiki queue for local runtime use:
    <code>python -m ctx.core.wiki.wiki_queue_worker --wiki ~/.claude/skill-wiki --limit 1</code>. This updates the
    wiki index, writes wiki overlay packs, attempts incremental ANN graph attach
@@ -1653,12 +1652,23 @@ the update is treated like a release step.</p>
 9. Refresh published counts with <code>python src/update_repo_stats.py</code>.
 10. Verify the changed entity can be recommended through
    <code>ctx-scan-repo --repo . --recommend</code> or <code>ctx__recommend_bundle</code>.
-11. Unpark and stage the graph artifacts once the release candidate is final:
-    <code>python scripts/graph_artifact_guard.py unpark</code>, then <code>git add</code> the graph
-    artifacts intentionally. Run <code>python scripts/graph_artifact_guard.py prune</code>
-    after interrupted Git/LFS runs or after release staging to clean prunable
-    local LFS cache entries. Add <code>--include-git-prune</code> only when you explicitly
-    want repo-wide dangling Git objects removed too.</p>
+11. Once the release candidate is final, publish all five graph files to a
+    draft <code>graph-artifacts-*</code> GitHub prerelease, verify their GitHub sizes and
+    digests, then publish that prerelease. Refresh and validate the tracked
+    manifest, and commit only the manifest plus the three small tracked files:</p>
+<div class="language-text highlight"><pre><span></span><code>```bash
+python scripts/graph_release_manifest.py refresh \
+  --manifest graph/release-artifacts.json \
+  --source-release-tag graph-artifacts-&lt;identity&gt;
+python scripts/graph_release_manifest.py validate \
+  --manifest graph/release-artifacts.json
+git add graph/release-artifacts.json graph/communities.json \
+  graph/entity-overlays.jsonl graph/skills-sh-catalog.json.gz
+```
+
+Never add either `wiki-graph*.tar.gz` archive to Git; CI hydrates the exact
+prerelease bytes named by the manifest.
+</code></pre></div>
 <p>The durable wiki worker drains <code>entity-upsert</code>, <code>graph-export</code>,
 <code>skill-index-refresh</code>, <code>tar-refresh</code>, and <code>artifact-promotion</code> jobs. Use
 <code>python -m ctx.core.wiki.wiki_queue_worker --wiki ~/.claude/skill-wiki --limit 1</code> for a controlled
@@ -1669,25 +1679,25 @@ the target sibling named <code>&lt;target&gt;.staged</code>. The worker rejects 
 symlinks and selects the JSON/JSONL/gzip/tar validator from the target file
 type before promotion.</p>
 <p>For a manual attach dry-run against an existing vector index:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>python<span class="w"> </span>-m<span class="w"> </span>ctx.core.graph.incremental_attach<span class="w"> </span>attach<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>--index-dir<span class="w"> </span>~/.claude/skill-wiki/.embedding-cache/graph/vector-index<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span>--overlay<span class="w"> </span>~/.claude/skill-wiki/graphify-out/entity-overlays.jsonl<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span>--node-id<span class="w"> </span>skill:fastapi-review<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span>--type<span class="w"> </span>skill<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span>--label<span class="w"> </span>fastapi-review<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span>--text-file<span class="w"> </span>~/.claude/skill-wiki/entities/skills/fastapi-review.md<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">  </span>--dry-run
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>python<span class="w"> </span>-m<span class="w"> </span>ctx.core.graph.incremental_attach<span class="w"> </span>attach<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span>--index-dir<span class="w"> </span>~/.claude/skill-wiki/.embedding-cache/graph/vector-index<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span>--overlay<span class="w"> </span>~/.claude/skill-wiki/graphify-out/entity-overlays.jsonl<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span>--node-id<span class="w"> </span>skill:fastapi-review<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span>--type<span class="w"> </span>skill<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">  </span>--label<span class="w"> </span>fastapi-review<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">  </span>--text-file<span class="w"> </span>~/.claude/skill-wiki/entities/skills/fastapi-review.md<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">  </span>--dry-run
 </span></code></pre></div>
 <p>Use <code>python -m ctx.core.graph.incremental_attach calibrate --graph ~/.claude/skill-wiki/graphify-out/graph.json</code>
 to inspect the current graph's semantic and degree distributions before
 changing attach thresholds.</p>
 <p>Validate the attach quality before relying on a new ANN backend or changed
 threshold:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>python<span class="w"> </span>-m<span class="w"> </span>ctx.core.graph.incremental_shadow<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span>--index-dir<span class="w"> </span>~/.claude/skill-wiki/.embedding-cache/graph/vector-index<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span>--graph<span class="w"> </span>~/.claude/skill-wiki/graphify-out/graph.json<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span>--sample-size<span class="w"> </span><span class="m">100</span><span class="w"> </span><span class="se">\</span>
-</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span>--min-overlap<span class="w"> </span><span class="m">0</span>.85
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>python<span class="w"> </span>-m<span class="w"> </span>ctx.core.graph.incremental_shadow<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>--index-dir<span class="w"> </span>~/.claude/skill-wiki/.embedding-cache/graph/vector-index<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span>--graph<span class="w"> </span>~/.claude/skill-wiki/graphify-out/graph.json<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span>--sample-size<span class="w"> </span><span class="m">100</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">  </span>--min-overlap<span class="w"> </span><span class="m">0</span>.85
 </span></code></pre></div>
 <p>The shadow gate pretends sampled existing nodes are new, compares incremental
 attach neighbors to batch graph semantic neighbors, reports precision/recall
@@ -1696,18 +1706,18 @@ recall at the largest top-k is below the overlap floor.</p>
 <h2 id="repair-incremental-attach">Repair Incremental Attach<a class="headerlink" href="#repair-incremental-attach" title="Permanent link">&para;</a></h2>
 <p>If the worker says <code>incremental attach skipped (no vector index)</code>, build the
 persisted semantic index once:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>python<span class="w"> </span>-m<span class="w"> </span>ctx.core.wiki.wiki_graphify<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>--wiki-dir<span class="w"> </span>~/.claude/skill-wiki<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span>--incremental<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span>--graph-only<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">  </span>--semantic-vector-index<span class="w"> </span>numpy-flat
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>python<span class="w"> </span>-m<span class="w"> </span>ctx.core.wiki.wiki_graphify<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span>--wiki-dir<span class="w"> </span>~/.claude/skill-wiki<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span>--incremental<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span>--graph-only<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">  </span>--semantic-vector-index<span class="w"> </span>numpy-flat
 </span></code></pre></div>
 <p><code>numpy-flat</code> is exact and portable. <code>--semantic-vector-index auto</code> keeps the
 portable exact backend at this graph size and can switch to the optional ANN
 backend only above the configured node threshold. <code>hnswlib</code> is optional and
 should be shadow-gated before release use.</p>
 <p>Then process pending entity updates:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>python<span class="w"> </span>-m<span class="w"> </span>ctx.core.wiki.wiki_queue_worker<span class="w"> </span>--wiki<span class="w"> </span>~/.claude/skill-wiki
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>python<span class="w"> </span>-m<span class="w"> </span>ctx.core.wiki.wiki_queue_worker<span class="w"> </span>--wiki<span class="w"> </span>~/.claude/skill-wiki
 </span></code></pre></div>
 <p>That is the supported "attach pending" flow today: the queue is durable, so
 failed or skipped entity-upsert jobs remain visible to the worker and can be
@@ -1748,18 +1758,18 @@ benefits, possible regressions, security findings, and a recommendation.</p>
    when the update should be reconciled into shipped graph artifacts.</li>
 </ol>
 <p>Examples:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>python<span class="w"> </span>-m<span class="w"> </span>skill_add<span class="w"> </span>--skill-path<span class="w"> </span>./SKILL.md<span class="w"> </span>--name<span class="w"> </span>fastapi-review
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>python<span class="w"> </span>-m<span class="w"> </span>skill_add<span class="w"> </span>--skill-path<span class="w"> </span>./SKILL.md<span class="w"> </span>--name<span class="w"> </span>fastapi-review<span class="w"> </span>--update-existing
-</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
-</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>python<span class="w"> </span>-m<span class="w"> </span>agent_add<span class="w"> </span>--agent-path<span class="w"> </span>./code-reviewer.md<span class="w"> </span>--name<span class="w"> </span>code-reviewer
-</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>python<span class="w"> </span>-m<span class="w"> </span>agent_add<span class="w"> </span>--agent-path<span class="w"> </span>./code-reviewer.md<span class="w"> </span>--name<span class="w"> </span>code-reviewer<span class="w"> </span>--update-existing
-</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>
-</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>python<span class="w"> </span>-m<span class="w"> </span>mcp_add<span class="w"> </span>--from-json<span class="w"> </span>./github-mcp.json
-</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>python<span class="w"> </span>-m<span class="w"> </span>mcp_fetch<span class="w"> </span>--source<span class="w"> </span>pulsemcp<span class="w"> </span>--limit<span class="w"> </span><span class="m">50</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>mcp_add<span class="w"> </span>--from-stdin
-</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>python<span class="w"> </span>-m<span class="w"> </span>mcp_add<span class="w"> </span>--from-json<span class="w"> </span>./github-mcp.json<span class="w"> </span>--update-existing
-</span><span id="__span-6-10"><a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>
-</span><span id="__span-6-11"><a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>python<span class="w"> </span>-m<span class="w"> </span>harness_add<span class="w"> </span>--from-json<span class="w"> </span>./text-to-cad-harness.json
-</span><span id="__span-6-12"><a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>python<span class="w"> </span>-m<span class="w"> </span>harness_add<span class="w"> </span>--from-json<span class="w"> </span>./text-to-cad-harness.json<span class="w"> </span>--update-existing
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>python<span class="w"> </span>-m<span class="w"> </span>skill_add<span class="w"> </span>--skill-path<span class="w"> </span>./SKILL.md<span class="w"> </span>--name<span class="w"> </span>fastapi-review
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>python<span class="w"> </span>-m<span class="w"> </span>skill_add<span class="w"> </span>--skill-path<span class="w"> </span>./SKILL.md<span class="w"> </span>--name<span class="w"> </span>fastapi-review<span class="w"> </span>--update-existing
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>python<span class="w"> </span>-m<span class="w"> </span>agent_add<span class="w"> </span>--agent-path<span class="w"> </span>./code-reviewer.md<span class="w"> </span>--name<span class="w"> </span>code-reviewer
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>python<span class="w"> </span>-m<span class="w"> </span>agent_add<span class="w"> </span>--agent-path<span class="w"> </span>./code-reviewer.md<span class="w"> </span>--name<span class="w"> </span>code-reviewer<span class="w"> </span>--update-existing
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>python<span class="w"> </span>-m<span class="w"> </span>mcp_add<span class="w"> </span>--from-json<span class="w"> </span>./github-mcp.json
+</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>python<span class="w"> </span>-m<span class="w"> </span>mcp_fetch<span class="w"> </span>--source<span class="w"> </span>pulsemcp<span class="w"> </span>--limit<span class="w"> </span><span class="m">50</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>mcp_add<span class="w"> </span>--from-stdin
+</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>python<span class="w"> </span>-m<span class="w"> </span>mcp_add<span class="w"> </span>--from-json<span class="w"> </span>./github-mcp.json<span class="w"> </span>--update-existing
+</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>
+</span><span id="__span-7-11"><a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>python<span class="w"> </span>-m<span class="w"> </span>harness_add<span class="w"> </span>--from-json<span class="w"> </span>./text-to-cad-harness.json
+</span><span id="__span-7-12"><a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>python<span class="w"> </span>-m<span class="w"> </span>harness_add<span class="w"> </span>--from-json<span class="w"> </span>./text-to-cad-harness.json<span class="w"> </span>--update-existing
 </span></code></pre></div>
 <p><code>python -m harness_install --update</code> is different: it refreshes an installed harness
 checkout under <code>~/.claude/harnesses/&lt;slug&gt;</code>. Catalog entity replacement uses
@@ -1788,8 +1798,8 @@ checkout under <code>~/.claude/harnesses/&lt;slug&gt;</code>. Catalog entity rep
 </ul>
 <p>After deleting an entity page, drain or rebuild before trusting recommendation
 results:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>python<span class="w"> </span>-m<span class="w"> </span>ctx.core.wiki.wiki_queue_worker<span class="w"> </span>--wiki<span class="w"> </span>~/.claude/skill-wiki<span class="w"> </span>--limit<span class="w"> </span><span class="m">1</span>
-</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>ctx-scan-repo<span class="w"> </span>--repo<span class="w"> </span>.<span class="w"> </span>--recommend
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>python<span class="w"> </span>-m<span class="w"> </span>ctx.core.wiki.wiki_queue_worker<span class="w"> </span>--wiki<span class="w"> </span>~/.claude/skill-wiki<span class="w"> </span>--limit<span class="w"> </span><span class="m">1</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>ctx-scan-repo<span class="w"> </span>--repo<span class="w"> </span>.<span class="w"> </span>--recommend
 </span></code></pre></div>
 <p>If you need an auditable manual flow without the browser, use the dashboard
 local API only from loopback with the per-process monitor token printed into
@@ -1798,9 +1808,9 @@ the served page. The API route is <code>POST /api/entity/delete</code> with
 <h2 id="add-a-skill">Add a Skill<a class="headerlink" href="#add-a-skill" title="Permanent link">&para;</a></h2>
 <p>Use this when you have a local <code>SKILL.md</code> that should be installed under
 <code>~/.claude/skills/&lt;name&gt;/SKILL.md</code> and mirrored into the wiki.</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>python<span class="w"> </span>-m<span class="w"> </span>skill_add<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span>--skill-path<span class="w"> </span>./SKILL.md<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span>--name<span class="w"> </span>fastapi-review
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>python<span class="w"> </span>-m<span class="w"> </span>skill_add<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span>--skill-path<span class="w"> </span>./SKILL.md<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">  </span>--name<span class="w"> </span>fastapi-review
 </span></code></pre></div>
 <p>What happens:</p>
 <ol>
@@ -1815,12 +1825,12 @@ the served page. The API route is <code>POST /api/entity/delete</code> with
 </ol>
 <h2 id="add-an-agent">Add an Agent<a class="headerlink" href="#add-an-agent" title="Permanent link">&para;</a></h2>
 <p>Use this when you have a local Claude Code agent markdown file.</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>python<span class="w"> </span>-m<span class="w"> </span>agent_add<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span>--agent-path<span class="w"> </span>./code-reviewer.md<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">  </span>--name<span class="w"> </span>code-reviewer
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>python<span class="w"> </span>-m<span class="w"> </span>agent_add<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span>--agent-path<span class="w"> </span>./code-reviewer.md<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">  </span>--name<span class="w"> </span>code-reviewer
 </span></code></pre></div>
 <p>Batch-add every top-level <code>.md</code> file in a directory:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>python<span class="w"> </span>-m<span class="w"> </span>agent_add<span class="w"> </span>--scan-dir<span class="w"> </span>./agents<span class="w"> </span>--skip-existing
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>python<span class="w"> </span>-m<span class="w"> </span>agent_add<span class="w"> </span>--scan-dir<span class="w"> </span>./agents<span class="w"> </span>--skip-existing
 </span></code></pre></div>
 <p>Agents are copied into <code>~/.claude/agents/</code> and mirrored into
 <code>entities/agents/</code>. Re-run <code>python -m ctx.core.wiki.wiki_graphify</code> after adding agents if you want
@@ -1829,18 +1839,18 @@ graph recommendations to include them.</p>
 <p>Use this when you want the MCP server available as a recommendation before
 installing it into a host.</p>
 <p>Create <code>github-mcp.json</code>:</p>
-<div class="language-json highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="p">{</span>
-</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="w">  </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;GitHub MCP&quot;</span><span class="p">,</span>
-</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="w">  </span><span class="nt">&quot;slug&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;github-mcp&quot;</span><span class="p">,</span>
-</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="w">  </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;MCP server for GitHub repository and issue workflows.&quot;</span><span class="p">,</span>
-</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="w">  </span><span class="nt">&quot;github_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://github.com/modelcontextprotocol/servers&quot;</span><span class="p">,</span>
-</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="w">  </span><span class="nt">&quot;sources&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;manual&quot;</span><span class="p">],</span>
-</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="w">  </span><span class="nt">&quot;tags&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;github&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;automation&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;repository&quot;</span><span class="p">],</span>
-</span><span id="__span-11-8"><a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="w">  </span><span class="nt">&quot;transports&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;stdio&quot;</span><span class="p">]</span>
-</span><span id="__span-11-9"><a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="p">}</span>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="p">{</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;GitHub MCP&quot;</span><span class="p">,</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">  </span><span class="nt">&quot;slug&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;github-mcp&quot;</span><span class="p">,</span>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="w">  </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;MCP server for GitHub repository and issue workflows.&quot;</span><span class="p">,</span>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="w">  </span><span class="nt">&quot;github_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://github.com/modelcontextprotocol/servers&quot;</span><span class="p">,</span>
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="w">  </span><span class="nt">&quot;sources&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;manual&quot;</span><span class="p">],</span>
+</span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="w">  </span><span class="nt">&quot;tags&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;github&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;automation&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;repository&quot;</span><span class="p">],</span>
+</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="w">  </span><span class="nt">&quot;transports&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;stdio&quot;</span><span class="p">]</span>
+</span><span id="__span-12-9"><a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a><span class="p">}</span>
 </span></code></pre></div>
 <p>Add it:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>python<span class="w"> </span>-m<span class="w"> </span>mcp_add<span class="w"> </span>--from-json<span class="w"> </span>./github-mcp.json
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>python<span class="w"> </span>-m<span class="w"> </span>mcp_add<span class="w"> </span>--from-json<span class="w"> </span>./github-mcp.json
 </span></code></pre></div>
 <p>MCP pages live under <code>entities/mcp-servers/&lt;shard&gt;/&lt;slug&gt;.md</code>. The add command
 accepts a single JSON object with <code>--from-json</code> or streams JSONL records from
@@ -1861,68 +1871,68 @@ instead of literal tokens.</p>
 tool. Harness examples include coding-agent loops, CAD-generation runtimes,
 browser-automation runners, evaluation loops, and local-model workbenches.</p>
 <p>Example: add <code>earthtojake/text-to-cad</code> as a harness recommendation.</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>python<span class="w"> </span>-m<span class="w"> </span>harness_add<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">  </span>--repo<span class="w"> </span>https://github.com/earthtojake/text-to-cad<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">  </span>--name<span class="w"> </span><span class="s2">&quot;Text to CAD&quot;</span><span class="w"> </span><span class="se">\</span>
-</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="w">  </span>--description<span class="w"> </span><span class="s2">&quot;Harness for turning text prompts into CAD artifacts.&quot;</span><span class="w"> </span><span class="se">\</span>
-</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="w">  </span>--tag<span class="w"> </span>cad<span class="w"> </span>--tag<span class="w"> </span>3d<span class="w"> </span>--tag<span class="w"> </span>automation<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="w">  </span>--model-provider<span class="w"> </span>openai<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-13-7"><a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="w">  </span>--runtime<span class="w"> </span>python<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-13-8"><a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="w">  </span>--capability<span class="w"> </span><span class="s2">&quot;Generate CAD artifacts from natural language&quot;</span><span class="w"> </span><span class="se">\</span>
-</span><span id="__span-13-9"><a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="w">  </span>--setup-command<span class="w"> </span><span class="s2">&quot;pip install -e .&quot;</span><span class="w"> </span><span class="se">\</span>
-</span><span id="__span-13-10"><a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a><span class="w">  </span>--verify-command<span class="w"> </span><span class="s2">&quot;pytest&quot;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>python<span class="w"> </span>-m<span class="w"> </span>harness_add<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="w">  </span>--repo<span class="w"> </span>https://github.com/earthtojake/text-to-cad<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="w">  </span>--name<span class="w"> </span><span class="s2">&quot;Text to CAD&quot;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="w">  </span>--description<span class="w"> </span><span class="s2">&quot;Harness for turning text prompts into CAD artifacts.&quot;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="w">  </span>--tag<span class="w"> </span>cad<span class="w"> </span>--tag<span class="w"> </span>3d<span class="w"> </span>--tag<span class="w"> </span>automation<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-14-6"><a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="w">  </span>--model-provider<span class="w"> </span>openai<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-14-7"><a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="w">  </span>--runtime<span class="w"> </span>python<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-14-8"><a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="w">  </span>--capability<span class="w"> </span><span class="s2">&quot;Generate CAD artifacts from natural language&quot;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-14-9"><a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="w">  </span>--setup-command<span class="w"> </span><span class="s2">&quot;pip install -e .&quot;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-14-10"><a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a><span class="w">  </span>--verify-command<span class="w"> </span><span class="s2">&quot;pytest&quot;</span>
 </span></code></pre></div>
 <p>Or load one JSON record:</p>
-<div class="language-json highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="p">{</span>
-</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="w">  </span><span class="nt">&quot;repo_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://github.com/earthtojake/text-to-cad&quot;</span><span class="p">,</span>
-</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="w">  </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Text to CAD&quot;</span><span class="p">,</span>
-</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="w">  </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Harness for turning text prompts into CAD artifacts.&quot;</span><span class="p">,</span>
-</span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="w">  </span><span class="nt">&quot;tags&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;cad&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;3d&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;automation&quot;</span><span class="p">],</span>
-</span><span id="__span-14-6"><a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="w">  </span><span class="nt">&quot;model_providers&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;openai&quot;</span><span class="p">],</span>
-</span><span id="__span-14-7"><a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="w">  </span><span class="nt">&quot;runtimes&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;python&quot;</span><span class="p">],</span>
-</span><span id="__span-14-8"><a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="w">  </span><span class="nt">&quot;capabilities&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;Generate CAD artifacts from natural language&quot;</span><span class="p">],</span>
-</span><span id="__span-14-9"><a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="w">  </span><span class="nt">&quot;setup_commands&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;pip install -e .&quot;</span><span class="p">],</span>
-</span><span id="__span-14-10"><a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a><span class="w">  </span><span class="nt">&quot;verify_commands&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;pytest&quot;</span><span class="p">],</span>
-</span><span id="__span-14-11"><a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a><span class="w">  </span><span class="nt">&quot;sources&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;manual&quot;</span><span class="p">]</span>
-</span><span id="__span-14-12"><a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a><span class="p">}</span>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="p">{</span>
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="w">  </span><span class="nt">&quot;repo_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://github.com/earthtojake/text-to-cad&quot;</span><span class="p">,</span>
+</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="w">  </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Text to CAD&quot;</span><span class="p">,</span>
+</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="w">  </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Harness for turning text prompts into CAD artifacts.&quot;</span><span class="p">,</span>
+</span><span id="__span-15-5"><a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="w">  </span><span class="nt">&quot;tags&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;cad&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;3d&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;automation&quot;</span><span class="p">],</span>
+</span><span id="__span-15-6"><a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="w">  </span><span class="nt">&quot;model_providers&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;openai&quot;</span><span class="p">],</span>
+</span><span id="__span-15-7"><a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="w">  </span><span class="nt">&quot;runtimes&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;python&quot;</span><span class="p">],</span>
+</span><span id="__span-15-8"><a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="w">  </span><span class="nt">&quot;capabilities&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;Generate CAD artifacts from natural language&quot;</span><span class="p">],</span>
+</span><span id="__span-15-9"><a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a><span class="w">  </span><span class="nt">&quot;setup_commands&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;pip install -e .&quot;</span><span class="p">],</span>
+</span><span id="__span-15-10"><a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a><span class="w">  </span><span class="nt">&quot;verify_commands&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;pytest&quot;</span><span class="p">],</span>
+</span><span id="__span-15-11"><a id="__codelineno-15-11" name="__codelineno-15-11" href="#__codelineno-15-11"></a><span class="w">  </span><span class="nt">&quot;sources&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;manual&quot;</span><span class="p">]</span>
+</span><span id="__span-15-12"><a id="__codelineno-15-12" name="__codelineno-15-12" href="#__codelineno-15-12"></a><span class="p">}</span>
 </span></code></pre></div>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>python<span class="w"> </span>-m<span class="w"> </span>harness_add<span class="w"> </span>--from-json<span class="w"> </span>./text-to-cad-harness.json
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>python<span class="w"> </span>-m<span class="w"> </span>harness_add<span class="w"> </span>--from-json<span class="w"> </span>./text-to-cad-harness.json
 </span></code></pre></div>
 <p>Harness pages live under <code>entities/harnesses/&lt;slug&gt;.md</code>. Setup and verification
 commands are documentation only; ctx records them so the user can inspect and
 decide before running anything.</p>
 <p>To inspect and install a harness:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>python<span class="w"> </span>-m<span class="w"> </span>harness_install<span class="w"> </span>text-to-cad<span class="w"> </span>--dry-run
-</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>python<span class="w"> </span>-m<span class="w"> </span>harness_install<span class="w"> </span>text-to-cad
-</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>python<span class="w"> </span>-m<span class="w"> </span>harness_install<span class="w"> </span>text-to-cad<span class="w"> </span>--update<span class="w"> </span>--dry-run
-</span><span id="__span-16-4"><a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>python<span class="w"> </span>-m<span class="w"> </span>harness_install<span class="w"> </span>text-to-cad<span class="w"> </span>--uninstall<span class="w"> </span>--dry-run
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>python<span class="w"> </span>-m<span class="w"> </span>harness_install<span class="w"> </span>text-to-cad<span class="w"> </span>--dry-run
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>python<span class="w"> </span>-m<span class="w"> </span>harness_install<span class="w"> </span>text-to-cad
+</span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>python<span class="w"> </span>-m<span class="w"> </span>harness_install<span class="w"> </span>text-to-cad<span class="w"> </span>--update<span class="w"> </span>--dry-run
+</span><span id="__span-17-4"><a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a>python<span class="w"> </span>-m<span class="w"> </span>harness_install<span class="w"> </span>text-to-cad<span class="w"> </span>--uninstall<span class="w"> </span>--dry-run
 </span></code></pre></div>
 <p>The installer clones or copies the harness into <code>~/.claude/harnesses/&lt;slug&gt;</code> and
 writes <code>~/.claude/harness-installs/&lt;slug&gt;.json</code>. It does not run setup commands
 unless you pass <code>--approve-commands</code>, and it does not run verification commands
 unless you also pass <code>--run-verify</code>.</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>python<span class="w"> </span>-m<span class="w"> </span>harness_install<span class="w"> </span>text-to-cad<span class="w"> </span>--approve-commands<span class="w"> </span>--run-verify
-</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>python<span class="w"> </span>-m<span class="w"> </span>harness_install<span class="w"> </span>text-to-cad<span class="w"> </span>--update<span class="w"> </span>--approve-commands<span class="w"> </span>--run-verify
-</span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>python<span class="w"> </span>-m<span class="w"> </span>harness_install<span class="w"> </span>text-to-cad<span class="w"> </span>--uninstall
-</span><span id="__span-17-4"><a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a>python<span class="w"> </span>-m<span class="w"> </span>harness_install<span class="w"> </span>text-to-cad<span class="w"> </span>--uninstall<span class="w"> </span>--keep-files
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>python<span class="w"> </span>-m<span class="w"> </span>harness_install<span class="w"> </span>text-to-cad<span class="w"> </span>--approve-commands<span class="w"> </span>--run-verify
+</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>python<span class="w"> </span>-m<span class="w"> </span>harness_install<span class="w"> </span>text-to-cad<span class="w"> </span>--update<span class="w"> </span>--approve-commands<span class="w"> </span>--run-verify
+</span><span id="__span-18-3"><a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>python<span class="w"> </span>-m<span class="w"> </span>harness_install<span class="w"> </span>text-to-cad<span class="w"> </span>--uninstall
+</span><span id="__span-18-4"><a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a>python<span class="w"> </span>-m<span class="w"> </span>harness_install<span class="w"> </span>text-to-cad<span class="w"> </span>--uninstall<span class="w"> </span>--keep-files
 </span></code></pre></div>
 <h2 id="initialize-model-choice">Initialize Model Choice<a class="headerlink" href="#initialize-model-choice" title="Permanent link">&para;</a></h2>
 <p>During setup, record whether you use Claude Code or your own model. Plain
 <code>ctx-init</code> starts a small wizard when it is attached to an interactive
 terminal; use <code>ctx-init --wizard</code> to force the prompts, or pass explicit flags
 such as <code>--model-mode skip</code> for non-interactive automation.</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>ctx-init
-</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>ctx-init<span class="w"> </span>--wizard
-</span><span id="__span-18-3"><a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>ctx-init<span class="w"> </span>--model-mode<span class="w"> </span>skip
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>ctx-init
+</span><span id="__span-19-2"><a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>ctx-init<span class="w"> </span>--wizard
+</span><span id="__span-19-3"><a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>ctx-init<span class="w"> </span>--model-mode<span class="w"> </span>skip
 </span></code></pre></div>
 <p>For Claude Code:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>ctx-init<span class="w"> </span>--model-mode<span class="w"> </span>claude-code<span class="w"> </span>--goal<span class="w"> </span><span class="s2">&quot;maintain a FastAPI service&quot;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>ctx-init<span class="w"> </span>--model-mode<span class="w"> </span>claude-code<span class="w"> </span>--goal<span class="w"> </span><span class="s2">&quot;maintain a FastAPI service&quot;</span>
 </span></code></pre></div>
 <p>For a custom model:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>ctx-init<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="w">  </span>--model-mode<span class="w"> </span>custom<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-20-3"><a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="w">  </span>--model<span class="w"> </span>openai/gpt-5.5<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-20-4"><a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="w">  </span>--goal<span class="w"> </span><span class="s2">&quot;build CAD artifacts from text prompts&quot;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>ctx-init<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-21-2"><a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="w">  </span>--model-mode<span class="w"> </span>custom<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-21-3"><a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="w">  </span>--model<span class="w"> </span>openai/gpt-5.5<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-21-4"><a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="w">  </span>--goal<span class="w"> </span><span class="s2">&quot;build CAD artifacts from text prompts&quot;</span>
 </span></code></pre></div>
 <p>Add <code>--validate-model</code> only when you want <code>ctx-init</code> to make one small provider
 call. Without that flag, setup writes <code>~/.claude/ctx-model-profile.json</code> and

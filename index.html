@@ -1780,8 +1780,9 @@ quality and health tooling moved off PATH and is reached with
 <code>python -m ctx.adapters.claude_code.skill_health</code>.
 <code>ctx-init --graph</code> installs the fast
 pre-built runtime graph that powers recommendations and harness dry-runs;
-source checkouts use <code>graph/wiki-graph-runtime.tar.gz</code>, while pip installs
-download the matching GitHub release asset. Use
+source checkouts hydrate the exact runtime archive declared by
+<code>graph/release-artifacts.json</code>, while pip installs download the matching
+GitHub release asset. Use
 <code>ctx-init --graph --graph-install-mode full</code> when you want the full
 packed LLM-wiki installed locally.</p>
 <p>Custom-model users can run
@@ -1928,7 +1929,7 @@ A/B/C/D/F.</p>
 <p><strong>Source snapshot</strong></p>
 <hr />
 <p>Current main is <strong>v1.0.21</strong> — MIT, tested on CPython 3.11+ for Linux and macOS,
-8,780 test inventory. Ships seven console scripts led by <code>ctx</code> and
+8,803 test inventory. Ships seven console scripts led by <code>ctx</code> and
 <code>ctx-init</code>. The maintenance
 tools are still shipped and still work, now via <code>python -m</code>:
 <code>ctx_monitor serve</code> (local dashboard with graph + wiki + load/unload for
@@ -1988,9 +1989,10 @@ same changed-file classifier as GitHub Actions and runs the matching local
 gates before you open a PR: stats, ruff format/check, mypy, pip check, unit
 coverage, canaries, package build, twine, docs, graph validation, browser,
 and similarity checks as needed.
-When graph artifacts are still Git LFS pointers, preflight hydrates only
-the required tarballs, verifies their pointer SHA-256 and size caps, then
-validates the artifacts.
+Preflight reads <code>graph/release-artifacts.json</code>, verifies the three small tracked
+graph assets, hydrates only the two large archives from the declared GitHub
+release, checks exact SHA-256 and byte size, then validates the artifacts. There
+is no Git LFS fallback.
 Use <code>--profile full</code> before release work to force the source/package gates
 even for docs-only or graph-only changes. Docs changes run public docs
 tracker checks before the strict MkDocs build, including bug-smoke,
