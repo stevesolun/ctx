@@ -15,10 +15,11 @@
 - Active goal: retire Git LFS safely after CTX Fit 1.0.21
 - Phase: LFS migration merged and local cleanup complete; remote purge pending
 - Release decision: **1.0.21 REMAINS RELEASED; LFS MIGRATION MERGED; REMOTE PURGE PENDING**
-- Branch: `codex/lfs-cleanup-state`
+- Branch: `main`
 - Release commit: `38a33f8784e2bf408430a98fed81206c2cf39d00`
 - Release tag object: `a7b8e78559fda1d44dca844393458272071ae89b`
-- Latest merged PR: `https://github.com/stevesolun/ctx/pull/275`
+- LFS migration PR: `https://github.com/stevesolun/ctx/pull/275`
+- Cleanup checkpoint PR: `https://github.com/stevesolun/ctx/pull/276`
 - Follow-up scope at checkpoint:
   - migrate graph distribution from Git LFS pointers to exact release assets,
     then ask GitHub Support to purge the historical remote LFS objects
