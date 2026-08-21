@@ -13,7 +13,7 @@
 
 - Updated: 2026-08-21 (Asia/Jerusalem)
 - Active goal: retire Git LFS safely after CTX Fit 1.0.21
-- Phase: LFS migration merged and local cleanup complete; remote purge pending
+- Phase: repository and Mac-local LFS cleanup complete; remote purge pending
 - Release decision: **1.0.21 REMAINS RELEASED; LFS MIGRATION MERGED; REMOTE PURGE PENDING**
 - Branch: `main`
 - Release commit: `38a33f8784e2bf408430a98fed81206c2cf39d00`
@@ -21,8 +21,7 @@
 - LFS migration PR: `https://github.com/stevesolun/ctx/pull/275`
 - Cleanup checkpoint PR: `https://github.com/stevesolun/ctx/pull/276`
 - Follow-up scope at checkpoint:
-  - migrate graph distribution from Git LFS pointers to exact release assets,
-    then ask GitHub Support to purge the historical remote LFS objects
+  - ask GitHub Support to purge the historical remote LFS objects
   - add repository/environment protection rules as defense in depth
   - user-owned and out of scope: `.scratch/`
 - Parallel execution: complete. Independent product, security, spend,
@@ -47,8 +46,11 @@
   validated the 405,434,548-byte release pair. Local cleanup removed
   1,968,180,750 bytes of release-backed LFS cache objects, 197,656,624 bytes of
   stale temporary packs, and the untracked 405,434,548-byte working pair: at
-  least 2,571,271,922 bytes (2.395 GiB) total. No remote LFS object has been
-  purged yet.
+  least 2,571,271,922 bytes (2.395 GiB) total. A later Mac-wide audit found and
+  removed a second 16-object, 4,534,205,612-byte LFS cache in the `no-mistakes`
+  bare mirror, then restarted and verified the daemon. Safe cache and clean
+  worktree cleanup reduced the Data volume's rounded used space from 280 GiB to
+  262 GiB. No remote LFS object has been purged yet.
 
 ## Product destination
 
@@ -104,7 +106,7 @@ All of the following must be true before tagging or publishing:
 | ADR-015 stop attribution | Complete, independently accepted | Coordinator + spend/fairness reviewer | Structured stop reason/log fields flow provider → live runner → serialized result, budget-capped trials are inconclusive, and the accepted spend/fairness lane plus 446-test Fit aggregate are green |
 | Release metadata and publish guard | Complete, independently accepted | Metadata writer + publish writer/reviewer + coordinator | 1.0.21 metadata and changelog are current; exact-main/exact-successful-Tests production guard and changelog-backed notes have no P0/P1 review findings; P2 credential/doc hardening is integrated |
 | Final verification and release | Complete, publicly verified | Coordinator + release/SBOM reviewers | PR #271 merged as release commit `38a33f8784e2bf408430a98fed81206c2cf39d00`; exact-main Tests, CodeQL, and Hugging Face sync succeeded. Annotated tag `v1.0.21` peels to that commit. Publish run `31915534546` completed every build, attestation, release-asset, and PyPI job. Public wheel/SBOM digests, Sigstore/Rekor attestations, clean installation, `pip check`, version output, and a minimal `ctx fit --json` repository profile were independently verified. |
-| Retire Git LFS | Repository and local cleanup complete; remote purge pending GitHub Support | Coordinator + manifest/workflow writers + independent auditor | 45 historical objects total 12.131 GiB because each compressed archive revision is stored whole. Current useful pair is 405,434,548 bytes and is independently preserved and attested in release v1.0.21. PR #275 merged as `b62b78d7` after 19 successful checks. A clean post-merge checkout hydrated and deeply validated both release assets without Git LFS. The local checkout has no LFS objects, LFS directory, LFS configuration, tracked LFS paths, or Git garbage; `git fsck --no-dangling` is clean. At least 2.395 GiB was freed locally. GitHub still retains and bills the historical remote objects until Support purges them. |
+| Retire Git LFS | Repository and Mac-local cleanup complete; remote purge pending GitHub Support | Coordinator + manifest/workflow writers + independent auditor | 45 historical objects total 12.131 GiB because each compressed archive revision is stored whole. Current useful pair is 405,434,548 bytes and is independently preserved and attested in release v1.0.21. PR #275 merged as `b62b78d7` after 19 successful checks. A clean post-merge checkout hydrated and deeply validated both release assets without Git LFS. The repository and `no-mistakes` mirror have no LFS objects or local LFS configuration; the development-root scan found no other LFS object store. Main and mirror integrity checks pass, `no-mistakes` is running, and `.scratch/` is untouched. The two cleanup passes reclaimed about 20 GiB locally; GitHub still retains and bills the historical remote objects until Support purges them. |
 
 ## Open release blockers
 
@@ -294,6 +296,20 @@ Support contact: `https://support.github.com/contact`
 
 ## Checkpoint log
 
+- 2026-08-21: Completed a safe Mac-wide follow-up cleanup. Found 16 duplicate
+  CTX LFS payloads totaling 4,534,205,612 bytes (4.223 GiB) in the active
+  `no-mistakes` bare mirror. Stopped the daemon, removed only its LFS payloads
+  and local LFS settings, restarted it, and verified the mirror and main Git
+  object databases. Removed the obsolete generated CTX A/B catalog cache,
+  Python download cache, abandoned Codex runtime install, explicitly broken SDK
+  cache, Homebrew-confirmed obsolete files, and old gate sandbox/tool caches.
+  Removed 12 clean inactive worktrees through `git worktree remove`; all
+  detached heads were already ancestors of `main`, branch-backed worktrees kept
+  their branches, and the two dirty worktrees plus official benchmark evidence
+  were preserved. A development-root scan found no remaining LFS object store.
+  Rounded Data-volume usage fell from 280 GiB to 262 GiB. Active applications,
+  Codex/Claude sessions, Downloads, benchmark evidence and its official VM
+  disks, project sources, and `.scratch/` were not deleted.
 - 2026-08-21: PR #275 final head `52ddcba6` passed 19 remote checks with one
   intentionally skipped matrix placeholder and merged to `main` as
   `b62b78d704ec54b3ff43e333982eef713a33c8df`. CodeQL, unit-linux, full graph,
