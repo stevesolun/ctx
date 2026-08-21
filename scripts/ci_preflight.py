@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
-import hashlib
 import os
 from pathlib import Path
 import shutil
@@ -73,26 +72,6 @@ GRAPH_VALIDATE_ARGS = (
     "--max-stage-lines",
     "40",
 )
-GRAPH_LFS_ARTIFACTS = (
-    "graph/wiki-graph.tar.gz",
-    "graph/wiki-graph-runtime.tar.gz",
-)
-GRAPH_LFS_MAX_FALLBACK_SIZES = {
-    "graph/wiki-graph.tar.gz": 350_000_000,
-    "graph/wiki-graph-runtime.tar.gz": 150_000_000,
-}
-LFS_POINTER_PREFIX = "version https://git-lfs.github.com/spec/v1"
-LFS_POINTER_MAX_BYTES = 4096
-GIT_LFS_FILTER_CONFIG = (
-    "-c",
-    "filter.lfs.process=git-lfs filter-process",
-    "-c",
-    "filter.lfs.smudge=git-lfs smudge -- %f",
-    "-c",
-    "filter.lfs.clean=git-lfs clean -- %f",
-    "-c",
-    "filter.lfs.required=true",
-)
 
 
 @dataclass(frozen=True)
@@ -100,13 +79,6 @@ class Check:
     name: str
     argv: tuple[str, ...]
     env: dict[str, str] | None = None
-
-
-@dataclass(frozen=True)
-class LfsPointer:
-    path: str
-    sha256: str
-    size: int
 
 
 def _run_git(args: list[str], *, allow_failure: bool = False) -> list[str]:
@@ -164,108 +136,6 @@ def _diffs_for_files(base_ref: str, files: list[str]) -> dict[str, str]:
         if diff_text:
             diffs[path] = diff_text
     return diffs
-
-
-def _read_lfs_pointer(path: Path) -> LfsPointer | None:
-    if not path.exists():
-        return None
-    prefix_bytes = LFS_POINTER_PREFIX.encode("utf-8")
-    with path.open("rb") as fh:
-        prefix = fh.read(len(prefix_bytes))
-        if prefix != prefix_bytes:
-            return None
-        pointer_bytes = prefix + fh.read(LFS_POINTER_MAX_BYTES - len(prefix_bytes))
-    expected_oid = ""
-    expected_size = 0
-    pointer = pointer_bytes.decode("utf-8", errors="replace")
-    for line in pointer.splitlines():
-        if line.startswith("oid sha256:"):
-            expected_oid = line.split(":", 1)[1].strip()
-        elif line.startswith("size "):
-            expected_size = int(line.split(" ", 1)[1].strip())
-    if expected_oid and expected_size:
-        return LfsPointer(path.relative_to(REPO_ROOT).as_posix(), expected_oid, expected_size)
-    raise RuntimeError(f"{path.relative_to(REPO_ROOT)} has incomplete Git LFS pointer metadata")
-
-
-def _file_sha256_and_size(path: Path) -> tuple[str, int]:
-    sha = hashlib.sha256()
-    total = 0
-    with path.open("rb") as fh:
-        while True:
-            chunk = fh.read(1024 * 1024)
-            if not chunk:
-                break
-            sha.update(chunk)
-            total += len(chunk)
-    return sha.hexdigest(), total
-
-
-def _verify_hydrated_lfs_pointer(pointer: LfsPointer) -> None:
-    path = REPO_ROOT / pointer.path
-    if _read_lfs_pointer(path) is not None:
-        raise RuntimeError(f"{pointer.path} is still a Git LFS pointer after hydration")
-    actual_sha256, actual_size = _file_sha256_and_size(path)
-    if actual_sha256 != pointer.sha256 or actual_size != pointer.size:
-        raise RuntimeError(
-            f"{pointer.path} does not match its Git LFS pointer: "
-            f"sha256:{actual_sha256} size:{actual_size}"
-        )
-
-
-def hydrate_graph_lfs_artifacts() -> int:
-    pointers = [
-        pointer
-        for relpath in GRAPH_LFS_ARTIFACTS
-        if (pointer := _read_lfs_pointer(REPO_ROOT / relpath)) is not None
-    ]
-    if not pointers:
-        print("Graph LFS artifacts are already hydrated.")
-        return 0
-
-    if not shutil.which("git"):
-        print("git is required to hydrate graph LFS artifacts", file=sys.stderr)
-        return 127
-
-    env = os.environ.copy()
-    env.setdefault("GIT_LFS_SKIP_SMUDGE", "1")
-    env.setdefault("GIT_LFS_ACTIVITYTIMEOUT", "600")
-    env.setdefault("GIT_LFS_DIALTIMEOUT", "120")
-    env.setdefault("GIT_LFS_TLSTIMEOUT", "120")
-    for pointer in pointers:
-        max_size = GRAPH_LFS_MAX_FALLBACK_SIZES[pointer.path]
-        if pointer.size > max_size:
-            print(
-                f"Refusing Git LFS fallback for {pointer.path}: "
-                f"pointer size {pointer.size} exceeds cap {max_size}",
-                file=sys.stderr,
-            )
-            return 1
-        print(f"Hydrating {pointer.path} from Git LFS sha256:{pointer.sha256} size:{pointer.size}")
-        proc = subprocess.run(
-            [
-                "git",
-                *GIT_LFS_FILTER_CONFIG,
-                "lfs",
-                "pull",
-                "--include",
-                pointer.path,
-                "--exclude",
-                "",
-            ],
-            cwd=REPO_ROOT,
-            check=False,
-            env=env,
-        )
-        if proc.returncode != 0:
-            print(f"git lfs pull failed for {pointer.path}", file=sys.stderr)
-            return proc.returncode
-        try:
-            _verify_hydrated_lfs_pointer(pointer)
-        except RuntimeError as exc:
-            print(str(exc), file=sys.stderr)
-            return 1
-    return 0
 
 
 def _run_whitespace_check(base_ref: str) -> int:
@@ -326,6 +196,20 @@ def select_checks(
                 [
                     Check("mypy", (python, "-m", "mypy", "src")),
                     Check("pip check", (python, "-m", "pip", "check")),
+                    Check(
+                        "hydrate benchmark catalog",
+                        (
+                            python,
+                            "scripts/graph_release_manifest.py",
+                            "hydrate",
+                            "--manifest",
+                            "graph/release-artifacts.json",
+                            "--repo-root",
+                            ".",
+                            "--artifact",
+                            "graph/wiki-graph-runtime.tar.gz",
+                        ),
+                    ),
                     Check(
                         "unit-linux equivalent",
                         (
@@ -412,7 +296,18 @@ def select_checks(
 
     if not smoke_profile and flags["graph_artifact_changed"]:
         checks.append(
-            Check("hydrate graph LFS", (python, __file__, "--internal-hydrate-graph-lfs"))
+            Check(
+                "hydrate graph release assets",
+                (
+                    python,
+                    "scripts/graph_release_manifest.py",
+                    "hydrate",
+                    "--manifest",
+                    "graph/release-artifacts.json",
+                    "--repo-root",
+                    ".",
+                ),
+            )
         )
         checks.append(Check("graph artifact validation", (python, *GRAPH_VALIDATE_ARGS)))
 
@@ -570,11 +465,6 @@ def main(argv: list[str] | None = None) -> int:
         help=argparse.SUPPRESS,
     )
     parser.add_argument(
-        "--internal-hydrate-graph-lfs",
-        action="store_true",
-        help=argparse.SUPPRESS,
-    )
-    parser.add_argument(
         "--internal-whitespace",
         action="store_true",
         help=argparse.SUPPRESS,
@@ -584,8 +474,6 @@ def main(argv: list[str] | None = None) -> int:
     if not shutil.which("git"):
         raise SystemExit("git is required for ci_preflight")
 
-    if args.internal_hydrate_graph_lfs:
-        return hydrate_graph_lfs_artifacts()
     if args.internal_whitespace:
         return _run_whitespace_check(args.base)
 

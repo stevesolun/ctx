@@ -62,6 +62,8 @@ Thumbs.db
 /internal/reviews/
 
 # Generated graph review artifacts (regenerate locally when needed)
+/graph/wiki-graph.tar.gz
+/graph/wiki-graph-runtime.tar.gz
 /graph/*-report.md
 /graph/*-report.json
 /graph/*-report.json.gz

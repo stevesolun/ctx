@@ -24,6 +24,7 @@ from ctx.adapters.claude_code.install.skill_install import install_skill
 from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox
 from ctx.adapters.generic.providers import ToolCall
 from ctx.core.graph.graph_packs import write_base_pack
+from ctx.core.graph import release_artifacts
 from ctx.core.graph.graph_store import validate_graph_store
 from ctx.core.install_policy_store import (
     has_persisted_install_policy as has_real_install_policy,
@@ -101,17 +102,6 @@ def _write_dashboard_index(path: Path, *, export_id: str = "test-export") -> Non
         conn.commit()
     finally:
         conn.close()
-
-
-def _artifact_sha256_or_lfs_oid(path: Path, *, normalize_text: bool = False) -> str:
-    data = path.read_bytes()
-    if data.startswith(b"version https://git-lfs.github.com/spec/v1\n"):
-        for line in data.decode("utf-8").splitlines():
-            if line.startswith("oid sha256:"):
-                return line.removeprefix("oid sha256:")
-    if normalize_text:
-        data = data.replace(b"\r\n", b"\n")
-    return hashlib.sha256(data).hexdigest()
 
 
 def test_ensure_directories_creates_standard_tree(tmp_path: Path) -> None:
@@ -771,18 +761,67 @@ def test_download_graph_archive_verifies_sha256(
         )
     assert not bad_destination.exists()
 
+    bad_size_destination = tmp_path / "bad-size-wiki-graph.tar.gz"
+    with pytest.raises(ValueError, match="size mismatch"):
+        ci._download_graph_archive(
+            bad_size_destination,
+            url="https://example.invalid/wiki-graph.tar.gz",
+            expected_sha256=hashlib.sha256(payload).hexdigest(),
+            expected_size=len(payload) + 1,
+        )
+    assert not bad_size_destination.exists()
+
 
 def test_graph_download_checksums_match_shipped_artifacts() -> None:
     root = Path(__file__).resolve().parent.parent.parent
+    manifest = release_artifacts.load_manifest(root / "graph" / "release-artifacts.json")
     for mode, archive_name in ci._GRAPH_ARCHIVE_NAMES.items():
-        path = root / "graph" / archive_name
-        assert ci._GRAPH_ARCHIVE_SHA256[mode] == _artifact_sha256_or_lfs_oid(path)
+        artifact = manifest.artifact_for_path(f"graph/{archive_name}")
+        assert ci._GRAPH_ARCHIVE_SHA256[mode] == artifact.sha256
+        assert ci._GRAPH_ARCHIVE_SIZE[mode] == artifact.size
 
-    overlay_path = root / "graph" / ci._GRAPH_ENTITY_OVERLAY_NAME
-    assert ci._GRAPH_ENTITY_OVERLAY_SHA256 == _artifact_sha256_or_lfs_oid(
-        overlay_path,
-        normalize_text=True,
+    overlay = manifest.artifact_for_path(f"graph/{ci._GRAPH_ENTITY_OVERLAY_NAME}")
+    assert ci._GRAPH_ENTITY_OVERLAY_SHA256 == overlay.sha256
+    assert ci._GRAPH_ENTITY_OVERLAY_SIZE == overlay.size
+
+
+def test_source_checkout_without_local_graph_archive_uses_release(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    monkeypatch.setattr(ci, "__file__", str(tmp_path / "src" / "ctx_init.py"))
+
+    assert ci._find_local_graph_archive("runtime") is None
+
+
+def test_source_checkout_release_contract_comes_from_the_strict_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "repo"
+    graph_dir = root / "graph"
+    graph_dir.mkdir(parents=True)
+    source_manifest = Path(__file__).resolve().parents[2] / "graph" / "release-artifacts.json"
+    payload = json.loads(source_manifest.read_text(encoding="utf-8"))
+    payload["source_release_tag"] = "graph-artifacts-test-source"
+    (graph_dir / "release-artifacts.json").write_text(
+        json.dumps(payload),
+        encoding="utf-8",
     )
+    monkeypatch.setattr(ci, "__file__", str(root / "src" / "ctx_init.py"))
+
+    contract = ci._source_graph_release_contract("runtime")
+    assert contract is not None
+    url, sha256, size = contract
+    runtime = release_artifacts.load_manifest(
+        graph_dir / "release-artifacts.json"
+    ).artifact_for_path("graph/wiki-graph-runtime.tar.gz")
+
+    assert url.endswith("/releases/download/graph-artifacts-test-source/wiki-graph-runtime.tar.gz")
+    assert (sha256, size) == (runtime.sha256, runtime.size)
 
 
 def test_local_graph_archive_checksum_is_verified(tmp_path: Path) -> None:
@@ -791,26 +830,6 @@ def test_local_graph_archive_checksum_is_verified(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="local graph archive checksum mismatch"):
         ci._verify_local_graph_archive(archive, requested_install_mode="runtime")
-
-
-def test_lfs_pointer_graph_archive_is_ignored(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    graph_dir = tmp_path / "graph"
-    graph_dir.mkdir()
-    (graph_dir / "wiki-graph-runtime.tar.gz").write_text(
-        "version https://git-lfs.github.com/spec/v1\n"
-        "oid sha256:993fc08377fdb09edcff4414c59b10fc121189b4a161bf796e3f8f6600907bb1\n"
-        "size 122141091\n",
-        encoding="utf-8",
-    )
-    cwd = tmp_path / "cwd"
-    cwd.mkdir()
-    monkeypatch.chdir(cwd)
-    monkeypatch.setattr(ci, "__file__", str(tmp_path / "src" / "ctx_init.py"))
-
-    assert ci._find_local_graph_archive("runtime") is None
 
 
 def test_custom_graph_url_requires_checksum_or_explicit_opt_out(

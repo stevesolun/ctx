@@ -11,11 +11,11 @@
 
 ## Checkpoint
 
-- Updated: 2026-08-16 (Asia/Jerusalem)
-- Active goal: CTX Fit 1.0.21 post-release record and maintenance handoff
-- Phase: released; public verification complete
-- Release decision: **RELEASED / ACCEPTED**
-- Branch: `codex/ctx-fit-release-complete`
+- Updated: 2026-08-21 (Asia/Jerusalem)
+- Active goal: retire Git LFS safely after CTX Fit 1.0.21
+- Phase: PR #275 CodeQL permission repair accepted; push/recheck pending
+- Release decision: **1.0.21 REMAINS RELEASED; LFS MIGRATION IN PROGRESS**
+- Branch: `codex/remove-git-lfs`
 - Release commit: `38a33f8784e2bf408430a98fed81206c2cf39d00`
 - Release tag object: `a7b8e78559fda1d44dca844393458272071ae89b`
 - Latest merged PR: `https://github.com/stevesolun/ctx/pull/271`
@@ -31,6 +31,16 @@
   publish run `31915534546` completed successfully, including reproducible
   package build, package and graph provenance, CycloneDX attestation, release
   assets, and PyPI Trusted Publishing.
+- LFS migration execution: three parallel lanes completed repository resolver,
+  workflow migration, and independent storage/identity audit. The working tree
+  now removes the two tracked archive pointers, LFS hooks/rules/fallbacks, and
+  obsolete park/prune tooling; strict release-manifest hydration replaces them.
+  Focused integrated evidence is 326 passed plus 113 reviewer-adjacent tests;
+  full non-integration passed 8,812 tests with 5 skips; the authoritative PR
+  preflight passed all 21 lanes. The final committed clean-checkout gate passed
+  all 12 lanes after selectively hydrating the runtime catalog before unit
+  tests. Independent final audit accepted the repaired tree with no P0-P2
+  findings. No remote LFS object has been purged yet.
 
 ## Product destination
 
@@ -86,6 +96,7 @@ All of the following must be true before tagging or publishing:
 | ADR-015 stop attribution | Complete, independently accepted | Coordinator + spend/fairness reviewer | Structured stop reason/log fields flow provider → live runner → serialized result, budget-capped trials are inconclusive, and the accepted spend/fairness lane plus 446-test Fit aggregate are green |
 | Release metadata and publish guard | Complete, independently accepted | Metadata writer + publish writer/reviewer + coordinator | 1.0.21 metadata and changelog are current; exact-main/exact-successful-Tests production guard and changelog-backed notes have no P0/P1 review findings; P2 credential/doc hardening is integrated |
 | Final verification and release | Complete, publicly verified | Coordinator + release/SBOM reviewers | PR #271 merged as release commit `38a33f8784e2bf408430a98fed81206c2cf39d00`; exact-main Tests, CodeQL, and Hugging Face sync succeeded. Annotated tag `v1.0.21` peels to that commit. Publish run `31915534546` completed every build, attestation, release-asset, and PyPI job. Public wheel/SBOM digests, Sigstore/Rekor attestations, clean installation, `pip check`, version output, and a minimal `ctx fit --json` repository profile were independently verified. |
+| Retire Git LFS | In progress; remote permission repair accepted | Coordinator + manifest/workflow writers + independent auditor | 45 historical objects total 12.131 GiB because each compressed archive revision is stored whole. Current useful pair is 405,434,548 bytes and is independently preserved and attested in release v1.0.21. Strict five-asset manifest, shared resolver, workflow/local consumers, clean-clone benchmark hydration, hook/rule/tool cleanup, 8,812-test non-integration run, all 21 PR-preflight lanes, and all 12 committed clean-checkout lanes are green. PR #275 CodeQL rejected world-readable refreshed manifest output; a failing-first regression now proves owner-only `0600`, 74 focused/static checks pass, and independent review accepted atomic replacement/failure behavior with no P0-P2. |
 
 ## Open release blockers
 
@@ -177,6 +188,11 @@ surface makes that row stale for release purposes.
 | PR #271 / head `6a409de9`, 2026-08-16 | GitHub Tests and CodeQL | Tests run `31914512225` and CodeQL run `31914512301` succeeded; unit-linux passed 8,680 with 50 skips and 91.32% coverage | Accepted merge evidence |
 | Exact release commit `38a33f87`, 2026-08-16 | canonical main CI and graph distribution | Tests `31914958343`, CodeQL `31914958371`, and Hugging Face sync `31914958347` succeeded | Exact tag provenance evidence |
 | Annotated tag `v1.0.21`, 2026-08-16 | production publish and public smoke | Publish `31915534546` succeeded; GitHub release, PyPI wheel/sdist, SBOM, package/graph/SBOM attestations, clean install, `pip check`, version, and minimal-repository Fit profile verified | Release complete |
+| LFS migration working tree, 2026-08-21 | manifest/workflow/local-consumer focused integration | 326 passed with one expected tar deprecation warning; adjacent manifest/graph-validation/review suite 113 passed; writer lanes separately reported 137+57 and 165 passed with Ruff/format/mypy/YAML checks green | Strong uncommitted evidence; full gates and independent final-tree review remain |
+| Accepted LFS migration working tree, 2026-08-21 | full non-integration, static/docs/package gates, independent adversarial refreeze, and authoritative PR preflight | 8,812 passed, 5 skipped in the full non-integration run; repaired surface 172 passed and independent refreeze 133 passed; Ruff, format, mypy, strict MkDocs, trackers, stats, clean-host, deep graph, browser, reproducible wheel/sdist, and Twine passed; all 21 PR-preflight lanes passed; reviewer accepted with no P0-P2 | Valid final-tree implementation evidence. One parallel-only deterministic-bridge miss in the first preflight attempt passed three isolated reruns and the complete retry; commit and committed-history gate remain |
+| First committed LFS migration gate, commit `9e0fb368`, 2026-08-21 | isolated committed-head local-fast | Static, graph, docs, telemetry, similarity, browser, package, clean-host, canary, contract, and policy lanes passed; unit lane failed 123 benchmark/holdout fixtures because its clean worktree correctly lacked the now-untracked runtime archive | Valid red evidence: clean CI test jobs must selectively hydrate the 110,283,462-byte runtime catalog before pytest. Failing-first workflow/local contracts added; repair rerun pending |
+| Repaired committed LFS migration, commit `72d1ad73`, 2026-08-21 | complete 12-lane committed-head local-fast, split only to avoid repeating an identical five-minute unit lane | Selective runtime hydration followed by the isolated unit lane passed 8,806 tests with 5 skips and 92.16% coverage. The other 11 exact-commit lanes passed static, policy, canary, contract, clean-host, docs, full graph hydration/deep validation, telemetry, similarity, browser security, reproducible package, and Twine checks | Valid complete committed-history evidence for the implementation commit; state-only checkpoint follow-up requires proportional docs/stats validation |
+| PR #275 head `a7f49bc4`, 2026-08-21 | GitHub Tests and CodeQL | 15 specialized Tests checks passed while unit and graph jobs were still running; CodeQL analysis completed but security aggregation opened alert #23 (`py/overly-permissive-file`, high) because manifest refresh explicitly changed its atomic temp file to world-readable `0644` | Valid red evidence. Failing-first owner-only regression passes at `0600`; 74 focused/static checks passed and independent reviewer verified atomic replacement, rollback, cleanup, and supported-platform behavior with no P0-P2. Repair push/recheck pending |
 
 No paid real-provider evaluation has been authorized or run during this
 hardening pass. A simulated or injected driver is not evidence of live provider
@@ -232,18 +248,70 @@ path remains unproven. Production PyPI Trusted Publishing succeeded.
 
 ## Immediate next actions
 
-1. Keep release assets plus their exact manifests as the canonical graph
-   distribution path, then remove the two graph tarballs and LFS tracking rules
-   in a separately reviewed post-release migration.
-2. Ask GitHub Support to purge historical repository LFS objects after that
-   migration. Removing pointers or rewriting Git history alone does not release
-   GitHub's billed LFS storage.
-3. Add `main`, tag, and `pypi` environment protection rules as defense in depth;
+1. Complete independent review of the CodeQL permission repair, push it to PR
+   #275, and merge only after every required remote check passes.
+2. Verify a fresh post-merge checkout hydrates the exact v1.0.21 release assets;
+   then prune the release-backed local LFS cache and disable repository LFS.
+3. Ask GitHub Support to purge all 45 historical LFS objects (12.131 GiB).
+   Pointer removal alone does not release GitHub's billed remote storage.
+4. Recheck billed storage after Support confirms purge and after the next
+   billing-cycle reset.
+5. Add `main`, tag, and `pypi` environment protection rules as defense in depth;
    the shipped workflow already enforces exact-main and exact-successful-Tests
    provenance.
 
 ## Checkpoint log
 
+- 2026-08-21: Began the safe Git LFS retirement on branch
+  `codex/remove-git-lfs` from `a62a7ff6`. Independent audit counted 45 whole
+  compressed archive objects totaling 13,025,281,486 bytes (12.131 GiB): 31
+  full graph revisions and 14 runtime revisions. Twenty-two objects are already
+  preserved as release assets; the current v1.0.21 pair (405,434,548 bytes)
+  matches public release sizes/digests and verified attestations. The remaining
+  historical snapshots are intentionally disposable because they are old tag,
+  transient branch, or intermediate generated states and are not consumed by
+  the published packages. Implemented a pinned five-asset release manifest and
+  one stdlib resolver, migrated CI/publish/Hugging Face/local consumers and A/B
+  proof preparation, removed tracking rules/four generated hooks/obsolete
+  guard, and uninstalled the checkout-local LFS filters. Focused integrated
+  suites report 326 and 113 passed. No history rewrite, remote purge, or local
+  cache deletion has occurred; `.scratch/` and `.gate/worktrees` remain
+  untouched.
+- 2026-08-21: Completed aggregate verification and independent final audit for
+  the LFS retirement tree. Repository-wide non-integration passed 8,812 tests
+  with 5 skips. The first authoritative preflight attempt encountered the
+  previously documented parallel-only deterministic-bridge request-count
+  miss; the exact test passed three isolated reruns, and the full retry passed
+  all 21 lanes, including clean-host install, strict docs, telemetry, release
+  hydration, deep graph validation, similarity, browser security,
+  reproducible wheel/sdist, and Twine. Independent audit first rejected two
+  selective-hydration/source-contract defects, then accepted their repairs
+  after adversarial refreeze with no P0-P2 findings. No local cache or remote
+  LFS object has been deleted yet.
+- 2026-08-21: Committed the accepted migration as `9e0fb368` and ran the
+  committed-head gate in isolated clean worktrees. Eleven lanes progressed or
+  passed, while the unit lane failed 123 benchmark/holdout fixtures because
+  the runtime archive was correctly absent. This exposed a real difference
+  between the previously hydrated development tree and clean CI checkouts.
+  Added failing-first contracts, then made the local unit lane and both GitHub
+  full-test jobs hydrate only `graph/wiki-graph-runtime.tar.gz` through the
+  exact manifest before pytest. The three new red contracts and 181 affected
+  CI/workflow tests are green; clean committed-head rerun is pending.
+- 2026-08-21: Amended the clean-checkout repair into implementation commit
+  `72d1ad73`. Its isolated unit lane selectively hydrated only the runtime
+  archive and passed 8,806 tests with 5 skips and 92.16% coverage. To avoid
+  repeating that identical five-minute lane, ran the other 11 local-fast lanes
+  separately against the same exact commit; every lane passed. Together the
+  two invocations cover the complete 12-lane committed-history gate. PR push,
+  required remote checks, and merge are next.
+- 2026-08-21: Opened PR #275. Fifteen specialized Tests checks passed while
+  the long unit/graph jobs continued, but GitHub security aggregation opened
+  high-severity CodeQL alert #23: `write_manifest` made the atomic temporary
+  manifest world-readable with mode `0644`. Captured a failing-first permission
+  regression, changed the manifest mode to owner-only `0600`, and passed 74
+  focused tests plus Ruff, format, and mypy. Independent reviewer directly
+  probed replacement and injected failure behavior and accepted with no P0-P2;
+  the repair has not yet been pushed.
 - 2026-08-16: Released CTX Fit 1.0.21. PR #271 merged as exact commit
   `38a33f8784e2bf408430a98fed81206c2cf39d00`; canonical Tests run
   `31914958343`, CodeQL run `31914958371`, and Hugging Face sync

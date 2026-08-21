@@ -1,3 +1,1 @@
-graph/wiki-graph.tar.gz filter=lfs diff=lfs merge=lfs -text
-graph/wiki-graph-runtime.tar.gz filter=lfs diff=lfs merge=lfs -text
 benchmarks/ctx_ab/holdout-protocol-v1.json text eol=lf

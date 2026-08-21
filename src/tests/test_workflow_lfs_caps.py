@@ -3,45 +3,79 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml  # type: ignore[import-untyped]
 
 ROOT = Path(__file__).resolve().parents[2]
-
-
-def _resolve_script(workflow_path: str) -> str:
-    workflow = (ROOT / workflow_path).read_text(encoding="utf-8")
-    start = workflow.index("def hydrate_from_lfs")
-    end = workflow.index("          PY", start)
-    return workflow[start:end]
-
-
-@pytest.mark.parametrize(
-    "workflow_path",
-    [
-        ".github/workflows/huggingface-sync.yml",
-        ".github/workflows/publish.yml",
-        ".github/workflows/test.yml",
-    ],
+WORKFLOW_STEPS = {
+    ".github/workflows/huggingface-sync.yml": (
+        "sync",
+        "Hydrate required graph artifacts from exact release manifest",
+        "Set up Python",
+    ),
+    ".github/workflows/publish.yml": (
+        "build",
+        "Resolve release graph artifacts from exact release manifest",
+        "Validate release graph artifacts",
+    ),
+    ".github/workflows/test.yml": (
+        "graph-check",
+        "Resolve graph artifacts from exact release manifest",
+        "Validate shipped graph artifacts",
+    ),
+}
+RESOLVER_COMMAND = (
+    "python scripts/graph_release_manifest.py hydrate --manifest graph/release-artifacts.json"
 )
-def test_targeted_lfs_fallback_checks_pointer_size_before_pull(workflow_path: str) -> None:
+
+
+def _workflow_steps(workflow_path: str) -> list[dict[str, object]]:
+    job_name, _, _ = WORKFLOW_STEPS[workflow_path]
+    workflow = yaml.safe_load((ROOT / workflow_path).read_text(encoding="utf-8"))
+    steps = workflow["jobs"][job_name]["steps"]
+    assert isinstance(steps, list)
+    return steps
+
+
+@pytest.mark.parametrize("workflow_path", WORKFLOW_STEPS)
+def test_graph_workflows_have_no_git_lfs_dependency(workflow_path: str) -> None:
     workflow = (ROOT / workflow_path).read_text(encoding="utf-8")
-    script = _resolve_script(workflow_path)
 
-    assert '"graph/wiki-graph.tar.gz": 350_000_000' in workflow
-    assert '"graph/wiki-graph-runtime.tar.gz": 150_000_000' in workflow
-    size_check = script.index("if expected_size > max_size:")
-    lfs_pull = script.index('["git", "lfs", "pull", "--include", path_name, "--exclude", ""]')
-    missing_cap_check = script.index("no size cap configured")
-
-    assert "max_size = max_lfs_fallback_sizes.get(path_name)" in script
-    assert missing_cap_check < lfs_pull
-    assert "pointer size {expected_size} exceeds cap {max_size}" in script
-    assert size_check < lfs_pull
+    assert "git lfs" not in workflow.lower()
+    assert "GIT_LFS_" not in workflow
+    assert "git-lfs.github.com" not in workflow
+    assert "targeted LFS" not in workflow
 
 
-def test_huggingface_sync_catalog_lfs_fallback_has_explicit_cap() -> None:
-    workflow = (ROOT / ".github" / "workflows" / "huggingface-sync.yml").read_text(encoding="utf-8")
+@pytest.mark.parametrize("workflow_path", WORKFLOW_STEPS)
+def test_graph_workflows_use_shared_exact_manifest_resolver(workflow_path: str) -> None:
+    _, step_name, _ = WORKFLOW_STEPS[workflow_path]
+    steps = _workflow_steps(workflow_path)
+    step = next(item for item in steps if item.get("name") == step_name)
+    run = str(step["run"])
 
-    assert '"graph/skills-sh-catalog.json.gz": 15_000_000' in workflow
-    assert workflow.index('"graph/skills-sh-catalog.json.gz": 15_000_000') < workflow.index(
-        'hydrate_from_release("graph/skills-sh-catalog.json.gz", 1_000_000)'
+    assert RESOLVER_COMMAND in run
+    assert run.count("scripts/graph_release_manifest.py") == 1
+    assert "--manifest graph/release-artifacts.json" in run
+    assert "git" not in run.lower()
+
+
+@pytest.mark.parametrize("workflow_path", WORKFLOW_STEPS)
+def test_graph_workflows_resolve_before_consuming_artifacts(workflow_path: str) -> None:
+    _, resolver_name, consumer_name = WORKFLOW_STEPS[workflow_path]
+    names = [str(step.get("name", "")) for step in _workflow_steps(workflow_path)]
+
+    assert names.index(resolver_name) < names.index(consumer_name)
+
+
+def test_huggingface_hydration_keeps_canonical_full_sync_guard() -> None:
+    steps = _workflow_steps(".github/workflows/huggingface-sync.yml")
+    step = next(
+        item
+        for item in steps
+        if item.get("name") == "Hydrate required graph artifacts from exact release manifest"
+    )
+
+    assert step["if"] == (
+        "${{ env.HF_TOKEN != '' && github.repository == 'stevesolun/ctx' "
+        "&& steps.scope.outputs.sync_mode == 'full' }}"
     )

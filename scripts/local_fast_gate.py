@@ -55,13 +55,14 @@ CHECK_LANES = {
     "ruff": "static",
     "mypy": "static",
     "pip check": "static",
+    "hydrate benchmark catalog": "unit",
     "unit-linux equivalent": "unit",
     "A-Z canary": "canary",
     "contract compatibility local": "contract",
     "clean host contract": "clean-host",
     "public docs tracker": "docs",
     "docs strict build": "docs",
-    "hydrate graph LFS": "graph",
+    "hydrate graph release assets": "graph",
     "graph artifact validation": "graph",
     "telemetry enterprise": "telemetry",
     "similarity precision/recall": "similarity",
@@ -165,12 +166,9 @@ def _is_worktree_dirty() -> bool:
 def _create_worktree(lane: str, *, revision: str) -> Path:
     parent = Path(tempfile.mkdtemp(prefix="ctx-local-fast-"))
     worktree = parent / lane
-    env = os.environ.copy()
-    env.setdefault("GIT_LFS_SKIP_SMUDGE", "1")
     subprocess.check_call(
         ["git", "worktree", "add", "--detach", str(worktree), revision],
         cwd=REPO_ROOT,
-        env=env,
         stdout=subprocess.DEVNULL,
     )
     return worktree
@@ -195,7 +193,6 @@ def _run_check(check: Check, *, cwd: Path, index: int, total: int, lane: str) ->
     env = os.environ.copy()
     env.setdefault("PYTHONDONTWRITEBYTECODE", "1")
     env.setdefault("PIP_DISABLE_PIP_VERSION_CHECK", "1")
-    env.setdefault("GIT_LFS_SKIP_SMUDGE", "1")
     if check.env:
         env.update(check.env)
     proc = subprocess.run(check.argv, cwd=cwd, check=False, env=env)

@@ -189,8 +189,9 @@ routing machinery underneath, useful on its own.
     `python -m ctx.adapters.claude_code.skill_health`.
     `ctx-init --graph` installs the fast
     pre-built runtime graph that powers recommendations and harness dry-runs;
-    source checkouts use `graph/wiki-graph-runtime.tar.gz`, while pip installs
-    download the matching GitHub release asset. Use
+    source checkouts hydrate the exact runtime archive declared by
+    `graph/release-artifacts.json`, while pip installs download the matching
+    GitHub release asset. Use
     `ctx-init --graph --graph-install-mode full` when you want the full
     packed LLM-wiki installed locally.
 
@@ -356,7 +357,7 @@ graph-based discovery:
     ---
 
     Current main is **v1.0.21** — MIT, tested on CPython 3.11+ for Linux and macOS,
-    8,780 test inventory. Ships seven console scripts led by `ctx` and
+    8,803 test inventory. Ships seven console scripts led by `ctx` and
     `ctx-init`. The maintenance
     tools are still shipped and still work, now via `python -m`:
     `ctx_monitor serve` (local dashboard with graph + wiki + load/unload for
@@ -420,9 +421,10 @@ same changed-file classifier as GitHub Actions and runs the matching local
 gates before you open a PR: stats, ruff format/check, mypy, pip check, unit
 coverage, canaries, package build, twine, docs, graph validation, browser,
 and similarity checks as needed.
-When graph artifacts are still Git LFS pointers, preflight hydrates only
-the required tarballs, verifies their pointer SHA-256 and size caps, then
-validates the artifacts.
+Preflight reads `graph/release-artifacts.json`, verifies the three small tracked
+graph assets, hydrates only the two large archives from the declared GitHub
+release, checks exact SHA-256 and byte size, then validates the artifacts. There
+is no Git LFS fallback.
 Use `--profile full` before release work to force the source/package gates
 even for docs-only or graph-only changes. Docs changes run public docs
 tracker checks before the strict MkDocs build, including bug-smoke,

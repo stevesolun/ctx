@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import os
 import re
 import shutil
@@ -13,6 +12,12 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Callable
+
+from ctx.core.graph.release_artifacts import (
+    GraphReleaseManifest,
+    load_manifest,
+    verify_artifact,
+)
 
 DEFAULT_REPO_ID = "Stevesolun/ctx"
 DEFAULT_REPO_TYPE = "dataset"
@@ -99,12 +104,15 @@ def _iter_tracked_files(repo: Path) -> list[Path]:
 
 
 def _assert_hydrated_artifacts(repo: Path) -> None:
-    for rel, min_bytes in HYDRATED_ARTIFACT_MIN_BYTES.items():
-        artifact = repo / rel
+    manifest = _load_release_manifest_contract(repo)
+    for record in manifest.artifacts:
+        rel = Path(record.path)
+        artifact = repo / record.path
         if not artifact.is_file():
             raise FileNotFoundError(f"{rel.as_posix()} is required before Hugging Face sync")
+        min_bytes = HYDRATED_ARTIFACT_MIN_BYTES.get(rel)
         size = artifact.stat().st_size
-        if size < min_bytes:
+        if min_bytes is not None and size < min_bytes:
             raise RuntimeError(
                 f"{rel.as_posix()} is {size:,} bytes; expected at least "
                 f"{min_bytes:,}. Download or rebuild graph release artifacts "
@@ -114,50 +122,21 @@ def _assert_hydrated_artifacts(repo: Path) -> None:
             prefix = fh.read(len(LFS_POINTER_PREFIX))
         if prefix == LFS_POINTER_PREFIX:
             raise RuntimeError(f"{rel.as_posix()} is a Git LFS pointer, not the hydrated artifact")
-        _assert_matches_lfs_pointer(repo, rel, artifact)
+        try:
+            verify_artifact(artifact, record)
+        except ValueError as exc:
+            raise RuntimeError(
+                f"{rel.as_posix()} does not match graph release manifest: {exc}"
+            ) from exc
     _validate_graph_artifact_integrity(repo)
 
 
-def _parse_lfs_pointer(text: str) -> tuple[str, int] | None:
-    if not text.startswith(LFS_POINTER_PREFIX.decode("ascii")):
-        return None
-    oid: str | None = None
-    size: int | None = None
-    for line in text.splitlines():
-        if line.startswith("oid sha256:"):
-            oid = line.split(":", 1)[1].strip()
-        elif line.startswith("size "):
-            try:
-                size = int(line.split(" ", 1)[1].strip())
-            except ValueError:
-                size = None
-    if not oid or size is None:
-        return None
-    return oid, size
-
-
-def _assert_matches_lfs_pointer(repo: Path, rel: Path, artifact: Path) -> None:
+def _load_release_manifest_contract(repo: Path) -> GraphReleaseManifest:
+    manifest_path = repo / "graph" / "release-artifacts.json"
     try:
-        raw_pointer = _git_bytes(repo, "show", f"HEAD:{rel.as_posix()}")
-    except subprocess.CalledProcessError:
-        return
-    pointer = raw_pointer.decode("utf-8", errors="replace")
-    contract = _parse_lfs_pointer(pointer)
-    if contract is None:
-        return
-    expected_oid, expected_size = contract
-    actual_size = artifact.stat().st_size
-    sha = hashlib.sha256()
-    with artifact.open("rb") as fh:
-        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
-            sha.update(chunk)
-    actual_oid = sha.hexdigest()
-    if actual_oid != expected_oid or actual_size != expected_size:
-        raise RuntimeError(
-            f"{rel.as_posix()} does not match HEAD LFS pointer: "
-            f"sha256:{actual_oid} size:{actual_size}; expected "
-            f"sha256:{expected_oid} size:{expected_size}"
-        )
+        return load_manifest(manifest_path)
+    except ValueError as exc:
+        raise RuntimeError(f"invalid graph release manifest: {exc}") from exc
 
 
 def _validate_graph_artifact_integrity(repo: Path) -> None:

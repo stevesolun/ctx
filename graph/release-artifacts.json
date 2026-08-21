@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "repository": "stevesolun/ctx",
+  "source_release_tag": "v1.0.21",
+  "artifacts": [
+    {
+      "path": "graph/communities.json",
+      "asset_name": "communities.json",
+      "size": 5214068,
+      "sha256": "c384b109660dc2490c9e6d86997423a0070e75ddaab4cb5a23cdbfd1f897677c",
+      "hydrate": false
+    },
+    {
+      "path": "graph/entity-overlays.jsonl",
+      "asset_name": "entity-overlays.jsonl",
+      "size": 98513,
+      "sha256": "2d7c22c5a520172ee2d3b73bb579079cd9946cebcad4eeed7b18d3282284f269",
+      "hydrate": false
+    },
+    {
+      "path": "graph/skills-sh-catalog.json.gz",
+      "asset_name": "skills-sh-catalog.json.gz",
+      "size": 10763626,
+      "sha256": "d1bb927e93d65ef86cdbc6d68c7f57511d64c8f13026e8193287a9c4ca6f5815",
+      "hydrate": false
+    },
+    {
+      "path": "graph/wiki-graph-runtime.tar.gz",
+      "asset_name": "wiki-graph-runtime.tar.gz",
+      "size": 110283462,
+      "sha256": "d4a39836aab5f558b546842580b2e20c523b9a9ab901ed681f84c09b5c4d6515",
+      "hydrate": true
+    },
+    {
+      "path": "graph/wiki-graph.tar.gz",
+      "asset_name": "wiki-graph.tar.gz",
+      "size": 295151086,
+      "sha256": "2ce8a945c17a7345df9d27d8f101319a9f963b0fc85d399f104630bc06a7c4a0",
+      "hydrate": true
+    }
+  ]
+}

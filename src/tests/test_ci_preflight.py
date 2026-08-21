@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import hashlib
+import io
 import json
 import shlex
 from pathlib import Path
@@ -15,6 +16,7 @@ from scripts.ci_preflight import _run_no_test_policy_for_files
 from scripts.ci_preflight import Check
 from scripts.ci_preflight import PUBLIC_DOCS_TRACKER_TESTS
 from scripts.ci_preflight import select_checks
+from ctx.core.graph import release_artifacts
 
 
 def _checks_for(files: list[str], *, profile: str = "pr") -> list[Check]:
@@ -52,6 +54,11 @@ def _workflow_unit_linux_coverage_command() -> list[str]:
     return shlex.split(run)
 
 
+def _workflow_step_names(job: str) -> list[str]:
+    workflow = yaml.safe_load(Path(".github/workflows/test.yml").read_text(encoding="utf-8"))
+    return [str(step.get("name", "")) for step in workflow["jobs"][job]["steps"]]
+
+
 def test_pr_docs_workflow_tracker_tests_match_preflight() -> None:
     assert _workflow_docs_tracker_tests() == PUBLIC_DOCS_TRACKER_TESTS
 
@@ -82,6 +89,11 @@ def test_preflight_runs_source_gates_for_source_changes() -> None:
         for check in _checks_for(["src/ctx/adapters/generic/loop.py"])
         if check.name == "unit-linux equivalent"
     )
+    unit_hydrate = next(
+        check
+        for check in _checks_for(["src/ctx/adapters/generic/loop.py"])
+        if check.name == "hydrate benchmark catalog"
+    )
     lanes = local_fast_gate.group_checks(_checks_for(["src/ctx/adapters/generic/loop.py"]))
     lanes_by_name = {
         lane.name: [check.name for check in lane.checks]
@@ -97,7 +109,7 @@ def test_preflight_runs_source_gates_for_source_changes() -> None:
     assert "A-Z canary" in names
     assert "clean host contract" in names
     assert lanes_by_name == {
-        "unit": ["unit-linux equivalent"],
+        "unit": ["hydrate benchmark catalog", "unit-linux equivalent"],
         "canary": ["A-Z canary"],
         "contract": ["contract compatibility local"],
         "clean-host": ["clean host contract"],
@@ -109,6 +121,26 @@ def test_preflight_runs_source_gates_for_source_changes() -> None:
         "--max-worker-restart=0",
     )
     assert workflow_unit_command[-4:] == list(unit_check.argv[-4:])
+    assert unit_hydrate.argv == (
+        "python",
+        "scripts/graph_release_manifest.py",
+        "hydrate",
+        "--manifest",
+        "graph/release-artifacts.json",
+        "--repo-root",
+        ".",
+        "--artifact",
+        "graph/wiki-graph-runtime.tar.gz",
+    )
+
+
+@pytest.mark.parametrize("job", ["unit-linux", "test"])
+def test_clean_checkout_test_jobs_hydrate_runtime_catalog_before_pytest(job: str) -> None:
+    names = _workflow_step_names(job)
+
+    assert names.index("Resolve benchmark catalog from exact release manifest") < names.index(
+        "Run tests with coverage gate" if job == "unit-linux" else "Run tests without coverage"
+    )
 
 
 def test_xdist_auto_worker_count_is_resource_capped(monkeypatch) -> None:
@@ -150,12 +182,20 @@ def test_preflight_runs_graph_validation_for_graph_artifacts() -> None:
     graph_lane = next(lane for lane in lanes if lane.name == "graph")
     graph_names = [check.name for check in graph_lane.checks]
 
-    assert names.index("hydrate graph LFS") < names.index("graph artifact validation")
+    assert names.index("hydrate graph release assets") < names.index("graph artifact validation")
     assert "graph artifact validation" in names
     assert "no-test policy" not in names
     assert "unit-linux equivalent" not in names
-    assert graph_names == ["hydrate graph LFS", "graph artifact validation"]
-    assert graph_lane.checks[0].argv[1] == "scripts/ci_preflight.py"
+    assert graph_names == ["hydrate graph release assets", "graph artifact validation"]
+    assert graph_lane.checks[0].argv == (
+        "python",
+        "scripts/graph_release_manifest.py",
+        "hydrate",
+        "--manifest",
+        "graph/release-artifacts.json",
+        "--repo-root",
+        ".",
+    )
 
 
 def test_local_fast_whitespace_check_runs_against_base() -> None:
@@ -450,72 +490,120 @@ def test_local_fast_kept_worktree_paths_remain_in_summary(monkeypatch, tmp_path:
     assert removed == []
 
 
-def test_preflight_graph_lfs_pointer_verification(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr(ci_preflight, "REPO_ROOT", tmp_path)
-    artifact = tmp_path / "graph" / "wiki-graph.tar.gz"
-    artifact.parent.mkdir()
-    payload = b"hydrated graph payload"
-    expected_sha256 = hashlib.sha256(payload).hexdigest()
-    artifact.write_text(
-        "version https://git-lfs.github.com/spec/v1\n"
-        f"oid sha256:{expected_sha256}\n"
-        f"size {len(payload)}\n",
+def _write_release_artifact_manifest(
+    root: Path,
+    *,
+    tracked_payload: bytes = b"tracked graph payload",
+    archive_payload: bytes = b"release archive payload",
+) -> Path:
+    manifest_path = root / "graph" / "release-artifacts.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    payloads = {
+        "communities.json": tracked_payload,
+        "entity-overlays.jsonl": b"tracked overlay payload",
+        "skills-sh-catalog.json.gz": b"tracked catalog payload",
+        "wiki-graph-runtime.tar.gz": b"release runtime payload",
+        "wiki-graph.tar.gz": archive_payload,
+    }
+    specs = (
+        ("graph/communities.json", "communities.json", False),
+        ("graph/entity-overlays.jsonl", "entity-overlays.jsonl", False),
+        ("graph/skills-sh-catalog.json.gz", "skills-sh-catalog.json.gz", False),
+        ("graph/wiki-graph-runtime.tar.gz", "wiki-graph-runtime.tar.gz", True),
+        ("graph/wiki-graph.tar.gz", "wiki-graph.tar.gz", True),
+    )
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "repository": "stevesolun/ctx",
+                "source_release_tag": "v1.0.21",
+                "artifacts": [
+                    {
+                        "path": path,
+                        "asset_name": asset_name,
+                        "size": len(payloads[asset_name]),
+                        "sha256": hashlib.sha256(payloads[asset_name]).hexdigest(),
+                        "hydrate": hydrate,
+                    }
+                    for path, asset_name, hydrate in specs
+                ],
+            }
+        )
+        + "\n",
         encoding="utf-8",
     )
-
-    pointer = ci_preflight._read_lfs_pointer(artifact)
-
-    assert pointer == ci_preflight.LfsPointer(
-        "graph/wiki-graph.tar.gz",
-        expected_sha256,
-        len(payload),
-    )
-    artifact.write_bytes(payload)
-    ci_preflight._verify_hydrated_lfs_pointer(pointer)
+    return manifest_path
 
 
-def test_preflight_graph_lfs_pull_uses_per_command_filters(
+def test_preflight_hydrates_missing_archives_from_exact_release_url(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(ci_preflight, "REPO_ROOT", tmp_path)
-    monkeypatch.setattr(ci_preflight.shutil, "which", lambda _name: "/usr/bin/git")
-    artifact = tmp_path / "graph" / "wiki-graph.tar.gz"
-    artifact.parent.mkdir()
-    artifact.write_text(
-        f"version https://git-lfs.github.com/spec/v1\noid sha256:{'a' * 64}\nsize 1\n",
-        encoding="utf-8",
+    tracked_payload = b"tracked graph payload"
+    archive_payload = b"release archive payload"
+    manifest_path = _write_release_artifact_manifest(
+        tmp_path,
+        tracked_payload=tracked_payload,
+        archive_payload=archive_payload,
     )
-    calls: list[list[str]] = []
+    tracked_assets = {
+        "communities.json": tracked_payload,
+        "entity-overlays.jsonl": b"tracked overlay payload",
+        "skills-sh-catalog.json.gz": b"tracked catalog payload",
+    }
+    for asset_name, payload in tracked_assets.items():
+        (tmp_path / "graph" / asset_name).write_bytes(payload)
+    release_assets = {
+        "wiki-graph-runtime.tar.gz": b"release runtime payload",
+        "wiki-graph.tar.gz": archive_payload,
+    }
 
-    class Result:
-        returncode = 0
+    requested_urls: list[str] = []
 
-    def fake_run(argv: list[str], **_kwargs) -> Result:
-        calls.append(argv)
-        return Result()
+    def fake_urlopen(url: str, *, timeout: int) -> io.BytesIO:
+        requested_urls.append(url)
+        assert timeout == 120
+        return io.BytesIO(release_assets[url.rsplit("/", 1)[-1]])
 
-    verified: list[ci_preflight.LfsPointer] = []
-    monkeypatch.setattr(ci_preflight.subprocess, "run", fake_run)
-    monkeypatch.setattr(ci_preflight, "_verify_hydrated_lfs_pointer", verified.append)
+    monkeypatch.setattr(release_artifacts.urllib.request, "urlopen", fake_urlopen)
 
-    assert ci_preflight.hydrate_graph_lfs_artifacts() == 0
-
-    assert len(calls) == 1
-    argv = calls[0]
-    lfs_index = argv.index("lfs")
-    assert argv[:lfs_index] == ["git", *ci_preflight.GIT_LFS_FILTER_CONFIG]
-    assert argv[lfs_index:] == [
-        "lfs",
-        "pull",
-        "--include",
-        "graph/wiki-graph.tar.gz",
-        "--exclude",
-        "",
+    release_artifacts.hydrate_and_verify(repo_root=tmp_path, manifest_path=manifest_path)
+    assert requested_urls == [
+        "https://github.com/stevesolun/ctx/releases/download/v1.0.21/wiki-graph-runtime.tar.gz",
+        "https://github.com/stevesolun/ctx/releases/download/v1.0.21/wiki-graph.tar.gz",
     ]
-    assert verified == [
-        ci_preflight.LfsPointer("graph/wiki-graph.tar.gz", "a" * 64, 1),
-    ]
+    assert (tmp_path / "graph" / "wiki-graph.tar.gz").read_bytes() == archive_payload
+
+
+def test_preflight_fails_closed_on_existing_graph_artifact_tamper(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(ci_preflight, "REPO_ROOT", tmp_path)
+    manifest_path = _write_release_artifact_manifest(tmp_path)
+    tracked = tmp_path / "graph" / "communities.json"
+    tracked.write_bytes(b"tampered")
+    monkeypatch.setattr(
+        release_artifacts.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: pytest.fail("tamper must fail before network access"),
+    )
+
+    with pytest.raises(ValueError, match="artifact mismatch"):
+        release_artifacts.hydrate_and_verify(repo_root=tmp_path, manifest_path=manifest_path)
+    assert tracked.read_bytes() == b"tampered"
+
+
+def test_release_artifact_manifest_rejects_unknown_fields(tmp_path: Path) -> None:
+    manifest_path = _write_release_artifact_manifest(tmp_path)
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    payload["unexpected"] = True
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="unknown manifest fields"):
+        release_artifacts.load_manifest(manifest_path)
 
 
 def test_preflight_no_test_policy_invocation_uses_current_dirty_file_set() -> None:
@@ -600,7 +688,7 @@ def test_preflight_runs_browser_and_similarity_when_classified() -> None:
     graph_resolver_script = next(
         step["run"]
         for step in graph_steps
-        if step.get("name") == "Resolve graph artifacts from release assets or targeted LFS"
+        if "graph_release_manifest.py hydrate" in str(step.get("run", ""))
     )
 
     assert "browser monitor security" in names
@@ -615,10 +703,8 @@ def test_preflight_runs_browser_and_similarity_when_classified() -> None:
     assert "similarity" in lane_names
     assert "browser" in lane_names
     assert "package" in lane_names
-    assert "release_asset_wait_seconds = 300" in graph_resolver_script
-    assert 'os.environ.get("GITHUB_EVENT_NAME") == "pull_request"' in graph_resolver_script
-    assert "release_asset_wait_seconds = 0" in graph_resolver_script
-    assert 'env.setdefault("GIT_LFS_CONCURRENTTRANSFERS", "1")' in graph_resolver_script
+    assert "--manifest graph/release-artifacts.json" in graph_resolver_script
+    assert "git lfs" not in graph_resolver_script.lower()
 
 
 def test_every_workflow_parses_under_the_strict_loader() -> None:

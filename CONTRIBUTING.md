@@ -198,11 +198,12 @@ PyPI publishes must run from a version tag that matches `pyproject.toml`; manual
 PyPI workflow dispatch is disabled. The tagged commit must be the exact current
 `main` head and the latest canonical `Tests` workflow for that exact SHA must be
 a successful `main` push run. The publish workflow verifies those facts before
-building. It resolves the full and runtime graph tarballs from matching GitHub
-release cache assets first. If a checked-out Git LFS pointer is newer than the
-cache, it performs a targeted `git lfs pull` for that artifact only, enforces the
-configured pointer size cap, verifies SHA-256 and byte size, then runs graph
-validation before building and publishing the package.
+building. `graph/release-artifacts.json` names the exact GitHub release or graph
+cache release that owns the five graph assets and binds every asset to its
+path, byte size, and SHA-256. The full and runtime archives are deliberately
+not tracked in Git. CI downloads only those two manifest-declared archives,
+validates the three small tracked assets against the same manifest, and has no
+Git LFS fallback.
 
 ## Commit conventions
 

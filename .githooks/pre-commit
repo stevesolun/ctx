@@ -75,8 +75,8 @@ if echo "$STAGED_CHANGES" | grep -qE '^(README\.md|docs/(index|knowledge-graph|c
 fi
 
 if echo "$STAGED_CHANGES" | grep -qE '^(skills|agents|harnesses|imported-skills|graph/skills-sh-catalog\.json\.gz)' ; then
-  log "entity source changed; graph/wiki tarball not rebuilt by pre-commit"
-  log "run the explicit graph release command and stage graph/wiki-graph.tar.gz if needed"
+  log "entity source changed; graph/wiki release artifacts are not rebuilt by pre-commit"
+  log "run the explicit graph release build, then refresh and stage graph/release-artifacts.json"
 fi
 
 exit 0

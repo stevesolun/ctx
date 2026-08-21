@@ -602,6 +602,17 @@ def test_create_protocol_writes_authenticated_canonical_output(
         version="codex 1.2.3",
         provider_config_sha256=benchmark.codex_provider_config_sha256("openai"),
     )
+    hydrated: list[Path] = []
+
+    def hydrate_catalog(*, root: Path) -> Path:
+        hydrated.append(root)
+        return product_paths[1]
+
+    monkeypatch.setattr(
+        prepare.benchmark,
+        "hydrate_production_catalog_archive",
+        hydrate_catalog,
+    )
     monkeypatch.setattr(prepare, "_repository_state", lambda _root: state)
     monkeypatch.setattr(prepare, "_assert_repository_unchanged", lambda _state: None)
     monkeypatch.setattr(prepare, "_committed_v1_protocol", lambda _state: _v1())
@@ -633,6 +644,7 @@ def test_create_protocol_writes_authenticated_canonical_output(
     assert digest == _sha256(output.read_bytes())
     assert document["frozen_at"] == "2026-07-30T10:00:00Z"
     assert document["product_inputs"]["revision"] == REVISION
+    assert hydrated == [root]
     assert document["product_inputs"]["origin_url"] == ORIGIN_URL
     assert document["product_inputs"]["origin_main_revision"] == REVISION
     assert document["product_inputs"]["codex_binary_sha256"] == codex.sha256

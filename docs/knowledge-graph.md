@@ -8,8 +8,10 @@
     still ships and is what the published PyPI release installs.
 
 
-A pre-built weighted graph of skills, agents, MCP servers, and
-harnesses in the ctx ecosystem, shipped as `graph/wiki-graph.tar.gz`.
+A pre-built weighted graph of skills, agents, MCP servers, and harnesses in the
+ctx ecosystem, shipped as content-addressed GitHub release assets. The tracked
+`graph/release-artifacts.json` manifest binds the release source, names, sizes,
+and SHA-256 digests; the large archives themselves are not stored in Git.
 The on-disk JSON and `resolve_graph` Python API are harness-aware, including
 plain-slug graph walks from `harness:<slug>` nodes. `python -m ctx_monitor`
 exposes skill/agent/MCP/harness wiki and graph views. Harness installation,
@@ -50,9 +52,10 @@ shipped tarball.
 
 ## Install
 
-Use `ctx-init --graph` to install the fast runtime graph. Source checkouts use
-`graph/wiki-graph-runtime.tar.gz`; pip installs download the matching GitHub
-release asset for the installed package version. This installs
+Use `ctx-init --graph` to install the fast runtime graph. Source checkouts use a
+verified local cache when present or hydrate the manifest-declared release
+asset; pip installs download the matching GitHub release asset for the installed
+package version. This installs
 `graphify-out/*`, the skill index used by recommendations, and
 the harness pages used by `python -m harness_install`:
 
@@ -86,11 +89,12 @@ request the full wiki artifact explicitly:
 ctx-init --graph --graph-install-mode full
 ```
 
-Manual extraction is still supported for offline/source installs. Extract the
-full tarball into your `~/.claude/skill-wiki/` when you want local wiki
-browsing through ctx's merged pack/local view:
+Manual extraction is still supported after hydrating the manifest. Extract the
+full tarball into your `~/.claude/skill-wiki/` when you want local wiki browsing
+through ctx's merged pack/local view:
 
 ```bash
+python scripts/graph_release_manifest.py hydrate --manifest graph/release-artifacts.json
 mkdir -p ~/.claude/skill-wiki
 tar xzf graph/wiki-graph.tar.gz -C ~/.claude/skill-wiki/
 ```

@@ -11,6 +11,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import update_repo_stats as urs  # noqa: E402
+from ctx.core.graph import release_artifacts  # noqa: E402
 
 
 def _add_bytes(tf: tarfile.TarFile, name: str, body: bytes) -> None:
@@ -62,6 +63,27 @@ def _write_graph_stats_sidecar(
             },
         ),
         encoding="utf-8",
+    )
+
+
+def _write_graph_release_manifest(root: Path, *, full_size: int) -> None:
+    artifacts = tuple(
+        release_artifacts.GraphReleaseArtifact(
+            path=path,
+            asset_name=asset_name,
+            size=full_size if path == "graph/wiki-graph.tar.gz" else 1,
+            sha256="a" * 64,
+            hydrate=hydrate,
+        )
+        for path, asset_name, hydrate in release_artifacts.GRAPH_RELEASE_ARTIFACT_SPECS
+    )
+    release_artifacts.write_manifest(
+        root / "graph" / "release-artifacts.json",
+        release_artifacts.GraphReleaseManifest(
+            repository="stevesolun/ctx",
+            source_release_tag="v1.0.21",
+            artifacts=artifacts,
+        ),
     )
 
 
@@ -165,6 +187,28 @@ def test_graph_artifact_stats_sidecar_rejects_size_drift(
     )
 
     assert urs._read_graph_artifact_stats() is None
+
+
+def test_graph_artifact_stats_use_manifest_when_archive_is_not_checked_in(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(urs, "REPO_ROOT", tmp_path)
+    _write_graph_stats_sidecar(
+        tmp_path,
+        {"nodes": 100, "edges": 200, "skills": 30},
+        file_size=4,
+        artifact_size=4,
+    )
+    _write_graph_release_manifest(tmp_path, full_size=4)
+    (tmp_path / "graph" / "wiki-graph.tar.gz").unlink()
+
+    stats = urs._read_graph_artifact_stats()
+
+    assert stats is not None
+    assert stats["nodes"] == 100
+    assert stats["edges"] == 200
+    assert stats["skills"] == 30
 
 
 def test_read_graph_stats_prefers_artifact_sidecar_without_tarball_scan(
@@ -446,17 +490,7 @@ def test_published_inventory_prose_uses_exact_graph_counts(
 ) -> None:
     graph_dir = tmp_path / "graph"
     graph_dir.mkdir()
-    (graph_dir / "wiki-graph.tar.gz").write_text(
-        "\n".join(
-            (
-                "version https://git-lfs.github.com/spec/v1",
-                "oid sha256:" + ("a" * 64),
-                f"size {314 * 1024 * 1024}",
-                "",
-            )
-        ),
-        encoding="utf-8",
-    )
+    _write_graph_release_manifest(tmp_path, full_size=314 * 1024 * 1024)
     text = "\n".join(
         [
             "badge/Graph-79%2C958_nodes_/_1.8M_edges-red",

@@ -1697,20 +1697,20 @@ def test_validator_default_floors_match_preflight_contract() -> None:
     assert values["--min-semantic-edges"] == str(DEFAULT_MIN_SEMANTIC_EDGES)
 
 
-def test_graph_only_workflow_uses_release_cache_or_targeted_lfs() -> None:
+def test_graph_only_workflow_uses_exact_release_manifest_resolver() -> None:
     workflow = yaml.safe_load(Path(".github/workflows/test.yml").read_text(encoding="utf-8"))
     steps = workflow["jobs"]["graph-check"]["steps"]
     resolve_step = next(
         step
         for step in steps
-        if step.get("name") == "Resolve graph artifacts from release assets or targeted LFS"
+        if step.get("name") == "Resolve graph artifacts from exact release manifest"
     )
-    script = resolve_step["run"]
+    validate_step = next(
+        step for step in steps if step.get("name") == "Validate shipped graph artifacts"
+    )
+    names = [step.get("name") for step in steps]
 
-    assert "release_asset_wait_seconds = 300" in script
-    assert "while True:" in script
-    assert "Waiting for matching release asset" in script
-    assert "time.sleep(release_asset_poll_seconds)" in script
-    assert "Pointer for {path_name} is not in release cache" in script
-    assert '"git", "lfs", "pull", "--include", path_name' in script
-    assert "verify_hydrated_file(graph_tar, expected_oid, expected_size)" in script
+    assert resolve_step["run"].strip() == (
+        "python scripts/graph_release_manifest.py hydrate --manifest graph/release-artifacts.json"
+    )
+    assert names.index(resolve_step["name"]) < names.index(validate_step["name"])
