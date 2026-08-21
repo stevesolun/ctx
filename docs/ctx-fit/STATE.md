@@ -295,12 +295,23 @@ Support contact: `https://support.github.com/contact`
 > repository deleted/recreated and do not need a history rewrite.
 >
 > The Enterprise Cloud repository LFS DELETE endpoint returned HTTP 404 for this
-> personal GitHub.com repository (request ID
-> `C027:354872:36D09:4F64A:6A88AD3E`), so the safe self-service route is not
-> available.
+> personal GitHub.com repository with both the legacy API version (request ID
+> `C027:354872:36D09:4F64A:6A88AD3E`) and current API version `2026-03-10`
+> (request ID `C52A:166CDA:57D73:880EA:6A88B8ED`). The latter used the active
+> repository administrator's OAuth token with `repo` scope. The safe
+> self-service route is therefore not available.
 
 ## Checkpoint log
 
+- 2026-08-21: Retried the documented `DELETE /repos/stevesolun/ctx/lfs`
+  endpoint with GitHub REST API version `2026-03-10`. The active `gh` OAuth
+  token has `repo` scope, the authenticated user owns the repository, and the
+  repository permission response reports `admin: true`; GitHub nevertheless
+  returned HTTP 404 with request ID `C52A:166CDA:57D73:880EA:6A88B8ED`.
+  Nothing changed remotely. GitHub's public removal contract still leaves only
+  repository deletion/recreation or Support-assisted purging; deletion was not
+  attempted because it would destroy repository identity and is outside this
+  safe cleanup. Support purge remains the sole remote blocker.
 - 2026-08-21: Removed the remaining reproducible local CTX experiment residue
   after reconciling it with the CTX Fit pivot. Deleted three clean detached
   benchmark worktrees whose commits are ancestors of `main`, all old A/B graph
