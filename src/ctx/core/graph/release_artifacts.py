@@ -354,7 +354,7 @@ def write_manifest(path: Path, manifest: GraphReleaseManifest) -> None:
             output.write(body)
             output.flush()
             os.fsync(output.fileno())
-        os.chmod(temp_path, 0o644)
+        os.chmod(temp_path, 0o600)
         os.replace(temp_path, path)
     finally:
         temp_path.unlink(missing_ok=True)

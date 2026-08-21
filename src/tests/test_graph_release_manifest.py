@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import stat
 import subprocess
 import sys
 
@@ -58,6 +59,7 @@ def test_refresh_writes_the_exact_five_asset_manifest_deterministically(tmp_path
         == 0
     )
     assert manifest_path.read_bytes() == first
+    assert stat.S_IMODE(manifest_path.stat().st_mode) == 0o600
 
     manifest = release_artifacts.load_manifest(manifest_path)
     assert manifest.repository == "stevesolun/ctx"
