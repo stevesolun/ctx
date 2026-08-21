@@ -13,7 +13,7 @@
 
 - Updated: 2026-08-21 (Asia/Jerusalem)
 - Active goal: retire Git LFS safely after CTX Fit 1.0.21
-- Phase: repository and Mac-local LFS cleanup complete; remote purge pending
+- Phase: repository and Mac-local cleanup complete; remote LFS purge pending
 - Release decision: **1.0.21 REMAINS RELEASED; LFS MIGRATION MERGED; REMOTE PURGE PENDING**
 - Branch: `main`
 - Release commit: `38a33f8784e2bf408430a98fed81206c2cf39d00`
@@ -23,6 +23,7 @@
 - Follow-up scope at checkpoint:
   - ask GitHub Support to purge the historical remote LFS objects
   - add repository/environment protection rules as defense in depth
+  - choose a retention policy before removing Codex task transcripts
   - user-owned and out of scope: `.scratch/`
 - Parallel execution: complete. Independent product, security, spend,
   activation, packaging, release, Linux, SBOM, and recovery reviewers accepted
@@ -107,6 +108,7 @@ All of the following must be true before tagging or publishing:
 | Release metadata and publish guard | Complete, independently accepted | Metadata writer + publish writer/reviewer + coordinator | 1.0.21 metadata and changelog are current; exact-main/exact-successful-Tests production guard and changelog-backed notes have no P0/P1 review findings; P2 credential/doc hardening is integrated |
 | Final verification and release | Complete, publicly verified | Coordinator + release/SBOM reviewers | PR #271 merged as release commit `38a33f8784e2bf408430a98fed81206c2cf39d00`; exact-main Tests, CodeQL, and Hugging Face sync succeeded. Annotated tag `v1.0.21` peels to that commit. Publish run `31915534546` completed every build, attestation, release-asset, and PyPI job. Public wheel/SBOM digests, Sigstore/Rekor attestations, clean installation, `pip check`, version output, and a minimal `ctx fit --json` repository profile were independently verified. |
 | Retire Git LFS | Repository and Mac-local cleanup complete; remote purge pending GitHub Support | Coordinator + manifest/workflow writers + independent auditor | 45 historical objects total 12.131 GiB because each compressed archive revision is stored whole. Current useful pair is 405,434,548 bytes and is independently preserved and attested in release v1.0.21. PR #275 merged as `b62b78d7` after 19 successful checks. A clean post-merge checkout hydrated and deeply validated both release assets without Git LFS. The repository and `no-mistakes` mirror have no LFS objects or local LFS configuration; the development-root scan found no other LFS object store. Main and mirror integrity checks pass, `no-mistakes` is running, and `.scratch/` is untouched. The two cleanup passes reclaimed about 20 GiB locally; GitHub still retains and bills the historical remote objects until Support purges them. |
+| Local storage hygiene | Reproducible CTX residue removed; user history preserved | Coordinator | The superseded A/B benchmark root fell from about 16.6 GiB to 440 MiB; only the dirty 14-file evaluator worktree remains. Repository `.gate` fell from 4.6 GiB to 136 KiB after old A/B runs, caches, environments, and a redundant checkout were removed. Its two-line uncommitted change is retained as a checked recovery patch. Stale Codex plugin staging freed another 76.8 MiB. Codex task transcripts (20.3 GiB active; 3.44 GiB archived) and the live logs database were inventoried but not deleted without a retention decision. Rounded Data-volume use is now 241 GiB. |
 
 ## Open release blockers
 
@@ -268,6 +270,9 @@ path remains unproven. Production PyPI Trusted Publishing succeeded.
 3. Add `main`, tag, and `pypi` environment protection rules as defense in depth;
    the shipped workflow already enforces exact-main and exact-successful-Tests
    provenance.
+4. Decide whether to permanently remove Codex task history. Archived transcripts
+   older than 30 days account for 3.43 GiB; active transcripts older than 90
+   days account for 0.455 GiB. The current task and recent history must remain.
 
 ### GitHub Support handoff
 
@@ -296,6 +301,23 @@ Support contact: `https://support.github.com/contact`
 
 ## Checkpoint log
 
+- 2026-08-21: Removed the remaining reproducible local CTX experiment residue
+  after reconciling it with the CTX Fit pivot. Deleted three clean detached
+  benchmark worktrees whose commits are ancestors of `main`, all old A/B graph
+  catalogs, raw runs, tool homes, and inactive sparse Lima/Colima disks. Kept
+  the dirty `codex/fix-evaluator-status-superset` worktree and all 14 of its
+  changes. `.ctx-benchmark` fell from about 16.6 GiB to 440 MiB. Removed the
+  4.6 GiB repository `.gate` A/B corpus and redundant checkout after preserving
+  its two-line `PYTEST_ADDOPTS` change in
+  `.gate/recovery/ctx-ab-disable-pytest-cache.patch` (SHA-256
+  `74c4c7b982e669b097049de9af49ab195d07a169fc3bee5fcca7629dc8d311e3`);
+  `.gate` is now 136 KiB. Removed 76.8 MiB of stale Codex plugin staging while
+  keeping the current bundled marketplace. Audited 20.3 GiB of active Codex
+  transcripts and 3.44 GiB of archived transcripts; no transcript or live
+  database was deleted because that would remove user history. Rounded Data
+  volume use fell from 262 GiB to 241 GiB during this pass. Local Git LFS
+  remains empty. GitHub's 12.131 GiB remote purge is blocked only on Support
+  sign-in and submission.
 - 2026-08-21: Completed a safe Mac-wide follow-up cleanup. Found 16 duplicate
   CTX LFS payloads totaling 4,534,205,612 bytes (4.223 GiB) in the active
   `no-mistakes` bare mirror. Stopped the daemon, removed only its LFS payloads
