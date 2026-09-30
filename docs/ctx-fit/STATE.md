@@ -13,7 +13,7 @@
 
 - Updated: 2026-09-30 (Europe/Prague)
 - Active goal: inventory, test, repair, and retest every shipped user behavior
-- Phase: final local acceptance closure, tree freeze, and committed verification
+- Phase: committed gate execution and final checklist evidence reconciliation
 - Release decision: **1.0.21 REMAINS RELEASED; NEW AUDIT OPEN; NO NEW RELEASE DECISION**
 - Branch: `codex/full-feature-audit`
 - Release commit: `38a33f8784e2bf408430a98fed81206c2cf39d00`
@@ -30,10 +30,11 @@
   - preserve user-owned and out-of-scope `.scratch/`
 - Parallel execution: all 314 active stories and four historical rows have
   received clause-by-clause coverage review. The coordinator owns CSV writes;
-  254 executable rows now carry specific passing acceptance evidence (192
-  tested, 62 retested), while 60 checklists remain open and four are deprecated.
-  Independent lanes are reviewing the final timeout fixture, reconciling those
-  checklists, and refreshing GitHub facts. Production source is frozen. The
+  295 rows now carry specific passing acceptance evidence (206 tested, 89
+  retested), while 16 need validation, three have explicit prerequisites, and
+  four are deprecated. Independent lanes accepted the timeout fixture and
+  reconciled checklists/GitHub facts; installed-wheel dashboard proof is being
+  retained for coordinator replay. Production source is frozen. The
   coordinator owns integration, state, GitHub mutations, and final gates.
 - LFS migration execution: three parallel lanes completed repository resolver,
   workflow migration, and independent storage/identity audit. Merged `main`
@@ -344,11 +345,12 @@ path remains unproven. Production PyPI Trusted Publishing succeeded.
 
 ## Immediate next actions
 
-1. Commit the independently accepted cold-start timeout fixture repair with
-   the final homepage corrections and compact evidence. Source
-   remains frozen; generated inventory is synchronized at 8,986.
-2. Run the repaired committed fast gate and authoritative PR preflight. The
-   earlier `2f7a6a23` gate is red (one timeout), not final completion evidence.
+1. The `05d16854` fast gate completed successfully: all 11 lanes, 8,977
+   unit passes, five documented skips, 92.02% coverage. Session `92349` is
+   terminal. Source remains frozen; generated inventory is synchronized at 8,986.
+2. Commit evidence-only checklist updates, run proportional cheap/docs checks,
+   then authoritative PR preflight. The earlier `2f7a6a23` red run remains
+   historical diagnosis evidence, not the current gate result.
    Close the 60 checklist rows only where all acceptance clauses are proved;
    record external prerequisites without blanket pass claims.
 3. Finalize evidence-backed GitHub issue replies and public documentation
@@ -389,6 +391,23 @@ Support contact: `https://support.github.com/contact`
 
 ## Checkpoint log
 
+- 2026-09-30: The exact `05d16854` fast gate passed all 11 lanes with 8,977
+  unit passes, five documented skips, and 92.02% coverage. Final strict docs
+  build and browser homepage assertions passed; all 3,407 links/anchors across
+  29 navigation pages resolve. Coordinator reran all 79 isolated documentation
+  examples. Thirty-nine independently mapped checklist contracts now carry
+  precise passing evidence; optional/external prerequisites remain explicit.
+  Durable result: `qa/feature-audit/verification-05d16854.md`. Authoritative
+  preflight and remote integration remain; no publication is authorized.
+- 2026-09-30: Committed the accepted test fixture, homepage corrections,
+  canonical executable-row evidence, and portable audit bundle as `05d16854`.
+  All 14 bundle hashes verify; all helpers pass lint/format; the 79 documented
+  examples reran successfully. The 11-lane committed fast gate is running in
+  session `92349`. Read-only parallel lanes are closing checklist evidence and
+  proving installed-wheel dashboard HTTP behavior; no production edits are
+  allowed during verification. GitHub still has four unchanged open issues;
+  About and September 15–28 traffic facts match the earlier readback. No branch
+  push, PR, publication, Support submission, or remote LFS purge has occurred.
 - 2026-09-30: Independent timeout review accepted the bounded fixture repair
   with no findings after inspecting the frozen failure, tracing lazy import
   inside the provider timer, and running the exact regression (one passed)
