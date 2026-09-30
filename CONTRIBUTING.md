@@ -177,18 +177,18 @@ then `/tmp/ctx-verify-venv/bin`; the first owner-only venv containing
 `pytest`, `ruff`, and `mypy` wins and is exposed as
 `CTX_NO_MISTAKES_PYTHON_BIN_RESOLVED`.
 
-Codex executable discovery first accepts a valid
-`CTX_NO_MISTAKES_REAL_CODEX`. When that variable is unset, it checks
-`CTX_NO_MISTAKES_CODEX_RESOURCES/codex`, the colon-separated candidates in
-`CTX_NO_MISTAKES_CODEX_APP_PATHS`, then `codex` on `PATH`. When the app-path
-variable is unset, its candidates default to system `Codex.app`, system
-`ChatGPT.app`, user `Codex.app`, then user `ChatGPT.app`. An explicitly empty
-app-path value disables those app candidates. An invalid explicit executable
-fails closed with exit 127. A resource override is validated as an executable
-source only when `CTX_NO_MISTAKES_REAL_CODEX` is unset; when both are set and
-the executable is valid, the resource directory is prepended to `PATH` without
-separate validation. Invalid app candidates are skipped before the `PATH`
-fallback.
+Codex executable discovery validates non-empty executable and resource overrides.
+`CTX_NO_MISTAKES_REAL_CODEX` must name a runnable executable, and
+`CTX_NO_MISTAKES_CODEX_RESOURCES` must contain a runnable `codex`, even when
+both are set; either invalid override fails closed with exit 127. A valid
+explicit executable takes precedence, while the separately validated resource
+directory is prepended to `PATH`. Otherwise discovery checks the resource
+override, the colon-separated candidates in `CTX_NO_MISTAKES_CODEX_APP_PATHS`,
+then `codex` on `PATH`. When the app-path variable is unset, its candidates
+cover current nested `CodexCLI.app` executables and legacy resource executables
+in system and user `Codex.app` and `ChatGPT.app` bundles. An explicitly empty
+app-path value disables those app candidates. Invalid app candidates are
+skipped before the `PATH` fallback.
 
 The repo disables review-stage no-mistakes auto-fixes (`auto_fix.review: 0`) so
 review findings stay human-approved; rebase, test, document, lint, and CI stages

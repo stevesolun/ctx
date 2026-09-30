@@ -28,6 +28,10 @@ CSV is the sole current status authority. The later `53986b36` committed fast
 gate passed all 11 lanes, including this new delta; serial preflight/delivery
 and hosted checks remain distinct.
 
+`launcher-repair-20260930.md` records a subsequently discovered delivery
+launcher failure and its independently accepted repair. That focused evidence
+does not substitute for completing the actual no-mistakes pipeline.
+
 ## Retained examples
 
 - `documentation-evidence.md`: source-backed review, corrections, and explicit

@@ -260,6 +260,52 @@ def test_no_mistakes_wrapper_discovers_known_app_candidate(tmp_path: Path) -> No
     )
 
 
+@pytest.mark.parametrize(
+    "relative_executable",
+    (
+        Path(
+            "Applications/ChatGPT.app/Contents/Resources/codex-cli/"
+            "CodexCLI.app/Contents/MacOS/codex"
+        ),
+        Path("Applications/ChatGPT.app/Contents/Resources/codex"),
+    ),
+)
+def test_no_mistakes_wrapper_supports_current_and_legacy_app_candidates(
+    tmp_path: Path,
+    relative_executable: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    script_dir = repo / "scripts"
+    script_dir.mkdir(parents=True)
+    wrapper = script_dir / "no_mistakes_codex_env.sh"
+    shutil.copy2(Path("scripts/no_mistakes_codex_env.sh"), wrapper)
+
+    fake_codex = tmp_path / relative_executable
+    fake_codex.parent.mkdir(parents=True)
+    _write_executable(fake_codex, "#!/bin/sh\nprintf 'app=%s\\n' \"$0\"\n")
+
+    wrapper_text = wrapper.read_text(encoding="utf-8")
+    assert f"/{relative_executable.as_posix()}" in wrapper_text
+    assert f"${{HOME:-}}/{relative_executable.as_posix()}" in wrapper_text
+
+    result = subprocess.run(
+        ["bash", str(wrapper), "--version"],
+        cwd=repo,
+        env={
+            "HOME": str(tmp_path),
+            "PATH": "/usr/bin:/bin",
+            "CTX_NO_MISTAKES_CODEX_APP_PATHS": str(fake_codex),
+        },
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == f"app={fake_codex}"
+
+
 def test_no_mistakes_wrapper_falls_back_to_path(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     script_dir = repo / "scripts"

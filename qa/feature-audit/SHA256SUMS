@@ -1,4 +1,4 @@
-37446df08479954822d99a25604cfb6329a8878f1033de45d4e373388df68b2a  qa/feature-audit/README.md
+d16123fee8271b93537e697b7c64ea55e84c9b5d0b6951c972f8f1619afe8a89  qa/feature-audit/README.md
 25702e68e49899a2336bae1b1a0bf88a5e4ac2f756f4b0d396c3d13de240789a  qa/feature-audit/documentation-evidence.md
 007ca20249831496019e957bbf62f9d761e49bf1867528589dfa56714eb00c6d  qa/feature-audit/seven-docs-evidence.md
 cc477c54dd93d6ab0ac217ed2b84535f081e557ccfbb0e221fa19f6205f1d9b1  qa/feature-audit/dashboard_performance_repro.py
@@ -17,3 +17,4 @@ bb62dcd48f099a987b4cd6f4131be81fb18383e3f836bde4c8d58da40309c464  qa/feature-aud
 b01a034a9b4409a83113b3e262e45bc4f6c572fc66a2ce25e6d9aa3f0212c256  qa/feature-audit/review-refreeze-20260930.md
 70c02af1b717f39bb1761b3a6d77037081decd8f5c3c4505dd35a3e260cacfc2  qa/feature-audit/skillspector-static-smoke-evidence.json
 8d2b23891ecf384f720f9be58519021f4b327b8b17a8405a5573dd566f89ecfc  qa/feature-audit/verification-53986b36.md
+a230f632dca52ef861bc29768966fd81fd8bec2ad6a6e38a4ed189e7fa558280  qa/feature-audit/launcher-repair-20260930.md

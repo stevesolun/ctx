@@ -13,9 +13,19 @@
 
 - Updated: 2026-09-30 (Europe/Prague)
 - Active goal: inventory, test, repair, and retest every shipped user behavior
-- Phase: final parallel local gate passed; full delivery pipeline next
+- Phase: delivery launcher repair independently accepted; committed validation next
 - Release decision: **1.0.21 REMAINS RELEASED; NEW AUDIT OPEN; NO NEW RELEASE DECISION**
 - Branch: `codex/full-feature-audit`
+- Active delivery branch: `codex/full-feature-audit-delivery`, submitted head
+  `54dfe28ad1eef56a017ff7ea6985f1b7875bc52c`
+- Active delivery worktree:
+  `/Users/steves/.codex/worktrees/full-feature-audit-delivery/ctx`
+- Latest no-mistakes run: `01M3RV98HW4HQDSM04HA6NRBJG` is **FAILED**; driver
+  session `15506` is terminal, log `/tmp/ctx-feature-audit-delivery-54dfe28a.log`.
+  Intent/rebase completed; review could not launch Codex and no later phase ran.
+  No pipeline fix commits or PR exist. The bounded launcher/tests/docs repair
+  is independently accepted and frozen. Commit it, then fast-forward the clean
+  delivery branch without resetting or dropping any pipeline history.
 - Release commit: `38a33f8784e2bf408430a98fed81206c2cf39d00`
 - Release tag object: `a7b8e78559fda1d44dca844393458272071ae89b`
 - LFS migration PR: `https://github.com/stevesolun/ctx/pull/275`
@@ -403,6 +413,42 @@ Support contact: `https://support.github.com/contact`
 
 ## Checkpoint log
 
+- 2026-09-30: Resumed after a Support-only turn (no product-goal progress).
+  The full delivery run remains authoritatively FAILED, with no hidden fixes,
+  branch divergence, or structured synchronization action offered. Accepted
+  the minimal nested-app discovery repair after coordinator replay of all 17
+  wrapper tests and a real stripped-environment version-only launch, plus
+  independent review of nine boundary cases with no P0-P3 findings. Explicit
+  overrides, legacy paths, self-recursion protection, empty-list opt-out, and
+  PATH fallback remain intact. The corresponding CONTRIBUTING paragraph now
+  matches both-override validation. SEC-002 returns to Needs Validation, not
+  Pass: the complete pipeline still must run. Source hashes and red/green
+  evidence are in `qa/feature-audit/launcher-repair-20260930.md`. Generated
+  README/docs inventory is 8,990. A parallel read-only GitHub lane checks for
+  changed issue/PR/traffic state; no Support submission is authorized.
+- 2026-09-30: Full pipeline run `01M3RV98HW4HQDSM04HA6NRBJG` failed before
+  review-agent start: configured repository wrapper cannot find the nested
+  installed CodexCLI binary. Its actual default-path probe also exits127 under
+  `env -i HOME=<user-home> PATH=/usr/bin:/bin ... --version`, although doctor
+  can find `/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex`.
+  `SEC-002` now records `AUDIT-20260930-CODEX-BUNDLE-DISCOVERY` as Needs Fix.
+  The writer owns only wrapper/tests/CONTRIBUTING in the original checkout;
+  global configuration stays unchanged. An adjacent prose error about explicit
+  resource validation is included. No model was invoked; no push/PR occurred.
+  AXI home/status confirm the run is terminal and no branch-sync action is
+  offered. Preserve the tested `53986b36` result as its checkpoint, not proof
+  of this newly exposed launch path.
+- 2026-09-30: Result-only commit `54dfe28a` passed its cheap/docs committed
+  lanes (five checks); all 19 retained bundle hashes pass. The initial delivery
+  invocation refused original-checkout `.scratch/` before creating any run.
+  Created an attached clean linked worktree at the exact same head and branch
+  `codex/full-feature-audit-delivery`, without moving, hiding or staging user
+  files. Full no-mistakes run `01M3RV98HW4HQDSM04HA6NRBJG` now exists there;
+  initial authoritative status is pending. Session `15506` is live. The
+  pipeline owns review/test/docs/lint/fixes/push/PR/CI; coordinator must use its
+  gates, not edit around them. No PR exists yet and no merge is authorized.
+  This original-checkout note is a resumption pointer, not a pipeline-source
+  change; preserve every pipeline commit before any eventual synchronization.
 - 2026-09-30: Exact `53986b36` fast gate completed with exit0: all11 lanes,
   8,979 unit passes, five documented skips, 92.03% coverage in341.916 seconds.
   Session50413 is terminal. Durable evidence is
