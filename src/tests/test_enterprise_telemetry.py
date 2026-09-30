@@ -959,6 +959,118 @@ def test_telemetry_export_cli_dry_run_is_read_only_in_fresh_home(tmp_path: Path)
     assert list(home.iterdir()) == []
 
 
+@pytest.mark.parametrize("signal", ["events", "metrics", "traces"])
+@pytest.mark.parametrize("global_salt", ["existing_file", "missing_file", "inline", "absent"])
+@pytest.mark.parametrize("partial_privacy", ["absent", "empty_bytes"])
+def test_partial_config_export_preview_preserves_checkpoint_and_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    signal: str,
+    global_salt: str,
+    partial_privacy: str,
+) -> None:
+    salt_path = tmp_path / "identity" / "hash-salt"
+    global_privacy: dict[str, Any] = {}
+    if global_salt in {"existing_file", "missing_file"}:
+        global_privacy["hash_salt_path"] = str(salt_path)
+    if global_salt == "existing_file":
+        salt_path.parent.mkdir()
+        salt_path.write_text("global-tenant\n", encoding="utf-8")
+    elif global_salt == "inline":
+        global_privacy["hash_salt"] = "global-tenant"
+    monkeypatch.delenv("CTX_TELEMETRY_HASH_SALT", raising=False)
+    for name in (
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(
+        telemetry,
+        "_config_get",
+        lambda key, default: {"privacy": global_privacy} if key == "telemetry" else default,
+    )
+    path = tmp_path / f"{signal}.jsonl"
+    record_config: dict[str, Any] = {"privacy": {"hash_salt": "fixture-salt"}}
+    if signal == "metrics":
+        record_config["metrics"] = {"enabled": True}
+        assert record_counter(
+            "ctx.api.requests",
+            path=path,
+            trusted_root=tmp_path,
+            config=record_config,
+        ) is not None
+    else:
+        assert record_event(
+            "ctx.api.recommend_bundle",
+            source="ctx-api",
+            path=path,
+            trusted_root=tmp_path,
+            config=record_config,
+        ) is not None
+    otlp_signal = "logs" if signal == "events" else signal
+    export_config = {
+        "enabled": True,
+        "sink": "otlp_http",
+        "span_maturity_seconds": 0,
+        "otlp": {"endpoint": f"http://127.0.0.1:4318/v1/{otlp_signal}"},
+    }
+    signal_config = {"enabled": True, "path": str(path), "export": export_config}
+    config: dict[str, Any] = signal_config if signal == "events" else {signal: signal_config}
+    if partial_privacy == "empty_bytes":
+        config["privacy"] = {"hash_salt": b""}
+    export, preview = {
+        "events": (telemetry.export_events, telemetry.preview_export),
+        "metrics": (telemetry.export_metrics, telemetry.preview_metrics_export),
+        "traces": (telemetry.export_traces, telemetry.preview_traces_export),
+    }[signal]
+    calls: list[dict[str, Any]] = []
+
+    def fake_post_otlp_http(payload: dict[str, Any], settings: dict[str, Any]) -> None:
+        calls.append(payload)
+
+    def snapshot() -> dict[Path, tuple[int, int, bytes | None]]:
+        return {
+            item.relative_to(tmp_path): (
+                stat.S_IMODE(item.stat().st_mode),
+                item.stat().st_mtime_ns,
+                item.read_bytes() if item.is_file() else None,
+            )
+            for item in [tmp_path, *tmp_path.rglob("*")]
+        }
+
+    monkeypatch.setattr(telemetry, "_post_otlp_http", fake_post_otlp_http)
+    before = snapshot()
+    pending = preview(path, trusted_root=tmp_path, config=config)
+    assert snapshot() == before
+    assert pending.attempted == 1
+    assert pending.status == "ok"
+    assert pending.exported == 0
+    assert calls == []
+
+    exported = export(path, trusted_root=tmp_path, config=config)
+    assert exported.exported == 1
+    assert exported.status == "ok"
+    assert exported.checkpoint_advanced is True
+    assert exported.checkpoint_path is not None
+    assert Path(exported.checkpoint_path).is_file()
+    assert len(calls) == 1
+    if global_salt == "missing_file":
+        assert salt_path.is_file()
+
+    before = snapshot()
+    drained = preview(path, trusted_root=tmp_path, config=config)
+    assert snapshot() == before
+    assert drained.attempted == 0
+    assert drained.exported == 0
+    assert drained.status == "noop"
+    assert drained.checkpoint_found is True
+    assert drained.checkpoint_advanced is False
+    assert drained.destination_hash == exported.destination_hash
+    assert len(calls) == 1
+
+
 def test_export_events_posts_otlp_http_payload(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

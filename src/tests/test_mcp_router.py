@@ -16,6 +16,7 @@ import io
 import subprocess
 import sys
 import time
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -197,7 +198,7 @@ class TestClientLifecycle:
         [
             ({}, "missing protocolVersion"),
             ({"protocolVersion": 20251125}, "non-string protocolVersion"),
-            ({"protocolVersion": "2026-07-28"}, "unsupported protocolVersion '2026-07-28'"),
+            ({"protocolVersion": "2026-07-28"}, "unsupported protocolVersion"),
         ],
     )
     def test_start_rejects_invalid_or_unsupported_protocol_before_tool_use(
@@ -264,6 +265,47 @@ class TestClientLifecycle:
         assert client.stop() is True
         assert len(procs) == 1
         _assert_exited(procs[0])
+
+    @pytest.mark.parametrize("value_kind", ["string", "list", "object"])
+    @pytest.mark.parametrize("secret", ["opaque-credential-value", "opaque\nvalue'with\\escapes"])
+    def test_rejected_protocol_version_diagnostic_redacts_credentials(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+        value_kind: str,
+        secret: str,
+    ) -> None:
+        monkeypatch.setenv("MCP_TEST_AUTH", secret)
+        protocol_version: object = secret
+        if value_kind == "list":
+            protocol_version = [secret]
+        elif value_kind == "object":
+            protocol_version = {"credential": secret}
+        procs = _capture_popen(monkeypatch)
+        config = McpServerConfig(
+            name="malformed",
+            command=sys.executable,
+            args=(
+                "-c",
+                _INITIALIZE_RESULT_SERVER,
+                json.dumps({"protocolVersion": protocol_version}),
+            ),
+            credential_env=("MCP_TEST_AUTH",),
+            startup_timeout=2.0,
+        )
+        client = McpClient(config)
+
+        with pytest.raises(McpServerError, match="protocolVersion") as exc:
+            client.start()
+
+        assert client._proc is None
+        assert client._stderr_redaction_values == ()
+        assert client.negotiated_protocol_version is None
+        assert len(procs) == 1
+        _assert_exited(procs[0])
+        diagnostic = "".join(traceback.format_exception(exc.value)) + caplog.text
+        assert secret not in diagnostic
+        assert repr(secret)[1:-1] not in diagnostic
 
     def test_context_manager(self) -> None:
         with McpClient(_make_config()) as client:
@@ -548,6 +590,68 @@ class TestClientToolOperations:
 
 
 class TestClientRobustness:
+    @pytest.mark.parametrize("error_at", ["initialize", "tools/list", "tools/call", "isError"])
+    @pytest.mark.parametrize("secret", ["opaque-credential-value", "opaque\nvalue'with\\escapes"])
+    def test_server_error_diagnostic_redacts_credentials(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+        error_at: str,
+        secret: str,
+    ) -> None:
+        procs = _capture_popen(monkeypatch)
+        server = """
+import json, os, sys
+error_at = sys.argv[1]
+for line in sys.stdin:
+    request = json.loads(line)
+    if 'id' not in request:
+        continue
+    response = {'jsonrpc': '2.0', 'id': request['id']}
+    message = 'request refused for ' + os.environ['MCP_API_KEY'] + '; retry later'
+    if request['method'] == error_at:
+        response['error'] = {'code': -32603, 'message': message}
+    elif request['method'] == 'initialize':
+        response['result'] = {'protocolVersion': '2025-11-25'}
+    else:
+        response['result'] = {'isError': True, 'content': [{'type': 'text', 'text': message}]}
+    print(json.dumps(response), flush=True)
+"""
+        client = McpClient(
+            McpServerConfig(
+                name="error-server",
+                command=sys.executable,
+                args=("-c", server, error_at),
+                env={"MCP_API_KEY": secret},
+                startup_timeout=2.0,
+                request_timeout=2.0,
+            )
+        )
+        try:
+            with pytest.raises(McpServerError, match="request refused for") as exc:
+                client.start()
+                assert client.negotiated_protocol_version == "2025-11-25"
+                if error_at == "tools/list":
+                    client.list_tools()
+                else:
+                    client.call_tool("echo", {})
+            if error_at == "initialize":
+                assert client._proc is None
+                assert client._stderr_redaction_values == ()
+        finally:
+            client.stop()
+
+        assert client._proc is None
+        assert client._stderr_redaction_values == ()
+        assert len(procs) == 1
+        _assert_exited(procs[0])
+        diagnostic = "".join(traceback.format_exception(exc.value)) + caplog.text
+        assert secret not in diagnostic
+        assert repr(secret)[1:-1] not in diagnostic
+        assert "[REDACTED]" in str(exc.value)
+        assert "retry later" in str(exc.value)
+        assert ("isError" if error_at == "isError" else "code=-32603") in str(exc.value)
+
     @pytest.mark.parametrize(
         ("raw", "forbidden"),
         [

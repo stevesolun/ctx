@@ -2213,6 +2213,8 @@ def _resolve_hash_salt(
 
     configured = _mapping_get(effective_privacy, "hash_salt", "")
     if isinstance(configured, bytes):
+        if not configured and not create and privacy is not None:
+            return _resolve_hash_salt(create=False)
         return configured or None
     configured_text = str(configured)
     if configured_text:
@@ -2220,7 +2222,9 @@ def _resolve_hash_salt(
 
     configured_path = _mapping_get(effective_privacy, "hash_salt_path", None)
     if not configured_path:
-        return None if create else _PREVIEW_HASH_SALT
+        if not create and privacy is not None:
+            return _resolve_hash_salt(create=False)
+        return None
     salt_path = Path(str(configured_path))
     if not create:
         try:

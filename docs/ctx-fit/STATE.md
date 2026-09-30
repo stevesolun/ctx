@@ -13,19 +13,28 @@
 
 - Updated: 2026-09-30 (Europe/Prague)
 - Active goal: inventory, test, repair, and retest every shipped user behavior
-- Phase: delivery launcher repair independently accepted; committed validation next
+- Phase: review repairs independently accepted; focused source tests passed
 - Release decision: **1.0.21 REMAINS RELEASED; NEW AUDIT OPEN; NO NEW RELEASE DECISION**
-- Branch: `codex/full-feature-audit`
+- Branch: `codex/full-feature-audit-delivery`
 - Active delivery branch: `codex/full-feature-audit-delivery`, submitted head
-  `54dfe28ad1eef56a017ff7ea6985f1b7875bc52c`
+  `18253e9a37cb215856fb79bac01ea9c7482eb6e6`; current repair is uncommitted
 - Active delivery worktree:
-  `/Users/steves/.codex/worktrees/full-feature-audit-delivery/ctx`
-- Latest no-mistakes run: `01M3RV98HW4HQDSM04HA6NRBJG` is **FAILED**; driver
+  `/Users/steves/.no-mistakes/worktrees/88e19bf0677f/01M3RWB2ZY374H29CTPEPNSWVH`
+- Current no-mistakes run is in its assigned review repair phase. The outer
+  executor owns re-review, authoritative PR preflight, docs/lint, push/PR and CI;
+  none of those later phases is inferred from focused repair evidence.
+- Previous no-mistakes run: `01M3RV98HW4HQDSM04HA6NRBJG` is **FAILED**; driver
   session `15506` is terminal, log `/tmp/ctx-feature-audit-delivery-54dfe28a.log`.
   Intent/rebase completed; review could not launch Codex and no later phase ran.
-  No pipeline fix commits or PR exist. The bounded launcher/tests/docs repair
-  is independently accepted and frozen. Commit it, then fast-forward the clean
-  delivery branch without resetting or dropping any pipeline history.
+  No pipeline fixes or PR were created by that failed run. The independently
+  accepted launcher/tests/docs repair is now committed as `18253e9a`.
+- Exact submitted `18253e9a` local-fast checkpoint passed all 11 lanes,
+  return code 0, `committed_head_only=true`, in 334.256 seconds: 8,981 unit
+  passes, five documented skips, 92.03% coverage. The supplied checkpoint
+  metadata names `/tmp/ctx-feature-audit-fast-18253e9a.log` and original-checkout
+  `.gate/local-fast.json`; this review read the retained log, not that checkout.
+  This is evidence for `18253e9a`, not the later uncommitted R1/R2 repair tree
+  or complete delivery. `SEC-002` remains Needs Validation.
 - Release commit: `38a33f8784e2bf408430a98fed81206c2cf39d00`
 - Release tag object: `a7b8e78559fda1d44dca844393458272071ae89b`
 - LFS migration PR: `https://github.com/stevesolun/ctx/pull/275`
@@ -50,7 +59,8 @@
   records were appended to 65 canonical rows with original-contract hash
   guards. All source writers are frozen; final independent metadata review
   accepted all 65 guarded contracts and historical records with no blocking
-  findings. Earlier full gates remain
+  findings. The current review has reopened only MCP exception diagnostics and
+  telemetry preview identity; their focused evidence is recorded below. Earlier full gates remain
   valid for their checkpoints, not the later script/test/prose delta. The
   coordinator owns integration, state, GitHub mutations, and final gates.
 - LFS migration execution: three parallel lanes completed repository resolver,
@@ -358,9 +368,10 @@ path remains unproven. Production PyPI Trusted Publishing succeeded.
 
 ## Immediate next actions
 
-1. The final implementation `53986b36` fast gate passed all 11 lanes: 8,979
-   unit passes, five documented skips, 92.03% coverage, 341.916 seconds.
-   Session `50413` is terminal. Authoritative PR preflight at the earlier
+1. Submitted `18253e9a` passed all 11 fast lanes: 8,981 unit passes, five
+   documented skips, 92.03% coverage, 334.256 seconds, return code 0 and
+   `committed_head_only=true`. The previous `53986b36` fast result remains
+   historical evidence for that checkpoint. Authoritative PR preflight at the earlier
    `e187337a` passed all 20 checks, including 8,977 unit passes, five documented
    skips, and 92.02% coverage. Sessions `92349` and `27260` are terminal;
    do not restart these successful source gates merely for metadata.
@@ -369,9 +380,8 @@ path remains unproven. Production PyPI Trusted Publishing succeeded.
    script, optional static scan, 94 Fit tests, and 56 latest tracker/surface/
    clean-host tests. Generated inventory, global static checks, and strict
    docs pass; retained source/prose hashes match.
-3. Commit the final result/three local acceptance records, proportionally
-   validate that metadata-only follow-up, then drive the full no-mistakes
-   pipeline. Its configured test phase runs authoritative PR
+3. Return the bounded R1/R2 repair through this existing no-mistakes run for
+   re-review. Its configured test phase runs authoritative PR
    preflight; do not redundantly run the same full preflight first. The pipeline
    owns any fixes while active and creates the push/PR; never duplicate that
    PR, skip its review decisions, or hand-merge. Inspect required hosted CI.
@@ -413,6 +423,64 @@ Support contact: `https://support.github.com/contact`
 
 ## Checkpoint log
 
+- 2026-09-30: Review of submitted `18253e9a` against base `11b582a7` confirmed
+  R1 (server-controlled protocol/error diagnostics bypass credential redaction)
+  and R2 (partial-config previews use a different hash identity from exports).
+  A coordinator failing-first run on unchanged production source reproduced
+  all 26 targeted cases: 14 MCP diagnostic cases and 12 event/metric/trace
+  checkpoint cases, 208 deselected, 1.27 seconds, exit 1. The repair omits
+  rejected protocol values, redacts raw JSON-RPC and tool-error messages before
+  exception construction and cleanup, and resolves missing preview identity
+  through the existing global salt fallback with file creation disabled.
+  Independent source review also identified the same fallback issue for an
+  explicit empty bytes salt; this branch is repaired with 12 supplemental
+  cases. Independent bounded source review accepted both repairs and the
+  preserved tracker contracts with no actionable finding. README/docs inventory advances by the 38 added parameter cases
+  from 8,990 to 9,028; the outer preflight owns the full collection check.
+  Exact red command: `PYTHONPATH=src python -m pytest -q --no-cov
+  src/tests/test_mcp_router.py src/tests/test_enterprise_telemetry.py -k
+  'rejected_protocol_version_diagnostic_redacts_credentials or
+  server_error_diagnostic_redacts_credentials or
+  partial_config_export_preview_preserves_checkpoint_and_files' --tb=short`.
+  Raw local output: `.gate/review-repair-red.txt`. The canonical existing rows
+  retain their original IDs, stories, expected behavior, setup and verification
+  contracts. Full delivery, hosted CI and external/human acceptance remain open;
+  no nested pipeline, push, release, paid evaluation or external mutation ran.
+- 2026-09-30: After all source fixes, coordinator ran `PYTHONPATH=src python
+  -m pytest -q --no-cov src/tests/test_mcp_router.py
+  src/tests/test_enterprise_telemetry.py
+  src/tests/test_feature_user_story_tracker.py --tb=short`: **258 passed,
+  1 failed in 6.19 seconds**. All 246 MCP/telemetry tests passed, including
+  the 38 new parameter cases and existing legitimate negotiation/error tests.
+  The failure was the tracker schema: Needs Validation rows reserve both
+  `retest_evidence` and `evidence` rather than accepting partial checkpoint
+  results there. Moved SEC-002 checkpoint details to `notes` and retained its
+  original reserved field values and non-pass status. The first one-case
+  schema retest exposed the second reserved field (1 failed, 0.16 seconds);
+  the final retest passed (1 passed, 0.16 seconds). Exact retest command:
+  `PYTHONPATH=src python -m pytest -q --no-cov
+  src/tests/test_feature_user_story_tracker.py::test_canonical_tracker_schema_paths_status_and_freshness_are_valid
+  --tb=short`. Raw local logs are `.gate/review-repair-green.txt`,
+  `.gate/review-repair-tracker-retest.txt` and
+  `.gate/review-repair-tracker-retest-2.txt`. No production/test source changed
+  after the 246-test pass. Independent review accepted the eight-file delta;
+  these are bounded review-phase results, not preflight or hosted-CI results.
+  Source/test SHA-256 identities for that pass:
+  - `src/ctx/adapters/generic/tools/mcp_router.py`:
+    `57210616fe51a55f3adabb4c8c4a3a0c8cd0b84f5e8b62153d23e3363a851c0c`
+  - `src/ctx/telemetry/__init__.py`:
+    `53d074fca33e760544c49c92000eae78b3da372119ec1ab98f477770424e635f`
+  - `src/tests/test_mcp_router.py`:
+    `a16d01249a59f421b46fcd96c3f1ce7f2fa7320a8bf9bf6b01518519cd7120e9`
+  - `src/tests/test_enterprise_telemetry.py`:
+    `befac4ee8738399e07d6febe25415520fff6854aa4d372aab29d290dda392698`
+- 2026-09-30: Retained the supplied exact-head `18253e9a` fast result: all
+  11 lanes passed, return code 0, `committed_head_only=true`, 334.256 seconds,
+  8,981 passes, five skips and 92.03% coverage. Read-only inspection of
+  `/tmp/ctx-feature-audit-fast-18253e9a.log` confirms the unit totals and
+  coverage; the original checkout and its `.gate/local-fast.json` were not
+  accessed. That successful checkpoint retires the pending launcher fast-gate
+  action only; it does not qualify this later repair tree or complete delivery.
 - 2026-09-30: Resumed after a Support-only turn (no product-goal progress).
   The full delivery run remains authoritatively FAILED, with no hidden fixes,
   branch divergence, or structured synchronization action offered. Accepted

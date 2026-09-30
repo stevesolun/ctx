@@ -549,14 +549,13 @@ class McpClient:
             protocol_version = initialize_result["protocolVersion"]
             if not isinstance(protocol_version, str):
                 raise McpServerError(
-                    f"{self._config.name}.initialize: non-string protocolVersion "
-                    f"{protocol_version!r}"
+                    f"{self._config.name}.initialize: non-string protocolVersion"
                 )
             if protocol_version not in _SUPPORTED_PROTOCOL_VERSIONS:
                 supported = ", ".join(_SUPPORTED_PROTOCOL_VERSIONS)
                 raise McpServerError(
-                    f"{self._config.name}.initialize: unsupported protocolVersion "
-                    f"{protocol_version!r}; supported revisions: {supported}"
+                    f"{self._config.name}.initialize: unsupported protocolVersion; "
+                    f"supported revisions: {supported}"
                 )
             self._protocol_version = protocol_version
         except Exception:
@@ -713,7 +712,9 @@ class McpClient:
                         f"{self._config.name}.tools/call: content must be an array"
                     )
                 if result.get("isError"):
-                    content = _flatten_content(result.get("content", []))
+                    content = _redact_sensitive_text(
+                        _flatten_content(result.get("content", [])), self._stderr_redaction_values
+                    )
                     _record_mcp_client_tool_call(
                         server=self._config.name,
                         tool=name,
@@ -868,9 +869,10 @@ class McpClient:
                         or not isinstance(err.get("message"), str)
                     ):
                         raise McpServerError(f"{self._config.name}.{method}: invalid error object")
+                    message = _redact_sensitive_text(err["message"], self._stderr_redaction_values)
                     raise McpServerError(
                         f"{self._config.name}.{method}: "
-                        f"code={err.get('code')} message={err.get('message')!r}"
+                        f"code={err.get('code')} message={message!r}"
                     )
                 return frame.get("result")
 
