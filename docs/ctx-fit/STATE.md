@@ -376,6 +376,15 @@ Support contact: `https://support.github.com/contact`
 
 ## Checkpoint log
 
+- 2026-09-30: Retried GitHub's documented LFS-disable API with the authenticated
+  repository owner's OAuth token (`repo` scope) and API version `2026-03-10`:
+  `DELETE /repos/stevesolun/ctx/lfs` again returned HTTP 404, request ID
+  `D343:2BCE4:452C5E9:4562838:6ABCB3C8`. No remote state changed. Recounted the
+  retired inventory at 45 unique objects totaling 13,025,281,486 bytes
+  (12.131 GiB); current `main` contains no LFS paths and the exact replacement
+  archives remain available as attested v1.0.21 release assets. GitHub Support
+  purge remains the only safe route that preserves repository identity, stars,
+  forks, issues, and pull requests.
 - 2026-08-21: Retried the documented `DELETE /repos/stevesolun/ctx/lfs`
   endpoint with GitHub REST API version `2026-03-10`. The active `gh` OAuth
   token has `repo` scope, the authenticated user owns the repository, and the
