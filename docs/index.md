@@ -70,9 +70,10 @@ repository, not to the index, not to any ref.
 Spending requires two explicit flags. `--test` alone will not spend: without
 `--budget` CTX Fit only plans. Run `ctx doctor` to see whether a real evaluation
 can run where you are. A real evaluation needs
-`pip install "claude-ctx[harness]"`, Node.js with `npx` for the
-workspace-filesystem MCP, a matching provider credential, and Bubblewrap on
-Linux; the base install can profile, plan, and simulate. Without a matching
+`pip install "claude-ctx[harness]"`, a matching provider credential, and
+Bubblewrap on Linux. The current source uses CTX's bundled filesystem MCP;
+it does not require Node.js or `npx` for Fit's workspace tools. The base install
+can profile, plan, and simulate. Without a matching
 provider credential, `--test` runs in simulation, which proves the pipeline but
 never your repository. With a credential but a missing live prerequisite, CTX
 refuses the run before trial setup. A simulated result is refused as evidence
@@ -259,16 +260,15 @@ graph-based discovery:
   backups are not shipped in the tarball.
 - **52 Louvain communities** group related entities into named
   communities (e.g., *AI + Devops + Frontend*, *Python + API*).
-- PostToolUse and Stop hooks update the wiki automatically during each
-  Claude Code session.
+- Installed PostToolUse and Stop hooks can record tool activity and update
+  quality evidence during a Claude Code session; they require host configuration.
 - Hydrated skills over 180 lines are converted to gated micro-skill
   pipelines so the router can load them incrementally.
-- At session start, the skill-router scans your project and
-  **recommends** the best-matching skills, agents, and MCP servers.
-- Mid-session, the context monitor watches every tool call, detects new
-  stack signals, walks the graph, and **recommends** relevant skills,
-  agents, and MCP servers in real time — **nothing loads or
-  installs without your approval**.
+- A host can scan the project at session start and request relevant skills,
+  agents, and MCP servers from the shared recommender.
+- Mid-session recommendations use observations supplied by an installed hook
+  or host integration. CTX does not automatically observe every tool call in
+  every host. Installation follows the user's per-kind approval policy.
 - Recommendation calls can suppress already selected, rejected, active, or
   baseline context and can filter local/no-key or language-mismatched rows
   before they enter a plan.
@@ -309,7 +309,7 @@ graph-based discovery:
     ---
 
     `python -m ctx_monitor serve` opens a local HTTP dashboard over the
-    recommendation surface: live graph, skill grades + four-signal scores,
+    recommendation surface: live graph, skill grades and quality scores,
     session timelines, one-click load/unload for skills, agents, and MCP
     servers, selectable recommendations, runtime token history, plus harness
     wiki and graph browsing. It shows no CTX Fit state. It is served by stdlib
@@ -322,9 +322,10 @@ graph-based discovery:
 
     ---
 
-    Curated councils of skills and agents that fire at session-start,
-    file-save, pre-commit, and session-end. Blocks `git commit` on
-    HIGH/CRITICAL findings. Five starter toolboxes ship out of the box.
+    Curated skill and agent plans for configured session-start, file-save,
+    pre-commit, and session-end triggers. The consuming host executes the plan
+    and records findings; the installed pre-commit hook can block on an existing
+    HIGH/CRITICAL verdict. Five starter toolboxes ship out of the box.
 
     [:octicons-arrow-right-24: Toolbox overview](toolbox/index.md) ·
     [Starter toolboxes](toolbox/starters.md) ·
@@ -335,9 +336,9 @@ graph-based discovery:
     ---
 
     Scans the active repo, detects the stack from file signatures, walks
-    the stack matrix, loads exactly the skills that apply, and can
-    recommend supporting agents and MCP servers. Loop adapters can call
-    the same recommender before each plan.
+    the stack matrix, and recommends relevant skills, agents, and MCP servers.
+    Host integrations decide when to install or load them. Loop adapters can
+    call the same recommender before each plan.
 
     [:octicons-arrow-right-24: Router overview](skill-router/index.md) ·
     [Stack signatures](stack-signatures.md) ·
@@ -395,8 +396,8 @@ graph-based discovery:
 - **Configurable gates.** Recommendation floors, semantic edge thresholds,
   micro-skill line limits, and harness match floors live in config so teams
   can tune behavior without forking the code.
-- **Token discipline.** Every council run honors `max_tokens` /
-  `max_seconds` budgets.
+- **Token discipline.** Council plans carry `max_tokens` / `max_seconds`
+  budgets. The consuming host must enforce them while executing agents.
 
 ## Before pushing a change to ctx itself
 

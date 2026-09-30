@@ -159,6 +159,10 @@ def test_docs_front_door_leads_with_ctx_fit() -> None:
 
     lead = text.split("## ", 1)[0]
     assert "ctx fit" in lead.lower(), "the docs home page never names the command"
+    assert "bundled filesystem MCP" in _flat(text)
+    assert "Node.js with `npx` for the workspace-filesystem MCP" not in _flat(text)
+    assert "Every council run honors" not in text
+    assert "The consuming host must enforce" in text
 
 
 def test_release_front_doors_describe_1_0_21_without_old_install_claims() -> None:

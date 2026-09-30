@@ -29,12 +29,12 @@
   - reproduce, fix, and reply to applicable open GitHub issues
   - preserve user-owned and out-of-scope `.scratch/`
 - Parallel execution: all 314 active stories and four historical rows have
-  received clause-by-clause coverage review. Coverage mappings are not
-  final-tree pass claims. Source and browser writers are frozen. The actual
-  generated harness command now passes the isolated no-fit path. The canonical
-  CSV owner incorporates completed evidence and preserves compact reproducers under
-  `qa/feature-audit/`. The coordinator owns final integration, generated
-  inventory, state, GitHub mutations, and committed verification gates.
+  received clause-by-clause coverage review. The coordinator owns CSV writes;
+  254 executable rows now carry specific passing acceptance evidence (192
+  tested, 62 retested), while 60 checklists remain open and four are deprecated.
+  Independent lanes are reviewing the final timeout fixture, reconciling those
+  checklists, and refreshing GitHub facts. Production source is frozen. The
+  coordinator owns integration, state, GitHub mutations, and final gates.
 - LFS migration execution: three parallel lanes completed repository resolver,
   workflow migration, and independent storage/identity audit. Merged `main`
   removes the two tracked archive pointers, LFS hooks/rules/fallbacks, and
@@ -344,11 +344,13 @@ path remains unproven. Production PyPI Trusted Publishing succeeded.
 
 ## Immediate next actions
 
-1. Freeze the canonical tracker and its compact evidence bundle. Source and
-   browser edits are frozen; generated inventory is synchronized at 8,986.
-2. Commit the reviewed audit changes (never `.scratch/`), then run the fast
-   gate and authoritative PR preflight on that exact tree. Record actual
-   story evidence and external prerequisites without blanket pass claims.
+1. Commit the independently accepted cold-start timeout fixture repair with
+   the final homepage corrections and compact evidence. Source
+   remains frozen; generated inventory is synchronized at 8,986.
+2. Run the repaired committed fast gate and authoritative PR preflight. The
+   earlier `2f7a6a23` gate is red (one timeout), not final completion evidence.
+   Close the 60 checklist rows only where all acceptance clauses are proved;
+   record external prerequisites without blanket pass claims.
 3. Finalize evidence-backed GitHub issue replies and public documentation
    synchronization. A new release or paid-provider run is not authorized.
 4. GitHub Support's prepared LFS purge request is at Submit. Wait for explicit
@@ -387,6 +389,40 @@ Support contact: `https://support.github.com/contact`
 
 ## Checkpoint log
 
+- 2026-09-30: Independent timeout review accepted the bounded fixture repair
+  with no findings after inspecting the frozen failure, tracing lazy import
+  inside the provider timer, and running the exact regression (one passed)
+  plus the full pair file (23 passed). Both arms remain approval-bound to the
+  same allowance; production defaults and all exact correctness guards remain
+  unchanged. Coordinator passed 37 tracker/surface tests, reran real safe
+  graph/telemetry examples, and matched all 29 retained example source hashes.
+  Final committed gate execution is next.
+- 2026-09-30: Resumed after a Support-only handoff (no product progress in
+  that turn). Revalidated the actual dirty tree and dispatched independent
+  timeout review, checklist closure, and remote issue/traffic reconciliation.
+  The timeout writer changed only the real two-process test fixture: its
+  provider allowance is 15 seconds under the unchanged 30-second outer bound;
+  contract/drift tests retain five seconds. Production code is unchanged.
+  Writer evidence is 50 nearby tests plus a parallel cold-import stress pass;
+  independent acceptance and final gates remain required. Canonical executable
+  rows carry 254 specific passing outcomes; 60 checklists remain unverified.
+- 2026-09-30: Committed the reviewed audit as `2f7a6a23`. Ten of eleven
+  committed fast lanes passed, including real clean-host installation,
+  reproducible packaging, browser, docs, static, and similarity. The unit lane
+  finished 8,976 passed / 5 documented skips / 1 failure: the deterministic
+  pair's context arm recorded `provider_timeout` after five seconds and made
+  no provider request. The exact-request guard correctly rejected it. A
+  bounded diagnosis owns only that failure; no green retry has replaced the
+  red evidence. All five integration checks separately passed. Compact durable
+  evidence is `qa/feature-audit/verification-2f7a6a23.md`.
+- 2026-09-30: Opened all 29 rendered documentation navigation pages and
+  checked 3,407 local links/anchors with no missing target. The built catalog
+  correctly hides eleven excluded cards; all four deployed badge targets are
+  reachable but still exhibit the old fifteen-visible-cards defect until
+  deployment. Rendering found stale homepage prerequisites and automatic host
+  execution/budget claims; failing-first documentation assertions and all 21
+  surface tests pass after correction. This prose/test delta remains separate
+  from the implementation commit and requires final committed verification.
 - 2026-09-30: Canonical mapper handoff is frozen: 318 rows comprise 254
   executable contracts, 60 explicit checklists, and four deprecated contracts.
   All 314 active contracts have source/assertion mappings; no blanket final

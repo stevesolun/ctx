@@ -150,9 +150,9 @@ def main() -> int:
                     "kpi_api_cold": cold_kpi,
                     "kpi_api_warm": warm_kpi,
                     "kpi_page_warm": warm_kpi_page,
-                    "extracted_index_bytes": (
-                        graph_dir / "dashboard-neighborhoods.sqlite3"
-                    ).stat().st_size,
+                    "extracted_index_bytes": (graph_dir / "dashboard-neighborhoods.sqlite3")
+                    .stat()
+                    .st_size,
                 },
                 "smoke": {
                     "exit_code": smoke_exit,

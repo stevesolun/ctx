@@ -12,6 +12,12 @@ All 314 active contracts received behavior-level source/assertion review. The
 CSV SHA256 was `a3617aee4afb9c1b5304ddbe2937dffc3f9cbb18b00600b0c542b749d935c73b`.
 Later coordinator results may update that file; these are historical counts.
 
+Later coordinator evidence is in `verification-2f7a6a23.md`; safe graph and
+telemetry examples are reproducible with `safe_examples.py` and explained in
+`safe-examples-evidence.md`. The earlier fast gate has one recorded timeout
+failure, so neither that report nor the per-story passes imply an all-green
+aggregate. The canonical CSV remains the sole current status authority.
+
 ## Retained examples
 
 - `documentation-evidence.md`: source-backed review, corrections, and explicit
