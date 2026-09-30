@@ -1,7 +1,7 @@
 {
   "scope": "DOC-NAV-008, DOC-NAV-027, B-DOC-001 and US-008 local recommendation examples",
   "source_hashes": {
-    "docs/harness/attaching-to-hosts.md": "44300010ef786bb6c4b00d6c83517fceb629070c2530a2b07931440208a4dfc9",
+    "docs/harness/attaching-to-hosts.md": "1b457a79071b16284256585a0c315e12e4f57cab09ad9b1f186025bfc18fcc22",
     "docs/harness/loopflow-adapter-demo.md": "d7cb8468ced20c36abc92e132dee2ce13149310fab8164fb5da1baf8d15d1c03",
     "src/ctx/api.py": "25592e8ba8e238b742b9dc805116e1a1dfe759c56ff5ff7f813fea0b4a04b893",
     "src/ctx/adapters/loopflow.py": "01af8261230d989121be7c85b081a63a3bbbc0e8a6405e8477e483bae9dae82a"
@@ -171,7 +171,7 @@
         "-m",
         "ctx.adapters.loopflow",
         "--loop-file",
-        "<fixture>/select-capabilities.loop",
+        "/var/folders/cj/j956f9v920b8wk3wvd8ms2nh0000gn/T/ctx-doc-host-h3w_jna8/select-capabilities.loop",
         "--permissions",
         "skills,agents,mcps,harnesses",
         "--own-llm",
@@ -319,7 +319,7 @@
         "-m",
         "ctx.adapters.loopflow",
         "--loop-file",
-        "<fixture>/select-capabilities.loop",
+        "/var/folders/cj/j956f9v920b8wk3wvd8ms2nh0000gn/T/ctx-doc-host-h3w_jna8/select-capabilities.loop",
         "--permissions",
         "skills,agents,mcps"
       ],
@@ -459,7 +459,7 @@
         "-m",
         "ctx.adapters.loopflow",
         "--loop-file",
-        "<fixture>/select-capabilities.loop",
+        "/var/folders/cj/j956f9v920b8wk3wvd8ms2nh0000gn/T/ctx-doc-host-h3w_jna8/select-capabilities.loop",
         "--permissions",
         "skills,agents,mcps",
         "--selected",
@@ -596,7 +596,7 @@
         "-m",
         "ctx.adapters.loopflow",
         "--loop-file",
-        "<fixture>/select-capabilities.loop",
+        "/var/folders/cj/j956f9v920b8wk3wvd8ms2nh0000gn/T/ctx-doc-host-h3w_jna8/select-capabilities.loop",
         "--permissions",
         "skills,agents,mcps,harnesses",
         "--own-llm",
@@ -750,11 +750,11 @@
         "-m",
         "ctx.adapters.loopflow",
         "--loop-file",
-        "<fixture>/select-capabilities.loop",
+        "/var/folders/cj/j956f9v920b8wk3wvd8ms2nh0000gn/T/ctx-doc-host-h3w_jna8/select-capabilities.loop",
         "--permissions",
         "skills,mcps",
         "--last-failure-file",
-        "<fixture>/last-failure.txt"
+        "/var/folders/cj/j956f9v920b8wk3wvd8ms2nh0000gn/T/ctx-doc-host-h3w_jna8/last-failure.txt"
       ],
       "exit_code": 0,
       "payload": {
@@ -885,5 +885,5 @@
     "sdk_config": "https://github.com/anthropics/claude-agent-sdk-python/blob/main/src/claude_agent_sdk/types.py",
     "finding": "McpServerConfig is a union of TypedDict shapes; use a stdio dictionary rather than calling the union"
   },
-  "retention_note": "2026-09-30 dirty-working-tree local execution; disposable absolute paths redacted. Not a final-tree story pass. Portable retained script rerun successfully at evidence handoff."
+  "retention_note": "2026-09-30 coordinator rerun after the post-e187 named-host documentation correction: eight real local examples passed; source hashes identify the tested working tree. Disposable paths redacted. No external-host interoperability or whole-audit completion claim."
 }

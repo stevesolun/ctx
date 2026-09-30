@@ -9,13 +9,16 @@ entrypoint yet; this is release infrastructure.
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import shlex
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -477,6 +480,90 @@ def _prepare_dirs(paths: ContractPaths) -> None:
         path.mkdir(parents=True, exist_ok=True)
 
 
+def _dashboard_request(port: int, path: str) -> tuple[int, str, bytes]:
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+    try:
+        connection.request("GET", path)
+        response = connection.getresponse()
+        return response.status, response.headers.get_content_type(), response.read()
+    finally:
+        connection.close()
+
+
+def _run_installed_dashboard_smoke(
+    *,
+    python_bin: Path,
+    cwd: Path,
+    env: Mapping[str, str],
+    forbidden_text: Sequence[str],
+) -> None:
+    with socket.socket() as port_socket:
+        port_socket.bind(("127.0.0.1", 0))
+        port = int(port_socket.getsockname()[1])
+
+    process = subprocess.Popen(
+        [
+            str(python_bin),
+            "-m",
+            "ctx_monitor",
+            "serve",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+        ],
+        cwd=cwd,
+        env=dict(env),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                stdout, stderr = process.communicate()
+                raise AssertionError(
+                    "installed dashboard exited before serving: "
+                    f"stdout={stdout!r} stderr={stderr!r}"
+                )
+            try:
+                if _dashboard_request(port, "/api/status.json")[0] == 200:
+                    break
+            except (ConnectionError, OSError, http.client.HTTPException):
+                time.sleep(0.1)
+        else:
+            raise AssertionError("installed dashboard did not become ready within 15 seconds")
+
+        for path, content_type, json_type, markers in (
+            ("/", "text/html", None, ("ctx",)),
+            ("/status", "text/html", None, ("Status", "Telemetry health")),
+            ("/api/status.json", "application/json", dict, ()),
+            ("/api/sessions.json", "application/json", list, ()),
+        ):
+            status, actual_type, body = _dashboard_request(port, path)
+            text = body.decode("utf-8", "replace")
+            if status != 200 or actual_type != content_type:
+                raise AssertionError(
+                    f"installed dashboard {path} returned {status} {actual_type!r}"
+                )
+            if json_type is not None and not isinstance(json.loads(text), json_type):
+                raise AssertionError(f"installed dashboard {path} returned the wrong JSON shape")
+            if any(marker.casefold() not in text.casefold() for marker in markers):
+                raise AssertionError(f"installed dashboard {path} omitted expected content")
+            leaked = [value for value in forbidden_text if value and value in text]
+            if leaked:
+                raise AssertionError(f"installed dashboard {path} exposed host paths: {leaked}")
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        try:
+            process.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate()
+
+
 def _assert_fake_claude_hook_output(stdout: str) -> str:
     try:
         result = json.loads(stdout)
@@ -789,6 +876,13 @@ def run_contract(
     wheel = _single_wheel(paths.dist)
     py = venv_python(paths.venv)
     runner.run([str(py), "-m", "pip", "install", str(wheel)], cwd=project_root, env=env)
+
+    _run_installed_dashboard_smoke(
+        python_bin=py,
+        cwd=paths.tiny_repo,
+        env=isolated_env(paths),
+        forbidden_text=(str(Path.home()), str(project_root)),
+    )
 
     run_env = isolated_env(paths, extra_pythonpath=paths.fake_modules)
     ctx_init = venv_script(paths.venv, "ctx-init")

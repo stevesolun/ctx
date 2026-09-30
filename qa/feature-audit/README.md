@@ -2,9 +2,9 @@
 
 `qa/feature_status.csv` is the only canonical tracker. This directory retains
 bounded execution evidence and reproductions, not another status ledger.
-Results apply to the dirty working tree and the source hashes in each artifact;
-the base HEAD alone does not identify the code tested. No final-tree story pass
-is asserted by this handoff.
+Each result applies only to its named tree or source hashes. Initial mapping
+artifacts describe a dirty working tree; the later verification reports name
+committed checkpoints. Consult the canonical CSV for current story outcomes.
 
 At the mapper freeze, the canonical CSV contained 318 rows: 254 executable
 contracts, 60 explicit acceptance checklists, and four deprecated contracts.
@@ -12,13 +12,18 @@ All 314 active contracts received behavior-level source/assertion review. The
 CSV SHA256 was `a3617aee4afb9c1b5304ddbe2937dffc3f9cbb18b00600b0c542b749d935c73b`.
 Later coordinator results may update that file; these are historical counts.
 
-Later coordinator evidence is in `verification-2f7a6a23.md` and
-`verification-05d16854.md`; safe graph and
+Later coordinator evidence is in `verification-2f7a6a23.md`,
+`verification-05d16854.md`, and `verification-e187337a.md`; safe graph and
 telemetry examples are reproducible with `safe_examples.py` and explained in
 `safe-examples-evidence.md`. The earlier fast gate has one recorded timeout
 failure, so neither that report nor the per-story passes imply an all-green
-aggregate. The repaired `05d16854` gate passed all 11 lanes; hosted and external
-checks remain separate. The canonical CSV is the sole current status authority.
+aggregate. The repaired `05d16854` gate passed all 11 lanes and `e187337a`
+passed all 20 authoritative preflight checks. Hosted and external checks remain
+separate. The subsequently identified clean-host script/dashboard integration
+gap is repaired and its actual installed-wheel command was independently
+replayed. `review-refreeze-20260930.md` records the later source/prose review
+and focused evidence; earlier gates do not cover that new delta. The canonical
+CSV is the sole current status authority.
 
 ## Retained examples
 
@@ -35,6 +40,9 @@ checks remain separate. The canonical CSV is the sole current status authority.
 - `dashboard-performance-evidence.json`: shipped-runtime cold/warm graph HTTP
   and exactly 10,000 synthetic sidecars for bounded KPI timing. This is not a
   full-catalog KPI performance claim.
+- `skillspector-static-smoke-evidence.json`: coordinator-replayed real optional
+  scanner with a pinned official wheel, one retained synthetic fixture,
+  network denied, no credentials, and no model execution.
 
 The three portable documentation scripts reran successfully at handoff:
 
@@ -49,7 +57,8 @@ The first three write fresh local JSON under `/tmp/ctx-feature-audit-*`, not
 over this evidence. The performance reproducer prints JSON and requires the
 already-hydrated runtime archive. Inspect its cold/warm measurements against
 the recorded thresholds; its exit status alone checks the smoke result.
-Its retained timings precede the mapper freeze and need a frozen-tree rerun.
+Its retained timings precede the mapper freeze; the coordinator's frozen-tree
+rerun and threshold results are in `verification-05d16854.md`.
 All paths in retained example output are synthetic or redacted (`<fixture>`,
 `<repo>`). No credentials, real user data, or provider execution are retained.
 
@@ -65,7 +74,11 @@ The latest mapped session privacy, status payload, protected logs/events/SSE,
 archive failure, threshold sweep, and wizard-command assertions were inspected
 directly; their coordinator final-tree execution remains authoritative.
 
-## True remaining acceptance groups
+## Historical mapper handoff boundaries
+
+The following list records what was still open at the initial mapper handoff,
+not current outstanding work. Later reports above and the canonical CSV
+supersede these historical prerequisites when fresh evidence exists.
 
 1. Frozen-tree aggregate evidence: full non-integration tests, browser tests,
    static checks, committed fast gate, PR preflight, real wheel/clean install,
@@ -79,8 +92,9 @@ directly; their coordinator final-tree execution remains authoritative.
 4. Current external facts and hosted evidence: About, rulesets, release upload
    and attestation, supported-host package smoke, Pages, and Hugging Face.
    Existing releases or a workflow's wiring do not prove a new-tree publish.
-5. Explicit unavailable prerequisites: CLI-039 needs an already approved local
-   SkillSpector runtime (no `audit-directory` subcommand exists); MAINT-017
+5. Explicit unavailable prerequisites at handoff: CLI-039 needed an installed
+   optional SkillSpector Python runtime (no `audit-directory` subcommand exists);
+   this is ordinary dependency setup, not inherently a paid-model boundary. MAINT-017
    needs an approved OCR LLM endpoint/credentials; DIST-013 has no required
    independent-approval rule. These are not test failures or silent passes.
 6. Real third-party SDK/host handshakes, paid/model-backed runs, service

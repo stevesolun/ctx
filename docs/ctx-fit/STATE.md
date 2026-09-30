@@ -13,7 +13,7 @@
 
 - Updated: 2026-09-30 (Europe/Prague)
 - Active goal: inventory, test, repair, and retest every shipped user behavior
-- Phase: committed gate execution and final checklist evidence reconciliation
+- Phase: repairs accepted; canonical evidence reconciliation and final committed gates
 - Release decision: **1.0.21 REMAINS RELEASED; NEW AUDIT OPEN; NO NEW RELEASE DECISION**
 - Branch: `codex/full-feature-audit`
 - Release commit: `38a33f8784e2bf408430a98fed81206c2cf39d00`
@@ -30,11 +30,18 @@
   - preserve user-owned and out-of-scope `.scratch/`
 - Parallel execution: all 314 active stories and four historical rows have
   received clause-by-clause coverage review. The coordinator owns CSV writes;
-  295 rows now carry specific passing acceptance evidence (206 tested, 89
-  retested), while 16 need validation, three have explicit prerequisites, and
-  four are deprecated. Independent lanes accepted the timeout fixture and
-  reconciled checklists/GitHub facts; installed-wheel dashboard proof is being
-  retained for coordinator replay. Production source is frozen. The
+  296 rows carry specific passing acceptance evidence (179 tested, 117
+  retested), while 16 need validation, two have explicit owner prerequisites,
+  and four are deprecated. The real optional SkillSpector scan passed under
+  network denial with no credentials or model call, including coordinator
+  replay. The actual clean-host script now tests installed dashboard HTTP;
+  coordinator replay and independent semantic review passed. Independent code
+  and prose lanes accepted the remaining repair families; 35 current defect
+  records were appended to 65 canonical rows with original-contract hash
+  guards. All source writers are frozen; final independent metadata review
+  accepted all 65 guarded contracts and historical records with no blocking
+  findings. Earlier full gates remain
+  valid for their checkpoints, not the later script/test/prose delta. The
   coordinator owns integration, state, GitHub mutations, and final gates.
 - LFS migration execution: three parallel lanes completed repository resolver,
   workflow migration, and independent storage/identity audit. Merged `main`
@@ -103,29 +110,25 @@ and working examples.
 
 ### Open questions / frontier
 
-1. Which current entry points, MCP surfaces, workflows, hooks, package data,
-   and public APIs lack a canonical row, and which existing rows describe
-   removed or superseded behavior? Owner: tracker-coverage audit.
-2. Which row paths, commands, preconditions, and evidence are stale or not
-   executable, and what is the smallest deterministic runner that can validate
-   every automatable story? Owner: executable-story audit.
-3. Which open issues reproduce against current `main`, conflict with accepted
-   product boundaries, or require human/provider decisions? Owner: issue
-   triage, with coordinator-owned comments and mutations.
-4. Which README/docs/About/package facts, numbers, examples, and claims disagree
-   with the current implementation? Owner: documentation-sync audit.
-5. Which material correctness, security, architecture, logistical, or UX
-   defects remain in production surfaces? Owners: architecture review and
-   end-user smoke lanes.
-6. After all repairs, does fresh story-by-story evidence plus proportional
-   repository gates prove the destination without relying on agent reports?
-   Owner: coordinator and independent final reviewer.
+The initial six discovery lanes completed inventory, semantic acceptance
+mapping, issue triage, documentation review, architecture review, and local
+execution. The remaining frontier is narrower, without reducing the destination:
+
+1. Does the new committed tree pass the fast gate and complete no-mistakes
+   sequence, including authoritative PR preflight? Owner: coordinator;
+   no duplicate full-gate run merely for unchanged metadata.
+2. Does the frozen repaired tree pass required hosted CI, and can the durable
+   PR resolve #283? Owner: coordinator; depends on final local verification.
+3. Which remaining deployed, publish, host, OCR, and governance requirements
+   genuinely require external state or owner authority? Owner: coordinator;
+   do not convert missing evidence to a pass or run paid/publication actions
+   simply to make the tracker green.
 
 ### Fog and boundaries
 
-- The exact repair set remains fog until the six read-only lanes return
-  reproducible findings. Writers will receive disjoint ownership only after
-  those findings are deduplicated against canonical rows and open issues.
+- Discovery is complete; exact hosted behavior and optional external services
+  remain unverified until their named evidence exists. New reproduced findings
+  reopen only the affected surface; writers retain disjoint ownership.
 - Paid live-model quality, a new release/tag, external credential rotation,
   repository deletion/recreation, and unsupported native Windows execution are
   outside this audit unless separately authorized or required to reproduce an
@@ -345,16 +348,22 @@ path remains unproven. Production PyPI Trusted Publishing succeeded.
 
 ## Immediate next actions
 
-1. The `05d16854` fast gate completed successfully: all 11 lanes, 8,977
-   unit passes, five documented skips, 92.02% coverage. Session `92349` is
-   terminal. Source remains frozen; generated inventory is synchronized at 8,986.
-2. Commit evidence-only checklist updates, run proportional cheap/docs checks,
-   then authoritative PR preflight. The earlier `2f7a6a23` red run remains
-   historical diagnosis evidence, not the current gate result.
-   Close the 60 checklist rows only where all acceptance clauses are proved;
-   record external prerequisites without blanket pass claims.
-3. Finalize evidence-backed GitHub issue replies and public documentation
-   synchronization. A new release or paid-provider run is not authorized.
+1. The `05d16854` fast gate passed all 11 lanes. Authoritative PR preflight at
+   `e187337a` passed all 20 checks, including 8,977 unit passes, five documented
+   skips, and 92.02% coverage. Sessions `92349` and `27260` are terminal;
+   do not restart these successful source gates merely for metadata.
+2. Independent review of the applied canonical record delta accepted all 35
+   families/65 rows; source and prose repairs are accepted. Root passed the actual clean-host
+   script, optional static scan, 94 Fit tests, and 56 latest tracker/surface/
+   clean-host tests. Generated inventory, global static checks, and strict
+   docs pass; retained source/prose hashes match.
+3. Commit the reviewed delta and run the committed fast gate, then drive the
+   full no-mistakes pipeline. Its configured test phase runs authoritative PR
+   preflight; do not redundantly run the same full preflight first. The pipeline
+   owns any fixes while active and creates the push/PR; never duplicate that
+   PR, skip its review decisions, or hand-merge. Inspect required hosted CI.
+   Update issue #283 with the durable PR and verified result; keep it open until
+   integration. A new release or paid-provider run is not authorized.
 4. GitHub Support's prepared LFS purge request is at Submit. Wait for explicit
    action-time confirmation before sending it; no ticket or remote purge
    exists. Preserve the repository and release assets. Recheck billed storage
@@ -391,6 +400,43 @@ Support contact: `https://support.github.com/contact`
 
 ## Checkpoint log
 
+- 2026-09-30: The preceding Support-only turn made no product-goal progress;
+  this continuation applied 35 canonical defect families to 65 rows, retaining
+  original-contract hashes, old bug IDs and external non-passes. Independent
+  final code review accepted seven families after 40 focused and three browser
+  passes; prose review accepted eight families with all 29 retained hashes
+  matching. Actual clean-host dashboard integration received independent
+  ACCEPT after coordinator real-install replay and 18 focused passes. The
+  real optional static-scanner integration is closed with no network, credentials
+  or model call; its disposable 199 MB environment was moved recoverably to
+  Trash, not claimed as freed disk space. New review evidence is retained in
+  `qa/feature-audit/review-refreeze-20260930.md`; the scanner has a compact JSON
+  receipt. Root's latest tracker/surface/clean-host selection passed 56 tests.
+  No current-branch no-mistakes run or PR exists yet; doctor confirms a runnable
+  Codex pipeline agent. Final metadata review subsequently accepted the 35
+  families/65 guarded rows; new committed gates remain. CLI-039's separately
+  corrected checklist is supported by its real scanner receipt, not covered by
+  the 65-row preservation statement.
+  LFS Support remains at Submit with no ticket or purge.
+- 2026-09-30: Acceptance review rejected MAINT-007 closure from the separate
+  installed-wheel probe: the promised clean-host script itself still skipped
+  dashboard HTTP. A bounded writer owns that script/tests/documentation to
+  close the actual contract, rather than narrowing it to the context hook.
+  Another review found several current defects lacked populated canonical
+  bug/repro/fix fields despite passing tests; exact evidence reconciliation
+  is in progress. Earlier local gates stay recorded as checkpoint evidence;
+  final gates will run after the new integration delta is frozen.
+- 2026-09-30: The preceding Support-only turn did not advance product work;
+  this continuation reconciled the actual live gate handle to terminal exit 0.
+  Authoritative preflight at `e187337a` passed all 20 checks, with 8,977 unit
+  passes, five skips, and 92.02% coverage. The coordinator's installed-wheel
+  dashboard replay also passed four real HTTP routes. Independent review found
+  stale review metadata on 41 passed rows; their historical mapping and current
+  acceptance are now distinguished without changing any behavior contract.
+  Two independent lanes are checking remaining closure clauses and a real
+  zero-model optional scanner in a disposable environment. Durable local-gate
+  evidence is `qa/feature-audit/verification-e187337a.md`. No PR, new release,
+  Support submission, or remote LFS purge has occurred.
 - 2026-09-30: The exact `05d16854` fast gate passed all 11 lanes with 8,977
   unit passes, five documented skips, and 92.02% coverage. Final strict docs
   build and browser homepage assertions passed; all 3,407 links/anchors across

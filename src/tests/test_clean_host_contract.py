@@ -11,6 +11,7 @@ from typing import Mapping, Sequence
 
 import pytest
 
+import scripts.clean_host_contract as clean_host_contract
 from scripts.clean_host_contract import (
     CommandRunner,
     CompletedCommand,
@@ -336,6 +337,13 @@ def test_tiny_repo_contains_fastapi_signals(tmp_path: Path) -> None:
 def test_contract_command_sequence_without_real_build(tmp_path: Path, monkeypatch) -> None:
     paths = make_paths(tmp_path)
     runner = RecordingRunner(paths.venv)
+    dashboard_smokes: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        clean_host_contract,
+        "_run_installed_dashboard_smoke",
+        lambda **kwargs: dashboard_smokes.append(kwargs),
+        raising=False,
+    )
     monkeypatch.setenv("CTX_TEST_HOME_OVERRIDE", str(paths.home))
     monkeypatch.setenv("HOME", str(tmp_path / "real-home"))
     monkeypatch.setenv("APPDATA", str(tmp_path / "real-appdata"))
@@ -361,6 +369,14 @@ def test_contract_command_sequence_without_real_build(tmp_path: Path, monkeypatc
     assert any("ctx-scan-repo" in call and "--recommend" in call for call in joined)
     assert any("ctx run" in call or "ctx.exe run" in call for call in joined)
     assert any("--deny-tool ctx__wiki_get" in call for call in joined)
+    assert dashboard_smokes == [
+        {
+            "python_bin": venv_python(paths.venv),
+            "cwd": paths.tiny_repo,
+            "env": isolated_env(paths),
+            "forbidden_text": (str(tmp_path / "real-home"), str(tmp_path)),
+        }
+    ]
 
     assert runner.records
     for record in runner.records:
@@ -377,6 +393,44 @@ def test_contract_command_sequence_without_real_build(tmp_path: Path, monkeypatc
     denied_records = [record for record in runner.records if "--deny-tool" in record.args]
     assert denied_records
     assert denied_records[0].check is False
+
+
+def test_dashboard_smoke_stops_server_when_probe_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailedServer:
+        returncode = None
+        terminated = False
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self) -> None:
+            self.terminated = True
+            self.returncode = -15
+
+        def communicate(self, timeout=None):
+            return "", ""
+
+    server = FailedServer()
+    monkeypatch.setattr(clean_host_contract.subprocess, "Popen", lambda *args, **kwargs: server)
+    monkeypatch.setattr(
+        clean_host_contract,
+        "_dashboard_request",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("probe failed")),
+        raising=False,
+    )
+
+    with pytest.raises(RuntimeError, match="probe failed"):
+        clean_host_contract._run_installed_dashboard_smoke(
+            python_bin=tmp_path / "python",
+            cwd=tmp_path,
+            env={},
+            forbidden_text=(),
+        )
+
+    assert server.terminated
 
 
 def test_live_claude_command_is_bounded_and_streamed(tmp_path: Path) -> None:
@@ -464,6 +518,7 @@ def test_live_claude_ack_required_before_running_live_host(
     runner = RecordingRunner(paths.venv)
     monkeypatch.setenv("CTX_TEST_HOME_OVERRIDE", str(paths.home))
     monkeypatch.delenv(LIVE_CLAUDE_ACK_ENV, raising=False)
+    monkeypatch.setattr(clean_host_contract, "_run_installed_dashboard_smoke", lambda **_: None)
 
     with pytest.raises(AssertionError, match=LIVE_CLAUDE_ACK_ENV):
         run_contract(
@@ -486,6 +541,7 @@ def test_live_claude_gate_runs_only_when_acknowledged(
     claude_bin = tmp_path / "claude"
     monkeypatch.setenv("CTX_TEST_HOME_OVERRIDE", str(paths.home))
     monkeypatch.setenv(LIVE_CLAUDE_ACK_ENV, LIVE_CLAUDE_ACK_VALUE)
+    monkeypatch.setattr(clean_host_contract, "_run_installed_dashboard_smoke", lambda **_: None)
 
     run_contract(
         project_root=tmp_path,

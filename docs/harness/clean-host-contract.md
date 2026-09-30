@@ -14,6 +14,9 @@ contract stabilizes.
 - The source tree can build a wheel.
 - The built wheel installs into a clean virtualenv.
 - Console-script entrypoints execute from the installed wheel.
+- The installed wheel starts its monitor on loopback under the isolated temp
+  home, and bounded HTTP checks cover `/`, `/status`, `/api/status.json`, and
+  `/api/sessions.json` without exposing the caller's home or checkout path.
 - `ctx-init --hooks` writes Claude settings only under an isolated temp home.
 - A deterministic fake Claude host reads the generated settings and executes
   the installed PostToolUse and Stop hook commands without calling Anthropic
@@ -37,7 +40,8 @@ contract stabilizes.
 - It does not execute hooks inside a live Claude Code process by default. The
   live host path is opt-in because it can consume Anthropic or provider quota.
 - It does not connect to a real third-party MCP server.
-- It does not browser-test the monitor dashboard.
+- The default monitor check is HTTP-only. It does not launch a browser or run
+  the dashboard's JavaScript interactions; those remain in the browser lane.
 - It does not simulate process kills or power loss during writes.
 
 Those checks stay intentionally manual or opt-in until they are stable enough
@@ -89,6 +93,8 @@ CI uses the default fake-host path and does not spend model quota.
 
 - Wheel build failure: inspect package metadata and `pyproject.toml`.
 - Install failure: inspect dependency constraints and `pip check` output.
+- Monitor failure: inspect the installed `python -m ctx_monitor serve` output,
+  loopback routing, and the isolated temp-home paths.
 - `ctx-init` failure: inspect packaged entrypoints and hook module paths.
 - Fake Claude hook-smoke failure: inspect generated `settings.json`, packaged
   hook module paths, and whether PostToolUse/Stop hook schemas changed.

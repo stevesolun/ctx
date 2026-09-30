@@ -5,7 +5,7 @@ already supports:
 
 | Your host | Use |
 |---|---|
-| MCP-native (Claude Code, Claude Agent SDK, Cline, Goose, OpenHands, Continue) | **MCP server** — no Python integration code; install the Python package, then spawn `ctx-mcp-server` |
+| A host whose current version accepts a stdio MCP server | **MCP server** — no Python integration code; install the Python package, then verify the host-specific configuration and `ctx-mcp-server` handshake below |
 | Anything that isn't MCP-native but runs Python | **Python library** — `from ctx import recommend_bundle, ...` |
 | "I just want to run an agent and get recommendations" | **`ctx run` CLI** — our built-in harness |
 | LoopFlow or another loop that already owns plan/act/observe | **LoopFlow adapter** — `python -m ctx.adapters.loopflow` before planning |
@@ -26,18 +26,43 @@ pip install "claude-ctx[harness]"
 
 This puts `ctx-mcp-server` on your PATH. Then wire it into your host:
 
+### Evidence boundary for named hosts
+
+The blocks below are **version-dependent configuration examples**, **not
+external-host interoperability evidence**. CTX's clean-host tests exercise
+installed package entrypoints; local protocol tests exercise `ctx-mcp-server`
+directly. They do not establish that a
+particular release of Claude Code, Cline, Continue, Goose, and OpenHands accepts
+the shown configuration or exposes CTX tools. The Claude Agent SDK dictionary
+shape was checked against its upstream type definition, but no SDK host was
+launched.
+
+Before relying on any named-host recipe, use that host's current documentation
+and an isolated profile to verify that the host:
+
+1. accepts and lists the configuration;
+2. starts `ctx-mcp-server` without a shell wrapper;
+3. completes `initialize` and `tools/list`; and
+4. completes one read-only `tools/call`, such as `ctx__wiki_search`, before you
+   grant any lifecycle write tools.
+
+Those checks need no paid model call when the host provides an MCP diagnostic.
+If the host can exercise MCP only through an agent turn, interoperability stays
+unverified until the host owner deliberately runs that external acceptance.
+
 ### Claude Code
 
 ```bash
 claude mcp add ctx-wiki -- ctx-mcp-server
 ```
 
-The tools `ctx__recommend_bundle`, `ctx__recommend_related`,
-`ctx__graph_query`, `ctx__wiki_search`, and `ctx__wiki_get` appear to
-Claude on the next turn, alongside runtime lifecycle tools such as
-`ctx__load_entity`, `ctx__mark_entity_used`, and `ctx__session_state`.
-Ask "What skills help with FastAPI auth?" to invite the host to use them;
-tool choice remains the host's decision.
+Treat this as a configuration recipe, not proof that the tools loaded. Perform
+the host-native checks above. A successful `tools/list` should include read-only
+tools such as `ctx__recommend_bundle`, `ctx__recommend_related`,
+`ctx__graph_query`, `ctx__wiki_search`, and `ctx__wiki_get`; a server started
+without a restrictive allowlist also advertises runtime lifecycle tools such as
+`ctx__load_entity`, `ctx__mark_entity_used`, and `ctx__session_state`. Tool
+choice remains the host's decision.
 
 For permissioned adapters that should expose only read/query tools, start the
 same server with `--allow-tools` and `--entity-types`. For example,
@@ -62,8 +87,9 @@ Creating these options does not launch a host or verify a live tool call.
 
 ### Cline / Continue.dev
 
-Add to your MCP server config (`~/.config/cline/mcp.json` or the
-Continue equivalent):
+The exact config location and schema are host-version dependent. Consult the
+installed host's current documentation; the following shape is an example, not
+a verified import into either host:
 
 ```json
 {
@@ -77,7 +103,8 @@ Continue equivalent):
 
 ### Goose
 
-`~/.config/goose/config.yaml`:
+Consult the installed Goose version's documentation before using this example
+shape; it was not imported into a Goose runtime during CTX verification:
 
 ```yaml
 extensions:
@@ -88,7 +115,9 @@ extensions:
 
 ### OpenHands
 
-OpenHands' runtime config:
+Consult the installed OpenHands version's documentation before using this
+example shape; it was not imported into an OpenHands runtime during CTX
+verification:
 
 ```json
 {

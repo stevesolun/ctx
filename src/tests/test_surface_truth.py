@@ -227,6 +227,31 @@ def test_some_nav_page_documents_the_product() -> None:
     assert naming, "no page in the mkdocs nav mentions `ctx fit`"
 
 
+def test_host_attachment_recipes_do_not_claim_unverified_interoperability() -> None:
+    """Named-host examples must say what was and was not exercised.
+
+    CTX can prove its own stdio server locally. That is not evidence that every
+    named host still accepts a copied configuration shape or exposes the tools
+    without a host-native configuration and handshake check.
+    """
+
+    page = (DOCS / "harness" / "attaching-to-hosts.md").read_text(encoding="utf-8")
+    flat = _flat(page)
+
+    assert "version-dependent configuration examples" in flat
+    assert "not external-host interoperability evidence" in flat
+    assert "Claude Code, Cline, Continue, Goose, and OpenHands" in flat
+    assert "appear to Claude on the next turn" not in flat
+    for proof in (
+        "accepts and lists the configuration",
+        "starts `ctx-mcp-server`",
+        "`initialize`",
+        "`tools/list`",
+        "one read-only `tools/call`",
+    ):
+        assert proof in flat, f"host-native verification omits {proof!r}"
+
+
 # ---------------------------------------------------------------------------
 # `--apply` and `--pr` write different things, and the docs said otherwise.
 # ---------------------------------------------------------------------------
