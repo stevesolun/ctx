@@ -653,6 +653,75 @@ for line in sys.stdin:
         assert ("isError" if error_at == "isError" else "code=-32603") in str(exc.value)
 
     @pytest.mark.parametrize(
+        ("malformed_at", "error_pattern"),
+        [
+            ("block", "content block must be a JSON object"),
+            ("type", "content type must be a string"),
+            ("text", "text content must be a string"),
+            ("mime", "image mimeType must be a string"),
+        ],
+    )
+    @pytest.mark.parametrize("nested_kind", ["array", "object"])
+    @pytest.mark.parametrize("is_error", [False, True])
+    def test_malformed_tool_content_rejects_without_credential_diagnostics(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+        malformed_at: str,
+        error_pattern: str,
+        nested_kind: str,
+        is_error: bool,
+    ) -> None:
+        secret = "opaque\nvalue'with\"quotes\\and\\slashes"
+        nested: object = {"nested": [secret]}
+        if nested_kind == "array":
+            nested = [secret]
+        blocks: dict[str, object] = {
+            "block": [nested],
+            "type": {"type": nested},
+            "text": {"type": "text", "text": nested},
+            "mime": {"type": "image", "mimeType": nested},
+        }
+        result = {"isError": is_error, "content": [blocks[malformed_at]]}
+        server = """
+import json, sys
+for line in sys.stdin:
+    request = json.loads(line)
+    if 'id' not in request:
+        continue
+    result = ({'protocolVersion': '2025-11-25'} if request['method'] == 'initialize'
+              else json.loads(sys.argv[1]))
+    print(json.dumps({'jsonrpc': '2.0', 'id': request['id'], 'result': result}), flush=True)
+"""
+        procs = _capture_popen(monkeypatch)
+        client = McpClient(
+            McpServerConfig(
+                name="malformed-content",
+                command=sys.executable,
+                args=("-c", server, json.dumps(result)),
+                env={"MCP_API_KEY": secret},
+                startup_timeout=2.0,
+                request_timeout=2.0,
+            )
+        )
+        try:
+            client.start()
+            assert client.negotiated_protocol_version == "2025-11-25"
+            with pytest.raises(McpServerError, match=error_pattern) as exc:
+                client.call_tool("echo", {})
+        finally:
+            client.stop()
+
+        assert client._proc is None
+        assert client._stderr_redaction_values == ()
+        assert len(procs) == 1
+        _assert_exited(procs[0])
+        diagnostic = "".join(traceback.format_exception(exc.value)) + caplog.text
+        assert secret not in diagnostic
+        assert repr(secret)[1:-1] not in diagnostic
+        assert "opaque" not in diagnostic
+
+    @pytest.mark.parametrize(
         ("raw", "forbidden"),
         [
             (
@@ -1555,7 +1624,24 @@ class TestFlattenContent:
     def test_non_dict_block(self) -> None:
         from ctx.adapters.generic.tools.mcp_router import _flatten_content
 
-        assert _flatten_content(["just a string"]) == "just a string"
+        with pytest.raises(McpServerError, match="content block must be a JSON object"):
+            _flatten_content(["just a string"])
+
+    def test_valid_mixed_content_preserves_text_and_safe_summaries(self) -> None:
+        from ctx.adapters.generic.tools.mcp_router import _flatten_content
+
+        text = "verbatim\ntext'with\"quotes\\and\\slashes"
+        assert (
+            _flatten_content(
+                [
+                    {"type": "text", "text": text},
+                    {"type": "image", "mimeType": "image/png", "data": "private-image"},
+                    {"type": "resource", "resource": {"uri": "file:///private", "text": "private"}},
+                    {"type": "fancy", "blob": "private-unknown"},
+                ]
+            )
+            == text + "[image/png image omitted][resource omitted][fancy block omitted]"
+        )
 
 
 # ── Config dataclass ────────────────────────────────────────────────────────

@@ -13,11 +13,12 @@
 
 - Updated: 2026-09-30 (Europe/Prague)
 - Active goal: inventory, test, repair, and retest every shipped user behavior
-- Phase: review repairs independently accepted; focused source tests passed
+- Phase: 312 focused tests passed; R1 accepted, R2 salt-lock compatibility unresolved
 - Release decision: **1.0.21 REMAINS RELEASED; NEW AUDIT OPEN; NO NEW RELEASE DECISION**
 - Branch: `codex/full-feature-audit-delivery`
 - Active delivery branch: `codex/full-feature-audit-delivery`, submitted head
-  `18253e9a37cb215856fb79bac01ea9c7482eb6e6`; current repair is uncommitted
+  `18253e9a37cb215856fb79bac01ea9c7482eb6e6`; current review starts from committed
+  repair `4e6a61b66f2bfb7a63e003d759fce7a63eac62e9`
 - Active delivery worktree:
   `/Users/steves/.no-mistakes/worktrees/88e19bf0677f/01M3RWB2ZY374H29CTPEPNSWVH`
 - Current no-mistakes run is in its assigned review repair phase. The outer
@@ -49,9 +50,9 @@
   - preserve user-owned and out-of-scope `.scratch/`
 - Parallel execution: all 314 active stories and four historical rows have
   received clause-by-clause coverage review. The coordinator owns CSV writes;
-  299 rows carry specific passing acceptance evidence (179 tested, 120
-  retested), while 13 need validation, two have explicit owner prerequisites,
-  and four are deprecated. The real optional SkillSpector scan passed under
+  297 rows carry specific passing acceptance evidence (179 tested, 118
+  retested), while 13 need validation, two telemetry rows need fixes, two have
+  explicit owner prerequisites, and four are deprecated. The real optional SkillSpector scan passed under
   network denial with no credentials or model call, including coordinator
   replay. The actual clean-host script now tests installed dashboard HTTP;
   coordinator replay and independent semantic review passed. Independent code
@@ -423,6 +424,82 @@ Support contact: `https://support.github.com/contact`
 
 ## Checkpoint log
 
+- 2026-09-30: Source re-review at committed `4e6a61b6`, still within the audit
+  scope relative to `11b582a7`, reopened the same two defect records. R1 still
+  converted malformed tool content into escaped representations before
+  credential redaction. R2 still selected a different preview identity when
+  salt storage was unavailable, despite real export successfully checkpointing
+  with the established unsalted hash. Coordinator failing-first execution on
+  unchanged production source produced **41 failed, 37 passed, 221 deselected
+  in 22.23 seconds**, exit 1: 17 malformed-content failures and 24 degraded
+  salt/fallback failures. The exact command was `PYTHONPATH=src python -m
+  pytest -q --no-cov src/tests/test_mcp_router.py
+  src/tests/test_enterprise_telemetry.py -k
+  'malformed_tool_content_rejects_without_credential_diagnostics or
+  test_non_dict_block or valid_mixed_content_preserves_text_and_safe_summaries
+  or partial_config_export_preview_preserves_checkpoint_and_files' --tb=short`;
+  local raw output is `.gate/review-r3-red.txt`.
+  R1 now rejects malformed block/type/text/mime values before representation
+  and preserves legitimate summaries and cleanup. R2 distinguishes resolved
+  unsalted identity from default lookup at the shared boundary, preserving the
+  exact prefixed SHA-256 fallback and existing keyed HMAC. The 60-case telemetry
+  matrix covers global and partial configurations, a portable non-directory
+  salt parent, existing checkpoints, exact independent digest expectations,
+  before/after file snapshots, and a prohibition on preview creation-helper
+  calls. README/docs inventory advances from 9,028 to 9,081 for 17 added MCP
+  cases and 36 added telemetry combinations; the outer preflight owns the
+  authoritative collection check. Focused repaired-tree verification passed;
+  post-suite independent review accepted R1 but found another R2 storage case.
+  The four existing canonical rows retain the same two defect IDs
+  and all original acceptance contracts; Needs Validation sentinel and blank
+  date/commit/retest fields remain untouched. This phase does not run outer
+  pipeline stages or external/model/release/settings/Support actions. The later
+  document phase owns reconciliation of historical uncommitted-repair wording
+  after committed verification; older checkpoint evidence remains scoped to
+  its named tree.
+- 2026-09-30: With both writers frozen, coordinator ran the single focused
+  post-fix command `PYTHONPATH=src python -m pytest -q --no-cov
+  src/tests/test_mcp_router.py src/tests/test_enterprise_telemetry.py
+  src/tests/test_feature_user_story_tracker.py --tb=short`: **312 passed in
+  7.61 seconds**, exit 0 (299 MCP/telemetry cases and 13 canonical-tracker
+  checks). Local raw output: `.gate/review-r3-focused.txt`. Independent
+  read-only review was started after this pass; it does not substitute for
+  the coordinator's execution evidence. Source/tests remain frozen, identified
+  by SHA-256 below. These results qualify this repair over `4e6a61b6` only;
+  no outer authoritative preflight, lint, docs, push/PR or CI phase ran here.
+
+  - `src/ctx/adapters/generic/tools/mcp_router.py`:
+    `a9fcb8dbebb3903cff3647b82ef7f0c9b6d624d3fd9ca7f632f64ccd6274a159`
+  - `src/ctx/telemetry/__init__.py`:
+    `76c622d437192d3e1c756aa4c2a5508e3a86ddeafcbfa879aadf6bd3d74ed6fb`
+  - `src/tests/test_mcp_router.py`:
+    `7eac1487c74f71a2c31dbaf6b18f2c56ed903e23a99813be4a1146fc0aae6811`
+  - `src/tests/test_enterprise_telemetry.py`:
+    `569daf5b28eeec8ad978e03e7a965f4be725cc9c378e29cb257f0fe1eba183f1`
+- 2026-09-30: Post-suite independent read-only review accepted R1's shared
+  malformed-content boundary and found R2 still incomplete when a nonempty
+  salt is readable but its companion lock is unusable. A directory at
+  `hash-salt.lock` is a portable example: real export requires the writable
+  lock and catches its `OSError`, selecting the existing unsalted/global
+  fallback; preview can read `hash-salt` and selects HMAC. Coordinator source
+  inspection confirmed `_read_or_create_hash_salt` and `file_lock` diverge from
+  the preview branch in this way; this additional edge was not executed.
+  The passing 60-case matrix covers unavailable salt parents, not unusable
+  locks beside readable salts. `CLI-043` and `LANE-D-004` are now Needs Fix
+  under the same defect ID, preserving their historical evidence and original
+  acceptance contracts. The other 13 Needs Validation rows retain all reserved
+  sentinel/blank fields. R1 is accepted; R2's tested improvement is retained
+  without claiming complete resolution.
+  A read-only preview cannot infer every failure of a future writable lock.
+  Reading existing salt before locking would change legacy unsalted checkpoint
+  identity, while matching alternate checkpoint hashes can change salt-rotation
+  behavior. Those compatibility choices were not silently changed; outer
+  re-review must settle them before full R2 acceptance. No source/test changes
+  or additional test executions followed the 312-test pass.
+  Independent final metadata inspection accepted the preserved contracts,
+  defect IDs, reserved fields and reconciled counts. The 13 tracker passes
+  apply to the pre-review-result metadata snapshot; the final Needs Fix and
+  evidence updates received read-only review, not another test execution.
 - 2026-09-30: Review of submitted `18253e9a` against base `11b582a7` confirmed
   R1 (server-controlled protocol/error diagnostics bypass credential redaction)
   and R2 (partial-config previews use a different hash identity from exports).

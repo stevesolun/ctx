@@ -1301,13 +1301,19 @@ def _flatten_content(content: list[Any] | None) -> str:
     parts: list[str] = []
     for block in content:
         if not isinstance(block, dict):
-            parts.append(str(block))
-            continue
+            raise McpServerError("tool content block must be a JSON object")
         btype = block.get("type")
+        if not isinstance(btype, str):
+            raise McpServerError("tool content type must be a string")
         if btype == "text":
-            parts.append(str(block.get("text", "")))
+            text = block.get("text", "")
+            if not isinstance(text, str):
+                raise McpServerError("tool text content must be a string")
+            parts.append(text)
         elif btype == "image":
             mime = block.get("mimeType", "image/*")
+            if not isinstance(mime, str):
+                raise McpServerError("tool image mimeType must be a string")
             parts.append(f"[{mime} image omitted]")
         elif btype == "resource":
             parts.append("[resource omitted]")

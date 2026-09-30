@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from email.message import Message
 from io import BytesIO
+import hashlib
 import json
 import os
 import stat
@@ -960,8 +961,12 @@ def test_telemetry_export_cli_dry_run_is_read_only_in_fresh_home(tmp_path: Path)
 
 
 @pytest.mark.parametrize("signal", ["events", "metrics", "traces"])
-@pytest.mark.parametrize("global_salt", ["existing_file", "missing_file", "inline", "absent"])
-@pytest.mark.parametrize("partial_privacy", ["absent", "empty_bytes"])
+@pytest.mark.parametrize(
+    "global_salt", ["existing_file", "missing_file", "unavailable", "inline", "absent"]
+)
+@pytest.mark.parametrize(
+    "partial_privacy", ["absent", "empty_bytes", "global_config", "unavailable_local"]
+)
 def test_partial_config_export_preview_preserves_checkpoint_and_files(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -971,13 +976,15 @@ def test_partial_config_export_preview_preserves_checkpoint_and_files(
 ) -> None:
     salt_path = tmp_path / "identity" / "hash-salt"
     global_privacy: dict[str, Any] = {}
-    if global_salt in {"existing_file", "missing_file"}:
+    if global_salt in {"existing_file", "missing_file", "unavailable"}:
         global_privacy["hash_salt_path"] = str(salt_path)
     if global_salt == "existing_file":
         salt_path.parent.mkdir()
         salt_path.write_text("global-tenant\n", encoding="utf-8")
     elif global_salt == "inline":
         global_privacy["hash_salt"] = "global-tenant"
+    elif global_salt == "unavailable":
+        salt_path.parent.write_text("not a directory", encoding="utf-8")
     monkeypatch.delenv("CTX_TELEMETRY_HASH_SALT", raising=False)
     for name in (
         "OTEL_EXPORTER_OTLP_ENDPOINT",
@@ -986,10 +993,11 @@ def test_partial_config_export_preview_preserves_checkpoint_and_files(
         "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
     ):
         monkeypatch.delenv(name, raising=False)
+    global_config: dict[str, Any] = {"privacy": global_privacy}
     monkeypatch.setattr(
         telemetry,
         "_config_get",
-        lambda key, default: {"privacy": global_privacy} if key == "telemetry" else default,
+        lambda key, default: global_config if key == "telemetry" else default,
     )
     path = tmp_path / f"{signal}.jsonl"
     record_config: dict[str, Any] = {"privacy": {"hash_salt": "fixture-salt"}}
@@ -1017,9 +1025,16 @@ def test_partial_config_export_preview_preserves_checkpoint_and_files(
         "otlp": {"endpoint": f"http://127.0.0.1:4318/v1/{otlp_signal}"},
     }
     signal_config = {"enabled": True, "path": str(path), "export": export_config}
-    config: dict[str, Any] = signal_config if signal == "events" else {signal: signal_config}
+    config: dict[str, Any] | None = signal_config if signal == "events" else {signal: signal_config}
     if partial_privacy == "empty_bytes":
         config["privacy"] = {"hash_salt": b""}
+    elif partial_privacy == "global_config":
+        global_config.update(config)
+        config = None
+    elif partial_privacy == "unavailable_local":
+        local_salt_parent = tmp_path / "local-identity"
+        local_salt_parent.write_text("not a directory", encoding="utf-8")
+        config["privacy"] = {"hash_salt_path": str(local_salt_parent / "hash-salt")}
     export, preview = {
         "events": (telemetry.export_events, telemetry.preview_export),
         "metrics": (telemetry.export_metrics, telemetry.preview_metrics_export),
@@ -1029,6 +1044,9 @@ def test_partial_config_export_preview_preserves_checkpoint_and_files(
 
     def fake_post_otlp_http(payload: dict[str, Any], settings: dict[str, Any]) -> None:
         calls.append(payload)
+
+    def reject_salt_creation(path: Path) -> str:
+        pytest.fail(f"preview attempted salt creation: {path}")
 
     def snapshot() -> dict[Path, tuple[int, int, bytes | None]]:
         return {
@@ -1042,7 +1060,9 @@ def test_partial_config_export_preview_preserves_checkpoint_and_files(
 
     monkeypatch.setattr(telemetry, "_post_otlp_http", fake_post_otlp_http)
     before = snapshot()
-    pending = preview(path, trusted_root=tmp_path, config=config)
+    with monkeypatch.context() as readonly:
+        readonly.setattr(telemetry, "_read_or_create_hash_salt", reject_salt_creation)
+        pending = preview(path, trusted_root=tmp_path, config=config)
     assert snapshot() == before
     assert pending.attempted == 1
     assert pending.status == "ok"
@@ -1055,12 +1075,27 @@ def test_partial_config_export_preview_preserves_checkpoint_and_files(
     assert exported.checkpoint_advanced is True
     assert exported.checkpoint_path is not None
     assert Path(exported.checkpoint_path).is_file()
+    if global_salt != "missing_file":
+        assert pending.destination_hash == exported.destination_hash
+    if global_salt in {"unavailable", "absent"}:
+        checkpoint = json.loads(Path(exported.checkpoint_path).read_text(encoding="utf-8"))
+        assert checkpoint["source_path_hash"] == "sha256:" + hashlib.sha256(
+            b"ctx.telemetry.v1\x00" + str(path).encode("utf-8")
+        ).hexdigest()
+        destination = f"otlp_http:http://127.0.0.1:4318/v1/{otlp_signal}"
+        if signal == "metrics":
+            destination = f"metrics:{destination}"
+        assert checkpoint["destination_hash"] == "sha256:" + hashlib.sha256(
+            b"ctx.telemetry.v1\x00" + destination.encode("utf-8")
+        ).hexdigest()
     assert len(calls) == 1
     if global_salt == "missing_file":
         assert salt_path.is_file()
 
     before = snapshot()
-    drained = preview(path, trusted_root=tmp_path, config=config)
+    with monkeypatch.context() as readonly:
+        readonly.setattr(telemetry, "_read_or_create_hash_salt", reject_salt_creation)
+        drained = preview(path, trusted_root=tmp_path, config=config)
     assert snapshot() == before
     assert drained.attempted == 0
     assert drained.exported == 0

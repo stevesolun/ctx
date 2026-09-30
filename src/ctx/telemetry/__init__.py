@@ -8,6 +8,7 @@ disabled by default and must be explicitly enabled in config.
 from __future__ import annotations
 
 from email.utils import parsedate_to_datetime
+from enum import Enum
 import hashlib
 import hmac
 from http.client import RemoteDisconnected
@@ -412,15 +413,18 @@ _CURRENT_SPAN: ContextVar[TelemetrySpan | None] = ContextVar(
     "ctx_telemetry_span",
     default=None,
 )
-_PREVIEW_HASH_SALT = secrets.token_urlsafe(32)
 
 
-def hash_identifier(value: str, *, salt: str | bytes | None = None) -> str:
+class _HashSaltState(Enum):
+    UNSALTED = "unsalted"
+
+
+def hash_identifier(value: str, *, salt: str | bytes | _HashSaltState | None = None) -> str:
     """Return a stable non-reversible identifier for paths, repos, or queries."""
 
     raw = value.encode("utf-8")
     resolved_salt = salt if salt is not None else _resolve_hash_salt()
-    if resolved_salt is None:
+    if resolved_salt is None or resolved_salt is _HashSaltState.UNSALTED:
         digest = hashlib.sha256(b"ctx.telemetry.v1\x00" + raw).hexdigest()
     else:
         key = resolved_salt.encode("utf-8") if isinstance(resolved_salt, str) else resolved_salt
@@ -764,7 +768,7 @@ def exception_payload(
     exc: BaseException,
     *,
     config: Mapping[str, Any] | None = None,
-    hash_salt: str | bytes | None = None,
+    hash_salt: str | bytes | _HashSaltState | None = None,
     stack_limit: int = 50,
 ) -> dict[str, Any]:
     """Return privacy-safe exception attributes with hashed message and stack."""
@@ -2192,7 +2196,7 @@ def _resolve_hash_salt(
     privacy: Mapping[str, Any] | None = None,
     *,
     create: bool = True,
-) -> str | bytes | None:
+) -> str | bytes | _HashSaltState | None:
     effective_privacy = privacy
     if effective_privacy is None:
         raw = _config_get("telemetry", {}) or {}
@@ -2213,8 +2217,10 @@ def _resolve_hash_salt(
 
     configured = _mapping_get(effective_privacy, "hash_salt", "")
     if isinstance(configured, bytes):
-        if not configured and not create and privacy is not None:
-            return _resolve_hash_salt(create=False)
+        if not configured and not create:
+            if privacy is not None:
+                return _resolve_hash_salt(create=False)
+            return _HashSaltState.UNSALTED
         return configured or None
     configured_text = str(configured)
     if configured_text:
@@ -2222,16 +2228,22 @@ def _resolve_hash_salt(
 
     configured_path = _mapping_get(effective_privacy, "hash_salt_path", None)
     if not configured_path:
-        if not create and privacy is not None:
-            return _resolve_hash_salt(create=False)
+        if not create:
+            if privacy is not None:
+                return _resolve_hash_salt(create=False)
+            return _HashSaltState.UNSALTED
         return None
     salt_path = Path(str(configured_path))
     if not create:
         try:
             existing = _resolve_path(salt_path).read_text(encoding="utf-8").strip()
         except OSError:
-            return _PREVIEW_HASH_SALT
-        return existing or _PREVIEW_HASH_SALT
+            existing = ""
+        if existing:
+            return existing
+        if privacy is not None:
+            return _resolve_hash_salt(create=False)
+        return _HashSaltState.UNSALTED
     try:
         return _read_or_create_hash_salt(salt_path)
     except OSError:
@@ -3784,7 +3796,7 @@ def _otlp_value(value: Any) -> dict[str, Any]:
 def _redact_local_host_paths(
     text: str,
     *,
-    hash_salt: str | bytes | None,
+    hash_salt: str | bytes | _HashSaltState | None,
 ) -> str:
     redacted = text
 
@@ -3800,7 +3812,7 @@ def _sanitize_payload(
     payload: Mapping[str, Any],
     *,
     privacy_mode: str,
-    hash_salt: str | bytes | None = None,
+    hash_salt: str | bytes | _HashSaltState | None = None,
     max_keys: int = _MAX_PAYLOAD_KEYS,
     max_value_len: int = _MAX_PAYLOAD_VALUE_LEN,
     depth: int = 0,
@@ -3836,7 +3848,7 @@ def _sanitize_value(
     value: Any,
     *,
     privacy_mode: str,
-    hash_salt: str | bytes | None,
+    hash_salt: str | bytes | _HashSaltState | None,
     max_value_len: int,
     depth: int,
     max_keys: int = _MAX_PAYLOAD_KEYS,
