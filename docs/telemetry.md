@@ -389,6 +389,57 @@ next to the spool as `events.jsonl.export-checkpoint.json`, so later runs export
 only new events. Use `--checkpoint /path/to/checkpoint.json` to choose another
 checkpoint file, or `--all` when you intentionally want to replay the full spool.
 
+Checkpoint compatibility metadata separates acknowledged progress from the salt
+currently available for hashing exported identifiers. It scopes progress to the
+source, signal, sink, destination, and configured salt policy, using digests
+rather than raw paths, endpoints, or keys. Temporary salt or lock failures and
+subsequent recovery keep the cursor. Automatically regenerating a missing salt
+also keeps it. Replacing an existing salt with a different value, changing an
+explicit environment or inline salt, or changing the source, signal, destination,
+or salt policy starts a new export scope. Identifier hashing itself retains its
+existing keyed algorithm and unsalted fallback.
+
+Checkpoint rotation follows the key selected by a read-only lookup. A readable
+configured file remains authoritative even when its lock cannot be used for
+payload hashing. Changes to an unused fallback key do not reset progress; a
+fallback key becomes relevant when the primary key cannot be read.
+Automatic salt creation writes an owner-only
+`<hash_salt_path>.generation.json` file containing a version and key fingerprint,
+without the key itself. This lets later exports recognize generation performed
+by ordinary capture or identifier hashing. Keep this file with its salt;
+checkpoints remember generation history so restoring a previously observed key
+manually still counts as rotation.
+
+Older checkpoints migrate on a real export, including an export with no pending
+records. Dry-run previews only read this metadata; they never create salts,
+locks, checkpoints, or status files. A legacy keyed checkpoint must match its
+historical source and destination hashes using an available key. If its key is
+unavailable or generation history makes that identity ambiguous, export stops
+with an actionable identity error instead of silently replaying the spool. This
+also covers restoring an older generated key that does not match a legacy
+checkpoint. Restore the original key
+or use `--all` to explicitly replay it. Automatic event and metric capture keeps
+spooling locally if this prevents continuous export.
+An old keyed checkpoint also cannot distinguish a newly configured explicit
+fallback from one already present before a file failure. If that fallback cannot
+establish the old key, the same recovery choice applies. Changing only the source
+or destination with a recognizable key starts a new scope; changing both at once
+may leave a legacy checkpoint ambiguous and require `--all` or a fresh checkpoint.
+
+A legacy unsalted checkpoint has no key provenance. Its first available
+file-backed key is treated as storage recovery and adopted without replay;
+the next real export records that adoption, even if no records are pending.
+Later replacements reset the scope. A selected explicit environment or inline key,
+including a global fallback behind an unreadable file, resets an old unsalted
+checkpoint. This legacy ambiguity cannot be
+resolved from old checkpoint contents alone. New checkpoints also record the
+signal explicitly, so sharing a custom checkpoint between signals cannot make
+one signal inherit another's acknowledged progress.
+Legacy event and trace checkpoints lack this signal field: retain their
+dedicated checkpoint files and endpoints until migration. Older exporters do
+not understand compatibility metadata, so do not alternate old and new exporter
+versions against a migrated checkpoint.
+
 The command exits non-zero if the selected exporter or trace preview validation
 fails. Use
 `--fail-on-degraded` when running from cron or CI and you also want malformed

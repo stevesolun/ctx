@@ -13,12 +13,12 @@
 
 - Updated: 2026-09-30 (Europe/Prague)
 - Active goal: inventory, test, repair, and retest every shipped user behavior
-- Phase: 312 focused tests passed; R1 accepted, R2 salt-lock compatibility unresolved
+- Phase: R1 accepted; approved R2 repair passed 297 focused checks and independent re-review
 - Release decision: **1.0.21 REMAINS RELEASED; NEW AUDIT OPEN; NO NEW RELEASE DECISION**
 - Branch: `codex/full-feature-audit-delivery`
 - Active delivery branch: `codex/full-feature-audit-delivery`, submitted head
   `18253e9a37cb215856fb79bac01ea9c7482eb6e6`; current review starts from committed
-  repair `4e6a61b66f2bfb7a63e003d759fce7a63eac62e9`
+  repair `99883b4d69527c4efbbf86d53e0d148939a914e2`
 - Active delivery worktree:
   `/Users/steves/.no-mistakes/worktrees/88e19bf0677f/01M3RWB2ZY374H29CTPEPNSWVH`
 - Current no-mistakes run is in its assigned review repair phase. The outer
@@ -34,8 +34,15 @@
   passes, five documented skips, 92.03% coverage. The supplied checkpoint
   metadata names `/tmp/ctx-feature-audit-fast-18253e9a.log` and original-checkout
   `.gate/local-fast.json`; this review read the retained log, not that checkout.
-  This is evidence for `18253e9a`, not the later uncommitted R1/R2 repair tree
+  This is evidence for `18253e9a`, not the later R1/R2 repair commits or current tree
   or complete delivery. `SEC-002` remains Needs Validation.
+- Human authorization for the remaining R2 compatibility change: “I approve
+  the compatibility repair.” This permits a versioned checkpoint migration
+  that preserves acknowledged progress across salt-storage failure and recovery,
+  while retaining deliberate salt-rotation and destination scoping. The
+  accepted MCP repair and prior commits remain intact. The current repair is
+  being checked only within this assigned review phase; earlier 312-test
+  evidence does not certify the new compatibility implementation.
 - Release commit: `38a33f8784e2bf408430a98fed81206c2cf39d00`
 - Release tag object: `a7b8e78559fda1d44dca844393458272071ae89b`
 - LFS migration PR: `https://github.com/stevesolun/ctx/pull/275`
@@ -50,18 +57,19 @@
   - preserve user-owned and out-of-scope `.scratch/`
 - Parallel execution: all 314 active stories and four historical rows have
   received clause-by-clause coverage review. The coordinator owns CSV writes;
-  297 rows carry specific passing acceptance evidence (179 tested, 118
-  retested), while 13 need validation, two telemetry rows need fixes, two have
+  299 rows carry specific passing acceptance evidence (179 tested, 120
+  retested), while 13 need validation, two have
   explicit owner prerequisites, and four are deprecated. The real optional SkillSpector scan passed under
   network denial with no credentials or model call, including coordinator
   replay. The actual clean-host script now tests installed dashboard HTTP;
   coordinator replay and independent semantic review passed. Independent code
   and prose lanes accepted the remaining repair families; 35 current defect
   records were appended to 65 canonical rows with original-contract hash
-  guards. All source writers are frozen; final independent metadata review
+  guards. Those audit source writers froze; final independent metadata review
   accepted all 65 guarded contracts and historical records with no blocking
-  findings. The current review has reopened only MCP exception diagnostics and
-  telemetry preview identity; their focused evidence is recorded below. Earlier full gates remain
+  findings. The current review continues only telemetry checkpoint compatibility;
+  the accepted MCP diagnostic fixes remain intact. Focused evidence is recorded
+  below. Earlier full gates remain
   valid for their checkpoints, not the later script/test/prose delta. The
   coordinator owns integration, state, GitHub mutations, and final gates.
 - LFS migration execution: three parallel lanes completed repository resolver,
@@ -84,6 +92,109 @@
   bare mirror, then restarted and verified the daemon. Safe cache and clean
   worktree cleanup reduced the Data volume's rounded used space from 280 GiB to
   262 GiB. No remote LFS object has been purged yet.
+
+## Approved telemetry checkpoint compatibility repair (2026-09-30)
+
+- Starting commit: `99883b4d69527c4efbbf86d53e0d148939a914e2`.
+  Human authorization: “I approve the compatibility repair.” This is a
+  continuation of `AUDIT-20260930-TELEMETRY-PREVIEW-IDENTITY`, not a new audit
+  or a replacement for its historical evidence. Accepted MCP R1 source and
+  tests are unchanged.
+- Coordinator source inspection confirmed the finding: checkpoint comparison
+  used whichever payload salt was currently available. Reading a salt did not
+  establish that the writer could obtain its lock; generating a key after
+  recovery changed the hashes of already acknowledged progress. A lock check
+  alone would not resolve both transitions.
+- Failing-first command against unchanged starting production source:
+  `PYTHONPATH="$PWD/src" python -m pytest -q --no-cov src/tests/test_telemetry_checkpoint_identity.py`.
+  Result: **46 failed, 15 passed in 31.00s**, exit 1, retained local log
+  `.gate/review-r4-red.txt`. The all-signal cases reproduced duplicate export
+  during lock failure, preview recounting after initial lock failure, and
+  replay after storage recovery. Legacy migration, no-op adoption, missing-key
+  diagnostics, and signal-isolation expectations also exposed missing behavior.
+- The selected design adds versioned checkpoint scope and salt-policy
+  provenance while retaining the existing payload hash algorithms. Independent
+  design review identified the legacy unsalted first-key ambiguity and the need
+  to persist adoption on a real no-op export. Operator policy is documented in
+  `docs/telemetry.md`; previews remain read-only. Further coordinator inspection
+  found that generation can occur during ordinary capture or identifier hashing
+  before export. Generation provenance therefore persists in an owner-only
+  fingerprint sidecar, with no change to the plaintext salt format. Checkpoints
+  remember generation history so automatic recovery is distinguished from
+  deliberate replacement or restoration of a previously observed key.
+- After the source/test writer froze, the coordinator formatted only
+  `src/ctx/telemetry/__init__.py` and
+  `src/tests/test_telemetry_checkpoint_identity.py`, then ran one focused
+  verification command:
+  `PYTHONPATH="$PWD/src" python -m pytest -q --no-cov src/tests/test_enterprise_telemetry.py src/tests/test_telemetry_checkpoint_identity.py src/tests/test_feature_user_story_tracker.py`.
+  Result: **282 passed in 134.13s**, exit 0; local log
+  `.gate/review-r4-focused.txt`. This includes the 115-case new compatibility
+  matrix and the existing telemetry and canonical-tracker checks. The initial
+  61-case red matrix was extended with 54 cases before this final focused run.
+  No broad tests, lint, preflight, pipeline control, or external delivery ran.
+- That first candidate added 115 cases. The follow-up below adds 15 more, raising
+  the documented test inventory from 9,081 to 9,211; README and the docs index
+  retain the explicit inventory label. This arithmetic is not a claim that
+  the full inventory passed on the current repair tree.
+- Exact SHA-256 identities of the first, 282-pass candidate over `99883b4d`
+  (superseded by the follow-up below):
+
+  | File | SHA-256 |
+  | --- | --- |
+  | `src/ctx/telemetry/__init__.py` | `6d23a07991c16c34adb8a2b12ea4bd1bd71bdc139fdcf90f3dc6711d6d748442` |
+  | `src/tests/test_telemetry_checkpoint_identity.py` | `d10a406916d2c7d30f2febeb70c632a38baea37cd2a8097b5d981054897e2d11` |
+  | `src/tests/test_enterprise_telemetry.py` (unchanged) | `569daf5b28eeec8ad978e03e7a965f4be725cc9c378e29cb257f0fe1eba183f1` |
+  | `docs/telemetry.md` | `ad494a97c847f3eeffaf0e0ae07dae6b5d8cc33e8f93b99811eb5b938f9afbb0` |
+
+- Independent read-only review confirmed those logs and hashes, then found a
+  legacy unsalted checkpoint could be adopted when an unavailable local file
+  selected a newly explicit global inline/custom-environment key. Coordinator
+  reproduction:
+  `PYTHONPATH="$PWD/src" python -m pytest -q --no-cov src/tests/test_telemetry_checkpoint_identity.py -k selected_explicit_global_fallback`
+  produced **6 failed, 115 deselected in 0.35s**, exit 1, log
+  `.gate/review-r4-fallback-red.txt`.
+- Coordinator inspection also found that a readable generated key plus a
+  changed source or endpoint could falsely trigger the legacy unavailable-key
+  guard. Before further source edits,
+  `PYTHONPATH="$PWD/src" python -m pytest -q --no-cov src/tests/test_telemetry_checkpoint_identity.py -k available_generated_key_remains_scoped`
+  produced **6 failed, 121 deselected in 7.61s**, exit 1, log
+  `.gate/review-r4-legacy-scope-red.txt`. These are the same R2 compatibility
+  defect family. The first 282-case pass did not cover them.
+- The follow-up applies both matcher fixes together: selected explicit keys
+  reset an exact legacy unsalted checkpoint; an available key recognized by one
+  historical scope hash identifies a source/endpoint change. A full pair match
+  wins before partial matches are considered. Unmatched keyed legacy identity
+  under unavailable storage remains an actionable error, preserving safety when
+  an existing explicit fallback becomes active after a file failure. The
+  130-case matrix includes three additional controls for this last case.
+- After all follow-up fixes froze, the coordinator repeated only the focused
+  telemetry/compatibility/tracker command above. Result: **297 passed in
+  54.22s**, exit 0, log `.gate/review-r4-final-focused.txt`. This covers the
+  complete 130-case compatibility matrix, existing telemetry tests and 13
+  canonical-tracker checks. No production/test changes followed this pass.
+  Final SHA-256 identities:
+
+  | File | SHA-256 |
+  | --- | --- |
+  | `src/ctx/telemetry/__init__.py` | `d8e8211c68839a17d84ee246e655922600e3c4bbbdd6dce181b00441136fc1a5` |
+  | `src/tests/test_telemetry_checkpoint_identity.py` | `0fd01bb812b28f8d3a57686ff8483008e16c9e4affe8ec2e82d168d9ca5e8365` |
+  | `docs/telemetry.md` | `26e6a2cff969dc5eca1b3c4a2e25983c81568e803bfd07ddd5f63a2915fe8af8` |
+
+- Independent read-only final re-review **accepted with no actionable findings**.
+  The reviewer independently read the final retained result and matched all
+  three final hashes, then checked failure/recovery, legacy migration, explicit
+  rotation, scope changes, read-only previews, durable generation provenance,
+  CAS migration and continuous capture. The reviewer performed no tests or
+  writes. Accepted MCP source/tests remain unchanged. This is bounded review
+  and focused execution evidence, not full-delivery certification. The original
+  `CLI-043` and `LANE-D-004` defect records retain their historical IDs,
+  acceptance contracts, and earlier evidence; current results are supplemental.
+  Both telemetry rows return to Retested Pass. Their recorded commit remains
+  the historical acceptance checkpoint; this repair is identified by the final
+  source/test hashes until the outer executor commits it.
+  The outer executor still owns authoritative preflight and all remaining
+  delivery phases. Complete delivery, publication and owner prerequisites
+  remain unverified.
 
 ## Current goal map
 
