@@ -13,7 +13,8 @@ CSV SHA256 was `a3617aee4afb9c1b5304ddbe2937dffc3f9cbb18b00600b0c542b749d935c73b
 Later coordinator results may update that file; these are historical counts.
 
 Later coordinator evidence is in `verification-2f7a6a23.md`,
-`verification-05d16854.md`, and `verification-e187337a.md`; safe graph and
+`verification-05d16854.md`, `verification-e187337a.md`, and
+`verification-53986b36.md`; safe graph and
 telemetry examples are reproducible with `safe_examples.py` and explained in
 `safe-examples-evidence.md`. The earlier fast gate has one recorded timeout
 failure, so neither that report nor the per-story passes imply an all-green
@@ -23,7 +24,9 @@ separate. The subsequently identified clean-host script/dashboard integration
 gap is repaired and its actual installed-wheel command was independently
 replayed. `review-refreeze-20260930.md` records the later source/prose review
 and focused evidence; earlier gates do not cover that new delta. The canonical
-CSV is the sole current status authority.
+CSV is the sole current status authority. The later `53986b36` committed fast
+gate passed all 11 lanes, including this new delta; serial preflight/delivery
+and hosted checks remain distinct.
 
 ## Retained examples
 

@@ -13,7 +13,7 @@
 
 - Updated: 2026-09-30 (Europe/Prague)
 - Active goal: inventory, test, repair, and retest every shipped user behavior
-- Phase: repairs accepted; canonical evidence reconciliation and final committed gates
+- Phase: final parallel local gate passed; full delivery pipeline next
 - Release decision: **1.0.21 REMAINS RELEASED; NEW AUDIT OPEN; NO NEW RELEASE DECISION**
 - Branch: `codex/full-feature-audit`
 - Release commit: `38a33f8784e2bf408430a98fed81206c2cf39d00`
@@ -30,8 +30,8 @@
   - preserve user-owned and out-of-scope `.scratch/`
 - Parallel execution: all 314 active stories and four historical rows have
   received clause-by-clause coverage review. The coordinator owns CSV writes;
-  296 rows carry specific passing acceptance evidence (179 tested, 117
-  retested), while 16 need validation, two have explicit owner prerequisites,
+  299 rows carry specific passing acceptance evidence (179 tested, 120
+  retested), while 13 need validation, two have explicit owner prerequisites,
   and four are deprecated. The real optional SkillSpector scan passed under
   network denial with no credentials or model call, including coordinator
   replay. The actual clean-host script now tests installed dashboard HTTP;
@@ -348,7 +348,9 @@ path remains unproven. Production PyPI Trusted Publishing succeeded.
 
 ## Immediate next actions
 
-1. The `05d16854` fast gate passed all 11 lanes. Authoritative PR preflight at
+1. The final implementation `53986b36` fast gate passed all 11 lanes: 8,979
+   unit passes, five documented skips, 92.03% coverage, 341.916 seconds.
+   Session `50413` is terminal. Authoritative PR preflight at the earlier
    `e187337a` passed all 20 checks, including 8,977 unit passes, five documented
    skips, and 92.02% coverage. Sessions `92349` and `27260` are terminal;
    do not restart these successful source gates merely for metadata.
@@ -357,8 +359,9 @@ path remains unproven. Production PyPI Trusted Publishing succeeded.
    script, optional static scan, 94 Fit tests, and 56 latest tracker/surface/
    clean-host tests. Generated inventory, global static checks, and strict
    docs pass; retained source/prose hashes match.
-3. Commit the reviewed delta and run the committed fast gate, then drive the
-   full no-mistakes pipeline. Its configured test phase runs authoritative PR
+3. Commit the final result/three local acceptance records, proportionally
+   validate that metadata-only follow-up, then drive the full no-mistakes
+   pipeline. Its configured test phase runs authoritative PR
    preflight; do not redundantly run the same full preflight first. The pipeline
    owns any fixes while active and creates the push/PR; never duplicate that
    PR, skip its review decisions, or hand-merge. Inspect required hosted CI.
@@ -400,6 +403,25 @@ Support contact: `https://support.github.com/contact`
 
 ## Checkpoint log
 
+- 2026-09-30: Exact `53986b36` fast gate completed with exit0: all11 lanes,
+  8,979 unit passes, five documented skips, 92.03% coverage in341.916 seconds.
+  Session50413 is terminal. Durable evidence is
+  `qa/feature-audit/verification-53986b36.md`. The actual clean-host script and
+  two honest host-documentation contracts now pass; external interoperability
+  remains unclaimed. Canonical counts:299pass,13needs-validation,2owner
+  prerequisites,4deprecated. All29 retained source/prose hashes still match.
+  This follow-up changes evidence/state only; full delivery/serial preflight
+  and exact hosted CI remain, along with the explicitly open external rows.
+- 2026-09-30: Committed the accepted installed-dashboard, honest host guide,
+  real scanner evidence, and canonical repair records as `53986b36`. Only
+  user-owned `.scratch/` remained untracked. The exact committed fast gate is
+  running in session `50413`, log `/tmp/ctx-feature-audit-fast-53986b36.log`,
+  four isolated lanes at a time. Its explicit dirty-worktree allowance preserves
+  `.scratch/`; no uncommitted file enters the tested checkout. Initial lanes
+  passed. Recheck this handle before any restart. Latest remote readback still
+  has four unchanged open issues and no audit PR; GitHub traffic remains 303
+  views/102 unique visitors and 698 clones/139 unique cloners, September 15–28.
+  No LFS submission, release, merge, settings change, or paid model call occurred.
 - 2026-09-30: The preceding Support-only turn made no product-goal progress;
   this continuation applied 35 canonical defect families to 65 rows, retaining
   original-contract hashes, old bug IDs and external non-passes. Independent
