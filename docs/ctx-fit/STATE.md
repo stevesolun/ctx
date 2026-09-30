@@ -13,7 +13,7 @@
 
 - Updated: 2026-09-30 (Europe/Prague)
 - Active goal: inventory, test, repair, and retest every shipped user behavior
-- Phase: canonical-tracker reconciliation and parallel read-only audit
+- Phase: final local acceptance closure, tree freeze, and committed verification
 - Release decision: **1.0.21 REMAINS RELEASED; NEW AUDIT OPEN; NO NEW RELEASE DECISION**
 - Branch: `codex/full-feature-audit`
 - Release commit: `38a33f8784e2bf408430a98fed81206c2cf39d00`
@@ -28,11 +28,13 @@
   - perform independent architecture/code and public-documentation reviews
   - reproduce, fix, and reply to applicable open GitHub issues
   - preserve user-owned and out-of-scope `.scratch/`
-- Parallel execution: six read-only lanes are active for tracker coverage,
-  executable-story validity, GitHub issue triage, public documentation sync,
-  architecture/code review, and end-user behavior smoke testing. The
-  coordinator owns `qa/feature_status.csv`, this state file, cross-lane
-  decisions, GitHub mutations, and final verification.
+- Parallel execution: all 314 active stories and four historical rows have
+  received clause-by-clause coverage review. Coverage mappings are not
+  final-tree pass claims. Source and browser writers are frozen. The actual
+  generated harness command now passes the isolated no-fit path. The canonical
+  CSV owner incorporates completed evidence and preserves compact reproducers under
+  `qa/feature-audit/`. The coordinator owns final integration, generated
+  inventory, state, GitHub mutations, and committed verification gates.
 - LFS migration execution: three parallel lanes completed repository resolver,
   workflow migration, and independent storage/identity audit. Merged `main`
   removes the two tracked archive pointers, LFS hooks/rules/fallbacks, and
@@ -71,7 +73,7 @@ and working examples.
 ### Settled decisions
 
 - `qa/feature_status.csv` is the single canonical feature/user-story tracker.
-  The two files under `docs/qa/` remain historical/supporting inputs or
+  The three files under `docs/qa/` remain historical/supporting inputs or
   canonical-row pointers; this audit will not create a competing spreadsheet.
 - Code, tests, accepted ADRs, and executable behavior outrank stale tracker or
   prose claims.
@@ -90,8 +92,10 @@ and working examples.
   Every row currently has the schema's required descriptive fields and a
   `last_verified_at` value, but most evidence predates this audit and is not
   accepted as fresh proof.
-- GitHub currently has five open issues (`#228`, `#274`, `#282`, `#283`,
-  `#285`) and two open Dependabot pull requests (`#268`, `#284`).
+- GitHub currently has four open issues (`#274`, `#282`, `#283`, `#285`) and
+  two open Dependabot pull requests (`#268`, `#284`). Issue `#228` was closed
+  after reproduced scope/product review; `#274`, `#282`, and `#285` have
+  evidence-backed maintainer/author questions, and `#283` is in TDD repair.
 - GitHub's available fourteen-day traffic window reports 303 views from 102
   unique visitors and 698 clones from 139 unique cloners. Repository lifetime
   unique traffic is not exposed by this API.
@@ -200,11 +204,15 @@ provider call. The required Ubuntu lane proved Bubblewrap, Node, `npx`, the
 optional harness, and zero-spend driver construction without invoking a model.
 This is an evidence limit, not a claim the release makes.
 
-External release settings remain a P2 operational risk: observed `main` and
-the `pypi` environment have no server-side protection rules. The workflow now
-fails closed unless the tag is the exact current `main` head with a successful
-exact-SHA Tests run, but repository settings should still add reviewer/tag
-protection after this release.
+External release settings remain a P2 operational risk. At release, `main` and
+the `pypi` environment had no observed server-side protection rules. The
+2026-09-30 read-only recheck found active main ruleset `15907020`, requiring
+the exact `CI required` check with strict status checks. It contains no
+reviewer-approval rule; the legacy branch-protection endpoint returns 404.
+The shipped workflow also fails closed unless the tag is the exact current
+`main` head with a successful exact-SHA Tests run. Reviewer/tag/environment
+protection remains an explicit owner decision, not something this audit
+silently changes.
 
 ## Verification ledger
 
@@ -336,16 +344,19 @@ path remains unproven. Production PyPI Trusted Publishing succeeded.
 
 ## Immediate next actions
 
-1. Ask GitHub Support to purge all 45 historical LFS objects (12.131 GiB).
-   Pointer removal alone does not release GitHub's billed remote storage.
-2. Recheck billed storage after Support confirms purge and after the next
-   billing-cycle reset.
-3. Add `main`, tag, and `pypi` environment protection rules as defense in depth;
-   the shipped workflow already enforces exact-main and exact-successful-Tests
-   provenance.
-4. Decide whether to permanently remove Codex task history. Archived transcripts
-   older than 30 days account for 3.43 GiB; active transcripts older than 90
-   days account for 0.455 GiB. The current task and recent history must remain.
+1. Freeze the canonical tracker and its compact evidence bundle. Source and
+   browser edits are frozen; generated inventory is synchronized at 8,986.
+2. Commit the reviewed audit changes (never `.scratch/`), then run the fast
+   gate and authoritative PR preflight on that exact tree. Record actual
+   story evidence and external prerequisites without blanket pass claims.
+3. Finalize evidence-backed GitHub issue replies and public documentation
+   synchronization. A new release or paid-provider run is not authorized.
+4. GitHub Support's prepared LFS purge request is at Submit. Wait for explicit
+   action-time confirmation before sending it; no ticket or remote purge
+   exists. Preserve the repository and release assets. Recheck billed storage
+   only after Support confirms the purge.
+5. Reviewer/tag/environment protection and Codex transcript retention remain
+   owner decisions. Do not silently change settings or delete user history.
 
 ### GitHub Support handoff
 
@@ -376,6 +387,222 @@ Support contact: `https://support.github.com/contact`
 
 ## Checkpoint log
 
+- 2026-09-30: Canonical mapper handoff is frozen: 318 rows comprise 254
+  executable contracts, 60 explicit checklists, and four deprecated contracts.
+  All 314 active contracts have source/assertion mappings; no blanket final
+  pass was recorded. The compact, redacted evidence bundle is retained in
+  `qa/feature-audit/`, including portable reproducers and SHA-256 inventory.
+  Exact release-manifest hydration and real deep validation now pass the full
+  pair: 79,958 nodes, 1,778,069 edges, 1,088,763 semantic edges, all four entity
+  page counts, and 111,652 full archive members. No LFS was used. Remaining
+  safe documentation command examples run in isolated fixtures in parallel
+  with committed verification; those lanes may not modify production source.
+- 2026-09-30: Closed the actual browser-generated harness command acceptance
+  path: the real child CLI, isolated home and empty catalog produce the no-fit
+  plan with provider/model/tools/verification/privacy intact and no injected
+  secret value. The full browser file passed 19 tests; coordinator separately
+  passed four real public-doc browser tests and 66 tracker/surface/stat tests.
+  Global Ruff and formatting (625 files), mypy (595 files), dependency integrity,
+  generated 8,986-test inventory, and GitHub About readback pass. Fresh traffic
+  API evidence still reports 303 views / 102 unique visitors and 698 clones /
+  139 unique cloners for September 15–28. Full graph hydration/deep validation
+  is running; committed fast and authoritative preflight gates are next.
+- 2026-09-30: Resumed the audit after the Support-only turn, which did not
+  advance product verification. The final MCP router suite passed 114 tests;
+  independent review accepted the notification-method/stale-ID diagnostic
+  redaction regression and closed the prior P3. Telemetry sanitizer and
+  lifecycle dry-run repairs also received independent acceptance. All source
+  writers are frozen. The full static pass found six formatting differences
+  and two test typing defects; formatting and explicit type refinements were
+  applied, both targeted regressions passed, and full mypy now passes all 595
+  source files. Final committed gates remain required.
+- 2026-09-30: Completed bounded acceptance lanes: real four-type entity
+  authoring/index/graph integration, atomic maintenance interruption and
+  preservation tests, twelve-threshold CLI aggregation with input hashes,
+  and exact dashboard status/privacy/read-token routes. The latest dashboard
+  acceptance plus monitor run passed 276 tests (writer evidence); archive and
+  deep release-validation slice passed 74. Documentation lanes executed 79
+  isolated examples plus a real no-network graph-only quality projection.
+  Reproducers and compact outputs are being retained under `qa/feature-audit/`.
+  Real SkillSpector execution remains unavailable: no configured binary,
+  installed command, or importable package. There is no shipped
+  `audit-directory` command; that old checklist clause was corrected rather
+  than inventing a new feature.
+- 2026-09-30: Retained dashboard performance evidence records an actual
+  110,283,462-byte runtime archive: first extraction/request 1.079 seconds,
+  warm request 0.00161 seconds. A synthetic 10,000-sidecar KPI corpus takes
+  0.800 seconds cold and 0.027 seconds warm; this is not full-catalog KPI
+  evidence. All 24 real HTTP smoke checks passed. Public catalog CSS now has
+  a real-layout regression proving filtered cards occupy no space; no public
+  site deployment of this uncommitted change has occurred.
+- 2026-09-30: Additional independent refreezes accepted session privacy after
+  fixing a public-alias/raw-ID collision, and accepted related-tool filtering
+  after excluding status-only phantom entries while retaining concretely
+  installable uninstalled capabilities. Coordinator MCP response validation
+  passed 110 real-child/router tests before two additional no-ID notification
+  rejection cases; source and test static checks passed. Coverage closure
+  exposed a five-tool provisioning cap bypass (seven installs); the writer
+  fixed the installation boundary and an independent reviewer accepted it.
+  Its six adjacent suites passed 229 tests (writer evidence).
+- 2026-09-30: Coordinator executed missing-Hugging-Face-token refusal and fork
+  skip steps in isolated uncredentialed shells (exit 1 and 0 respectively),
+  asserted experimental workflow triggers/timing evidence, and parsed both
+  user-service templates. This found the systemd restart-rate settings in the
+  wrong section; moving them to `[Unit]` closed the failing-first regression.
+  The combined workflow/service suite passed 34 tests, Ruff/format/mypy passed,
+  and the launchd template passed `plutil -lint`. No service was installed.
+  The M5 runner is online/idle, but its latest recorded accelerator run
+  `29019837261` is an old cancelled run, not current-tree success.
+- 2026-09-30: Five public telemetry-sanitizer boundary cases established the
+  default key/depth/string/collection limits and exposed two defects: custom
+  key limits were lost in nested values, and non-JSON diagnostic objects could
+  leak an unredacted/unbounded representation. The shared sanitizer now
+  propagates limits and sanitizes that representation through its scalar path.
+  All 134 telemetry/skill-telemetry tests passed; Ruff/format/mypy passed.
+  Independent sanitizer refreeze is pending. The canonical mapper is also
+  correcting unsupported upload/import claims: the shipped Manage page is a
+  manual content CRUD editor, not a file-upload/import wizard.
+- 2026-09-30: Finished semantic mapping of all 318 canonical rows (314 active,
+  four historical), including exact missing acceptance clauses rather than
+  treating broad test paths as proof. The map remains local working evidence
+  at `/tmp/ctx-story-plan/execution-map.json`; the canonical tracker is still
+  `qa/feature_status.csv`. Exact MCP initialize capability assertion and both
+  tracker suites passed (1 + 16 tests, auditor evidence). Independent parser
+  review accepted the nested shell-quote repair after 117 tests; coordinator
+  also passed 173 adjacent authoring/graph tests. Independent workspace MCP
+  refreeze accepted 59 tests, Ruff/mypy, preserved overwrite permissions, and
+  hostile-cwd/PYTHONPATH clean-wheel launch. Its two documented low-severity
+  limits remain: portable compare-to-rename race and buffering a raw stdio
+  line before enforcing its length cap.
+- 2026-09-30: Browser inspection found a public catalog defect not captured by
+  the earlier attribute-only tests: every hidden card still had computed
+  `display:grid` and nonzero height on the deployed site. A dedicated writer
+  owns a real-stylesheet visibility regression and minimal CSS repair; no site
+  publish has occurred. Session privacy is writer-green (268 monitor tests)
+  and awaiting independent review. Related-tool filtering was reopened when
+  independent review showed a bare `status: available` graph node could still
+  be suggested without any concrete installation route. Root reproduced 13
+  malformed JSON-RPC response cases test-first; the corrected boundary now
+  rejects them with `McpServerError` and reaps startup children. Final broad
+  execution and all per-story pass records still require a frozen tree.
+- 2026-09-30: Continuation made implementation and verification progress while
+  Support submission awaits confirmation. Preserved the public filesystem MCP
+  preset's existing tool contract; the bundled server remains Fit-specific.
+  The restored preset plus Fit routing/discovery regressions passed 228 tests.
+  Reproduced unreadable/invalid-UTF8 runtime history failures, then repaired
+  their service, page, home-card, and HTTP API paths: explicit unavailable
+  state, no false zero/healthy counts, and API status 503. Added real HTTP
+  negative delete/no-mutation checks and KPI/grades/runtime/config payload and
+  redaction checks. All 262 monitor tests pass; source/test Ruff and mypy pass.
+  Independently reran all 27 deterministic bridge tests after the writer fixed
+  a real five-connection listener-backlog overflow. The other prior aggregate
+  failure was a fail-closed tree-drift check during concurrent source edits;
+  the final aggregate must run after writers freeze, not while they edit.
+- 2026-09-30: The user signed into the in-app GitHub Support browser. Located
+  the dedicated Repositories → Remove LFS objects form, selected that the
+  repository cannot be deleted/recreated, and prepared the scoped request for
+  all 45 retired objects (13,025,281,486 bytes). The request explicitly protects
+  repository identity/history and release assets, and acknowledges that old
+  LFS pointers will no longer resolve. Reached the final Submit page; submission
+  awaits action-time confirmation. No ticket number or remote purge exists yet.
+  Independent workspace MCP review meanwhile reproduced pathname-swap escape,
+  oversized aggregate output, unbounded traversal, and concurrent-edit loss;
+  its existing writer was reactivated with ownership limited to server/tests.
+  The aggregate unit run completed with 8,853 passed, 5 skipped, and 2 legacy
+  benchmark failures; the prior live-session note below is superseded.
+- 2026-09-30: Resumed the product audit after exhausting safe LFS APIs. The
+  LFS handoff remains pending Support sign-in; there is independent product
+  work available. Reconciled 318 canonical rows (314 needing current evidence,
+  4 deprecated), with all prior stale pass claims cleared. Initial exact
+  command deduplication found 124 commands across 165 executable rows; the
+  remaining 149 checklist rows require semantic acceptance mapping before any
+  pass claim. Found additional stale expectations for the primary CLI, About,
+  and review-enforcement stories and assigned their correction. Synced GitHub
+  About to the tested CTX Fit description and confirmed the remote readback.
+  Removed Node/npx requirements from the Linux live-driver workflow now that
+  its filesystem server ships with CTX; its three focused contracts pass.
+- 2026-09-30: Independent first-wave review reproduced four defects: malformed
+  source registry structures, FIFO-blocking SQLite sidecars, hardlinked SQLite
+  sidecar permission changes, and non-object MCP initialize results. Disjoint
+  writers are closing these with regressions. The registry writer reports 87
+  focused passes; coordinator aggregate verification is still pending. A
+  separate independent review found a P0 in the new workspace MCP launcher:
+  `python -m` from the trial repository permits a malicious local `ctx`
+  package to shadow the bundled server before its digest check. This is an
+  open integration blocker; an isolated-launch fix and real subprocess
+  regression are in progress, with independent revalidation required.
+- 2026-09-30: Stopped the initial aggregate unit run after 1,685 passes and
+  15 missing-catalog failures because the cleanup had correctly removed the
+  optional runtime archive. The manifest-backed 110,283,462-byte runtime test
+  fixture is being hydrated before restarting aggregate validation. This
+  interrupted run is not completion evidence. No paid model was invoked.
+- 2026-09-30: Manifest hydration completed. Fresh browser checks passed all
+  11 tests; the four local integration checks (editable trial environments,
+  reproducible wheel/sdist, and real similarity precision/recall) passed.
+  The repaired registry/SQLite/MCP/provider/workspace selection passed 166
+  tests. Aggregate unit rerun is still live in execution session `66492`,
+  with output `/tmp/ctx-feature-audit-unit.log` and JUnit output
+  `/tmp/ctx-feature-audit-unit.xml`; do not restart without checking that
+  handle. The P0 workspace launcher now uses isolated Python (`-I`) and
+  malicious-cwd/PYTHONPATH subprocess regressions pass; clean-wheel handshake
+  evidence also passes, pending the independent reviewer. Follow-up review
+  found two additional regressions (C-style assertion detection misclassifying
+  Python helpers; lost catalog fallback for bare model credential routing).
+  The Fit writer owns these fixes. C/C++ and Maven additions are static
+  discovery only; task derivation still supports the existing five languages.
+  The story mapper has converted 67 generic checklists to real acceptance
+  commands, retaining 82 unresolved concrete checklists without pass claims.
+- 2026-09-30: User reports GitHub/Support sign-in in Chrome. Native Chrome
+  access is denied by macOS computer-use permissions; both accessible in-app
+  browser tabs still show GitHub's sign-in form. No support ticket has been
+  submitted. Prepared request can be submitted by the user from their signed-in
+  Chrome session; no credentials or cookies should be copied into chat.
+- 2026-09-30: Completed the first parallel discovery wave. Tracker audits found
+  60 rows advertising retired commands, 32 passing rows that execute missing
+  commands, 27 malformed MkDocs commands, 47 prose-only automated steps, and
+  265 rows whose evidence predates referenced code changes. Public smoke found
+  MCP ping and allowlist defects, unsafe Fit apply-recovery advice, redundant
+  dry-run guidance, missing C/C++ and Maven coverage, and telemetry dry-run
+  filesystem writes. Documentation audit found stale GitHub About generation,
+  false `ctx fit --pr` claims, incomplete consent documentation, and an
+  overlong README. Five disjoint TDD writer lanes were dispatched; the
+  independent architecture/code review remains active.
+- 2026-09-30: Applied evidence-backed GitHub triage. Added
+  `enhancement`/`question` labels and comments to issues #274, #282, and #285;
+  labeled #228 `enhancement`/`wontfix`, explained the product/privacy/support
+  mismatch, and closed it as not planned. Every comment carries the required
+  AI-triage disclosure. Issue #283 remains open until the negotiated legacy MCP
+  compatibility patch is implemented and verified.
+- 2026-09-30: Implemented and independently reverified the issue #283 legacy
+  MCP repair. The server negotiates `2025-11-25` and `2024-11-05`, retains the
+  selected revision, answers request-form `ping`, rejects unknown
+  `--allow-tools` values, and still refuses to claim `2026-07-28`. The full MCP
+  suite passed 51 tests; a live initialize/ping subprocess returned valid
+  JSON-RPC; Ruff, format, and mypy passed. External 2025 conformance reported
+  13 passed, 0 failed, and 7 not verified. Issue #283 was labeled and updated
+  with this evidence; it remains open until the branch is integrated.
+- 2026-09-30: Repaired two reproduced local-runtime defects test-first.
+  Telemetry export previews now read existing salt material without creating a
+  lock and use a process-local preview salt when absent; an exact isolated-HOME
+  smoke left the home empty, the full telemetry suite passed 89 tests, and
+  Ruff/mypy passed. SQLite benefit-audit sidecars are now opened through a
+  pinned directory descriptor and disappearance during normal WAL/SHM lifecycle
+  is tolerated without weakening regular-file, owner, or mode checks. The
+  deterministic race regression plus the 21-test store suite and five fresh
+  concurrent-writer repetitions passed; Ruff and mypy passed.
+- 2026-09-30: Repaired installer false-success reporting test-first. A failed
+  starter-toolbox seed now propagates its nonzero status and prints
+  `ctx-init: completed with errors` instead of `done`; successful and
+  already-present paths remain zero. Independent verification passed all 66
+  initializer tests plus Ruff and mypy.
+- 2026-09-30: Reviewed both open Dependabot PRs and their failing job logs.
+  PR #268 updates action SHAs without updating five exact-pin contract tests;
+  its xdist lane also exercises retired LFS-backed A/B tests, and both its unit
+  lane and PR #284 reproduce the benefit-audit WAL/SHM disappearance race now
+  repaired in this tree. PR #284 also moves Ruff from 0.15.20 to 0.16.5,
+  enabling 2,175 findings across the existing tree, so it is not mergeable as
+  a dependency-only update without a deliberate lint migration or splitting
+  Ruff from the otherwise bounded dependency group.
 - 2026-09-30: Retried GitHub's documented LFS-disable API with the authenticated
   repository owner's OAuth token (`repo` scope) and API version `2026-03-10`:
   `DELETE /repos/stevesolun/ctx/lfs` again returned HTTP 404, request ID
@@ -385,6 +612,26 @@ Support contact: `https://support.github.com/contact`
   archives remain available as attested v1.0.21 release assets. GitHub Support
   purge remains the only safe route that preserves repository identity, stars,
   forks, issues, and pull requests.
+- 2026-09-30: Exhausted the remaining authenticated machine interfaces without
+  deleting, recreating, transferring, or rewriting the repository. The active
+  `stevesolun` OAuth token still has repository administrator access (`GET
+  /repos/stevesolun/ctx` returned HTTP 200, request ID
+  `D859:8A8C9:470BF82:474A3E6:6ABCB942`). GitHub's LFS batch API returned the
+  retained object and a download action (HTTP 200, request ID
+  `D747:1DE99C:4397811:42B891C:6ABCB848`), proving that repository access and
+  the remote object both exist. An exact object-scoped `DELETE` against a
+  retired OID returned HTTP 405 with no state change (request ID
+  `D765:2E858D:448AFB4:439E35E:6ABCB867`). The current GitHub.com REST OpenAPI
+  and all 275 public GraphQL mutations contain no LFS object-delete or purge
+  operation; plausible REST object paths returned 404. The standard Git LFS
+  transfer protocol exposes upload/download/verification only. GitHub
+  Support's web application does expose `POST /internal_api/contact`, but it
+  requires a separate signed-in Support browser session: bearer and basic use
+  of the working repository OAuth token both returned HTTP 403 (`You must be
+  signed in to view tickets`) from the corresponding ticket API. No token was
+  printed, no Support ticket was submitted, and no remote repository state
+  changed. The remaining safe action is to authenticate that Support session
+  and submit the prepared purge request through its API.
 - 2026-08-21: Retried the documented `DELETE /repos/stevesolun/ctx/lfs`
   endpoint with GitHub REST API version `2026-03-10`. The active `gh` OAuth
   token has `repo` scope, the authenticated user owns the repository, and the

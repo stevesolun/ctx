@@ -56,10 +56,12 @@ developer machine, measured back to back on the same checkout:
 | the CI selection above | 4m41s |
 | `pytest -q` | 11m57s |
 
-The marker filter is not what makes the first one fast: it deselects only 14 of
-the 8,524 collected tests. The speedup is `-n auto`, which fans the suite
-across cores via pytest-xdist (already in the `dev` extra). `--dist=loadfile`
-keeps all tests from one file on one worker.
+The timings above are a historical measurement, not a performance guarantee.
+The marker filter excludes only the opt-in browser and integration lanes; the
+main speedup is `-n auto`, which fans the remaining suite across cores via
+pytest-xdist (already in the `dev` extra). `--dist=loadfile` keeps all tests
+from one file on one worker. Avoid recording collected or deselected totals
+here because every test-only change makes those numbers stale.
 
 ```bash
 pytest -q -m integration              # embedding precision/recall tests

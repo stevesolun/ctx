@@ -11,14 +11,14 @@
 > pull-request preparation).
 >
 > **What is real is the code and its tests**, not this file:
-> `src/ctx/fit/`, `src/ctx/cli/fit.py`, and `src/tests/fit/` — 273 tests, all
-> passing. `ctx fit --help` and `ctx doctor --help` show the shipped command
+> `src/ctx/fit/`, `src/ctx/cli/fit.py`, and `src/tests/fit/`. `ctx fit --help`
+> and `ctx doctor --help` show the shipped command
 > surface. `git log --oneline -- src/ctx/fit` shows how it got there.
 >
-> One correction worth carrying forward: M10 shipped as *prepare* a pull
-> request, not *open* one. CTX Fit runs no git *write* commands: it reads history to derive tasks, but creates no branch, commits nothing, pushes nothing and never merges. `ctx fit --pr` prints
-> a PR body and a suggested branch name; it creates no branch, commits nothing
-> and never merges.
+> One correction worth carrying forward: M10 now opens the pull request.
+> `ctx fit --pr` previews the plan, runs read-only safety probes, and after
+> confirmation creates a branch, commits, pushes, and invokes `gh pr create`.
+> It never merges. `--apply` remains a working-tree-only write.
 >
 > Kept as the planning record of intent and rationale, which is still accurate.
 

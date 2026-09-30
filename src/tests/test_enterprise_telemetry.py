@@ -4,7 +4,10 @@ from dataclasses import asdict
 from email.message import Message
 from io import BytesIO
 import json
+import os
 import stat
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -104,6 +107,53 @@ def test_record_event_writes_local_redacted_envelope(tmp_path: Path) -> None:
     assert got[0].trace_id == event.trace_id
     assert got[0].span_id == event.span_id
     assert got[0].ctx_version == event.ctx_version
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_sanitize_payload_enforces_default_key_limit(nested: bool) -> None:
+    boundary = {f"metric{i}": i for i in range(40)}
+    payload = {"nested": boundary} if nested else boundary
+    assert telemetry.sanitize_payload(payload, config={}) == payload
+    boundary["metric40"] = 40
+    with pytest.raises(ValueError, match="41 keys; max 40"):
+        telemetry.sanitize_payload(payload, config={})
+
+
+def test_sanitize_payload_enforces_string_collection_and_depth_boundaries() -> None:
+    sanitized = telemetry.sanitize_payload(
+        {
+            "exact": "a" * 1024,
+            "long": "b" * 1025,
+            "items": list(range(1025)),
+            "nested": {"level2": {"level3": {"scalar": "visible", "level4": {"x": 1}}}},
+        },
+        config={},
+    )
+    assert sanitized["exact"] == "a" * 1024
+    assert sanitized["long"] == "b" * 1024 + "...[truncated]"
+    assert sanitized["items"] == list(range(1024))
+    assert sanitized["nested"] == {"level2": {"level3": {"scalar": "visible", "level4": "'dict'"}}}
+
+
+def test_sanitize_payload_applies_custom_limits_to_nested_values() -> None:
+    config = {"limits": {"max_payload_keys": 2, "max_payload_value_chars": 3}}
+    assert telemetry.sanitize_payload(
+        {"nested": {"a": "abcd", "b": [0, 1, 2, 3]}}, config=config
+    ) == {"nested": {"a": "abc...[truncated]", "b": [0, 1, 2]}}
+    with pytest.raises(ValueError, match="3 keys; max 2"):
+        telemetry.sanitize_payload({"nested": {"a": 1, "b": 2, "c": 3}}, config=config)
+
+
+def test_sanitize_payload_bounds_and_redacts_non_json_value_representation() -> None:
+    class Diagnostic:
+        def __repr__(self) -> str:
+            return "sk-ABCDEFGHIJKLMNOPQRSTUVWX " + "x" * 2000
+
+    sanitized = telemetry.sanitize_payload({"diagnostic": Diagnostic()}, config={})
+    value = sanitized["diagnostic"]
+    assert "sk-ABCDEFGHIJKLMNOPQRSTUVWX" not in value
+    assert "[redacted]" in value
+    assert len(value) == 1024 + len("...[truncated]")
 
 
 def test_sanitize_payload_hashes_common_path_key_shapes() -> None:
@@ -879,6 +929,34 @@ def test_telemetry_export_cli_rejects_unknown_privacy_mode(
     payload = json.loads(capsys.readouterr().out)
     assert payload["failed"] == 1
     assert "telemetry.mode must be one of" in payload["error"]
+
+
+def test_telemetry_export_cli_dry_run_is_read_only_in_fresh_home(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {**os.environ, "HOME": str(home)}
+    env.pop("CTX_TELEMETRY_HASH_SALT", None)
+
+    completed = subprocess.run(
+        [sys.executable, "-m", "ctx.cli.telemetry", "--dry-run", "--json"],
+        cwd=tmp_path,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=30,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    summary = json.loads(completed.stdout)
+    assert summary["status"] == "noop"
+    assert summary["attempted"] == 0
+    assert summary["exported"] == 0
+    assert summary["failed"] == 0
+    assert summary["dry_run"] is True
+    assert summary["destination_hash"].startswith("sha256:")
+    assert list(home.iterdir()) == []
 
 
 def test_export_events_posts_otlp_http_payload(

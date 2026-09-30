@@ -35,7 +35,7 @@ body::before { content: ""; position: fixed; inset: 0; z-index: -1; pointer-even
 .app-brand-mark { display: inline-grid; place-items: center; width: 2.15rem; height: 2.15rem;
                   border-radius: 8px; background: #0f172a; color: #fff; box-shadow: var(--shadow-soft); }
 .app-header-meta { color: var(--muted-text); font-size: 0.86rem; text-align: right; }
-.app-main { min-width: 0; }
+.app-main { min-width: 0; overflow-wrap: anywhere; }
 h1 { margin-top: 0; letter-spacing: 0; }
 h2, h3 { letter-spacing: 0; }
 a { color: var(--accent); text-decoration: none; }

@@ -156,16 +156,20 @@ portable exact backend at this graph size and can switch to the optional ANN
 backend only above the configured node threshold. `hnswlib` is optional and
 should be shadow-gated before release use.
 
-Then process pending entity updates:
+The graphify run reconciles the current entity set while it builds the index.
+You can still drain other ready maintenance work afterward:
 
 ```bash
 python -m ctx.core.wiki.wiki_queue_worker --wiki ~/.claude/skill-wiki
 ```
 
-That is the supported "attach pending" flow today: the queue is durable, so
-failed or skipped entity-upsert jobs remain visible to the worker and can be
-retried after the index exists. Use manual `python -m ctx.core.graph.incremental_attach attach
---dry-run` for one-off debugging, not as the normal bulk path.
+A failed `entity-upsert` remains visible and follows the queue retry policy, but
+an attach that was skipped because the vector index was absent is recorded as a
+successful job. It is not pending after the index exists. Future updates attach
+through the new index automatically; update an older entity again to queue a
+fresh `entity-upsert`. Use a manual
+`python -m ctx.core.graph.incremental_attach attach --dry-run` for one-off
+review, not as the normal bulk path.
 
 ## Security and Cyber Check
 
@@ -423,6 +427,22 @@ ctx-init
 ctx-init --wizard
 ctx-init --model-mode skip
 ```
+
+Install consent is persistent and independent for skills, agents, and MCP
+servers. The safe default is `ask-each-time`; choose `preapproved-auto` only
+when setup itself should authorize later relevant installs. In non-interactive
+setup, supply all three policies together:
+
+```bash
+ctx-init \
+  --model-mode skip \
+  --skill-install-consent preapproved-auto \
+  --agent-install-consent ask-each-time \
+  --mcp-install-consent ask-each-time
+```
+
+These policies authorize installation only. They do not authorize unload or
+uninstall, which still require confirmation or an explicit instruction.
 
 For Claude Code:
 

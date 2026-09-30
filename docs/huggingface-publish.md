@@ -28,8 +28,9 @@ then installs the sync dependencies and calls
 `scripts/sync_huggingface.py`. It publishes only when the repository secret
 `HF_TOKEN` is configured. On the canonical
 `stevesolun/ctx` repository, a missing token is a hard failure so main cannot
-silently drift from the dataset repo. On forks, a missing token still exits
-successfully with a notice because forks are not trusted publishing sources.
+silently drift from the dataset repo. Fork workflows never publish to
+`Stevesolun/ctx`, even if a fork has a token; they exit successfully with a
+notice because forks are not trusted publishing sources.
 
 When only repo-card inputs changed (`README.md`, `CHANGELOG.md`, or files under
 `docs/`), the workflow uses card-only upload mode. Source, test, workflow, graph,
@@ -44,8 +45,8 @@ validates README/docs stats, and refuses missing, stale, or corrupt artifacts.
 
 Use the repository sync script. It exports tracked files plus the validated
 local graph artifacts, adds the Hugging Face repo-card frontmatter to the
-uploaded `README.md`, and refuses to publish if the manifest or any full wiki,
-runtime wiki, or compressed skill-index byte identity is missing or mismatched.
+uploaded `README.md`, and refuses to publish if the manifest or any of its five
+graph-asset byte identities is missing or mismatched.
 
 Full sync uploads the exported tree with `delete_patterns="*"`, so files removed
 from the current git snapshot are removed remotely in the same commit.

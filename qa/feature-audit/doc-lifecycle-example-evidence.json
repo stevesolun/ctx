@@ -1,0 +1,554 @@
+{
+  "scope": "DOC-NAV-023 through DOC-NAV-026; local example evidence only, not canonical tracker",
+  "source_hashes": {
+    "docs/skills-health.md": "79ec05379115377bbe056afaf1e0c9ea49405a61ebda2cac22f44ef303dec0bc",
+    "docs/memory-anchor.md": "10fc36ea31c981e1831e81690977ef47f53544f0ef93da996f7defc48564876f",
+    "docs/skill-lifecycle-and-dashboard.md": "6bbd7c20bc16ffef0eafc6cad10a378c58c50de389ead643a219cfe752af9aaf",
+    "docs/skill-quality-install.md": "131635d1517c82e797fa99027986137f1e60556d535bc15976578b6e8badb27c",
+    "src/ctx/adapters/claude_code/skill_health.py": "9ff5d1b8194749eec9fde8ad18e84d8ef1d84f3f7cd7b9bfbdc3ce1a7d007a34",
+    "src/memory_anchor.py": "cf4462951e3ed5ee5ccb5e8d48146d5677b2ec64777aed731d804803da2f2e99",
+    "src/ctx_lifecycle.py": "9e75d9282727c870e1b365405de95cf8dc0c5f37963cefaa305028a8bad4dcd6",
+    "src/skill_quality.py": "844a9206a1734e5232b10e8aecfb1f0bd9907522dcf2d53a48d67e56beffcd72",
+    "src/skill_category.py": "89705baa2a6c4e1a697408f13cd6545bf97ce72a883a0de1ecd8d23ee5bb66c8",
+    "src/kpi_dashboard.py": "d3f067f5a0dffd82ff15b9c464c5636d256055ce2cef5c5a85957fa3d5042ccc"
+  },
+  "results": [
+    {
+      "example": "health report with real orphan fixture",
+      "argv": [
+        "python",
+        "-m",
+        "ctx.adapters.claude_code.skill_health",
+        "scan"
+      ],
+      "exit_code": 0,
+      "stdout": "{\n  \"generated_at\": 1790757071.8181791,\n  \"entities\": [\n    {\n      \"name\": \"python-testing\",\n      \"kind\": \"skill\",\n      \"path\": \"<fixture>/skills/python-testing/SKILL.md\",\n      \"lines\": 12,\n      \"has_frontmatter\": true,\n      \"issues\": [],\n      \"severity\": \"ok\"\n    }\n  ],\n  \"drift\": {\n    \"orphaned_manifest\": [\n      \"orphan\"\n    ],\n    \"orphaned_pending\": [\n      \"orphan\"\n    ]\n  },\n  \"totals\": {\n    \"total\": 1,\n    \"ok\": 1,\n    \"warning\": 0,\n    \"error\": 0\n  }\n}\n",
+      "stderr": "",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    },
+    {
+      "example": "health report with real orphan fixture",
+      "argv": [
+        "python",
+        "-m",
+        "ctx.adapters.claude_code.skill_health",
+        "dashboard"
+      ],
+      "exit_code": 0,
+      "stdout": "[health] 1 entities   ok=1  warn=0  err=0\n\nDrift:\n  manifest references missing on disk: orphan\n  pending suggestions missing on disk: orphan\n",
+      "stderr": "",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    },
+    {
+      "example": "health strict refuses drift",
+      "argv": [
+        "python",
+        "-m",
+        "ctx.adapters.claude_code.skill_health",
+        "check",
+        "--strict"
+      ],
+      "exit_code": 2,
+      "stdout": "[health] 1 entities   ok=1  warn=0  err=0\n\nDrift:\n  manifest references missing on disk: orphan\n  pending suggestions missing on disk: orphan\n",
+      "stderr": "",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    },
+    {
+      "example": "health heal orphan-only mutation",
+      "argv": [
+        "python",
+        "-m",
+        "ctx.adapters.claude_code.skill_health",
+        "heal"
+      ],
+      "exit_code": 0,
+      "stdout": "[heal] removed from manifest: orphan\n[heal] removed from pending: orphan\n",
+      "stderr": "",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    },
+    {
+      "example": "health strict passes healed data",
+      "argv": [
+        "python",
+        "-m",
+        "ctx.adapters.claude_code.skill_health",
+        "check",
+        "--strict"
+      ],
+      "exit_code": 0,
+      "stdout": "[health] 1 entities   ok=1  warn=0  err=0\nAll healthy.\n",
+      "stderr": "",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    },
+    {
+      "example": "health heal idempotent no-op",
+      "argv": [
+        "python",
+        "-m",
+        "ctx.adapters.claude_code.skill_health",
+        "heal"
+      ],
+      "exit_code": 0,
+      "stdout": "[heal] nothing to do.\n",
+      "stderr": "",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    },
+    {
+      "example": "memory references scan",
+      "argv": [
+        "python",
+        "-m",
+        "memory_anchor",
+        "scan",
+        "--repo-root",
+        "<fixture>"
+      ],
+      "exit_code": 0,
+      "stdout": "{\n  \"generated_at\": 1790757071.8275259,\n  \"repo_root\": \"<fixture>\",\n  \"memory_root\": \"<fixture>/memory\",\n  \"files\": [\n    {\n      \"memory_path\": \"<fixture>/memory/notes.md\",\n      \"refs\": [\n        {\n          \"raw\": \"skills/python-testing/SKILL.md:1\",\n          \"path\": \"skills/python-testing/SKILL.md\",\n          \"line\": 1,\n          \"exists\": true\n        },\n        {\n          \"raw\": \"src/missing.py\",\n          \"path\": \"src/missing.py\",\n          \"line\": null,\n          \"exists\": false\n        }\n      ],\n      \"live\": [\n        {\n          \"raw\": \"skills/python-testing/SKILL.md:1\",\n          \"path\": \"skills/python-testing/SKILL.md\",\n          \"line\": 1,\n          \"exists\": true\n        }\n      ],\n      \"dead\": [\n        {\n          \"raw\": \"src/missing.py\",\n          \"path\": \"src/missing.py\",\n          \"line\": null,\n          \"exists\": false\n        }\n      ]\n    }\n  ],\n  \"totals\": {\n    \"total\": 2,\n    \"live\": 1,\n    \"dead\": 1\n  }\n}\n",
+      "stderr": "",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    },
+    {
+      "example": "memory references scan",
+      "argv": [
+        "python",
+        "-m",
+        "memory_anchor",
+        "dashboard",
+        "--repo-root",
+        "<fixture>"
+      ],
+      "exit_code": 0,
+      "stdout": "[memory-anchor] 1 memory files   refs=2  live=1  dead=1\n\nDead references:\n  <fixture>/memory/notes.md\n    - `src/missing.py`\n",
+      "stderr": "",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    },
+    {
+      "example": "memory strict reports dead reference",
+      "argv": [
+        "python",
+        "-m",
+        "memory_anchor",
+        "check",
+        "--strict",
+        "--repo-root",
+        "<fixture>",
+        "--memory-root",
+        "<fixture>/memory"
+      ],
+      "exit_code": 2,
+      "stdout": "[memory-anchor] 1 memory files   refs=2  live=1  dead=1\n\nDead references:\n  <fixture>/memory/notes.md\n    - `src/missing.py`\n",
+      "stderr": "",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    },
+    {
+      "example": "memory strict passes live reference",
+      "argv": [
+        "python",
+        "-m",
+        "memory_anchor",
+        "check",
+        "--strict",
+        "--repo-root",
+        "<fixture>",
+        "--memory-root",
+        "<fixture>/memory"
+      ],
+      "exit_code": 0,
+      "stdout": "[memory-anchor] 1 memory files   refs=1  live=1  dead=0\nAll references resolve.\n",
+      "stderr": "",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    },
+    {
+      "example": "category backfill dry-run",
+      "argv": [
+        "python",
+        "-m",
+        "skill_category",
+        "backfill",
+        "--dry-run"
+      ],
+      "exit_code": 0,
+      "stdout": "Scanned 1 files\n  already-set: 0\n  filled:      1\n  unresolved:  0\n\nBy category:\n  language: 1\n\n(dry-run: no files written)\n",
+      "stderr": "",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    },
+    {
+      "example": "category backfill apply",
+      "argv": [
+        "python",
+        "-m",
+        "skill_category",
+        "backfill"
+      ],
+      "exit_code": 0,
+      "stdout": "Scanned 1 files\n  already-set: 0\n  filled:      1\n  unresolved:  0\n\nBy category:\n  language: 1\n",
+      "stderr": "",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    },
+    {
+      "example": "quality documented CLI",
+      "argv": [
+        "python",
+        "-m",
+        "skill_quality",
+        "recompute",
+        "--all"
+      ],
+      "exit_code": 0,
+      "stdout": "F  python-testing                           score=0.21  floor=intake_fail\n",
+      "stderr": "1 recomputed, 0 failed\n",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    },
+    {
+      "example": "quality documented CLI",
+      "argv": [
+        "python",
+        "-m",
+        "skill_quality",
+        "recompute",
+        "--slug",
+        "python-testing"
+      ],
+      "exit_code": 0,
+      "stdout": "F  python-testing                           score=0.21  floor=intake_fail\n",
+      "stderr": "1 recomputed, 0 failed\n",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    },
+    {
+      "example": "quality documented CLI",
+      "argv": [
+        "python",
+        "-m",
+        "skill_quality",
+        "show",
+        "python-testing"
+      ],
+      "exit_code": 0,
+      "stdout": "python-testing (skill)\n  grade: F\n  score: 0.21 (raw 0.21)\n  floor: intake_fail\n  computed: 2026-09-30T08:31:11+00:00\n",
+      "stderr": "",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    },
+    {
+      "example": "quality documented CLI",
+      "argv": [
+        "python",
+        "-m",
+        "skill_quality",
+        "explain",
+        "python-testing"
+      ],
+      "exit_code": 0,
+      "stdout": "python-testing (skill) — grade F\n  raw=0.2083  score=0.2083  floor=intake_fail\n\n  telemetry: score=0.00 weight=0.40\n    last_load_age_days: None\n    load_count: 0\n    never_loaded: True\n    recent_load_count: 0\n  intake: score=0.67 weight=0.20\n    checks: {'body_long_enough': False, 'has_description': True, 'has_frontmatter': True, 'has_h1': True, 'has_h2': False, 'has_name': True}\n    hard_fail: True\n    passed: 4\n    total: 6\n  graph: score=0.00 weight=0.25\n    avg_edge_weight: 0.0\n    degree: 0\n    is_isolated: True\n  routing: score=0.50 weight=0.15\n    considered: 0\n    hit_rate: 0.0\n    no_trace: True\n    picked: 0\n",
+      "stderr": "",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    },
+    {
+      "example": "quality documented CLI",
+      "argv": [
+        "python",
+        "-m",
+        "skill_quality",
+        "list"
+      ],
+      "exit_code": 0,
+      "stdout": "F  python-testing                           score=0.21\n",
+      "stderr": "1 entries\n",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    },
+    {
+      "example": "quality documented CLI",
+      "argv": [
+        "python",
+        "-m",
+        "skill_quality",
+        "list",
+        "--grade",
+        "D"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": "0 entries\n",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    },
+    {
+      "example": "quality documented CLI",
+      "argv": [
+        "python",
+        "-m",
+        "skill_quality",
+        "show",
+        "python-testing",
+        "--json"
+      ],
+      "exit_code": 0,
+      "stdout": "{\n  \"slug\": \"python-testing\",\n  \"subject_type\": \"skill\",\n  \"raw_score\": 0.2083,\n  \"score\": 0.2083,\n  \"grade\": \"F\",\n  \"hard_floor\": \"intake_fail\",\n  \"signals\": {\n    \"graph\": {\n      \"score\": 0.0,\n      \"evidence\": {\n        \"avg_edge_weight\": 0.0,\n        \"degree\": 0,\n        \"is_isolated\": true\n      }\n    },\n    \"intake\": {\n      \"score\": 0.6667,\n      \"evidence\": {\n        \"checks\": {\n          \"body_long_enough\": false,\n          \"has_description\": true,\n          \"has_frontmatter\": true,\n          \"has_h1\": true,\n          \"has_h2\": false,\n          \"has_name\": true\n        },\n        \"hard_fail\": true,\n        \"passed\": 4,\n        \"total\": 6\n      }\n    },\n    \"routing\": {\n      \"score\": 0.5,\n      \"evidence\": {\n        \"considered\": 0,\n        \"hit_rate\": 0.0,\n        \"no_trace\": true,\n        \"picked\": 0\n      }\n    },\n    \"telemetry\": {\n      \"score\": 0.0,\n      \"evidence\": {\n        \"last_load_age_days\": null,\n        \"load_count\": 0,\n        \"never_loaded\": true,\n        \"recent_load_count\": 0\n      }\n    }\n  },\n  \"weights\": {\n    \"graph\": 0.25,\n    \"intake\": 0.2,\n    \"routing\": 0.15,\n    \"telemetry\": 0.4\n  },\n  \"computed_at\": \"2026-09-30T08:31:11+00:00\"\n}\n",
+      "stderr": "",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    },
+    {
+      "example": "lifecycle populated dry-run write audit",
+      "argv": [
+        "python",
+        "-m",
+        "ctx_lifecycle",
+        "review",
+        "--dry-run"
+      ],
+      "exit_code": 0,
+      "stdout": "Nothing to propose. Corpus is healthy.\n",
+      "stderr": "",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls",
+      "changed_paths": [],
+      "semantic_result": "no fixture file changed"
+    },
+    {
+      "example": "lifecycle safe auto review",
+      "argv": [
+        "python",
+        "-m",
+        "ctx_lifecycle",
+        "review",
+        "--auto"
+      ],
+      "exit_code": 0,
+      "stdout": "Nothing to propose. Corpus is healthy.\n",
+      "stderr": "",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    },
+    {
+      "example": "lifecycle explicit demote declined",
+      "argv": [
+        "python",
+        "-m",
+        "ctx_lifecycle",
+        "demote",
+        "python-testing"
+      ],
+      "exit_code": 1,
+      "stdout": "Demote python-testing? [y/N] Aborted.\n",
+      "stderr": "",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    },
+    {
+      "example": "lifecycle explicit demote confirmed",
+      "argv": [
+        "python",
+        "-m",
+        "ctx_lifecycle",
+        "demote",
+        "python-testing"
+      ],
+      "exit_code": 0,
+      "stdout": "Demote python-testing? [y/N]   ✓ demote: python-testing\n",
+      "stderr": "",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    },
+    {
+      "example": "lifecycle explicit archive declined",
+      "argv": [
+        "python",
+        "-m",
+        "ctx_lifecycle",
+        "archive",
+        "python-testing"
+      ],
+      "exit_code": 1,
+      "stdout": "Archive python-testing? [y/N] Aborted.\n",
+      "stderr": "",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    },
+    {
+      "example": "lifecycle explicit archive confirmed without age floor",
+      "argv": [
+        "python",
+        "-m",
+        "ctx_lifecycle",
+        "archive",
+        "python-testing"
+      ],
+      "exit_code": 0,
+      "stdout": "Archive python-testing? [y/N]   ✓ archive: python-testing\n",
+      "stderr": "",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    },
+    {
+      "example": "lifecycle original invalid restore slug",
+      "argv": [
+        "python",
+        "-m",
+        "ctx_lifecycle",
+        "review-archived",
+        "--restore",
+        "python-testing"
+      ],
+      "exit_code": 2,
+      "stdout": "",
+      "stderr": "usage: ctx_lifecycle [-h] {review,demote,archive,purge,review-archived} ...\nctx_lifecycle: error: unrecognized arguments: python-testing\n",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls",
+      "semantic_result": "documentation defect: --restore is a boolean flag, not a slug argument"
+    },
+    {
+      "example": "lifecycle archived list and diff",
+      "argv": [
+        "python",
+        "-m",
+        "ctx_lifecycle",
+        "review-archived",
+        "--show-diff"
+      ],
+      "exit_code": 0,
+      "stdout": "1 archived entries:\n\n  python-testing  (archived 2026-09-30T08:31:11+00:00)\n",
+      "stderr": "",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    },
+    {
+      "example": "lifecycle corrected restore declined",
+      "argv": [
+        "python",
+        "-m",
+        "ctx_lifecycle",
+        "review-archived",
+        "--restore"
+      ],
+      "exit_code": 0,
+      "stdout": "1 archived entries:\n\n  python-testing  (archived 2026-09-30T08:31:11+00:00)\n  Restore python-testing? [y/N] ",
+      "stderr": "",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    },
+    {
+      "example": "lifecycle corrected restore confirmed",
+      "argv": [
+        "python",
+        "-m",
+        "ctx_lifecycle",
+        "review-archived",
+        "--restore"
+      ],
+      "exit_code": 0,
+      "stdout": "1 archived entries:\n\n  python-testing  (archived 2026-09-30T08:31:11+00:00)\n  Restore python-testing? [y/N]   ✓ restored: python-testing\n",
+      "stderr": "",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    },
+    {
+      "example": "lifecycle archive setup demote forced",
+      "argv": [
+        "python",
+        "-m",
+        "ctx_lifecycle",
+        "demote",
+        "python-testing",
+        "--force"
+      ],
+      "exit_code": 0,
+      "stdout": "  ✓ demote: python-testing\n",
+      "stderr": "",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    },
+    {
+      "example": "lifecycle archive setup archive forced",
+      "argv": [
+        "python",
+        "-m",
+        "ctx_lifecycle",
+        "archive",
+        "python-testing",
+        "--force"
+      ],
+      "exit_code": 0,
+      "stdout": "  ✓ archive: python-testing\n",
+      "stderr": "",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    },
+    {
+      "example": "lifecycle purge wrong slug preserves fixture",
+      "argv": [
+        "python",
+        "-m",
+        "ctx_lifecycle",
+        "purge"
+      ],
+      "exit_code": 0,
+      "stdout": "\n1 archived entries are purge-eligible:\n  - archive → deleted  python-testing  (archived 90.0d ago (>60d))\n\n*** DELETE IS PERMANENT. Type the exact slug to confirm each. ***\nType 'python-testing' to delete:   skipped: python-testing\n\nPurged 0 entries.\n",
+      "stderr": "",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    },
+    {
+      "example": "lifecycle purge exact slug deletes only disposable fixture",
+      "argv": [
+        "python",
+        "-m",
+        "ctx_lifecycle",
+        "purge"
+      ],
+      "exit_code": 0,
+      "stdout": "\n1 archived entries are purge-eligible:\n  - archive → deleted  python-testing  (archived 90.0d ago (>60d))\n\n*** DELETE IS PERMANENT. Type the exact slug to confirm each. ***\nType 'python-testing' to delete:   ✓ deleted: python-testing\n\nPurged 1 entries.\n",
+      "stderr": "",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    },
+    {
+      "example": "KPI documented CLI",
+      "argv": [
+        "python",
+        "-m",
+        "kpi_dashboard",
+        "render"
+      ],
+      "exit_code": 0,
+      "stdout": "# Skill Quality KPI Dashboard\n\n_Generated: 2026-09-30T08:31:11+00:00_\n\n**Total entities:** 1\n**By subject:** skill: 1\n\n## Grade distribution\n\n| Grade | Count | Share |\n| ----- | ----: | ----: |\n| A | 0 | 0.0% |\n| B | 0 | 0.0% |\n| C | 0 | 0.0% |\n| D | 0 | 0.0% |\n| F | 1 | 100.0% |\n\n## Lifecycle tiers\n\n| State | Count |\n| ----- | ----: |\n| active | 0 |\n| watch | 0 |\n| demote | 0 |\n| archive | 0 |\n\n## By category\n\n| Category | Count | Avg score | A | B | C | D | F |\n| -------- | ----: | --------: | -: | -: | -: | -: | -: |\n| uncategorized | 1 | 0.000 | 0 | 0 | 0 | 0 | 1 |\n\n## Top demotion candidates\n\n_No active D/F-grade entries — corpus is healthy._\n\n## Archived (restorable)\n\n_None._\n\n\n",
+      "stderr": "",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    },
+    {
+      "example": "KPI documented CLI",
+      "argv": [
+        "python",
+        "-m",
+        "kpi_dashboard",
+        "render",
+        "--out",
+        "<fixture>/kpi.md"
+      ],
+      "exit_code": 0,
+      "stdout": "Wrote <fixture>/kpi.md\n",
+      "stderr": "",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    },
+    {
+      "example": "KPI documented CLI",
+      "argv": [
+        "python",
+        "-m",
+        "kpi_dashboard",
+        "render",
+        "--json",
+        "--out",
+        "<fixture>/kpi.json"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": "",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    },
+    {
+      "example": "KPI documented CLI",
+      "argv": [
+        "python",
+        "-m",
+        "kpi_dashboard",
+        "summary"
+      ],
+      "exit_code": 0,
+      "stdout": "Total: 1\n  A: 0\n  B: 0\n  C: 0\n  D: 0\n  F: 1\nLifecycle:\n  active: 0\n  watch: 0\n  demote: 0\n  archive: 0\n",
+      "stderr": "",
+      "isolation": "real CLI parser/main; only module data/config paths redirected to disposable fixture; no host services or paid calls"
+    }
+  ],
+  "not_claimed": [
+    "host Stop hook installation/execution",
+    "full installed-corpus timings",
+    "external host lifecycle",
+    "paid model execution"
+  ],
+  "retention_note": "2026-09-30 dirty-working-tree local execution; disposable absolute paths redacted. Not a final-tree story pass. Portable retained script rerun successfully at evidence handoff."
+}

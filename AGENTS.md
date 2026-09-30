@@ -20,7 +20,7 @@ ctx fit                      # free, local, read-only: profile + readiness
 ctx fit --dry-run            # what a full evaluation would involve
 ctx fit --test --budget 10   # evaluate candidates; spending requires both flags
 ctx fit --apply              # write the winning configuration
-ctx fit --pr                 # print a PR body and branch name; commits nothing
+ctx fit --pr                 # branch, commit, push, and open a PR; never merge
 ```
 
 ## Where the code lives

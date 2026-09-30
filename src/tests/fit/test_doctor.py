@@ -222,11 +222,15 @@ def test_doctor_uses_the_applied_model_for_credentials_and_exact_pricing(
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "presence-only")
     observed: list[str] = []
-    actual = ModelPrice.from_litellm
 
-    def record(model: str) -> ModelPrice | None:
+    def record(model: str) -> ModelPrice:
         observed.append(model)
-        return actual(model)
+        return ModelPrice(
+            model=model,
+            usd_per_million_input=3.0,
+            usd_per_million_output=15.0,
+            source="test fixture",
+        )
 
     monkeypatch.setattr(ModelPrice, "from_litellm", record)
 

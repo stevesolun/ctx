@@ -1211,6 +1211,34 @@ def test_validate_runtime_graph_archive_rejects_host_path_graph_pack_node_id(
         )
 
 
+def test_deep_release_validation_rejects_host_path_retained_in_full_graph_pack(
+    tmp_path: Path,
+) -> None:
+    _write_catalog(
+        tmp_path,
+        converted_path="converted/skills-sh-example-skill/SKILL.md",
+    )
+    graph = nx.Graph()
+    graph.add_node("/Users/steves/private", type="skill")
+    pack_root = tmp_path / "graph-pack-source-export-test"
+    write_base_pack(
+        pack_dir=pack_root / "base-export-test",
+        pack_id="base-export-test",
+        base_export_id="export-test",
+        config_hash="config-sha",
+        model_id="bge-small-en-v1.5",
+        graph=graph,
+    )
+    _write_archive(tmp_path, graph_pack_dir=pack_root)
+
+    with pytest.raises(GraphArtifactError, match="host path"):
+        validate_graph_artifacts(
+            tmp_path,
+            deep=True,
+            expected_harnesses={"langgraph"},
+        )
+
+
 def test_validate_graph_artifacts_rejects_original_backup_members(tmp_path: Path) -> None:
     _write_catalog(
         tmp_path,

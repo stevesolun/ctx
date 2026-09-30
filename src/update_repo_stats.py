@@ -1465,22 +1465,11 @@ def build_docs_replacements(
     return reps
 
 
-def build_github_about_description(stats: Mapping[str, int | None]) -> str:
-    """Return the GitHub/HF one-line repo description from graph stats."""
-    nodes = int(stats.get("nodes") or 0)
-    skills = int(stats.get("skills") or 0)
-    agents = int(stats.get("agents") or 0)
-    mcps = int(stats.get("mcps") or 0)
-    harnesses = int(stats.get("harnesses") or 0)
-    if not all((nodes, skills, agents, mcps, harnesses)):
-        raise ValueError("missing graph stats for GitHub About description")
+def build_github_about_description() -> str:
+    """Return the stable one-line GitHub/HF product description."""
     return (
-        "Not an Amazon-style catalog or marketplace. ctx is a recommendation "
-        "layer: bring your org tools or use the shipped graph to load the "
-        "right skills, agents, MCPs, and harnesses only for the current dev "
-        "window, cutting token bills and local compute waste: "
-        f"{nodes:,}-node LLM-wiki graph, {skills:,} skills, "
-        f"{agents:,} agents, {mcps:,} MCPs, {harnesses:,} harnesses."
+        "CTX Fit finds the cheapest AI coding setup that reliably works on your "
+        "repository, then applies the winner as a reviewable change."
     )
 
 
@@ -1497,8 +1486,8 @@ def read_github_about_description(repo: str = _GITHUB_REPO) -> str:
 
 
 def sync_github_about(*, check_only: bool = False, repo: str = _GITHUB_REPO) -> int:
-    """Check or update GitHub About so it matches README/docs graph stats."""
-    expected = build_github_about_description(read_graph_stats())
+    """Check or update GitHub About so it matches the stable product summary."""
+    expected = build_github_about_description()
     current = read_github_about_description(repo)
     if current == expected:
         print("GitHub About description is up to date.")
@@ -1620,7 +1609,7 @@ def main() -> None:
     parser.add_argument("--github-repo", default=_GITHUB_REPO, help="GitHub repo owner/name")
     args = parser.parse_args()
     if args.print_github_description:
-        print(build_github_about_description(read_graph_stats()))
+        print(build_github_about_description())
         return
     if args.check_github_about:
         sys.exit(sync_github_about(check_only=True, repo=args.github_repo))

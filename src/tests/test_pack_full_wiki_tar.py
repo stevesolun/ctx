@@ -5,8 +5,12 @@ import json
 import tarfile
 from hashlib import sha256
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 from ctx.core.wiki.wiki_packs import load_merged_wiki_pages
+from scripts import pack_full_wiki_tar
 from scripts.pack_full_wiki_tar import repack_full_wiki_tar
 
 
@@ -33,6 +37,8 @@ def test_repack_full_wiki_tar_moves_high_fanout_pages_into_wiki_pack(
             "entities/skills/current.md",
             "# Current Skill\nSource: /Users/steves/ctx\nLinux: /home/steves/ctx\n",
         )
+        _add_text(tf, "entities/skills/current.md.original", "# Raw entity backup\n")
+        _add_text(tf, "converted/current/SKILL.md.original", "# Raw converted backup\n")
         _add_text(tf, "entities/skills/empty.md", "")
         _add_text(tf, "entities/agents/reviewer.md", "# Reviewer Agent\n")
         _add_text(tf, "entities/mcp-servers/github.md", "# GitHub MCP\n")
@@ -60,6 +66,8 @@ def test_repack_full_wiki_tar_moves_high_fanout_pages_into_wiki_pack(
         tf.extractall(tmp_path / "extracted")
 
     assert "entities/skills/current.md" not in names
+    assert "entities/skills/current.md.original" not in names
+    assert "converted/current/SKILL.md.original" not in names
     assert "entities/skills/empty.md" not in names
     assert "entities/agents/reviewer.md" not in names
     assert "entities/mcp-servers/github.md" not in names
@@ -190,3 +198,62 @@ def test_repack_full_wiki_tar_preserves_graph_pack_checksums(tmp_path: Path) -> 
     assert (
         manifest["checksums"]["graph.json"] == sha256(pack_graph_text.encode("utf-8")).hexdigest()
     )
+
+
+def test_repack_full_wiki_tar_rejects_malicious_member_without_mutating_source(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "wiki-graph.tar.gz"
+    outside = tmp_path / "escape.md"
+    with tarfile.open(source, "w:gz") as tf:
+        _add_text(
+            tf,
+            "graphify-out/graph-export-manifest.json",
+            json.dumps({"export_id": "test-export"}),
+        )
+        _add_text(tf, "../escape.md", "malicious\n")
+    original = source.read_bytes()
+
+    with pytest.raises(ValueError, match="unsafe archive member path"):
+        repack_full_wiki_tar(source)
+
+    assert source.read_bytes() == original
+    assert not outside.exists()
+    assert not source.with_name(f".{source.name}.tmp").exists()
+
+
+def test_repack_full_wiki_tar_replace_interruption_preserves_source_and_cleans_temp(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "wiki-graph.tar.gz"
+    with tarfile.open(source, "w:gz") as tf:
+        _add_text(tf, "index.md", "# Wiki\n")
+        _add_text(tf, "entities/skills/current.md", "# Current\n")
+        _add_text(
+            tf,
+            "graphify-out/graph-export-manifest.json",
+            json.dumps({"export_id": "test-export"}),
+        )
+        _add_text(tf, "graphify-out/graph-report.md", "# Graph Report\n")
+    original = source.read_bytes()
+    tmp_target = source.with_name(f".{source.name}.tmp")
+    replace_calls: list[tuple[Path, Path]] = []
+
+    def interrupt_replace(staged: Path, target: Path) -> None:
+        replace_calls.append((staged, target))
+        assert staged == tmp_target
+        assert staged.is_file()
+        assert target == source
+        raise OSError("forced interruption before tar replacement")
+
+    monkeypatch.setattr(pack_full_wiki_tar, "os", SimpleNamespace(replace=interrupt_replace))
+
+    with pytest.raises(OSError, match="forced interruption before tar replacement"):
+        repack_full_wiki_tar(source)
+
+    assert replace_calls == [(tmp_target, source)]
+    assert source.read_bytes() == original
+    assert not tmp_target.exists()
+    with tarfile.open(source, "r:gz") as tf:
+        assert "entities/skills/current.md" in tf.getnames()

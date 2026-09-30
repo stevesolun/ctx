@@ -204,6 +204,27 @@ def test_main_treats_existing_toolboxes_as_idempotent_skip(
     assert "Global config already has" not in captured.err
 
 
+def test_main_propagates_toolbox_seed_failure_and_reports_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(ci, "_claude_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        ci,
+        "seed_toolboxes",
+        lambda force=False: ci.ToolboxSeedResult(returncode=11),
+    )
+
+    rc = ci.main(["--model-mode", "skip"])
+
+    captured = capsys.readouterr()
+    assert rc == 11
+    assert "toolbox init returned 11" in captured.err
+    assert "ctx-init: completed with errors" in captured.out
+    assert "ctx-init: done" not in captured.out
+
+
 def test_main_auto_wizard_in_terminal_configures_custom_model(
     tmp_path: Path,
     monkeypatch,

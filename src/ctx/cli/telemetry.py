@@ -349,7 +349,7 @@ def main(argv: list[str] | None = None) -> int:
                 config=config,
                 include_exported=args.all,
             )
-    except ValueError as exc:
+    except (OSError, ValueError) as exc:
         if args.json:
             _print_json({"attempted": 0, "exported": 0, "failed": 1, "error": str(exc)})
         else:
@@ -390,7 +390,7 @@ def retention_main(argv: list[str] | None = None) -> int:
                 config=config,
                 drop_malformed=drop_malformed,
             )
-    except ValueError as exc:
+    except (OSError, ValueError) as exc:
         if args.json:
             _print_json({"failed": 1, "error": str(exc)})
         else:

@@ -238,3 +238,53 @@ def test_toolbox_dispatches_allowed_dry_run_provision(
     assert payload["would_install"] == ["a"]
     assert payload["installed"] == []
     assert not (skills_dir / "a").exists()
+
+
+def test_toolbox_caps_installs_and_forwards_security_scan(
+    wiki_dir: Path,
+    skills_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ctx_config
+
+    rows = [_local_row(f"skill-{index}") for index in range(7)]
+    for row in rows:
+        _seed_skill(wiki_dir, row["name"])
+    _fake_recommend(monkeypatch, rows)
+    monkeypatch.setattr(ctx_config.cfg, "skills_dir", skills_dir)
+    calls: list[tuple[str, bool]] = []
+
+    class _Installed:
+        status = "installed"
+        message = ""
+
+    def fake_install_skill(
+        slug: str,
+        *,
+        wiki_dir: Path,
+        skills_dir: Path,
+        dry_run: bool,
+        security_scan: bool,
+    ) -> _Installed:
+        del wiki_dir, skills_dir, dry_run
+        calls.append((slug, security_scan))
+        return _Installed()
+
+    monkeypatch.setattr(loop_tools, "install_skill", fake_install_skill)
+    box = CtxCoreToolbox(
+        wiki_dir=wiki_dir,
+        allowed_tool_names={"ctx__loop_provision"},
+    )
+
+    payload = json.loads(
+        box.dispatch(
+            ToolCall(
+                id="t",
+                name="ctx__loop_provision",
+                arguments={"goal": "bounded safe install", "top_k": 5, "security_scan": True},
+            )
+        )
+    )
+
+    assert payload["installed"] == [f"skill-{index}" for index in range(5)]
+    assert calls == [(f"skill-{index}", True) for index in range(5)]

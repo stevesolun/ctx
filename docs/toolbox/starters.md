@@ -1,8 +1,13 @@
 # Starter toolboxes
 
-Five presets ship in `docs/toolbox/templates/`. `toolbox init` activates
-them into `~/.claude/toolboxes.json`; you can then override any field per-repo
-in `.toolbox.yaml`.
+Five presets ship in `docs/toolbox/templates/`. `python -m toolbox init` seeds their
+definitions into `~/.claude/toolboxes.json`; it does not activate any of them.
+Use `toolbox activate NAME` or the intent interview to choose an active preset,
+then define per-repo replacements in `.toolbox.yaml`. A same-name per-repo
+entry replaces the complete global toolbox, not individual fields.
+
+The agent lists below describe intended host execution. The shipped planner
+only emits plans; it does not invoke those agents or enforce their budgets.
 
 ## ship-it
 
@@ -70,8 +75,9 @@ Best for: docs-heavy branches and README updates.
 
 > **New-repo bootstrap: run the intent interview, scaffold plan, pick initial toolbox.**
 
-Invokes `intent_interview` in interactive mode, then activates whichever
-starters the user selects.
+Declares an intent-interview bootstrap task for a host to invoke. To perform
+the interview directly, run `python -m intent_interview init`; activation
+requires `--apply`.
 
 - **Triggers**: slash only.
 - **Scope**: `diff`.

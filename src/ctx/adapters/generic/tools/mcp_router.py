@@ -45,6 +45,7 @@ import shutil
 import subprocess
 import threading
 import time
+from collections.abc import Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Iterator
@@ -61,7 +62,8 @@ from ctx.utils._secret_scan import find_inline_secret_arg, secret_key_like
 
 _logger = logging.getLogger(__name__)
 
-_PROTOCOL_VERSION = "2024-11-05"
+_SUPPORTED_PROTOCOL_VERSIONS = ("2025-11-25", "2024-11-05")
+_PROTOCOL_VERSION = _SUPPORTED_PROTOCOL_VERSIONS[0]
 _CLIENT_INFO = {"name": "ctx-harness", "version": "0.1"}
 _SAFE_PARENT_ENV_KEYS = frozenset(
     {
@@ -473,7 +475,7 @@ class McpClient:
         self._lock = threading.Lock()
         self._next_id = 0
         self._tools_cache: list[ToolDefinition] | None = None
-        self._stdout_frames: queue.Queue[dict[str, Any] | None] = queue.Queue()
+        self._stdout_frames: queue.Queue[dict[str, Any] | McpServerError | None] = queue.Queue()
         self._stdout_thread: threading.Thread | None = None
         # Capture stderr for diagnostics; reading runs in a background
         # thread so a chatty server doesn't block the pipe.
@@ -483,6 +485,7 @@ class McpClient:
         self._process_started_at: float | None = None
         self._last_process_lifetime_ms: float | None = None
         self._last_process_exited: bool | None = None
+        self._protocol_version: str | None = None
 
     # ── lifecycle ──────────────────────────────────────────────────────────
 
@@ -500,6 +503,7 @@ class McpClient:
         self._process_started_at = None
         self._last_process_lifetime_ms = None
         self._last_process_exited = None
+        self._protocol_version = None
         try:
             self._proc = subprocess.Popen(
                 [command, *args],
@@ -531,7 +535,7 @@ class McpClient:
         self._stdout_thread.start()
 
         try:
-            self._request(
+            initialize_result = self._request_object(
                 "initialize",
                 {
                     "protocolVersion": _PROTOCOL_VERSION,
@@ -540,6 +544,21 @@ class McpClient:
                 },
                 timeout=self._config.startup_timeout,
             )
+            if "protocolVersion" not in initialize_result:
+                raise McpServerError(f"{self._config.name}.initialize: missing protocolVersion")
+            protocol_version = initialize_result["protocolVersion"]
+            if not isinstance(protocol_version, str):
+                raise McpServerError(
+                    f"{self._config.name}.initialize: non-string protocolVersion "
+                    f"{protocol_version!r}"
+                )
+            if protocol_version not in _SUPPORTED_PROTOCOL_VERSIONS:
+                supported = ", ".join(_SUPPORTED_PROTOCOL_VERSIONS)
+                raise McpServerError(
+                    f"{self._config.name}.initialize: unsupported protocolVersion "
+                    f"{protocol_version!r}; supported revisions: {supported}"
+                )
+            self._protocol_version = protocol_version
         except Exception:
             self.stop()
             raise
@@ -608,6 +627,11 @@ class McpClient:
         """Return observed process exit state, or ``None`` if no process started."""
         return self._last_process_exited
 
+    @property
+    def negotiated_protocol_version(self) -> str | None:
+        """Return the server-selected MCP revision after a successful handshake."""
+        return self._protocol_version
+
     def __enter__(self) -> "McpClient":
         self.start()
         return self
@@ -626,13 +650,21 @@ class McpClient:
         """
         if self._tools_cache is not None:
             return list(self._tools_cache)
-        result = self._request("tools/list", {})
+        result = self._request_object("tools/list", {})
         raw_tools = result.get("tools", [])
+        if not isinstance(raw_tools, list):
+            raise McpServerError(f"{self._config.name}.tools/list: tools must be an array")
         tools: list[ToolDefinition] = []
         for t in raw_tools:
+            if not isinstance(t, Mapping):
+                raise McpServerError(f"{self._config.name}.tools/list: tool must be a JSON object")
             name = t.get("name")
             if not isinstance(name, str) or not name:
                 continue
+            if "inputSchema" in t and not isinstance(t["inputSchema"], Mapping):
+                raise McpServerError(
+                    f"{self._config.name}.tools/list: inputSchema must be a JSON object"
+                )
             tools.append(
                 ToolDefinition(
                     name=name,
@@ -668,10 +700,18 @@ class McpClient:
         recorded = False
         with telemetry_span():
             try:
-                result = self._request(
+                result = self._request_object(
                     "tools/call",
                     {"name": name, "arguments": arguments},
                 )
+                if "isError" in result and not isinstance(result["isError"], bool):
+                    raise McpServerError(
+                        f"{self._config.name}.tools/call: isError must be a boolean"
+                    )
+                if "content" in result and not isinstance(result["content"], list):
+                    raise McpServerError(
+                        f"{self._config.name}.tools/call: content must be an array"
+                    )
                 if result.get("isError"):
                     content = _flatten_content(result.get("content", []))
                     _record_mcp_client_tool_call(
@@ -712,13 +752,28 @@ class McpClient:
 
     # ── JSON-RPC plumbing ─────────────────────────────────────────────────
 
+    def _request_object(
+        self,
+        method: str,
+        params: dict[str, Any] | None,
+        *,
+        timeout: float | None = None,
+    ) -> Mapping[str, Any]:
+        result = self._request(method, params, timeout=timeout)
+        if not isinstance(result, Mapping):
+            result_kind = "null" if result is None else type(result).__name__
+            raise McpServerError(
+                f"{self._config.name}.{method}: result must be a JSON object; received {result_kind}"
+            )
+        return result
+
     def _request(
         self,
         method: str,
         params: dict[str, Any] | None,
         *,
         timeout: float | None = None,
-    ) -> dict[str, Any]:
+    ) -> Any:
         """Send a JSON-RPC request, wait for the matching response."""
         if self._proc is None or self._proc.stdin is None or self._proc.stdout is None:
             raise RuntimeError(f"MCP client '{self._config.name}' is not started")
@@ -768,31 +823,56 @@ class McpClient:
                         f"{self._config.name} pipe closed before response to "
                         f"{method!r}. stderr tail:\n{self._stderr_tail()}"
                     )
+                if frame.get("jsonrpc") != "2.0":
+                    raise McpServerError(f"{self._config.name}.{method}: jsonrpc must be '2.0'")
                 # Notifications have no ``id``; skip them for now.
                 if "id" not in frame:
+                    if (
+                        not isinstance(frame.get("method"), str)
+                        or not frame["method"]
+                        or "result" in frame
+                        or "error" in frame
+                    ):
+                        raise McpServerError(
+                            f"{self._config.name}.{method}: invalid notification or missing response id"
+                        )
                     _logger.debug(
                         "MCP %s notification: %s",
                         self._config.name,
-                        frame.get("method"),
+                        _redact_sensitive_text(frame["method"], self._stderr_redaction_values),
                     )
                     continue
-                if frame.get("id") != request_id:
+                response_id = frame["id"]
+                if type(response_id) not in (int, str) and response_id is not None:
+                    raise McpServerError(f"{self._config.name}.{method}: invalid response id")
+                if response_id != request_id:
                     # Late response to a prior request (shouldn't happen
                     # while we hold the lock, but defensive).
                     _logger.debug(
                         "MCP %s stale response id=%s (waiting for %s)",
                         self._config.name,
-                        frame.get("id"),
+                        _redact_sensitive_text(str(response_id), self._stderr_redaction_values),
                         request_id,
                     )
                     continue
+                if ("result" in frame) == ("error" in frame):
+                    raise McpServerError(
+                        f"{self._config.name}.{method}: response must contain "
+                        "exactly one of result or error"
+                    )
                 if "error" in frame:
                     err = frame["error"]
+                    if (
+                        not isinstance(err, Mapping)
+                        or type(err.get("code")) is not int
+                        or not isinstance(err.get("message"), str)
+                    ):
+                        raise McpServerError(f"{self._config.name}.{method}: invalid error object")
                     raise McpServerError(
                         f"{self._config.name}.{method}: "
                         f"code={err.get('code')} message={err.get('message')!r}"
                     )
-                return frame.get("result") or {}
+                return frame.get("result")
 
     def _notify(self, method: str, params: dict[str, Any] | None) -> None:
         if self._proc is None or self._proc.stdin is None:
@@ -816,11 +896,12 @@ class McpClient:
 
     def _read_frame(self, *, timeout: float | None) -> dict[str, Any] | None:
         try:
-            if timeout is None:
-                return self._stdout_frames.get()
-            return self._stdout_frames.get(timeout=timeout)
+            frame = self._stdout_frames.get(timeout=timeout)
         except queue.Empty as exc:
             raise TimeoutError from exc
+        if isinstance(frame, McpServerError):
+            raise frame
+        return frame
 
     def _drain_stdout(self) -> None:
         proc = self._proc
@@ -830,13 +911,19 @@ class McpClient:
         try:
             for line in iter(proc.stdout.readline, b""):
                 try:
-                    self._stdout_frames.put(json.loads(line.decode("utf-8", errors="replace")))
+                    frame = json.loads(line.decode("utf-8", errors="replace"))
+                    if not isinstance(frame, dict):
+                        self._stdout_frames.put(
+                            McpServerError(f"{self._config.name}: frame must be a JSON object")
+                        )
+                    else:
+                        self._stdout_frames.put(frame)
                 except json.JSONDecodeError as exc:
                     _logger.warning(
-                        "MCP %s: dropping malformed frame: %s (raw=%r)",
+                        "MCP %s: dropping malformed frame: %s (%d bytes)",
                         self._config.name,
                         exc,
-                        line,
+                        len(line),
                     )
         finally:
             self._stdout_frames.put(None)

@@ -373,6 +373,184 @@ def test_session_detail_filters_by_session_id(fake_claude: Path) -> None:
     assert detail["load_events"][0]["skill"] == "z"
 
 
+def test_public_session_id_aliases_only_secret_shaped_values() -> None:
+    secret_a = "sk-ABCDEFGHIJKLMNOPQRSTUVWX"
+    secret_b = "sk-ZYXWVUTSRQPONMLKJIHGFEDC"
+    domain = b"ctx.monitor.public-session-id.v1\x00"
+
+    alias_a = runtime_service.public_session_id(secret_a)
+    alias_b = runtime_service.public_session_id(secret_b)
+
+    assert alias_a == "session-public-" + hashlib.sha256(domain + secret_a.encode()).hexdigest()
+    assert alias_b == "session-public-" + hashlib.sha256(domain + secret_b.encode()).hexdigest()
+    assert alias_a != alias_b
+    assert runtime_service.public_session_id("ordinary-session") == "ordinary-session"
+
+
+def test_public_session_alias_namespace_cannot_merge_an_ordinary_session() -> None:
+    secret_session = "sk-ABCDEFGHIJKLMNOPQRSTUVWX"
+    secret_alias = runtime_service.public_session_id(secret_session)
+    ordinary_alias = runtime_service.public_session_id(secret_alias)
+    audit = [
+        {"session_id": secret_session, "subject": "secret-session-event"},
+        {"session_id": secret_alias, "subject": "ordinary-alias-event"},
+    ]
+
+    summaries = runtime_service.summarize_sessions(
+        audit,
+        [],
+        audit_entity_type=lambda _record: None,
+    )
+
+    assert secret_alias != ordinary_alias
+    assert {row["session_id"] for row in summaries} == {secret_alias, ordinary_alias}
+    assert [
+        row["subject"]
+        for row in runtime_service.session_detail(secret_alias, audit, [])["audit_entries"]
+    ] == ["secret-session-event"]
+    assert [
+        row["subject"]
+        for row in runtime_service.session_detail(ordinary_alias, audit, [])["audit_entries"]
+    ] == ["ordinary-alias-event"]
+    assert [
+        row["subject"]
+        for row in runtime_service.session_detail(secret_session, audit, [])["audit_entries"]
+    ] == ["secret-session-event"]
+
+
+def test_public_runtime_record_redacts_only_secret_shaped_or_secret_keyed_values() -> None:
+    record = {
+        "session_id": "ordinary-session",
+        "subject": "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+        "meta": {
+            "api_key": "not-token-shaped-but-private",
+            "tool": "xoxb-ABCDEFGHIJKLMNOPQRSTUVWX",
+            "note": "ordinary prose containing the word secret",
+            "nested": {"client_secret": "another-private-value"},
+        },
+    }
+
+    projected = runtime_service.project_public_record(record)
+
+    assert projected == {
+        "session_id": "ordinary-session",
+        "subject": "[redacted]",
+        "meta": {
+            "api_key": "[redacted]",
+            "tool": "[redacted]",
+            "note": "ordinary prose containing the word secret",
+            "nested": {"client_secret": "[redacted]"},
+        },
+    }
+    assert record["subject"] == "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    assert isinstance(record["meta"], dict)
+    assert record["meta"]["api_key"] == "not-token-shaped-but-private"
+
+
+def test_session_http_surfaces_project_secrets_and_preserve_alias_navigation(
+    fake_claude: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    secret_session_a = "sk-ABCDEFGHIJKLMNOPQRSTUVWX"
+    secret_session_b = "sk-ZYXWVUTSRQPONMLKJIHGFEDC"
+    github_token = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    huggingface_token = "hf_ABCDEFGHIJKLMNOPQRSTUVWX"
+    slack_token = "xoxb-ABCDEFGHIJKLMNOPQRSTUVWX"
+    keyed_secret = "private-value-without-token-shape"
+    ordinary_session = "ordinary-session"
+    _write_audit(
+        fake_claude,
+        [
+            {
+                "ts": "2026-09-30T10:00:00Z",
+                "event": "skill.loaded",
+                "subject_type": "skill",
+                "subject": github_token,
+                "session_id": secret_session_a,
+                "meta": {"api_key": huggingface_token, "client_secret": keyed_secret},
+            },
+            {
+                "ts": "2026-09-30T10:01:00Z",
+                "event": "skill.loaded",
+                "subject_type": "skill",
+                "subject": "ordinary-secret-session-tool",
+                "session_id": secret_session_b,
+            },
+            {
+                "ts": "2026-09-30T10:02:00Z",
+                "event": "skill.loaded",
+                "subject_type": "skill",
+                "subject": "ordinary-tool",
+                "session_id": ordinary_session,
+            },
+        ],
+    )
+    _write_events(
+        fake_claude,
+        [
+            {
+                "timestamp": "2026-09-30T10:00:30Z",
+                "event": "load",
+                "skill": slack_token,
+                "session_id": secret_session_a,
+            }
+        ],
+    )
+    alias_a = runtime_service.public_session_id(secret_session_a)
+    alias_b = runtime_service.public_session_id(secret_session_b)
+    aliases = {alias_a, alias_b}
+    forbidden = (
+        secret_session_a,
+        secret_session_b,
+        github_token,
+        huggingface_token,
+        slack_token,
+        keyed_secret,
+    )
+
+    server, thread, port = _serve_monitor(monkeypatch)
+    try:
+        status, payload = _get_json(port, "/api/sessions.json")
+        assert status == 200
+        encoded_payload = json.dumps(payload)
+        assert not any(secret in encoded_payload for secret in forbidden)
+        returned_ids = {row["session_id"] for row in payload}
+        assert aliases <= returned_ids
+        assert ordinary_session in returned_ids
+
+        html_by_path: dict[str, str] = {}
+        for path in ("/sessions", "/", *[f"/session/{alias}" for alias in aliases]):
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=5) as response:
+                assert response.status == 200
+                html_by_path[path] = response.read().decode()
+            assert not any(secret in html_by_path[path] for secret in forbidden)
+
+        for alias in aliases:
+            assert f"/session/{alias}" in html_by_path["/sessions"]
+            assert f"Session {alias}" in html_by_path[f"/session/{alias}"]
+        assert "[redacted]" in html_by_path[f"/session/{alias_a}"]
+        assert "ordinary-secret-session-tool" in html_by_path[f"/session/{alias_b}"]
+
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/session/{secret_session_a}", timeout=5
+        ) as response:
+            raw_path_body = response.read().decode()
+        assert not any(secret in raw_path_body for secret in forbidden)
+        assert f"Session {runtime_service.public_session_id(secret_session_a)}" in raw_path_body
+
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/session/{ordinary_session}", timeout=5
+        ) as response:
+            ordinary_body = response.read().decode()
+        assert f"Session {ordinary_session}" in ordinary_body
+        assert "ordinary-tool" in ordinary_body
+        assert secret_session_a in (fake_claude / "ctx-audit.jsonl").read_text(encoding="utf-8")
+        assert slack_token in (fake_claude / "skill-events.jsonl").read_text(encoding="utf-8")
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+
 def test_render_home_has_grade_pills(fake_claude: Path) -> None:
     _write_sidecar(fake_claude, "s1", {"slug": "s1", "grade": "A", "raw_score": 0.9})
     html = mt.render_home()
@@ -1722,6 +1900,40 @@ def test_render_runtime_lifecycle_surfaces_checks_and_open_escalations(
     assert "<td>Uncached input</td><td>8</td>" in html
     assert "<span class='pill'>exact</span>" in html
     assert html.count("class='card table-scroll'") == 5
+
+
+@pytest.mark.parametrize("failure", ["directory", "invalid-encoding"])
+def test_runtime_read_failure_is_explicit_in_service_page_and_http(
+    fake_claude: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    events = fake_claude / "runtime-events.jsonl"
+    if failure == "directory":
+        events.mkdir()
+    else:
+        events.write_bytes(b"\xff\xfe")
+    monkeypatch.setattr(mt, "runtime_lifecycle_path", lambda: events)
+
+    summary = runtime_service.lifecycle_summary(events)
+    assert "Runtime history is unavailable" in summary["error"]
+    assert "events_total" not in summary  # Unreadable is not empty/healthy.
+    assert "role='alert'" in mt.render_runtime_lifecycle()
+
+    server, thread, port = _serve_monitor(monkeypatch)
+    try:
+        status, payload = _get_json(port, "/api/runtime.json")
+        assert status == 503
+        assert payload == summary
+        for route in ("/runtime", "/"):
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}{route}", timeout=5) as response:
+                assert response.status == 200
+                assert "text/html" in response.headers["Content-Type"]
+                body = response.read().decode()
+            assert "Runtime history is unavailable" in body
+            assert "No open escalations" not in body
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
 
 
 def test_render_logs_filters_and_renders(fake_claude: Path) -> None:
@@ -5956,7 +6168,7 @@ def test_render_wiki_index_rejects_unsafe_filenames(fake_claude: Path) -> None:
     assert "Bad-Start" not in slugs
 
 
-def test_render_manage_includes_crud_and_upload_wizard(fake_claude: Path) -> None:
+def test_render_manage_includes_catalog_crud_and_editor(fake_claude: Path) -> None:
     html_out = mt.render_manage(mutations_enabled=True)
     direct_html = manage_page.render_manage(
         mutations_enabled=True,
@@ -6585,6 +6797,151 @@ def test_entity_delete_api_removes_wiki_page_and_queues_graph_refresh(
         )
         assert [job.kind for job in jobs] == [wiki_queue.ENTITY_UPSERT_JOB]
         assert jobs[0].payload["action"] == "delete"
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+
+@pytest.mark.parametrize(
+    ("body", "token", "origin", "expected_status"),
+    [
+        ({"slug": "kept", "entity_type": "unknown"}, "test-token", None, 400),
+        ({"slug": "../kept", "entity_type": "skill"}, "test-token", None, 400),
+        ({"slug": "kept", "entity_type": []}, "test-token", None, 400),
+        ({"slug": "kept", "entity_type": "skill"}, None, None, 403),
+        ({"slug": "kept", "entity_type": "skill"}, "wrong-token", None, 403),
+        ({"slug": "kept", "entity_type": "skill"}, "test-token", "https://outside.example", 403),
+        (["kept"], "test-token", None, 400),
+        ("malformed-json", "test-token", None, 400),
+    ],
+)
+def test_entity_delete_http_rejects_invalid_requests_without_mutation(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    body: Any,
+    token: str | None,
+    origin: str | None,
+    expected_status: int,
+) -> None:
+    entity_path = fake_claude / "skill-wiki" / "entities" / "skills" / "kept.md"
+    entity_path.parent.mkdir(parents=True)
+    original = "---\ntitle: Kept\ntype: skill\n---\n# Kept\n"
+    entity_path.write_text(original, encoding="utf-8")
+    before = sorted(str(path.relative_to(fake_claude)) for path in fake_claude.rglob("*"))
+    encoded = b"{not-json" if body == "malformed-json" else json.dumps(body).encode()
+    headers = {"Content-Type": "application/json", "Content-Length": str(len(encoded))}
+    if token is not None:
+        headers["X-CTX-Monitor-Token"] = token
+    if origin is not None:
+        headers["Origin"] = origin
+    server, thread, port = _serve_monitor(monkeypatch)
+    try:
+        status, payload = _post_raw(port, "/api/entity/delete", headers=headers, body=encoded)
+        assert status == expected_status
+        assert payload.get("ok") is not True
+        assert payload["detail"]
+        assert entity_path.read_text(encoding="utf-8") == original
+        assert (
+            sorted(str(path.relative_to(fake_claude)) for path in fake_claude.rglob("*")) == before
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+
+def test_readonly_http_apis_serve_seeded_data_and_redact_config(
+    fake_claude: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_sidecar(fake_claude, "sample", {"slug": "sample", "grade": "A", "raw_score": 0.9})
+    events = fake_claude / "runtime-events.jsonl"
+    _write_runtime_events(
+        events, [{"action": "validation", "status": "failed", "check_name": "pytest"}]
+    )
+    monkeypatch.setattr(mt, "runtime_lifecycle_path", lambda: events)
+    config = fake_claude / "skill-system-config.json"
+    config.write_text(
+        json.dumps({"resolver": {"recommendation_top_k": 3}, "api_key": "private-test-value"}),
+        encoding="utf-8",
+    )
+    server, thread, port = _serve_monitor(monkeypatch)
+    try:
+        responses = {}
+        for endpoint in ("kpi", "grades", "runtime", "config"):
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/api/{endpoint}.json", timeout=5
+            ) as response:
+                assert response.status == 200
+                assert "application/json" in response.headers["Content-Type"]
+                responses[endpoint] = json.loads(response.read())
+        assert responses["kpi"]["total"] == 1
+        assert responses["kpi"]["grade_counts"]["A"] == 1
+        assert responses["grades"] == {
+            "grades": {"A": 1, "B": 0, "C": 0, "D": 0, "F": 0},
+            "total": 1,
+        }
+        assert responses["runtime"]["events_total"] == 1
+        assert responses["runtime"]["validation_failures"] == 1
+        assert responses["runtime"]["latest_validation"]["check_name"] == "pytest"
+        assert set(responses["config"]) == {"defaults", "user", "effective", "path"}
+        assert responses["config"]["user"]["resolver"]["recommendation_top_k"] == 3
+        assert responses["config"]["effective"]["resolver"]["recommendation_top_k"] == 3
+        assert responses["config"]["user"]["api_key"] == "[redacted]"
+        assert "private-test-value" not in json.dumps(responses["config"])
+        assert "private-test-value" in config.read_text(encoding="utf-8")
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+
+def test_manifest_and_empty_session_http_payloads(
+    fake_claude: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = {
+        "load": [{"skill": "reviewer", "entity_type": "agent", "reason": "selected"}],
+        "unload": [{"skill": "old-skill", "entity_type": "skill"}],
+        "warnings": ["fixture warning"],
+    }
+    (fake_claude / "skill-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    server, thread, port = _serve_monitor(monkeypatch)
+    try:
+        status, payload = _get_json(port, "/api/manifest.json")
+        assert status == 200
+        assert payload == manifest
+        assert _get_json(port, "/api/sessions.json") == (200, [])
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/session/unknown-session", timeout=5
+        ) as response:
+            assert response.status == 200
+            body = response.read().decode()
+        assert "Session unknown-session" in body
+        assert "<strong>0</strong> audit entries" in body
+        assert "<strong>0</strong> load/unload events" in body
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [[], {"unknown.setting": 1}, {"resolver.recommendation_top_k": 99}],
+)
+def test_config_http_rejects_invalid_updates_without_mutation(
+    fake_claude: Path, monkeypatch: pytest.MonkeyPatch, updates: Any
+) -> None:
+    config = fake_claude / "skill-system-config.json"
+    original = '{"resolver":{"recommendation_top_k":3}}\n'
+    config.write_text(original, encoding="utf-8")
+    server, thread, port = _serve_monitor(monkeypatch)
+    try:
+        status, payload = _post_json(port, "/api/config", {"updates": updates}, token="test-token")
+        assert status == 400
+        assert payload["ok"] is False
+        assert payload["detail"]
+        assert config.read_text(encoding="utf-8") == original
     finally:
         server.shutdown()
         thread.join(timeout=5)

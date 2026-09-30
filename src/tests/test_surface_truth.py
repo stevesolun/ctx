@@ -27,8 +27,6 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 README = REPO_ROOT / "README.md"
 DOCS = REPO_ROOT / "docs"
 MKDOCS = REPO_ROOT / "mkdocs.yml"
-CLI_FIT = REPO_ROOT / "src" / "ctx" / "cli" / "fit.py"
-
 #: The two surfaces that describe `--apply` and `--pr` to a user about to run them.
 WRITE_SURFACES = ("README.md", "docs/index.md")
 
@@ -111,14 +109,6 @@ def _write_section(surface: str) -> tuple[str, str]:
     pr_marker = "--pr` writes to a remote"
     split_at = section.index(pr_marker)
     return _flat(section[:split_at]), _flat(section[split_at:])
-
-
-def _handle_apply_source() -> str:
-    """The body of the CLI handler that prints the post-write advice."""
-
-    source = CLI_FIT.read_text(encoding="utf-8")
-    body = source.split("def _handle_apply(", 1)[1]
-    return body.split("\ndef ", 1)[0]
 
 
 # ---------------------------------------------------------------------------
@@ -274,10 +264,10 @@ def _observed_apply_outcomes(workspace: Path) -> dict[str, dict[str, object]]:
     rather than against a remembered fact. `--apply` writes the CTX-owned
     `.ctx/fit-configuration.json` sidecar, whose action depends on whether an
     owned manifest already exists. A `create` lands untracked, where `git diff`
-    and `git checkout` -- the pair the CLI still prints unconditionally -- do
-    nothing and fail respectively. If `--apply` ever starts staging what it
-    writes, this dictionary changes and the doc assertions fail rather than
-    quietly describing the old behaviour.
+    shows nothing and `git checkout` fails; the CLI and docs now distinguish
+    that case from a tracked modification. If `--apply` ever starts staging
+    what it writes, this dictionary changes and the doc assertions fail rather
+    than quietly describing the old behaviour.
     """
 
     from ctx.fit.apply import apply_plan, plan_apply
@@ -451,27 +441,6 @@ def test_apply_no_git_claim_is_scoped_to_the_write(surface: str) -> None:
         f"{surface} does not tell the reader that `--apply` needs evidence from "
         "`--test --budget N`, which is where the git reads happen"
     )
-
-
-def test_docs_qualify_the_undo_line_that_ctx_fit_prints_after_a_write() -> None:
-    """A reader who trusts the tool's own closing line is stuck on a create.
-
-    The claim this pins is about `src/ctx/cli/fit.py`, which this lane does not
-    own, so it is asserted against that file rather than restated. If the CLI
-    starts branching on the artifact action, the caveat becomes wrong and this
-    test turns red so it is deleted rather than left to rot.
-    """
-
-    handler = _handle_apply_source()
-    unconditional = "git checkout" in handler and "untracked" not in handler
-
-    assert unconditional, "the CLI now qualifies its undo advice; remove the docs caveat test"
-    for surface in WRITE_SURFACES:
-        apply_half, _ = _write_section(surface)
-        assert "cannot recover an untracked file" in apply_half, (
-            f"{surface} does not qualify the unconditional `git checkout` advice "
-            "for a newly created sidecar"
-        )
 
 
 @pytest.mark.parametrize("surface", WRITE_SURFACES)

@@ -2840,6 +2840,7 @@ def main(argv: list[str] | None = None) -> int:
         print("  [ok] toolboxes seeded")
     else:
         print(f"  [warn] toolbox init returned {toolbox_rc} — inspect above", file=sys.stderr)
+        final_rc = toolbox_rc
 
     if args.hooks:
         rc = install_hooks(ctx_src_dir=_resolve_ctx_src_dir())
@@ -2892,7 +2893,10 @@ def main(argv: list[str] | None = None) -> int:
     # Label first, command second: the surviving invocations are `python -m`
     # module paths, and trailing `# comment` columns can no longer be aligned
     # across them without running past the line limit.
-    print("\nctx-init: done. Next steps:")
+    if final_rc == 0:
+        print("\nctx-init: done. Next steps:")
+    else:
+        print(f"\nctx-init: completed with errors (exit {final_rc}). Next steps:")
     print("  - starter toolboxes:  python -m toolbox list")
     print("  - baseline health:    python -m ctx.adapters.claude_code.skill_health dashboard")
     print("  - local dashboard:    python -m ctx_monitor serve   (http://127.0.0.1:8765)")

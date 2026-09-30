@@ -21,6 +21,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 # Ensure the project root is importable regardless of working directory.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -822,6 +824,44 @@ dependencies = ["fastapi>=0.100", "sqlalchemy>=2", "pydantic>=2"]
 # ===========================================================================
 # _print_recommendations
 # ===========================================================================
+
+
+def test_recommend_help_points_to_the_supported_graph_install_path(
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setattr(sys, "argv", ["ctx-scan-repo", "--help"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        sr.main()
+
+    assert exc_info.value.code == 0
+    help_text = capsys.readouterr().out
+    assert "ctx-init --graph" in help_text
+    assert "wiki_graphify" not in help_text
+
+
+def test_main_reports_output_filesystem_failure_without_traceback(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    blocker = tmp_path / "not-a-directory"
+    blocker.write_text("file, not directory\n", encoding="utf-8")
+    output = blocker / "stack.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["ctx-scan-repo", "--repo", str(tmp_path), "--output", str(output)],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        sr.main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert f"Error: cannot write profile to {output}:" in captured.err
+    assert "Traceback" not in captured.err
 
 
 class TestPrintRecommendations:

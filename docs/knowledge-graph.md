@@ -105,8 +105,9 @@ Obsidian's native graph view if you prefer it to the web dashboard.
 
 ## How edges are built
 
-Edges are built and explained by the `python -m ctx.core.wiki.wiki_graphify` console script
-(`ctx.core.wiki.wiki_graphify`). A pair must first have at least one base
+Edges are built and explained by the
+`python -m ctx.core.wiki.wiki_graphify` module invocation. A pair must first
+have at least one base
 signal:
 
 1. **Semantic cosine** — when the embedding backend is available, entity
@@ -164,8 +165,9 @@ shared tags.
 
 The legacy CNM ("greedy modularity") algorithm is still available
 behind `CTX_GRAPH_COMMUNITY=cnm` — it's deterministic but O(n²) on
-dense graphs and hangs on the live 13K-node dataset (~50min run was
-killed on 2026-04-27 inside the priority-queue siftup). Louvain is
+dense graphs and hung on the historical 12,934-node curated-core snapshot
+(a ~50min run was killed on 2026-04-27 inside the priority-queue siftup).
+Louvain is
 the default because it finishes in seconds and produces equivalent
 quality clusters for the recommendation use case.
 
@@ -428,9 +430,12 @@ python -m ctx.core.wiki.wiki_graphify \
   --semantic-vector-index numpy-flat
 ```
 
-Then drain pending entity-upsert work with `python -m ctx.core.wiki.wiki_queue_worker --wiki
-~/.claude/skill-wiki`. This is the current repair path for "build index" and
-"attach pending" without adding another command surface.
+That graphify run reconciles the current entity set while it builds the index.
+An `entity-upsert` job whose earlier attach was skipped is recorded as
+successful, so it is not left pending for a later worker run. Future entity
+updates use the new index automatically; to revisit an older entity, update it
+again (which queues a new `entity-upsert`) or run the manual attach command
+above after reviewing its dry-run.
 
 Before publishing graph artifacts, run the full rebuild/export path:
 

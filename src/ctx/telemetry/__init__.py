@@ -412,6 +412,7 @@ _CURRENT_SPAN: ContextVar[TelemetrySpan | None] = ContextVar(
     "ctx_telemetry_span",
     default=None,
 )
+_PREVIEW_HASH_SALT = secrets.token_urlsafe(32)
 
 
 def hash_identifier(value: str, *, salt: str | bytes | None = None) -> str:
@@ -1298,7 +1299,7 @@ def preview_metrics_export(
 ) -> MetricExportResult:
     """Return the metric export count without writing to the sink or checkpoint."""
 
-    settings = _metric_settings(config)
+    settings = _metric_settings(config, create_hash_salt=False)
     if not settings["metrics_enabled"] or not settings["metric_export_enabled"]:
         return MetricExportResult(
             attempted=0,
@@ -1359,7 +1360,7 @@ def preview_traces_export(
 ) -> ExportResult:
     """Return the trace export count without writing to the sink or checkpoint."""
 
-    settings = _trace_settings(config)
+    settings = _trace_settings(config, create_hash_salt=False)
     if not settings["enabled"] or not settings["export_enabled"]:
         return ExportResult(
             attempted=0,
@@ -1448,7 +1449,7 @@ def preview_export(
 ) -> ExportResult:
     """Return the export count without writing to the sink or checkpoint."""
 
-    settings = _settings(config)
+    settings = _settings(config, create_hash_salt=False)
     if not settings["enabled"] or not settings["export_enabled"]:
         return ExportResult(
             attempted=0,
@@ -1574,7 +1575,11 @@ def _resolve_path(path: Path, *, trusted_root: Path | None = None) -> Path:
     return raw
 
 
-def _settings(config: Mapping[str, Any] | None) -> dict[str, Any]:
+def _settings(
+    config: Mapping[str, Any] | None,
+    *,
+    create_hash_salt: bool = True,
+) -> dict[str, Any]:
     raw = dict(config or _config_get("telemetry", {}) or {})
     limits = raw.get("limits") if isinstance(raw.get("limits"), Mapping) else {}
     raw_privacy = raw.get("privacy")
@@ -1602,7 +1607,7 @@ def _settings(config: Mapping[str, Any] | None) -> dict[str, Any]:
         "enabled": bool(raw.get("enabled", True)),
         "mode": mode,
         "path": str(raw.get("path", DEFAULT_TELEMETRY_PATH)),
-        "hash_salt": _resolve_hash_salt(privacy),
+        "hash_salt": _resolve_hash_salt(privacy, create=create_hash_salt),
         "hash_salt_env": hash_salt_env or DEFAULT_HASH_SALT_ENV,
         "hash_salt_path": hash_salt_path,
         "export_enabled": export_enabled,
@@ -1663,7 +1668,11 @@ def _settings(config: Mapping[str, Any] | None) -> dict[str, Any]:
     }
 
 
-def _metric_settings(config: Mapping[str, Any] | None) -> dict[str, Any]:
+def _metric_settings(
+    config: Mapping[str, Any] | None,
+    *,
+    create_hash_salt: bool = True,
+) -> dict[str, Any]:
     raw = dict(config or _config_get("telemetry", {}) or {})
     metrics_present = "metrics" in raw
     raw_metrics = raw.get("metrics")
@@ -1693,7 +1702,7 @@ def _metric_settings(config: Mapping[str, Any] | None) -> dict[str, Any]:
         "metrics_enabled": bool(_mapping_get(metrics, "enabled", default_enabled)),
         "mode": mode,
         "metrics_path": str(_mapping_get(metrics, "path", DEFAULT_METRICS_PATH)),
-        "hash_salt": _resolve_hash_salt(privacy),
+        "hash_salt": _resolve_hash_salt(privacy, create=create_hash_salt),
         "metric_export_enabled": export_enabled,
         "metric_export_sink": export_sink,
         "metric_export_path": str(_mapping_get(export, "path", DEFAULT_METRICS_EXPORT_PATH)),
@@ -1753,7 +1762,11 @@ def _metric_settings(config: Mapping[str, Any] | None) -> dict[str, Any]:
     }
 
 
-def _trace_settings(config: Mapping[str, Any] | None) -> dict[str, Any]:
+def _trace_settings(
+    config: Mapping[str, Any] | None,
+    *,
+    create_hash_salt: bool = True,
+) -> dict[str, Any]:
     raw = dict(config or _config_get("telemetry", {}) or {})
     raw_traces = raw.get("traces")
     traces: Mapping[str, Any] = raw_traces if isinstance(raw_traces, Mapping) else {}
@@ -1781,7 +1794,7 @@ def _trace_settings(config: Mapping[str, Any] | None) -> dict[str, Any]:
         "enabled": bool(raw.get("enabled", True)) and bool(_mapping_get(traces, "enabled", True)),
         "mode": mode,
         "path": str(raw.get("path", DEFAULT_TELEMETRY_PATH)),
-        "hash_salt": _resolve_hash_salt(privacy),
+        "hash_salt": _resolve_hash_salt(privacy, create=create_hash_salt),
         "export_enabled": export_enabled,
         "export_sink": export_sink,
         "export_path": "",
@@ -2175,7 +2188,11 @@ def _mapping_get(mapping: object, key: str, default: Any) -> Any:
     return default
 
 
-def _resolve_hash_salt(privacy: Mapping[str, Any] | None = None) -> str | bytes | None:
+def _resolve_hash_salt(
+    privacy: Mapping[str, Any] | None = None,
+    *,
+    create: bool = True,
+) -> str | bytes | None:
     effective_privacy = privacy
     if effective_privacy is None:
         raw = _config_get("telemetry", {}) or {}
@@ -2203,8 +2220,14 @@ def _resolve_hash_salt(privacy: Mapping[str, Any] | None = None) -> str | bytes 
 
     configured_path = _mapping_get(effective_privacy, "hash_salt_path", None)
     if not configured_path:
-        return None
+        return None if create else _PREVIEW_HASH_SALT
     salt_path = Path(str(configured_path))
+    if not create:
+        try:
+            existing = _resolve_path(salt_path).read_text(encoding="utf-8").strip()
+        except OSError:
+            return _PREVIEW_HASH_SALT
+        return existing or _PREVIEW_HASH_SALT
     try:
         return _read_or_create_hash_salt(salt_path)
     except OSError:
@@ -3800,6 +3823,7 @@ def _sanitize_payload(
             hash_salt=hash_salt,
             max_value_len=max_value_len,
             depth=depth + 1,
+            max_keys=max_keys,
         )
     return sanitized
 
@@ -3811,6 +3835,7 @@ def _sanitize_value(
     hash_salt: str | bytes | None,
     max_value_len: int,
     depth: int,
+    max_keys: int = _MAX_PAYLOAD_KEYS,
 ) -> Any:
     if isinstance(value, _SCALAR_TYPES):
         if isinstance(value, str):
@@ -3830,6 +3855,7 @@ def _sanitize_value(
             hash_salt=hash_salt,
             max_value_len=max_value_len,
             depth=depth,
+            max_keys=max_keys,
         )
     if isinstance(value, (list, tuple)):
         return [
@@ -3839,7 +3865,15 @@ def _sanitize_value(
                 hash_salt=hash_salt,
                 max_value_len=max_value_len,
                 depth=depth + 1,
+                max_keys=max_keys,
             )
             for item in value[:max_value_len]
         ]
-    return repr(value)
+    return _sanitize_value(
+        repr(value),
+        privacy_mode=privacy_mode,
+        hash_salt=hash_salt,
+        max_value_len=max_value_len,
+        depth=depth,
+        max_keys=max_keys,
+    )

@@ -8,12 +8,13 @@
     still ships and is what the published PyPI release installs.
 
 
-A **toolbox** is a named bundle of skills and agents that runs at a defined
-moment in your workflow: at session start, on file save, before a commit, at
-session end, or when you invoke its slash command.
+A **toolbox** is a named declaration of skills and agents for a defined
+moment in your workflow: at session start, on file save, before a commit, or at
+session end. The shipped commands build and emit plans; they do not run agents.
 
-Toolboxes let you declare the *council* you want reviewing your work
-without hand-loading skills each session.
+Toolboxes let you declare the *council* you want reviewing your work. A host
+integration must consume the plan, load any skills, run agents, enforce budgets,
+and record findings. Those execution steps are not provided by the planner.
 
 ## Lifecycle
 
@@ -21,13 +22,13 @@ without hand-loading skills each session.
 flowchart LR
   A[Declare toolbox] --> B[Trigger fires]
   B --> C[Council runner<br/>builds plan]
-  C --> D[Agents run<br/>scoped to plan.files]
+  C --> D[Host integration runs agents<br/>scoped to plan.files]
   D --> E[Findings recorded<br/>as Verdict]
   E -->|HIGH / CRITICAL| F[Guardrail blocks<br/>pre-commit]
   E -->|LOW / MEDIUM| G[Logged,<br/>session continues]
 ```
 
-Each arrow is a concrete module:
+The shipped planning and recording modules are:
 
 - **Declare**: [`toolbox_config.py`](https://github.com/stevesolun/ctx/blob/main/src/toolbox_config.py)
   loads `~/.claude/toolboxes.json` and merges per-repo `.toolbox.yaml` on top.
@@ -45,6 +46,7 @@ Each arrow is a concrete module:
 ```yaml
 # .toolbox.yaml (per-repo)
 version: 1
+active: [review]
 toolboxes:
   review:
     description: "Post-feature code review"
@@ -59,7 +61,7 @@ toolboxes:
     guardrail: true
 ```
 
-Run it manually:
+Emit its plan manually (this does not execute a review):
 
 ```bash
 python -m toolbox run --event pre-commit
@@ -81,5 +83,5 @@ Or let the `pre-commit` hook fire it automatically — see
 
 - [Configuration schema](configuration.md) — full field reference.
 - [Starter toolboxes](starters.md) — 5 shipping presets.
-- [Intent interview](intent-interview.md) — `toolbox init` walkthrough.
+- [Intent interview](intent-interview.md) — select and activate starters.
 - [Verdicts & guardrails](verdicts.md) — how blocking works.

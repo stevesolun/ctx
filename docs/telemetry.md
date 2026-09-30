@@ -309,11 +309,11 @@ config = {
 }
 
 preview = preview_traces_export(
-    Path("~/.ctx/telemetry/events.jsonl"),
+    Path("~/.ctx/telemetry/events.jsonl").expanduser(),
     config=config,
 )
 result = export_traces(
-    Path("~/.ctx/telemetry/events.jsonl"),
+    Path("~/.ctx/telemetry/events.jsonl").expanduser(),
     config=config,
 )
 ```
@@ -359,7 +359,7 @@ record_counter("ctx.api.requests", attributes={"ctx.source": "api"})
 record_histogram("ctx.api.duration", value=42.0, unit="ms")
 
 result = export_metrics(
-    Path("~/.ctx/telemetry/metrics.jsonl"),
+    Path("~/.ctx/telemetry/metrics.jsonl").expanduser(),
     config={
         "metrics": {
             "enabled": True,
@@ -668,8 +668,12 @@ ctx-telemetry-export --sink local_jsonl --output /tmp/ctx-telemetry-export.jsonl
 ctx-telemetry-export --all --sink local_jsonl --output /tmp/ctx-telemetry-replay.jsonl --json
 ```
 
-The exported JSONL should contain the same event ids as the local spool and no
-raw prompt, query, path, repo, stdout, stderr, token, or secret values.
+The replay file created with `--all` should contain the same well-formed event
+ids as the local spool. The incremental export contains only events after its
+checkpoint. Neither output should contain raw prompt, query, path, repo,
+stdout, stderr, token, or secret values. Local JSONL retains raw session ids for
+compatibility, so keep these output files owner-only and treat them as local
+sensitive data.
 
 Inspect the durable exporter status after a real run:
 

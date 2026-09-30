@@ -102,7 +102,8 @@ from ctx.telemetry import (
 
 _logger = logging.getLogger(__name__)
 
-_PROTOCOL_VERSION = "2024-11-05"
+_SUPPORTED_LEGACY_PROTOCOL_VERSIONS = ("2025-11-25", "2024-11-05")
+_DEFAULT_LEGACY_PROTOCOL_VERSION = _SUPPORTED_LEGACY_PROTOCOL_VERSIONS[0]
 _SERVER_NAME = "ctx-wiki"
 _SERVER_VERSION = __version__
 
@@ -121,6 +122,7 @@ class _ServerState:
     """Mutable state for one server instance (one stdin/stdout pair)."""
 
     initialized: bool = False
+    negotiated_protocol_version: str | None = None
     toolbox: CtxCoreToolbox | None = None
     allowed_tool_names: frozenset[str] | None = None
     allowed_entity_types: frozenset[str] | None = None
@@ -142,13 +144,21 @@ class _ServerState:
 def _handle_initialize(state: _ServerState, params: dict[str, Any]) -> dict[str, Any]:
     """Respond to the client's initialize handshake.
 
-    We accept any ``protocolVersion`` string the client sends — MCP
-    versions are date-stamped so a mismatch isn't inherently fatal,
-    and our tool catalogue uses only the stable tools/* API.
+    Both supported revisions use the legacy initialize handshake. A supported
+    offer is echoed; an unsupported or absent offer is downgraded to the newest
+    legacy revision this server implements. Modern ``2026-07-28`` semantics are
+    deliberately not advertised here.
     """
+    offered = params.get("protocolVersion")
+    negotiated = (
+        offered
+        if isinstance(offered, str) and offered in _SUPPORTED_LEGACY_PROTOCOL_VERSIONS
+        else _DEFAULT_LEGACY_PROTOCOL_VERSION
+    )
     state.initialized = True
+    state.negotiated_protocol_version = negotiated
     return {
-        "protocolVersion": _PROTOCOL_VERSION,
+        "protocolVersion": negotiated,
         "capabilities": {
             # We advertise tools but not resources / prompts / sampling.
             "tools": {},
@@ -158,6 +168,12 @@ def _handle_initialize(state: _ServerState, params: dict[str, Any]) -> dict[str,
             "version": _SERVER_VERSION,
         },
     }
+
+
+def _handle_ping(state: _ServerState, params: dict[str, Any]) -> dict[str, Any]:
+    """Acknowledge an MCP ping request without changing connection state."""
+    del state, params
+    return {}
 
 
 def _handle_tools_list(state: _ServerState, params: dict[str, Any]) -> dict[str, Any]:
@@ -243,6 +259,7 @@ def _handle_tools_call(state: _ServerState, params: dict[str, Any]) -> dict[str,
 
 _HANDLERS = {
     "initialize": _handle_initialize,
+    "ping": _handle_ping,
     "tools/list": _handle_tools_list,
     "tools/call": _handle_tools_call,
 }
@@ -434,6 +451,16 @@ def _normalise_allowed_tool_names(
     if tool_names is None:
         return None
     return frozenset(str(name).strip() for name in tool_names if str(name).strip())
+
+
+def _unknown_allowed_tool_names(tool_names: frozenset[str] | None) -> tuple[str, ...]:
+    if tool_names is None:
+        return ()
+    exposed = {
+        definition.name
+        for definition in CtxCoreToolbox(allowed_tool_names=tool_names).tool_definitions()
+    }
+    return tuple(sorted(tool_names - exposed))
 
 
 def _normalise_allowed_entity_types(
@@ -721,6 +748,12 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     args = parser.parse_args(argv)
+    allowed_tool_names = _normalise_allowed_tool_names(
+        _csv_items(args.allow_tools) if args.allow_tools is not None else None
+    )
+    unknown_tool_names = _unknown_allowed_tool_names(allowed_tool_names)
+    if unknown_tool_names:
+        parser.error("unknown --allow-tools value(s): " + ", ".join(unknown_tool_names))
     allowed_entity_types = _csv_items(args.entity_types) if args.entity_types is not None else None
     try:
         _normalise_allowed_entity_types(allowed_entity_types)
@@ -736,7 +769,7 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s ctx-mcp-server %(levelname)s %(message)s",
     )
     return run_server(
-        allowed_tool_names=_csv_items(args.allow_tools) if args.allow_tools is not None else None,
+        allowed_tool_names=allowed_tool_names,
         allowed_entity_types=allowed_entity_types,
     )
 

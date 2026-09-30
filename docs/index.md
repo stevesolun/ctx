@@ -199,7 +199,8 @@ routing machinery underneath, useful on its own.
     `ctx-init --model-mode custom --model <provider/model> --goal "<task>"`
     to record the model profile and surface harness recommendations.
 
-Point it at your organization's own tools, or use the pre-built graph, and ctx
+Point it at your organization's own tools, use the pre-built graph, or enrich
+that graph with private knowledge, and ctx
 recommends the smallest useful bundle for the current development window: the
 right skills, agents, MCP servers, and optional harness at the right moment, so
 hosted LLMs burn fewer tokens and local models waste less CPU/GPU work.
@@ -208,7 +209,9 @@ It walks a knowledge graph of **68,494 skill pages, 467 agents, 10,790 MCP serve
 The live execution bundle is skills, agents, and MCP servers only; custom/API/local
 model users and external loop adapters get separate harness recommendations
 after explicit user-owned model consent, ranked by model choice and task goal.
-You decide what to load, install, or adopt.
+You decide what to load, install, or adopt. Install decisions follow the
+persisted per-kind consent selected during `ctx-init`; unload and uninstall
+remain explicit actions.
 
 ### Why this surface exists
 
@@ -284,7 +287,8 @@ graph-based discovery:
 
     79,958 shipped graph nodes: 12,934 curated skill/agent/MCP/harness nodes plus 67,024 body-backed skill nodes. The graph has
     1,778,069 weighted edges and 52 Louvain communities.
-    Ships pre-built in `graph/wiki-graph.tar.gz` and powers the
+    Published as the manifest-bound GitHub release asset
+    `wiki-graph.tar.gz`; it is not stored in Git or Git LFS. It powers the
     graph-aware recommendations + the pre-ship
     `python -m ctx.core.quality.dedup_check` gate.
 
@@ -356,8 +360,8 @@ graph-based discovery:
 
     ---
 
-    Current main is **v1.0.21** — MIT, tested on CPython 3.11+ for Linux and macOS,
-    8,803 test inventory. Ships seven console scripts led by `ctx` and
+    The latest release is **v1.0.21** — MIT, tested on CPython 3.11+ for Linux and macOS,
+    8,986 test inventory. Ships seven console scripts led by `ctx` and
     `ctx-init`. The maintenance
     tools are still shipped and still work, now via `python -m`:
     `ctx_monitor serve` (local dashboard with graph + wiki + load/unload for
@@ -383,9 +387,11 @@ graph-based discovery:
   installed.
 - **Unknown cost stays unknown.** A cost record carries its completeness state,
   and an incomplete record is never compared as if it were complete.
-- **Explicit approval.** ctx can recommend, review, install, update, unload,
-  or uninstall, but it does not mutate live skills, agents, MCP servers, or
-  harness installs without a command or approval path.
+- **Explicit installation policy.** During `ctx-init`, users choose independently
+  whether recommended skills, agents, and MCP servers require approval each
+  time or may be installed under persisted preapproval. That preapproval does
+  not authorize unload or uninstall; those require confirmation or an explicit
+  instruction.
 - **Configurable gates.** Recommendation floors, semantic edge thresholds,
   micro-skill line limits, and harness match floors live in config so teams
   can tune behavior without forking the code.

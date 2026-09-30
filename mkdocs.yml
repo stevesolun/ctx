@@ -34,6 +34,7 @@ not_in_nav: |
 exclude_docs: |
   plans/
   ctx-fit/
+  research/
 
 theme:
   name: material

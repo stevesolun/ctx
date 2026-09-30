@@ -5,7 +5,7 @@ already supports:
 
 | Your host | Use |
 |---|---|
-| MCP-native (Claude Code, Claude Agent SDK, Cline, Goose, OpenHands, Continue) | **MCP server** — no Python, just spawn `ctx-mcp-server` |
+| MCP-native (Claude Code, Claude Agent SDK, Cline, Goose, OpenHands, Continue) | **MCP server** — no Python integration code; install the Python package, then spawn `ctx-mcp-server` |
 | Anything that isn't MCP-native but runs Python | **Python library** — `from ctx import recommend_bundle, ...` |
 | "I just want to run an agent and get recommendations" | **`ctx run` CLI** — our built-in harness |
 | LoopFlow or another loop that already owns plan/act/observe | **LoopFlow adapter** — `python -m ctx.adapters.loopflow` before planning |
@@ -36,7 +36,8 @@ The tools `ctx__recommend_bundle`, `ctx__recommend_related`,
 `ctx__graph_query`, `ctx__wiki_search`, and `ctx__wiki_get` appear to
 Claude on the next turn, alongside runtime lifecycle tools such as
 `ctx__load_entity`, `ctx__mark_entity_used`, and `ctx__session_state`.
-Ask "What skills help with FastAPI auth?" and it will call them.
+Ask "What skills help with FastAPI auth?" to invite the host to use them;
+tool choice remains the host's decision.
 
 For permissioned adapters that should expose only read/query tools, start the
 same server with `--allow-tools` and `--entity-types`. For example,
@@ -46,17 +47,18 @@ limits tool discovery and read results to the named tools and entity types.
 ### Claude Agent SDK (Python)
 
 ```python
-from anthropic import Anthropic
-from claude_agent_sdk import ClaudeAgentOptions, McpServerConfig
+from claude_agent_sdk import ClaudeAgentOptions
 
 options = ClaudeAgentOptions(
     mcp_servers={
-        "ctx-wiki": McpServerConfig(
-            command="ctx-mcp-server",
-        ),
+        "ctx-wiki": {"type": "stdio", "command": "ctx-mcp-server"},
     },
 )
 ```
+
+Install the host SDK separately. Its [MCP configuration type](https://github.com/anthropics/claude-agent-sdk-python/blob/main/src/claude_agent_sdk/types.py)
+is a union of dictionary shapes, not a `McpServerConfig(...)` constructor.
+Creating these options does not launch a host or verify a live tool call.
 
 ### Cline / Continue.dev
 
@@ -100,9 +102,15 @@ OpenHands' runtime config:
 
 ### Any MCP-speaking harness
 
-The server reads JSON-RPC 2.0 on stdin, writes on stdout, speaks
-MCP protocol version `2024-11-05`. Any client that does the standard
-`initialize` handshake + `tools/list` + `tools/call` flow works.
+The server reads JSON-RPC 2.0 on stdin and writes on stdout. It implements the
+legacy MCP revisions `2025-11-25` and `2024-11-05`. During `initialize`, it
+echoes either supported version when offered; if the version is omitted or is
+not supported, it negotiates the newest implemented fallback, `2025-11-25`.
+It does **not** claim the `2026-07-28` protocol semantics, so a newer host must
+accept the negotiated legacy revision. The standard `initialize` →
+`tools/list` → `tools/call` flow is supported, and a JSON-RPC `ping` request
+receives an empty successful result. Ping notifications are also accepted
+without a response.
 
 ### Live MCP compatibility gate
 
@@ -192,9 +200,10 @@ def on_user_turn(query: str):
         inject_into_context(page["body"])
 ```
 
-The first call to any of these lazy-loads the graph + wiki once;
-subsequent calls are O(walk) cheap. Safe to call from inside your
-own while-loop on every turn. `recommend_bundle()` accepts
+The API lazily creates a shared toolbox. Individual operations use their
+graph/wiki readers and caches; first-load cost and later query cost depend on
+the artifact, index freshness, and operation. Measure these on your target
+corpus before putting them on a latency-sensitive path. `recommend_bundle()` accepts
 `selected`, `rejected`, `active_context`, and `baseline_context` to keep
 already-present context out of new load suggestions. It also accepts
 `local_code_task`, `no_api_keys`, `language`, `include_baseline_context`, and
@@ -452,7 +461,7 @@ python -m harness_install --recommend \
 |---|---|
 | Your host already speaks MCP | 1 (MCP server) — zero Python code on your side |
 | You want the alive-skill system inside your existing Python loop | 2 (library) |
-| You're comparing models and need a harness | 3 (CLI) |
+| You want to run one model in the legacy built-in agent loop | 3 (CLI) |
 | No catalog harness fits your model/goal | generated custom harness plan |
 | You're building an IDE extension | 1 if the IDE speaks MCP (most do), else 2 |
 | You're building a DSL runner or agent loop | 4 (LoopFlow adapter) |
@@ -465,19 +474,23 @@ integration you pick.
 
 ## Skill lifecycle
 
-Recommendations go up and down based on use automatically. `ctx`
-tracks:
+The legacy quality scorer can incorporate locally recorded use when a hook or
+an explicit recompute refreshes its sidecars. Its four deterministic signals are:
 
 - **How recently a skill was invoked** (`telemetry_signal`).
-- **How broadly it's used across the graph** (`graph_signal`).
-- **Whether new skills are being added** (`intake_signal`).
+- **Graph connectivity** (`graph_signal`).
+- **Whether the current body passes structural intake checks** (`intake_signal`).
+- **Recorded routing selections** (`routing_signal`).
 
-Skills that fall below a quality floor get demoted to `stale` status
-and de-ranked from future recommendations. This logic lives in
-`ctx.core.quality.quality_signals` and runs identically whether
-you're on the MCP path, library path, or `ctx run` CLI.
+`ctx.core.quality.quality_signals` contains pure signal calculations, not a
+background lifecycle worker. `skill_quality` computes and persists grades;
+`ctx_lifecycle` separately proposes or applies watch/demote/archive transitions
+under its confirmation policy. A read-only MCP or Python recommendation call
+does not by itself run those lifecycle transitions. See
+[lifecycle and dashboard](../skill-lifecycle-and-dashboard.md) for the operator
+commands and [quality installation](../skill-quality-install.md) for hook setup.
 
-To inspect lifecycle state for a specific skill:
+To inspect the last persisted quality score and its evidence for a skill:
 
 ```bash
 python -m skill_quality explain fastapi-pro

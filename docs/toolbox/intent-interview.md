@@ -3,8 +3,8 @@
 [`src/intent_interview.py`](https://github.com/stevesolun/ctx/blob/main/src/intent_interview.py)
 bootstraps your toolbox set via a short, skippable interview.
 
-The slash command `/toolbox init` is a thin wrapper; see
-[`.claude/commands/toolbox-init.md`](https://github.com/stevesolun/ctx/blob/main/.claude/commands/toolbox-init.md).
+Use `python -m intent_interview init`. A host may define a slash-command
+wrapper, but this repository does not ship `.claude/commands/toolbox-init.md`.
 
 ## Flow
 

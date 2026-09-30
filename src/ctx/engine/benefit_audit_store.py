@@ -8,6 +8,7 @@ Rows are immutable: an existing digest is either byte-identical or rejected.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
 import sqlite3
@@ -213,6 +214,7 @@ class SQLiteBenefitAuditStore:
                 else:
                     try:
                         created_metadata = os.fstat(descriptor)
+                        _require_single_link(created_metadata, self.path, "database file")
                         if hasattr(os, "fchmod"):
                             os.fchmod(descriptor, _PRIVATE_FILE_MODE)
                         created_metadata = os.fstat(descriptor)
@@ -389,18 +391,67 @@ def _require_owned_regular_file(path: Path) -> os.stat_result:
         raise ValueError(f"benefit audit database file must be a regular file: {path}")
     if os.name != "nt" and metadata.st_uid != os.geteuid():
         raise ValueError(f"benefit audit database file must be owned by the current user: {path}")
+    _require_single_link(metadata, path, "database file")
     return metadata
+
+
+def _require_single_link(metadata: os.stat_result, path: Path, kind: str) -> None:
+    if metadata.st_nlink != 1:
+        raise ValueError(f"SQLite {kind} must not be hard linked: {path}")
 
 
 def _secure_sqlite_files(path: Path) -> None:
     _require_private_file(path)
-    for candidate in (Path(f"{path}-wal"), Path(f"{path}-shm")):
-        if not os.path.lexists(candidate):
-            continue
-        reject_symlink_path(candidate)
-        _require_owned_regular_file(candidate)
-        os.chmod(candidate, _PRIVATE_FILE_MODE)
-        _require_private_file(candidate)
+    with secure_directory(path.parent, create=False) as directory:
+        directory_fd = directory._directory_fd
+        if directory_fd is None:  # pragma: no cover - native Windows is unsupported
+            raise RuntimeError("secure directory file descriptors are required")
+        for suffix in ("-wal", "-shm"):
+            name = f"{path.name}{suffix}"
+            try:
+                descriptor = _open_sqlite_sidecar(name, directory_fd)
+            except FileNotFoundError:
+                # SQLite creates and removes these sidecars as connections open
+                # and close. Disappearance during validation is normal.
+                continue
+            except OSError as exc:
+                if exc.errno == errno.ELOOP:
+                    raise ValueError(
+                        f"refusing to use symlinked SQLite sidecar: {path}{suffix}"
+                    ) from exc
+                raise
+            try:
+                _secure_sqlite_descriptor(descriptor, Path(f"{path}{suffix}"))
+            finally:
+                os.close(descriptor)
+
+
+def _open_sqlite_sidecar(name: str, directory_fd: int) -> int:
+    return os.open(
+        name,
+        os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0),
+        dir_fd=directory_fd,
+    )
+
+
+def _secure_sqlite_descriptor(descriptor: int, path: Path) -> None:
+    metadata = os.fstat(descriptor)
+    if not stat.S_ISREG(metadata.st_mode):
+        raise ValueError(f"SQLite sidecar must be a regular file: {path}")
+    if os.name != "nt" and metadata.st_uid != os.geteuid():
+        raise ValueError(f"SQLite sidecar must be owned by the current user: {path}")
+    if metadata.st_nlink == 0:
+        # SQLite may unlink a WAL/SHM sidecar after we open it. The pinned
+        # descriptor then names no filesystem object and needs no chmod.
+        return
+    _require_single_link(metadata, path, "sidecar")
+    if hasattr(os, "fchmod"):
+        os.fchmod(descriptor, _PRIVATE_FILE_MODE)
+    metadata = os.fstat(descriptor)
+    if os.name != "nt":
+        mode = stat.S_IMODE(metadata.st_mode)
+        if mode & 0o077 or mode & 0o600 != 0o600:
+            raise ValueError(f"SQLite sidecar must be owner-private (0600): {path}")
 
 
 def _require_no_sqlite_sidecars(path: Path) -> None:

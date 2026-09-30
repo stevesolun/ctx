@@ -1,14 +1,22 @@
 # Skill-Stack Matrix
 
-> Maps stack identifiers to the skills that serve them.
-> Used as resolver evidence; final ranking still goes through the shared
-> recommendation engine and graph/wiki scores.
+The active legacy resolver mapping is
+`src/ctx/core/resolve/stack_skill_map.py::STACK_SKILL_MAP`, pinned by
+`src/tests/test_stack_skill_map.py`. `resolve_skills.py` applies that mapping,
+its small `PRIORITY_BASE` table (default `5`), and four conflict pairs:
+Flask/FastAPI, Flask/Django, Jest/Vitest, and Webpack/Vite.
+
+The larger matrix below is a **design catalog**, not executable configuration.
+In particular, the resolver has no `Required` field, does not evaluate the
+companion rules below, and does not make the listed meta skills permanently
+loaded. A row is current only when its stack key and skill list appear in
+`STACK_SKILL_MAP`; add it there and add a behavior test before relying on it.
 
 ## Table of Contents
 1. [Matrix Format](#matrix-format)
-2. [The Matrix](#the-matrix)
-3. [Companion Rules](#companion-rules)
-4. [Conflict Rules](#conflict-rules)
+2. [Design catalog](#design-catalog)
+3. [Proposed companion rules](#proposed-companion-rules)
+4. [Conflict catalog](#conflict-catalog)
 
 ---
 
@@ -22,7 +30,7 @@ Each entry:
 - **Companions**: skills that should co-load
 - **Conflicts**: skills that should not co-load
 
-## The Matrix
+## Design catalog
 
 ### Document Creation Skills
 
@@ -118,7 +126,7 @@ Each entry:
 | mkdocs | mkdocs | 4 | no |
 | docusaurus | docusaurus | 4 | no |
 
-### Meta Skills (always available, never unloaded)
+### Proposed meta skills
 
 | Skill | Stack IDs | Priority | Required | Notes |
 |-------|-----------|----------|----------|-------|
@@ -129,9 +137,10 @@ Each entry:
 
 ---
 
-## Companion Rules
+## Proposed companion rules
 
-When skill A is loaded, also load skill B if its stack is detected:
+These relationships are not implemented by the legacy resolver. They record
+possible future behavior only:
 
 | Primary Skill | Companion | Condition |
 |---------------|-----------|-----------|
@@ -145,22 +154,23 @@ When skill A is loaded, also load skill B if its stack is detected:
 | langchain | openai-sdk | openai in deps |
 | pytest | coverage | .coveragerc or coverage config exists |
 
-## Conflict Rules
+## Conflict catalog
 
-These skills should not be co-loaded (pick the one with higher confidence/priority):
+Only the first four pairs are implemented by `resolve_skills.py`. The package
+manager and monorepo rows are design notes, not current conflict behavior:
 
 | Skill A | Skill B | Resolution |
 |---------|---------|------------|
-| flask | fastapi | Higher confidence wins |
-| flask | django | Higher confidence wins |
-| jest | vitest | Higher confidence wins |
-| webpack | vite | Higher confidence wins |
+| flask | fastapi | Highest resolver priority wins; alphabetical tie-break |
+| flask | django | Highest resolver priority wins; alphabetical tie-break |
+| jest | vitest | Highest resolver priority wins; alphabetical tie-break |
+| webpack | vite | Highest resolver priority wins; alphabetical tie-break |
 | npm | yarn | Check lock file |
 | npm | pnpm | Check lock file |
 | yarn | pnpm | Check lock file |
 | react | vue | Both can coexist in monorepo |
 | sqlalchemy | prisma | Both can coexist if different services |
 
-> Conflict resolution: check if the repo is a monorepo. In monorepos, "conflicting"
-> skills may serve different packages and should both load. In single-package repos,
-> pick the one with higher confidence.
+> Proposed behavior only: a future package-aware resolver could retain otherwise
+> conflicting skills for different monorepo packages. The current resolver is
+> not package-aware and always applies the four implemented conflict pairs.

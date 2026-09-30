@@ -207,6 +207,9 @@ It is public and always reachable. The full live catalog runs locally inside
   background: var(--md-default-bg-color);
   box-shadow: 0 1px 8px rgba(0, 0, 0, 0.04);
 }
+.ctx-catalog-card[hidden] {
+  display: none;
+}
 .ctx-catalog-card h3 {
   margin: 0;
 }

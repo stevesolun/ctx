@@ -2,13 +2,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
+import stat
+import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Callable, cast
 
 import pytest
 
+import ctx.engine.benefit_audit_store as benefit_audit_store
 from ctx.engine.benefit import (
     MAX_BENEFIT_RESULT_JSON_BYTES,
     BenefitCandidate,
@@ -397,3 +402,135 @@ def test_concurrent_idempotent_writers_preserve_one_exact_result(tmp_path: Path)
         count = connection.execute("SELECT COUNT(*) FROM benefit_audit_results").fetchone()
     assert count == (1,)
     assert store.load(result.result_digest) == result
+
+
+def test_disappearing_sqlite_sidecar_is_a_normal_lifecycle_race(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "private" / "benefit-audit.sqlite3"
+    store = SQLiteBenefitAuditStore(path)
+    result = _result()
+    store.store(result)
+    sidecar = Path(f"{path}-wal")
+    sidecar.write_bytes(b"transient")
+    sidecar.chmod(0o600)
+    real_open_sidecar = benefit_audit_store._open_sqlite_sidecar
+    removed = False
+
+    def open_after_sqlite_removes_sidecar(
+        name: str,
+        directory_fd: int,
+    ) -> int:
+        nonlocal removed
+        if not removed and name.endswith("-wal"):
+            sidecar.unlink()
+            removed = True
+        return real_open_sidecar(name, directory_fd)
+
+    monkeypatch.setattr(
+        benefit_audit_store,
+        "_open_sqlite_sidecar",
+        open_after_sqlite_removes_sidecar,
+    )
+
+    assert store.load(result.result_digest) == result
+    assert removed is True
+
+
+def test_unlinked_open_sqlite_sidecar_is_a_normal_lifecycle_race(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "private" / "benefit-audit.sqlite3"
+    store = SQLiteBenefitAuditStore(path)
+    result = _result()
+    store.store(result)
+    sidecar = Path(f"{path}-wal")
+    sidecar.write_bytes(b"transient")
+    sidecar.chmod(0o600)
+    real_open_sidecar = benefit_audit_store._open_sqlite_sidecar
+    removed = False
+
+    def open_before_sqlite_removes_sidecar(
+        name: str,
+        directory_fd: int,
+    ) -> int:
+        nonlocal removed
+        descriptor = real_open_sidecar(name, directory_fd)
+        if not removed and name.endswith("-wal"):
+            sidecar.unlink()
+            removed = True
+        return descriptor
+
+    monkeypatch.setattr(
+        benefit_audit_store,
+        "_open_sqlite_sidecar",
+        open_before_sqlite_removes_sidecar,
+    )
+
+    assert store.load(result.result_digest) == result
+    assert removed is True
+
+
+@pytest.mark.skipif(os.name == "nt", reason="native Windows is not supported")
+def test_fifo_sqlite_sidecar_is_rejected_without_blocking(tmp_path: Path) -> None:
+    path = tmp_path / "private" / "benefit-audit.sqlite3"
+    SQLiteBenefitAuditStore(path)
+    sidecar = Path(f"{path}-wal")
+    os.mkfifo(sidecar, mode=0o600)
+    script = """
+import sys
+from pathlib import Path
+from ctx.engine.benefit_audit_store import _secure_sqlite_files
+
+try:
+    _secure_sqlite_files(Path(sys.argv[1]))
+except ValueError as exc:
+    print(exc)
+    raise SystemExit(0)
+raise SystemExit(3)
+"""
+
+    completed = subprocess.run(
+        [sys.executable, "-c", script, str(path)],
+        capture_output=True,
+        text=True,
+        timeout=2,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "regular file" in completed.stdout
+
+
+@pytest.mark.skipif(os.name == "nt", reason="native Windows is not supported")
+def test_hardlinked_sqlite_sidecar_is_rejected_before_fchmod(tmp_path: Path) -> None:
+    path = tmp_path / "private" / "benefit-audit.sqlite3"
+    store = SQLiteBenefitAuditStore(path)
+    target = tmp_path / "shared-sidecar-target"
+    target.write_bytes(b"must-not-be-mutated")
+    target.chmod(0o640)
+    os.link(target, Path(f"{path}-wal"))
+
+    with pytest.raises(ValueError, match="hard link"):
+        store.load(_digest("missing"))
+
+    assert stat.S_IMODE(target.stat().st_mode) == 0o640
+    assert target.read_bytes() == b"must-not-be-mutated"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="native Windows is not supported")
+def test_hardlinked_main_database_is_rejected_before_sqlite_mutation(tmp_path: Path) -> None:
+    path = tmp_path / "private" / "benefit-audit.sqlite3"
+    store = SQLiteBenefitAuditStore(path)
+    result = _result()
+    store.store(result)
+    target = tmp_path / "shared-database-target"
+    os.link(path, target)
+    before = target.read_bytes()
+
+    with pytest.raises(ValueError, match="hard link"):
+        store.store(result)
+
+    assert target.read_bytes() == before

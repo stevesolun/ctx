@@ -883,13 +883,31 @@ class TestCLIReview:
         assert rc == 0
         assert "WATCH" in out
         assert "dry-run" in out
-        # Lifecycle state gets folded (counter maintenance) but no move.
-        state = lc.load_lifecycle_state("watchme", sidecar_dir=sidecar)
-        assert state is not None
-        # Dry-run still persists the observed score — state stays active,
-        # only the streak/last-grade fields advance.
-        assert state.state == lc.STATE_ACTIVE
-        assert state.last_grade == "C"
+        assert lc.lifecycle_sidecar_path("watchme", sidecar_dir=sidecar).exists() is False
+
+    def test_review_dry_run_preserves_existing_lifecycle_bytes(
+        self,
+        cli_env: Path,
+        capsys: pytest.CaptureFixture,
+    ) -> None:
+        sidecar = cli_env / "quality"
+        _write_quality_sidecar(sidecar, "watchme", grade="C")
+        lifecycle_path = lc.save_lifecycle_state(
+            lc.LifecycleState(
+                slug="watchme",
+                subject_type="skill",
+                state=lc.STATE_ACTIVE,
+                state_since="2000-01-01T00:00:00+00:00",
+            ),
+            sidecar_dir=sidecar,
+        )
+        before = lifecycle_path.read_bytes()
+
+        rc = lc.main(["review", "--dry-run"])
+
+        assert rc == 0
+        assert "dry-run" in capsys.readouterr().out
+        assert lifecycle_path.read_bytes() == before
 
     def test_review_json_emits_proposals(
         self,
@@ -926,6 +944,54 @@ class TestCLIPurge:
         rc = lc.main(["purge"])
         assert rc == 0
         assert "Nothing to purge" in capsys.readouterr().out
+
+    @pytest.mark.parametrize(
+        ("typed_response", "expected_purged"),
+        [("demo", True), ("", False), ("wrong-slug", False)],
+    )
+    def test_purge_typed_confirmation_controls_destructive_changes(
+        self,
+        cli_env: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+        typed_response: str,
+        expected_purged: bool,
+    ) -> None:
+        skills = cli_env / "skills"
+        sidecar = cli_env / "quality"
+        cfg = lc.LifecycleConfig()
+        archived = _make_fake_skill(skills / cfg.archive_subdir, "demo")
+        _write_quality_sidecar(sidecar, "demo", grade="A")
+        lifecycle_path = lc.save_lifecycle_state(
+            lc.LifecycleState(
+                slug="demo",
+                subject_type="skill",
+                state=lc.STATE_ARCHIVE,
+                state_since="2000-01-01T00:00:00+00:00",
+            ),
+            sidecar_dir=sidecar,
+        )
+        quality_path = sidecar / "demo.json"
+        preserved = {
+            archived / "SKILL.md": (archived / "SKILL.md").read_bytes(),
+            lifecycle_path: lifecycle_path.read_bytes(),
+            quality_path: quality_path.read_bytes(),
+        }
+        monkeypatch.setattr("builtins.input", lambda _prompt: typed_response)
+
+        rc = lc.main(["purge"])
+
+        output = capsys.readouterr().out
+        assert rc == 0
+        assert f"Purged {1 if expected_purged else 0} entries." in output
+        if expected_purged:
+            assert not (archived / "SKILL.md").exists()
+            assert not quality_path.exists()
+            tombstone = lc.load_lifecycle_state("demo", sidecar_dir=sidecar)
+            assert tombstone is not None
+            assert tombstone.state == "deleted"
+        else:
+            assert {path: path.read_bytes() for path in preserved} == preserved
 
 
 # ─────────────────────────────────────────────────────────────────────

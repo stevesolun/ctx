@@ -65,9 +65,10 @@ that file.
 
 ## Example payload
 
-This excerpt is from the live adapter against the current ctx catalog. Exact
-recommendation names can change as the graph changes, but the contract shape is
-stable.
+This is an illustrative contract excerpt, not the exact output of either
+command above. Recommendation names depend on the local catalog, filters and
+selection state. Selected or rejected entities are excluded from returned
+recommendation rows.
 
 ```json
 {
@@ -131,7 +132,6 @@ stable.
       {"name": "loop-operator", "type": "agent"}
     ],
     "mcps": [
-      {"name": "local-ollama-file-operations", "type": "mcp-server"},
       {"name": "multi-model-advisor-ollama", "type": "mcp-server"}
     ],
     "harnesses": [
