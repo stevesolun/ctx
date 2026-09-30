@@ -11,27 +11,28 @@
 
 ## Checkpoint
 
-- Updated: 2026-08-21 (Asia/Jerusalem)
-- Active goal: retire Git LFS safely after CTX Fit 1.0.21
-- Phase: repository and Mac-local cleanup complete; remote LFS purge pending
-- Release decision: **1.0.21 REMAINS RELEASED; LFS MIGRATION MERGED; REMOTE PURGE PENDING**
-- Branch: `main`
+- Updated: 2026-09-30 (Europe/Prague)
+- Active goal: inventory, test, repair, and retest every shipped user behavior
+- Phase: canonical-tracker reconciliation and parallel read-only audit
+- Release decision: **1.0.21 REMAINS RELEASED; NEW AUDIT OPEN; NO NEW RELEASE DECISION**
+- Branch: `codex/full-feature-audit`
 - Release commit: `38a33f8784e2bf408430a98fed81206c2cf39d00`
 - Release tag object: `a7b8e78559fda1d44dca844393458272071ae89b`
 - LFS migration PR: `https://github.com/stevesolun/ctx/pull/275`
 - Cleanup checkpoint PR: `https://github.com/stevesolun/ctx/pull/276`
-- Follow-up scope at checkpoint:
-  - ask GitHub Support to purge the historical remote LFS objects
-  - add repository/environment protection rules as defense in depth
-  - choose a retention policy before removing Codex task transcripts
-  - user-owned and out of scope: `.scratch/`
-- Parallel execution: complete. Independent product, security, spend,
-  activation, packaging, release, Linux, SBOM, and recovery reviewers accepted
-  the shipped tree. Exact-main Tests run `31914958343`, CodeQL run
-  `31914958371`, and Hugging Face sync `31914958347` are green. Production
-  publish run `31915534546` completed successfully, including reproducible
-  package build, package and graph provenance, CycloneDX attestation, release
-  assets, and PyPI Trusted Publishing.
+- Current scope:
+  - reconcile every shipped behavior with one canonical user-story row in
+    `qa/feature_status.csv`
+  - execute each story's current verification, record every defect, fix
+    reproduced logistical/UX defects test-first, and retest the same behavior
+  - perform independent architecture/code and public-documentation reviews
+  - reproduce, fix, and reply to applicable open GitHub issues
+  - preserve user-owned and out-of-scope `.scratch/`
+- Parallel execution: six read-only lanes are active for tracker coverage,
+  executable-story validity, GitHub issue triage, public documentation sync,
+  architecture/code review, and end-user behavior smoke testing. The
+  coordinator owns `qa/feature_status.csv`, this state file, cross-lane
+  decisions, GitHub mutations, and final verification.
 - LFS migration execution: three parallel lanes completed repository resolver,
   workflow migration, and independent storage/identity audit. Merged `main`
   removes the two tracked archive pointers, LFS hooks/rules/fallbacks, and
@@ -52,6 +53,78 @@
   bare mirror, then restarted and verified the daemon. Safe cache and clean
   worktree cleanup reduced the Data volume's rounded used space from 280 GiB to
   262 GiB. No remote LFS object has been purged yet.
+
+## Current goal map
+
+### Destination
+
+Every externally meaningful behavior shipped by this repository has exactly
+one canonical user story with explicit expected behavior and executable
+verification in `qa/feature_status.csv`. Every story is freshly tested against
+the final tree; every reproduced logistical or UX defect is recorded, repaired
+with the smallest root-cause change, independently reviewed where risk warrants,
+and retested through the same observable behavior. Open repository issues are
+truthfully triaged and resolved or answered, and README, documentation, package
+metadata, and GitHub About describe the same product with synchronized facts
+and working examples.
+
+### Settled decisions
+
+- `qa/feature_status.csv` is the single canonical feature/user-story tracker.
+  The two files under `docs/qa/` remain historical/supporting inputs or
+  canonical-row pointers; this audit will not create a competing spreadsheet.
+- Code, tests, accepted ADRs, and executable behavior outrank stale tracker or
+  prose claims.
+- Bare/read-only product paths may be exercised automatically. No paid provider
+  evaluation is authorized by this audit.
+- Issue comments, labels, and closures wait for reproduced evidence and, where
+  applicable, a verified fix. Triage comments use the repository's disclosure
+  prefix.
+- Remote LFS purging and Codex transcript retention remain recorded residual
+  operations, but do not block this product-behavior audit.
+
+### Initial evidence
+
+- The canonical tracker has 327 unique rows and 27 columns: 198 `Tested Pass`,
+  109 `Retested Pass`, 17 `Needs Validation`, and 3 `Blocked/Human Decision`.
+  Every row currently has the schema's required descriptive fields and a
+  `last_verified_at` value, but most evidence predates this audit and is not
+  accepted as fresh proof.
+- GitHub currently has five open issues (`#228`, `#274`, `#282`, `#283`,
+  `#285`) and two open Dependabot pull requests (`#268`, `#284`).
+- GitHub's available fourteen-day traffic window reports 303 views from 102
+  unique visitors and 698 clones from 139 unique cloners. Repository lifetime
+  unique traffic is not exposed by this API.
+
+### Open questions / frontier
+
+1. Which current entry points, MCP surfaces, workflows, hooks, package data,
+   and public APIs lack a canonical row, and which existing rows describe
+   removed or superseded behavior? Owner: tracker-coverage audit.
+2. Which row paths, commands, preconditions, and evidence are stale or not
+   executable, and what is the smallest deterministic runner that can validate
+   every automatable story? Owner: executable-story audit.
+3. Which open issues reproduce against current `main`, conflict with accepted
+   product boundaries, or require human/provider decisions? Owner: issue
+   triage, with coordinator-owned comments and mutations.
+4. Which README/docs/About/package facts, numbers, examples, and claims disagree
+   with the current implementation? Owner: documentation-sync audit.
+5. Which material correctness, security, architecture, logistical, or UX
+   defects remain in production surfaces? Owners: architecture review and
+   end-user smoke lanes.
+6. After all repairs, does fresh story-by-story evidence plus proportional
+   repository gates prove the destination without relying on agent reports?
+   Owner: coordinator and independent final reviewer.
+
+### Fog and boundaries
+
+- The exact repair set remains fog until the six read-only lanes return
+  reproducible findings. Writers will receive disjoint ownership only after
+  those findings are deduplicated against canonical rows and open issues.
+- Paid live-model quality, a new release/tag, external credential rotation,
+  repository deletion/recreation, and unsupported native Windows execution are
+  outside this audit unless separately authorized or required to reproduce an
+  existing supported contract.
 
 ## Product destination
 
