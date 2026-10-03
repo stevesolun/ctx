@@ -107,6 +107,31 @@
   worktree cleanup reduced the Data volume's rounded used space from 280 GiB to
   262 GiB. No remote LFS object has been purged yet.
 
+## Current isolated review-phase repair (2026-10-04)
+
+- Starting HEAD in this gate worktree: `03cc9e791059aa9dae8792ce6ff5dd0c300ac520`.
+  Both review findings were confirmed from their real callers. R1 supplies a
+  fixture privacy salt to the safe example's in-process event recorder; R2
+  binds the browser fixture's lifecycle path to its own temporary directory.
+  Production telemetry and monitor behavior are unchanged.
+- Two behavior regressions exercise the actual helper and home-page reader
+  with temporary sentinel defaults. Pre-fix isolated-copy controls failed
+  twice, then 20 focused tests and the actual helper passed. One format-only
+  adjustment passed its affected regression rerun; changed-file Ruff and
+  format checks are green. Source is frozen for explicit fix-review. See
+  `qa/feature-audit/isolation-repair-20261004.md` for commands and source hashes.
+- DASH-001, DOC-NAV-003, DOC-NAV-007 and LANE-D-036 are reopened as Needs
+  Validation; their prior acceptance remains verbatim in notes. Earlier
+  checkpoint totals above predate these four reopened rows. The two added
+  test cases increase the inventory from 9,450 to 9,452; the outer executor
+  owns the next full live collection and authoritative gates.
+- The supplied clean-03cc9e79 fast pass is historical for this changed tree.
+  After explicit fix-review and commit, the outer executor must run a fresh
+  committed fast gate before its authoritative PR preflight. This review
+  phase does not control pipelines, commit, push, update PRs/issues, or run
+  full test/lint suites. Draft PR #286, existing telemetry Needs Validation
+  rows, and all owner/external prerequisites remain open.
+
 ## Prior CI-phase optional-dependency repair (2026-10-04)
 
 - Starting tree: clean, detached

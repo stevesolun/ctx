@@ -1,6 +1,6 @@
 # Safe graph and telemetry example evidence
 
-Tested commit: `2f7a6a23d7d6f80acc54c7c09543048367da5bc9`
+Historical tested commit: `2f7a6a23d7d6f80acc54c7c09543048367da5bc9`
 
 Run from the repository root with the repository's development environment:
 
@@ -8,9 +8,14 @@ Run from the repository root with the repository's development environment:
 .venv/bin/python qa/feature-audit/safe_examples.py
 ```
 
-The reproducer creates an isolated temporary home and deletes it at exit. It
-does not contact the network, load or download a model, call a provider, start
-a service, contact a telemetry collector, or write to the user's real home.
+The reproducer creates an isolated temporary home and deletes it at exit.
+Review R1 later found that this historical revision isolated child processes
+but left in-process telemetry salt resolution on caller configuration. Its
+no-real-home-write claim was therefore not established by the result below.
+The 2026-10-04 repair supplies an explicit fixture salt to those calls; see
+`isolation-repair-20261004.md` for the bounded regression and replay evidence.
+The example performs no network request, model/provider call, service activation,
+or remote telemetry collection.
 
 ## Result
 

@@ -233,6 +233,7 @@ def main() -> None:
         config = {
             "mode": "local_redacted",
             "path": str(spool),
+            "privacy": {"hash_salt": "fixture-salt"},
             "export": {"enabled": False},
         }
         for name, payload in (

@@ -6,6 +6,7 @@ from io import BytesIO
 import hashlib
 import json
 import os
+import runpy
 import stat
 import subprocess
 import sys
@@ -54,6 +55,39 @@ def _redirect_real_event_telemetry(
 
     monkeypatch.setattr(telemetry, "_config_get", config_get)
     monkeypatch.setattr(telemetry, "record_event", record_event)
+
+
+def test_safe_examples_never_access_default_home_salt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    caller_home = tmp_path / "caller-home"
+    caller_home.mkdir()
+    default_salt = caller_home / ".ctx" / "telemetry" / "hash-salt"
+    monkeypatch.setenv("HOME", str(caller_home))
+    monkeypatch.delenv("CTX_TELEMETRY_HASH_SALT", raising=False)
+    monkeypatch.setattr(
+        telemetry,
+        "_config_get",
+        lambda key, default: (
+            {"privacy": {"hash_salt_path": str(default_salt)}} if key == "telemetry" else default
+        ),
+    )
+
+    def reject_salt_access(path: Path) -> Any:
+        pytest.fail(f"safe examples accessed filesystem salt: {path}")
+
+    monkeypatch.setattr(telemetry, "_read_or_create_hash_salt", reject_salt_access)
+    monkeypatch.setattr(telemetry, "_read_hash_salt_identity", reject_salt_access)
+    monkeypatch.setattr(telemetry, "record_event", record_event)
+    helper = Path(__file__).resolve().parents[2] / "qa/feature-audit/safe_examples.py"
+    runpy.run_path(str(helper), run_name="__main__")
+
+    result = json.loads(capsys.readouterr().out)
+    assert result["telemetry_preview_attempted"] == 2
+    assert result["telemetry_exported"] == result["telemetry_replayed"] == 2
+    assert list(caller_home.iterdir()) == []
 
 
 def test_record_event_writes_local_redacted_envelope(tmp_path: Path) -> None:

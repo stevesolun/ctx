@@ -19,6 +19,7 @@ import pytest
 from ctx import api as ctx_api
 from ctx.monitor import testing as mt
 from ctx.monitor.services import kpi as kpi_service
+from ctx.monitor.services import runtime as runtime_service
 from ctx.monitor.services import sidecars as sidecar_service
 
 playwright_sync: Any = pytest.importorskip("playwright.sync_api")
@@ -45,6 +46,7 @@ def fake_claude(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     claude = tmp_path / ".claude"
     (claude / "skill-quality").mkdir(parents=True)
     monkeypatch.setattr(mt, "claude_dir", lambda: claude)
+    monkeypatch.setattr(mt, "runtime_lifecycle_path", lambda: claude / "runtime" / "events.jsonl")
     monkeypatch.setattr(mt, "dashboard_graph_index_archives", lambda: [])
     sidecar_service.reset_caches()
     kpi_service.reset_cache()
@@ -531,6 +533,38 @@ def test_graph_page_uses_builtin_svg_renderer(
         ).click()
         page.wait_for_url("**/wiki/code-reviewer?type=agent", timeout=5000)
         assert "code-reviewer" in page.locator("h1").inner_text()
+    finally:
+        harness.close()
+
+
+def test_home_uses_fixture_lifecycle_history(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+    page: Any,
+) -> None:
+    sentinel = tmp_path / "caller-history.jsonl"
+    _write_runtime_events(sentinel, [{"action": "validation", "status": "passed"}])
+    monkeypatch.setattr(mt, "runtime_lifecycle_path", lambda: sentinel)
+    claude = request.getfixturevalue("fake_claude")
+    fixture_log = claude / "runtime" / "events.jsonl"
+    _write_runtime_events(fixture_log, [{"action": "validation", "status": "failed"}])
+    read_paths: list[Path] = []
+    real_read_jsonl = runtime_service.read_jsonl
+
+    def read_jsonl(path: Path, limit: int | None = None) -> list[dict[str, Any]]:
+        read_paths.append(path)
+        return real_read_jsonl(path, limit=limit)
+
+    monkeypatch.setattr(runtime_service, "read_jsonl", read_jsonl)
+    harness = _start_monitor(monkeypatch, fake_load=False)
+    try:
+        page.goto(harness.base_url)
+        assert read_paths
+        assert sentinel not in read_paths
+        assert fixture_log in read_paths
+        assert all(path.is_relative_to(claude) for path in read_paths)
+        assert "1 failed / 0 open escalations" in page.locator("body").inner_text()
     finally:
         harness.close()
 
