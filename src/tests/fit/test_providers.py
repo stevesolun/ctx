@@ -16,6 +16,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -211,9 +212,7 @@ def test_bare_anthropic_model_credential_does_not_depend_on_the_price_catalog(
 ) -> None:
     """Provider identity is durable even after LiteLLM removes an old rate."""
 
-    import litellm
-
-    monkeypatch.setattr(litellm, "model_cost", {})
+    monkeypatch.setitem(sys.modules, "litellm", SimpleNamespace(model_cost={}))
 
     resolved = resolve_model_credential(
         "claude-sonnet-4-20250514",
@@ -234,12 +233,10 @@ def test_unrecognized_bare_models_keep_catalog_credential_routing(
 ) -> None:
     """Exact-priced bare models retain the harness catalog's provider identity."""
 
-    import litellm
-
-    monkeypatch.setattr(
-        litellm,
-        "model_cost",
-        {model: {"litellm_provider": "openai"}},
+    monkeypatch.setitem(
+        sys.modules,
+        "litellm",
+        SimpleNamespace(model_cost={model: {"litellm_provider": "openai"}}),
     )
 
     resolved = resolve_model_credential(

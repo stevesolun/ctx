@@ -13,23 +13,25 @@
 
 - Updated: 2026-10-04 (Europe/Prague)
 - Active goal: inventory, test, repair, and retest every shipped user behavior
-- Phase: assigned documentation reconciliation after targeted test validation
+- Phase: assigned CI repair for PR #286's optional-dependency test failures
 - Release decision: **1.0.21 REMAINS RELEASED; NEW AUDIT OPEN; NO NEW RELEASE DECISION**
 - Branch: `codex/full-feature-audit-delivery`
 - Active delivery branch: `codex/full-feature-audit-delivery`, submitted head
-  `18253e9a37cb215856fb79bac01ea9c7482eb6e6`; current documentation target is
-  `627bb5255c67859457e3b9444d2c5ecfe8000770`
+  `18253e9a37cb215856fb79bac01ea9c7482eb6e6`; current CI repair target is
+  `5607252eb77cbf7f6704781fdc41489b1d38353a`
 - Active delivery worktree:
   `/Users/steves/.no-mistakes/worktrees/88e19bf0677f/01M3RWB2ZY374H29CTPEPNSWVH`
-- Current no-mistakes run is in its assigned document phase. The preceding test
+- Current no-mistakes run is in its assigned CI phase. PR #286's supplied
+  hosted results failed `unit-linux` and consequently `CI required`; the
+  focused repair and fresh local evidence are recorded below. The preceding test
   phase records an executor-supplied successful `scripts/no_mistakes_run.sh test`
   baseline; the wrapper delegates to `python scripts/ci_preflight.py --profile pr`.
   This supersedes
   the earlier failed preflight as the supplied current baseline, without
   changing that historical failure. Its focused and product-level evidence is
-  recorded below. Documentation reconciliation adds no product execution evidence.
-  The outer executor owns subsequent phases, push/PR and hosted CI; complete
-  delivery is not inferred from local testing.
+  recorded below. Documentation reconciliation added no product execution evidence.
+  The outer executor owns subsequent phases, commits, push and hosted CI reruns;
+  complete delivery is not inferred from local testing.
 - Previous no-mistakes run: `01M3RV98HW4HQDSM04HA6NRBJG` is **FAILED**; driver
   session `15506` is terminal, log `/tmp/ctx-feature-audit-delivery-54dfe28a.log`.
   Intent/rebase completed; review could not launch Codex and no later phase ran.
@@ -101,7 +103,39 @@
   worktree cleanup reduced the Data volume's rounded used space from 280 GiB to
   262 GiB. No remote LFS object has been purged yet.
 
-## Current targeted test-phase evidence (2026-10-04)
+## CI-phase optional-dependency repair (2026-10-04)
+
+- Starting tree: clean, detached
+  `5607252eb77cbf7f6704781fdc41489b1d38353a`, PR #286. Supplied hosted
+  `unit-linux` output reports four failures, 9,268 passes and 51 skips;
+  coverage passed at 91.26%. `CI required` failed because `unit-linux` failed.
+- Root cause: two credential-routing tests imported optional `litellm`
+  directly, but `unit-linux` installs only `.[dev]`; LiteLLM belongs to the
+  `harness` extra. The tests now inject per-test catalog stand-ins through
+  `monkeypatch.setitem(sys.modules, "litellm", ...)`, preserving the real
+  credential resolver, empty/matching catalog cases and every assertion.
+  Production code, dependency declarations and CI configuration are unchanged.
+- Fresh failing-first reproduction set `sys.modules["litellm"] = None`
+  before `pytest.main(["-q", "--no-cov", "src/tests/fit/test_providers.py",
+  "-k", "bare_anthropic_model_credential or unrecognized_bare_models_keep_catalog"])`:
+  **4 failed, 33 deselected**, all at the direct imports.
+- After the repair, with `PYTHONPATH="$PWD/src"`,
+  `python -m pytest -q --no-cov src/tests/fit/test_providers.py src/tests/test_litellm_provider.py`
+  passed **88 tests in 8.90s** with the installed LiteLLM available. Running
+  the same pytest arguments via `pytest.main` in a fresh Python process after
+  setting `sys.modules["litellm"] = None` passed **88 tests in 4.92s**.
+  These are local macOS checks of the repaired working tree, not a hosted
+  Linux rerun or a complete gate. The coordinator read both results directly.
+  Tested `src/tests/fit/test_providers.py` SHA-256:
+  `e988fddd5e1ea26539a0c998b6626b1d054b77886e30009704dc2f77d288b9e2`.
+- A bounded independent source inspection found no concerns with assertion
+  preservation or per-test restoration of the original module state; that
+  inspection is supplemental to the executed checks above. No other pipeline
+  phase or pipeline-control command ran. Hosted CI must be rerun by the outer
+  executor; full audit completion, `SEC-002` and existing external/human
+  prerequisites remain unverified. Canonical feature statuses are unchanged.
+
+## Targeted test-phase evidence (2026-10-04)
 
 - Tested code: `627bb5255c67859457e3b9444d2c5ecfe8000770`. The executor
   supplied the successful configured PR-preflight baseline; this phase did not
