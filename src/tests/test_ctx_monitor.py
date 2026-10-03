@@ -60,6 +60,7 @@ def fake_claude(tmp_path: Path, monkeypatch) -> Path:
     claude = tmp_path / ".claude"
     (claude / "skill-quality").mkdir(parents=True)
     monkeypatch.setattr(mt, "claude_dir", lambda: claude)
+    monkeypatch.setattr(mt, "runtime_lifecycle_path", lambda: claude / "runtime" / "events.jsonl")
     monkeypatch.setattr(mt, "dashboard_graph_index_archives", lambda: [])
     graph_service.reset_caches()
     sidecar_service.reset_caches()
@@ -557,6 +558,52 @@ def test_render_home_has_grade_pills(fake_claude: Path) -> None:
     assert "ctx monitor" in html
     assert "grade-A" in html
     assert "/sessions" in html
+
+
+def test_fake_claude_http_runtime_history_is_isolated(
+    fake_claude: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    events = fake_claude / "runtime" / "events.jsonl"
+    _write_runtime_events(
+        events,
+        [{"action": "validation", "status": "failed", "check_name": "fixture-check"}],
+    )
+    external_runtime = fake_claude.parent / "external-runtime"
+    _write_runtime_events(
+        external_runtime / "events.jsonl",
+        [{"action": "validation", "status": "passed", "check_name": "external-check"}],
+    )
+    monkeypatch.setenv("CTX_RUNTIME_LIFECYCLE_DIR", str(external_runtime))
+    read_jsonl = runtime_service.read_jsonl
+    read_paths: list[Path] = []
+    blocked_paths: list[Path] = []
+
+    def fixture_read_jsonl(path: Path, limit: int | None = None) -> list[dict[str, Any]]:
+        read_paths.append(path)
+        if not path.is_relative_to(fake_claude):
+            blocked_paths.append(path)
+            raise OSError("Runtime history outside the fixture must not be read")
+        return read_jsonl(path, limit=limit)
+
+    monkeypatch.setattr(runtime_service, "read_jsonl", fixture_read_jsonl)
+    server, thread, port = _serve_monitor(monkeypatch)
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=5) as response:
+            assert response.status == 200
+            body = response.read().decode()
+        status, payload = _get_json(port, "/api/runtime.json")
+
+        assert blocked_paths == []
+        assert read_paths.count(events) == 2
+        assert "1 failed / 0 open escalations" in body
+        assert status == 200
+        assert payload["events_total"] == 1
+        assert payload["latest_validation"]["check_name"] == "fixture-check"
+        assert "external-check" not in body + json.dumps(payload)
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
 
 
 def test_home_page_module_renders_stats_and_recent_activity() -> None:

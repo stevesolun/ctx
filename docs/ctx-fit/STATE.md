@@ -11,14 +11,14 @@
 
 ## Checkpoint
 
-- Updated: 2026-09-30 (Europe/Prague)
+- Updated: 2026-10-03 (Europe/Prague)
 - Active goal: inventory, test, repair, and retest every shipped user behavior
-- Phase: R1 accepted; approved R2 repair passed 297 focused checks and independent re-review
+- Phase: accepted R1 retained; R2–R5 repair passed 660 focused checks and independent re-review
 - Release decision: **1.0.21 REMAINS RELEASED; NEW AUDIT OPEN; NO NEW RELEASE DECISION**
 - Branch: `codex/full-feature-audit-delivery`
 - Active delivery branch: `codex/full-feature-audit-delivery`, submitted head
   `18253e9a37cb215856fb79bac01ea9c7482eb6e6`; current review starts from committed
-  repair `99883b4d69527c4efbbf86d53e0d148939a914e2`
+  repair `fed56b9f7c8571568f8fcf1eba6cb7d8734c30f0`
 - Active delivery worktree:
   `/Users/steves/.no-mistakes/worktrees/88e19bf0677f/01M3RWB2ZY374H29CTPEPNSWVH`
 - Current no-mistakes run is in its assigned review repair phase. The outer
@@ -57,8 +57,9 @@
   - preserve user-owned and out-of-scope `.scratch/`
 - Parallel execution: all 314 active stories and four historical rows have
   received clause-by-clause coverage review. The coordinator owns CSV writes;
-  299 rows carry specific passing acceptance evidence (179 tested, 120
-  retested), while 13 need validation, two have
+  299 rows carry passing local acceptance evidence (179 tested, 120
+  retested); CLI-043, LANE-D-004 and DASH-015 were reopened and then retested
+  in this round. Thirteen need validation, two have
   explicit owner prerequisites, and four are deprecated. The real optional SkillSpector scan passed under
   network denial with no credentials or model call, including coordinator
   replay. The actual clean-host script now tests installed dashboard HTTP;
@@ -67,8 +68,9 @@
   records were appended to 65 canonical rows with original-contract hash
   guards. Those audit source writers froze; final independent metadata review
   accepted all 65 guarded contracts and historical records with no blocking
-  findings. The current review continues only telemetry checkpoint compatibility;
-  the accepted MCP diagnostic fixes remain intact. Focused evidence is recorded
+  findings at their recorded checkpoints. The current review repairs telemetry
+  checkpoint compatibility and monitor fixture isolation; accepted MCP diagnostic
+  behavior remains intact, with only requested formatting changes. Focused evidence is recorded
   below. Earlier full gates remain
   valid for their checkpoints, not the later script/test/prose delta. The
   coordinator owns integration, state, GitHub mutations, and final gates.
@@ -93,7 +95,83 @@
   worktree cleanup reduced the Data volume's rounded used space from 280 GiB to
   262 GiB. No remote LFS object has been purged yet.
 
-## Approved telemetry checkpoint compatibility repair (2026-09-30)
+## Authorized telemetry and monitor follow-up (2026-10-03)
+
+- Starting commit: `fed56b9f7c8571568f8fcf1eba6cb7d8734c30f0`.
+  Human approval: “continue and unblock what is blocked”, explicitly authorizing
+  observed generation history for R2 plus R3/R4 and the R5 fixture repair.
+  This continues the existing canonical telemetry defect and records the fixture
+  defect on DASH-015; original acceptance contracts and historical evidence remain.
+- Coordinator source inspection confirmed all findings before edits. The
+  checkpoint remembered only the latest generation, policy depended on unused
+  environment availability, and observational fallback decoding could abort
+  capture. The monitor fixture left its runtime-history reader outside isolation.
+- Supplied exact-head fast evidence in `/tmp/ctx-feature-audit-fast-fed56b9f.log`
+  was read directly: static formatting rejected `mcp_router.py` and
+  `test_enterprise_telemetry.py`; unit execution ended with **1 failed, 9,201
+  passed, 5 skipped in 559.33s**. The failure was the real HTTP session
+  privacy/navigation test at its five-second response timeout. An isolated
+  diagnostic pass does not erase this gate failure. The original checkout and
+  its `.gate/local-fast.json` were not accessed.
+- Failing-first command, before production or fixture edits:
+  `PYTHONPATH="$PWD/src" python -m pytest -q --no-cov src/tests/test_telemetry_checkpoint_identity.py src/tests/test_ctx_monitor.py -k 'restored_observed_generation or unused_custom_env_availability or selected_custom_env_rotation or malformed_unused_fallback or malformed_selected_key or selected_env_availability or fake_claude_http_runtime_history_is_isolated'`.
+  Result: **33 failed, 18 passed, 400 deselected in 3.65s**, exit 1;
+  `.gate/review-r5-red.txt`. The 32 telemetry failures cover restoration,
+  unused environment toggles/v1 migration, corrupt unused storage and capture.
+  The monitor regression blocked both attempted external runtime reads before
+  I/O, using synthetic fixtures. Selected-key validation and actual environment
+  rotation controls passed.
+- The monitor repair isolates `runtime_lifecycle_path` through its existing
+  fixture seam, retains actual HTTP/readers/privacy/navigation assertions, and
+  does not change the timeout. Source inspection of
+  `src/ctx/monitor/services/runtime.py::lifecycle_summary` and
+  `_runtime_tool_summary` confirms full-history aggregation and projection before
+  recent-output slicing. Full history preserves old open escalations, as required
+  by `test_runtime_lifecycle_summary_uses_full_history_for_open_state`.
+  Production aggregate latency remains unmeasured; fixture isolation is not
+  proof of scalability. No speculative production optimization was made.
+- Source/test writers froze with 92 additional telemetry cases and one monitor
+  regression. README and documentation inventory now show 9,304 (the prior
+  9,211 plus these 93 cases); this is inventory, not a full-suite pass.
+- Version 2 retains only safe key/path fingerprints across rotation, policy/scope
+  reset and explicit replay. Stable configured selectors separate policy from
+  unused environment availability; only observational fallback decoding treats
+  invalid UTF-8 as unavailable. Selected-key validation and payload hashing are
+  unchanged. V1 migration seeds only fingerprints present in its metadata;
+  discarded pre-migration history cannot be recovered. Bounded design review
+  added legacy explicit-key activation and policy-detour restoration controls
+  before the final freeze.
+- After all source/test fixes froze and were formatted, the coordinator ran
+  `PYTHONPATH="$PWD/src" python -m pytest -q --no-cov src/tests/test_enterprise_telemetry.py src/tests/test_telemetry_checkpoint_identity.py src/tests/test_ctx_monitor.py src/tests/test_feature_user_story_tracker.py`.
+  **660 passed in 47.85s**, exit 0, `.gate/review-r5-focused.txt`: 154 enterprise
+  telemetry, 222 checkpoint compatibility, 271 monitor and 13 tracker cases.
+  The original HTTP timeout regression, new isolation regression and full-history
+  open-state control all passed. No production or test edits followed this pass.
+- Concurrent bounded static verification passed, exit 0,
+  `.gate/review-r5-static.txt`: `python -m ruff format --check` on the five
+  touched Python files; AST equality against HEAD for MCP source and enterprise
+  telemetry tests; all 318 original acceptance contracts and historical bug IDs
+  preserved; Needs Validation reserved evidence fields unchanged and valid.
+  This is focused formatting/metadata evidence, not the outer static lane.
+- CLI-043, LANE-D-004 and DASH-015 now record this scoped local retest. Prior
+  verified commit/date fields remain historical checkpoint identifiers; current
+  evidence is tied to the following repair-tree SHA-256 values. Independent
+  read-only re-review accepted with no actionable findings after inspecting
+  source, tests, migration docs and canonical records, directly reading all
+  three retained logs, and matching all six hashes below. The reviewer ran no
+  tests and made no writes. Production aggregate latency, full preflight,
+  hosted CI, complete delivery, publication and owner prerequisites remain
+  unverified for this tree. The assigned review phase is complete; the outer
+  executor owns subsequent phases.
+
+  - `src/ctx/telemetry/__init__.py`: `162a0e4aeee1f959b906dc842e2adb48fa16e5258ea2b047432b31eb8e59de4b`
+  - `src/tests/test_telemetry_checkpoint_identity.py`: `7852e1b967052f11bc47755446954762b8079704be48ad875648c317e952bf39`
+  - `src/tests/test_ctx_monitor.py`: `002a1bd558b1b5d3adb65dffb5e933e22c7c7a51747d27f7769fbef907cdce42`
+  - `src/ctx/adapters/generic/tools/mcp_router.py`: `9c594fdf46f83a31b4f92158ec5a74a204022c2b9a09c4e24435070931e2ac80`
+  - `src/tests/test_enterprise_telemetry.py`: `98671f5cc6490abcef6ce8d2f21ef7ac49bd3c91da18683f176f140e8ebd601a`
+  - `docs/telemetry.md`: `459f68134a80abfeeebf57a850017da834bfda0c77cce88c516180d16695a45f`
+
+## Historical approved telemetry checkpoint compatibility repair (2026-09-30)
 
 - Starting commit: `99883b4d69527c4efbbf86d53e0d148939a914e2`.
   Human authorization: “I approve the compatibility repair.” This is a

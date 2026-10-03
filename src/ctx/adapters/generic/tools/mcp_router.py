@@ -548,9 +548,7 @@ class McpClient:
                 raise McpServerError(f"{self._config.name}.initialize: missing protocolVersion")
             protocol_version = initialize_result["protocolVersion"]
             if not isinstance(protocol_version, str):
-                raise McpServerError(
-                    f"{self._config.name}.initialize: non-string protocolVersion"
-                )
+                raise McpServerError(f"{self._config.name}.initialize: non-string protocolVersion")
             if protocol_version not in _SUPPORTED_PROTOCOL_VERSIONS:
                 supported = ", ".join(_SUPPORTED_PROTOCOL_VERSIONS)
                 raise McpServerError(
@@ -871,8 +869,7 @@ class McpClient:
                         raise McpServerError(f"{self._config.name}.{method}: invalid error object")
                     message = _redact_sensitive_text(err["message"], self._stderr_redaction_values)
                     raise McpServerError(
-                        f"{self._config.name}.{method}: "
-                        f"code={err.get('code')} message={message!r}"
+                        f"{self._config.name}.{method}: code={err.get('code')} message={message!r}"
                     )
                 return frame.get("result")
 

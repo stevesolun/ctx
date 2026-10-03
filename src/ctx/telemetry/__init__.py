@@ -27,6 +27,7 @@ from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from importlib.metadata import PackageNotFoundError, version as package_version
+from itertools import product
 from pathlib import Path
 from typing import Any, Iterator, Mapping
 from urllib.error import HTTPError, URLError
@@ -2306,7 +2307,7 @@ def _read_hash_salt_identity(path: Path) -> tuple[str, str | None]:
             before = b""
         try:
             key = path.read_text(encoding="utf-8").strip()
-        except OSError:
+        except (OSError, UnicodeDecodeError):
             key = ""
         try:
             after = marker.read_bytes()
@@ -2331,6 +2332,43 @@ def _read_hash_salt_identity(path: Path) -> tuple[str, str | None]:
     return key, None
 
 
+def _legacy_checkpoint_policies(scopes: list[Mapping[str, Any]]) -> set[str]:
+    env_names = {DEFAULT_HASH_SALT_ENV}
+    env_names.update(
+        str(_mapping_get(scope, "hash_salt_env", DEFAULT_HASH_SALT_ENV)).strip() for scope in scopes
+    )
+    names = sorted(env_names - {""})
+    policies = set()
+    for available in product((False, True), repeat=len(names)):
+        present = {name for name, enabled in zip(names, available) if enabled}
+        policy: list[list[str]] = []
+        paths = set()
+        for scope in scopes:
+            env_name = str(_mapping_get(scope, "hash_salt_env", DEFAULT_HASH_SALT_ENV)).strip()
+            if DEFAULT_HASH_SALT_ENV in present:
+                env_name = DEFAULT_HASH_SALT_ENV
+            if env_name in present:
+                policy.append(["env", _checkpoint_digest(f"env:{env_name}")])
+                break
+            configured = _mapping_get(scope, "hash_salt", "")
+            if isinstance(configured, bytes) and not configured:
+                continue
+            configured_key = configured if isinstance(configured, bytes) else str(configured)
+            if configured_key:
+                policy.append(["inline", _checkpoint_digest("inline:")])
+                break
+            configured_path = _mapping_get(scope, "hash_salt_path", None)
+            if configured_path:
+                path = str(_resolve_path(Path(str(configured_path))).resolve())
+                if path not in paths:
+                    paths.add(path)
+                    policy.append(["file", _checkpoint_digest(path)])
+        else:
+            policy.append(["unsalted"])
+        policies.add(_checkpoint_digest(json.dumps(policy, separators=(",", ":"))))
+    return policies
+
+
 def _hash_settings(privacy: Mapping[str, Any], *, create: bool) -> dict[str, Any]:
     salt = _resolve_hash_salt(privacy, create=create)
     if salt is None:
@@ -2340,70 +2378,78 @@ def _hash_settings(privacy: Mapping[str, Any], *, create: bool) -> dict[str, Any
     raw = _config_get("telemetry", {}) or {}
     global_privacy = _mapping_get(raw, "privacy", {})
     scopes = [privacy, global_privacy if isinstance(global_privacy, Mapping) else {}]
+    candidates: list[tuple[str, str, str | bytes | Path | None]] = [
+        (
+            "env",
+            _checkpoint_digest(f"env:{DEFAULT_HASH_SALT_ENV}"),
+            os.environ.get(DEFAULT_HASH_SALT_ENV),
+        )
+    ]
+    for scope in scopes:
+        env_name = str(_mapping_get(scope, "hash_salt_env", DEFAULT_HASH_SALT_ENV)).strip()
+        if env_name and env_name != DEFAULT_HASH_SALT_ENV:
+            candidates.append(
+                ("env", _checkpoint_digest(f"env:{env_name}"), os.environ.get(env_name))
+            )
+        configured = _mapping_get(scope, "hash_salt", "")
+        if isinstance(configured, bytes) and not configured:
+            continue
+        key = configured if isinstance(configured, bytes) else str(configured)
+        if key:
+            candidates.append(("inline", _checkpoint_digest("inline:"), key))
+            break
+        configured_path = _mapping_get(scope, "hash_salt_path", None)
+        if configured_path:
+            path = _resolve_path(Path(str(configured_path))).resolve()
+            candidates.append(("file", _checkpoint_digest(str(path)), path))
     policy: list[list[str]] = []
     file_keys: dict[str, str | None] = {}
     file_generations: dict[str, str | None] = {}
     legacy_keys: list[str | bytes] = []
     selector: str | None = None
     selected_fingerprint: str | None = None
-    default_env = os.environ.get(DEFAULT_HASH_SALT_ENV)
-    for scope in scopes:
-        key: str | bytes | None = default_env
-        kind = "env"
-        name = DEFAULT_HASH_SALT_ENV
-        if not key:
-            name = str(_mapping_get(scope, "hash_salt_env", DEFAULT_HASH_SALT_ENV)).strip()
-            key = os.environ.get(name) if name else None
-        if not key:
-            configured = _mapping_get(scope, "hash_salt", "")
-            key = configured if isinstance(configured, bytes) else str(configured)
-            kind = "inline"
-            name = ""
-            if isinstance(configured, bytes) and not configured:
-                continue
+    selectors: list[str] = []
+    for kind, key_selector, material in candidates:
+        if key_selector in selectors:
+            continue
+        selectors.append(key_selector)
+        policy.append([kind, key_selector])
+        if isinstance(material, Path):
+            key, generation = _read_hash_salt_identity(material)
+            fingerprint = (
+                hash_identifier("ctx.telemetry.checkpoint.key.v1", salt=key) if key else None
+            )
+            file_keys[key_selector] = fingerprint
+            file_generations[key_selector] = generation
+        else:
+            key = material
+            fingerprint = (
+                hash_identifier("ctx.telemetry.checkpoint.key.v1", salt=key) if key else None
+            )
         if key:
-            fingerprint = hash_identifier("ctx.telemetry.checkpoint.key.v1", salt=key)
-            key_selector = _checkpoint_digest(f"{kind}:{name}")
-            policy.append([kind, key_selector])
             if selector is None:
                 selector = key_selector
                 selected_fingerprint = fingerprint
             legacy_keys.append(key)
-            break
-        configured_path = _mapping_get(scope, "hash_salt_path", None)
-        if configured_path:
-            path = _resolve_path(Path(str(configured_path))).resolve()
-            path_hash = _checkpoint_digest(str(path))
-            if path_hash in file_keys:
-                continue
-            policy.append(["file", path_hash])
-            file_key, generation = _read_hash_salt_identity(path)
-            file_keys[path_hash] = (
-                hash_identifier("ctx.telemetry.checkpoint.key.v1", salt=file_key)
-                if file_key
-                else None
-            )
-            file_generations[path_hash] = generation
-            if file_key:
-                if selector is None:
-                    selector = path_hash
-                    selected_fingerprint = file_keys[path_hash]
-                legacy_keys.append(file_key)
-    else:
-        policy.append(["unsalted"])
     return {
         "hash_salt": salt,
         "checkpoint_hash_context": {
             "policy": _checkpoint_digest(json.dumps(policy, separators=(",", ":"))),
+            "legacy_policies": _legacy_checkpoint_policies(scopes),
             "kind": "file"
-            if policy[0][0] == "file"
-            else ("unsalted" if policy[0][0] == "unsalted" else "explicit"),
+            if any(
+                selector is None or selectors.index(path_hash) < selectors.index(selector)
+                for path_hash in file_keys
+            )
+            or selector in file_keys
+            else ("explicit" if selector else "unsalted"),
             "file_keys": file_keys,
             "file_generations": file_generations,
-            "selectors": [item[1] for item in policy if len(item) > 1],
+            "selectors": selectors,
             "selector": selector,
             "key_fingerprint": selected_fingerprint,
             "legacy_keys": legacy_keys,
+            "observed_history": {},
             "state": {},
             "write_identity": create,
         },
@@ -2859,12 +2905,12 @@ def _events_pending_export(
     pending_events = spool.events
     exported_events: list[TelemetryEvent] = []
     pending_start_line = 1
-    if not include_exported:
-        checkpoint_event_id = _read_export_checkpoint(
-            checkpoint_path,
-            settings=settings,
-            source_path=source_path,
-        )
+    checkpoint_event_id = _read_export_checkpoint(
+        checkpoint_path,
+        settings=settings,
+        source_path=source_path,
+        ignore_cursor=include_exported,
+    )
     if checkpoint_event_id is not None:
         for index, event in enumerate(spool.events):
             if event.event_id == checkpoint_event_id:
@@ -2916,12 +2962,12 @@ def _metrics_pending_export(
     checkpoint_found = False
     pending_metrics = spool.metrics
     pending_start_line = 1
-    if not include_exported:
-        checkpoint_metric_id = _read_metric_export_checkpoint(
-            checkpoint_path,
-            settings=settings,
-            source_path=source_path,
-        )
+    checkpoint_metric_id = _read_metric_export_checkpoint(
+        checkpoint_path,
+        settings=settings,
+        source_path=source_path,
+        ignore_cursor=include_exported,
+    )
     if checkpoint_metric_id is not None:
         for index, metric in enumerate(spool.metrics):
             if metric.metric_id == checkpoint_metric_id:
@@ -2995,12 +3041,19 @@ def _checkpoint_scope(settings: Mapping[str, Any], source_path: Path) -> str:
 
 def _checkpoint_identity(settings: Mapping[str, Any], source_path: Path) -> dict[str, Any]:
     context = settings["checkpoint_hash_context"]
+    history = {key: list(values) for key, values in context["observed_history"].items()}
+    for path_hash, fingerprint in context["file_keys"].items():
+        history[path_hash] = sorted(
+            set(history.get(path_hash, []))
+            | {value for value in (fingerprint, context["file_generations"][path_hash]) if value}
+        )
     return context["state"].get("identity") or {
-        "version": 1,
+        "version": 2,
         "scope": _checkpoint_scope(settings, source_path),
         "policy": context["policy"],
         "file_keys": dict(context["file_keys"]),
         "file_generations": dict(context["file_generations"]),
+        "file_generation_history": history,
         "selector": context["selector"],
         "key_fingerprint": context["key_fingerprint"],
     }
@@ -3010,12 +3063,53 @@ def _valid_checkpoint_hash(value: Any) -> bool:
     return isinstance(value, str) and re.fullmatch(r"sha256:[0-9a-f]{64}", value) is not None
 
 
+def _checkpoint_generation_history(identity: Any) -> dict[str, list[str]] | None:
+    if not isinstance(identity, dict):
+        return None
+    version = identity.get("version")
+    if type(version) is not int or version not in (1, 2):
+        return None
+    if not all(_valid_checkpoint_hash(identity.get(key)) for key in ("scope", "policy")):
+        return None
+    file_keys = identity.get("file_keys")
+    generations = identity.get("file_generations")
+    if not isinstance(file_keys, dict) or not isinstance(generations, dict):
+        return None
+    if file_keys.keys() != generations.keys():
+        return None
+    history = (
+        identity.get("file_generation_history") if version == 2 else {key: [] for key in file_keys}
+    )
+    if not isinstance(history, dict) or not file_keys.keys() <= history.keys():
+        return None
+    result = {}
+    for path_hash, observed in history.items():
+        if not _valid_checkpoint_hash(path_hash):
+            return None
+        fingerprint = file_keys.get(path_hash)
+        generation = generations.get(path_hash)
+        if any(
+            value is not None and not _valid_checkpoint_hash(value)
+            for value in (fingerprint, generation)
+        ):
+            return None
+        if not isinstance(observed, list) or not all(
+            _valid_checkpoint_hash(value) for value in observed
+        ):
+            return None
+        result[path_hash] = sorted(
+            set(observed) | {value for value in (fingerprint, generation) if value}
+        )
+    return result
+
+
 def _read_checkpoint(
     path: Path,
     *,
     settings: Mapping[str, Any],
     source_path: Path,
     metric: bool,
+    ignore_cursor: bool = False,
 ) -> str | None:
     context = settings["checkpoint_hash_context"]
     state = context["state"]
@@ -3026,6 +3120,13 @@ def _read_checkpoint(
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return None
     if not isinstance(payload, dict):
+        return None
+    if "checkpoint_identity" in payload:
+        history = _checkpoint_generation_history(payload["checkpoint_identity"])
+        if history is None:
+            return None
+        context["observed_history"].update(history)
+    if ignore_cursor:
         return None
     schema = METRIC_SCHEMA_VERSION if metric else SCHEMA_VERSION
     _, sink, _ = _checkpoint_destination(settings)
@@ -3044,14 +3145,15 @@ def _read_checkpoint(
         previous = payload["checkpoint_identity"]
         if not isinstance(previous, dict):
             return None
-        if type(previous.get("version")) is not int or previous["version"] != 1:
-            return None
         if previous.get("scope") != identity["scope"]:
             return None
-        if previous.get("policy") != identity["policy"]:
+        policies = context["legacy_policies"] if previous["version"] == 1 else {identity["policy"]}
+        if previous.get("policy") not in policies:
             return None
         file_keys = previous.get("file_keys")
-        if not isinstance(file_keys, dict) or file_keys.keys() != identity["file_keys"].keys():
+        if not isinstance(file_keys, dict) or not file_keys.keys() <= identity["file_keys"].keys():
+            return None
+        if previous["version"] == 2 and file_keys.keys() != identity["file_keys"].keys():
             return None
         generations = previous.get("file_generations")
         if not isinstance(generations, dict) or generations.keys() != file_keys.keys():
@@ -3072,6 +3174,27 @@ def _read_checkpoint(
         if previous_selector in file_keys and file_keys[previous_selector] != previous_fingerprint:
             return None
         selector = identity["selector"]
+        if selector != previous_selector and (
+            (
+                selector is not None
+                and selector not in identity["file_keys"]
+                and (
+                    previous_selector is None
+                    or context["selectors"].index(selector)
+                    < context["selectors"].index(previous_selector)
+                )
+            )
+            or (
+                previous_selector is not None
+                and previous_selector not in file_keys
+                and (
+                    selector is None
+                    or context["selectors"].index(selector)
+                    > context["selectors"].index(previous_selector)
+                )
+            )
+        ):
+            return None
         compare_selected = previous_selector is None or (
             selector is not None
             and context["selectors"].index(selector)
@@ -3090,7 +3213,7 @@ def _read_checkpoint(
             generated = (
                 current_generation is not None
                 and current_generation == current
-                and current_generation != generation
+                and current_generation not in context["observed_history"].get(file_hash, [])
             )
             if (
                 fingerprint is not None
@@ -3114,6 +3237,8 @@ def _read_checkpoint(
             return None
     else:
         candidates = [settings["hash_salt"], *context["legacy_keys"], _HashSaltState.UNSALTED]
+        if context["selector"] is not None and context["selector"] not in context["file_keys"]:
+            candidates = [settings["hash_salt"], _HashSaltState.UNSALTED]
         known_key = False
         for salt in candidates:
             expected_source = hash_identifier(str(source_path), salt=salt)
@@ -3195,8 +3320,11 @@ def _read_metric_export_checkpoint(
     *,
     settings: Mapping[str, Any],
     source_path: Path,
+    ignore_cursor: bool = False,
 ) -> str | None:
-    return _read_checkpoint(path, settings=settings, source_path=source_path, metric=True)
+    return _read_checkpoint(
+        path, settings=settings, source_path=source_path, metric=True, ignore_cursor=ignore_cursor
+    )
 
 
 def _write_metric_export_checkpoint(
@@ -3310,8 +3438,11 @@ def _read_export_checkpoint(
     *,
     settings: Mapping[str, Any],
     source_path: Path,
+    ignore_cursor: bool = False,
 ) -> str | None:
-    return _read_checkpoint(path, settings=settings, source_path=source_path, metric=False)
+    return _read_checkpoint(
+        path, settings=settings, source_path=source_path, metric=False, ignore_cursor=ignore_cursor
+    )
 
 
 def _write_export_checkpoint(

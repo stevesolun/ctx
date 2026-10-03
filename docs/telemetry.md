@@ -401,17 +401,31 @@ existing keyed algorithm and unsalted fallback.
 
 Checkpoint rotation follows the key selected by a read-only lookup. A readable
 configured file remains authoritative even when its lock cannot be used for
-payload hashing. Changes to an unused fallback key do not reset progress; a
-fallback key becomes relevant when the primary key cannot be read.
+payload hashing. Changes to an unused fallback key or environment availability do not reset
+progress. The policy records configured selectors independently of their
+availability; a fallback key becomes relevant when the primary key cannot be
+read. Invalid UTF-8 in unused fallback storage is unavailable observation data;
+validation of the key selected for hashing remains strict.
 Automatic salt creation writes an owner-only
 `<hash_salt_path>.generation.json` file containing a version and key fingerprint,
 without the key itself. This lets later exports recognize generation performed
 by ordinary capture or identifier hashing. Keep this file with its salt;
-checkpoints remember generation history so restoring a previously observed key
-manually still counts as rotation.
+version 2 checkpoint metadata retains fingerprint-only history for observed
+file keys and generation markers. The history survives deliberate rotations,
+policy changes, destination changes and explicit `--all` replay; it never allows
+a cursor to cross those export scopes. Restoring a previously observed key with
+its saved generation marker therefore still counts as rotation. No raw key
+material is written into checkpoint or generation metadata.
 
 Older checkpoints migrate on a real export, including an export with no pending
-records. Dry-run previews only read this metadata; they never create salts,
+records. Version 1 compatibility metadata is accepted only when its recorded
+availability-dependent policy matches a policy derivable from the currently
+configured selectors and its remaining scope/key checks succeed. Its migration
+seeds history from the key and generation fingerprints it actually retained;
+older generations already discarded by version 1 cannot be reconstructed.
+Restoration detection covers fingerprints retained at migration and observed
+afterward, not unknown pre-migration history.
+Dry-run previews only read this metadata; they never create salts,
 locks, checkpoints, or status files. A legacy keyed checkpoint must match its
 historical source and destination hashes using an available key. If its key is
 unavailable or generation history makes that identity ambiguous, export stops

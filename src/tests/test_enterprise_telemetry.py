@@ -1003,20 +1003,26 @@ def test_partial_config_export_preview_preserves_checkpoint_and_files(
     record_config: dict[str, Any] = {"privacy": {"hash_salt": "fixture-salt"}}
     if signal == "metrics":
         record_config["metrics"] = {"enabled": True}
-        assert record_counter(
-            "ctx.api.requests",
-            path=path,
-            trusted_root=tmp_path,
-            config=record_config,
-        ) is not None
+        assert (
+            record_counter(
+                "ctx.api.requests",
+                path=path,
+                trusted_root=tmp_path,
+                config=record_config,
+            )
+            is not None
+        )
     else:
-        assert record_event(
-            "ctx.api.recommend_bundle",
-            source="ctx-api",
-            path=path,
-            trusted_root=tmp_path,
-            config=record_config,
-        ) is not None
+        assert (
+            record_event(
+                "ctx.api.recommend_bundle",
+                source="ctx-api",
+                path=path,
+                trusted_root=tmp_path,
+                config=record_config,
+            )
+            is not None
+        )
     otlp_signal = "logs" if signal == "events" else signal
     export_config = {
         "enabled": True,
@@ -1079,15 +1085,19 @@ def test_partial_config_export_preview_preserves_checkpoint_and_files(
         assert pending.destination_hash == exported.destination_hash
     if global_salt in {"unavailable", "absent"}:
         checkpoint = json.loads(Path(exported.checkpoint_path).read_text(encoding="utf-8"))
-        assert checkpoint["source_path_hash"] == "sha256:" + hashlib.sha256(
-            b"ctx.telemetry.v1\x00" + str(path).encode("utf-8")
-        ).hexdigest()
+        assert (
+            checkpoint["source_path_hash"]
+            == "sha256:"
+            + hashlib.sha256(b"ctx.telemetry.v1\x00" + str(path).encode("utf-8")).hexdigest()
+        )
         destination = f"otlp_http:http://127.0.0.1:4318/v1/{otlp_signal}"
         if signal == "metrics":
             destination = f"metrics:{destination}"
-        assert checkpoint["destination_hash"] == "sha256:" + hashlib.sha256(
-            b"ctx.telemetry.v1\x00" + destination.encode("utf-8")
-        ).hexdigest()
+        assert (
+            checkpoint["destination_hash"]
+            == "sha256:"
+            + hashlib.sha256(b"ctx.telemetry.v1\x00" + destination.encode("utf-8")).hexdigest()
+        )
     assert len(calls) == 1
     if global_salt == "missing_file":
         assert salt_path.is_file()

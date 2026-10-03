@@ -287,7 +287,7 @@ def test_legacy_unsalted_checkpoint_adopts_file_identity_before_rotation(
     assert case.checkpoint_path.read_bytes() == legacy
     assert case.export().attempted == 0
     assert case.hashes() == original_hashes
-    assert case.checkpoint()["checkpoint_identity"]["version"] == 1
+    assert case.checkpoint()["checkpoint_identity"]["version"] == 2
     if rotation == "file":
         case.salt_path.write_text("rotated-key", encoding="utf-8")
     elif rotation == "inline":
@@ -405,6 +405,10 @@ def test_checkpoint_identity_separates_signals_at_the_same_endpoint(
         "missing_policy",
         "bad_file_keys",
         "bad_file_key_value",
+        "missing_history",
+        "bad_history",
+        "bad_history_path",
+        "bad_history_value",
         "not_mapping",
     ],
 )
@@ -429,6 +433,14 @@ def test_checkpoint_identity_never_treats_invalid_metadata_as_legacy(
         identity["file_keys"] = ["invalid"]
     elif damage == "bad_file_key_value":
         identity["file_keys"][next(iter(identity["file_keys"]))] = "not-a-fingerprint"
+    elif damage == "missing_history":
+        identity.pop("file_generation_history")
+    elif damage == "bad_history":
+        identity["file_generation_history"] = []
+    elif damage == "bad_history_path":
+        identity["file_generation_history"]["raw-path"] = []
+    elif damage == "bad_history_value":
+        identity["file_generation_history"][next(iter(identity["file_keys"]))] = ["raw-key"]
     else:
         checkpoint["checkpoint_identity"] = []
     case.write_checkpoint(checkpoint)
@@ -478,7 +490,7 @@ def test_legacy_keyed_checkpoint_matches_readable_key_during_lock_failure(
     assert case.checkpoint_path.read_bytes() == legacy
     assert case.export().attempted == 0
     assert case.hashes() == original_hashes
-    assert case.checkpoint()["checkpoint_identity"]["version"] == 1
+    assert case.checkpoint()["checkpoint_identity"]["version"] == 2
     case.restore_lock()
     assert case.preview().attempted == 0
 
@@ -764,3 +776,285 @@ def test_legacy_keyed_checkpoint_does_not_adopt_an_existing_explicit_fallback(
         case.export()
     assert case.checkpoint_path.read_bytes() == original
     assert len(case.calls) == 1
+
+
+@pytest.mark.parametrize("intervening_export", ["normal", "noop", "replay", "endpoint", "rotation"])
+def test_checkpoint_identity_recognizes_restored_observed_generation(
+    checkpoint_case: TelemetryCase,
+    intervening_export: str,
+) -> None:
+    case = checkpoint_case
+    case.salt_path.unlink()
+    case.append()
+    assert case.export().exported == 1
+    saved_key = case.salt_path.read_bytes()
+    marker = case.salt_path.with_suffix(case.salt_path.suffix + ".generation.json")
+    saved_marker = marker.read_bytes()
+    case.salt_path.unlink()
+    if intervening_export != "noop":
+        case.append()
+    expected_records = 1 if intervening_export == "noop" else 2
+    assert case.export().exported == expected_records - 1
+    assert case.preview().attempted == 0
+    if intervening_export == "replay":
+        assert case.export(include_exported=True).exported == expected_records
+    elif intervening_export == "endpoint":
+        case.export_config["otlp"]["endpoint"] = "http://127.0.0.1:4318/v1/other"
+        assert case.export().exported == expected_records
+    elif intervening_export == "rotation":
+        case.salt_path.write_text("deliberate-intermediate-key", encoding="utf-8")
+        assert case.export().exported == expected_records
+    checkpoint_text = case.checkpoint_path.read_text(encoding="utf-8")
+    assert saved_key.decode().strip() not in checkpoint_text
+    assert case.salt_path.read_text(encoding="utf-8").strip() not in checkpoint_text
+    case.salt_path.write_bytes(saved_key)
+    marker.write_bytes(saved_marker)
+    assert case.preview().attempted == expected_records
+    assert case.export().exported == expected_records
+    assert case.preview().attempted == 0
+
+
+@pytest.mark.parametrize("initially_available", [False, True])
+@pytest.mark.parametrize("legacy_policy", [False, True])
+def test_checkpoint_identity_ignores_unused_custom_env_availability(
+    checkpoint_case: TelemetryCase,
+    initially_available: bool,
+    legacy_policy: bool,
+) -> None:
+    case = checkpoint_case
+    variable = "CTX_REVIEW_UNUSED_CUSTOM_SALT"
+    global_privacy = {"hash_salt_env": variable}
+    case.monkeypatch.delenv(variable, raising=False)
+    if initially_available:
+        case.monkeypatch.setenv(variable, "unused-fallback-key")
+    case.monkeypatch.setattr(
+        telemetry,
+        "_config_get",
+        lambda key, default: {"privacy": global_privacy} if key == "telemetry" else default,
+    )
+    case.append()
+    assert case.export().exported == 1
+    original_hashes = case.hashes()
+    if legacy_policy:
+        checkpoint = case.checkpoint()
+        identity = checkpoint["checkpoint_identity"]
+        identity["version"] = 1
+        identity.pop("file_generation_history", None)
+        local_selector = next(iter(identity["file_keys"]))
+        old_policy = [["file", local_selector]]
+        if initially_available:
+            env_selector = (
+                "sha256:"
+                + hashlib.sha256(b"ctx.telemetry.v1\x00" + f"env:{variable}".encode()).hexdigest()
+            )
+            old_policy.append(["env", env_selector])
+        else:
+            old_policy.append(["unsalted"])
+        identity["policy"] = (
+            "sha256:"
+            + hashlib.sha256(
+                b"ctx.telemetry.v1\x00" + json.dumps(old_policy, separators=(",", ":")).encode()
+            ).hexdigest()
+        )
+        case.write_checkpoint(checkpoint)
+    for available in (not initially_available, initially_available):
+        if available:
+            case.monkeypatch.setenv(variable, "changed-unused-fallback-key")
+        else:
+            case.monkeypatch.delenv(variable, raising=False)
+        assert case.preview().attempted == 0
+        assert case.export().attempted == 0
+        assert case.hashes() == original_hashes
+        case.append()
+        assert case.export().exported == 1
+        assert case.preview().attempted == 0
+
+
+def test_checkpoint_identity_preserves_selected_custom_env_rotation(
+    checkpoint_case: TelemetryCase,
+) -> None:
+    case = checkpoint_case
+    variable = "CTX_REVIEW_SELECTED_CUSTOM_SALT"
+    case.config["privacy"] = {"hash_salt_env": variable}
+    case.monkeypatch.setenv(variable, "selected-key-a")
+    case.append()
+    assert case.export().exported == 1
+    case.monkeypatch.setenv(variable, "selected-key-b")
+    assert case.preview().attempted == 1
+    assert case.export().exported == 1
+
+
+def test_checkpoint_identity_ignores_malformed_unused_fallback(
+    checkpoint_case: TelemetryCase,
+) -> None:
+    case = checkpoint_case
+    fallback_path = case.root / "unused-global-salt"
+    global_privacy = {"hash_salt_path": str(fallback_path)}
+    case.monkeypatch.setattr(
+        telemetry,
+        "_config_get",
+        lambda key, default: {"privacy": global_privacy} if key == "telemetry" else default,
+    )
+    case.append()
+    assert case.export().exported == 1
+    original_hashes = case.hashes()
+    fallback_path.write_bytes(b"\xff\xfeinvalid-key")
+    assert case.preview().attempted == 0
+    assert case.export().attempted == 0
+    case.append()
+    assert case.export().exported == 1
+    assert case.hashes() == original_hashes
+    assert case.preview().attempted == 0
+
+
+@pytest.mark.parametrize("checkpoint_case", ["events", "metrics"], indirect=True)
+def test_capture_retains_records_with_malformed_unused_fallback(
+    checkpoint_case: TelemetryCase,
+) -> None:
+    case = checkpoint_case
+    fallback_path = case.root / "unused-global-salt"
+    fallback_path.write_bytes(b"\xff\xfeinvalid-key")
+    case.monkeypatch.setattr(
+        telemetry,
+        "_config_get",
+        lambda key, default: (
+            {"privacy": {"hash_salt_path": str(fallback_path)}} if key == "telemetry" else default
+        ),
+    )
+    assert case.append(continuous=True) is not None
+    assert len(case.path.read_text(encoding="utf-8").splitlines()) == 1
+    assert len(case.calls) == 1
+    assert case.preview().attempted == 0
+
+
+def test_checkpoint_identity_rejects_malformed_selected_key(
+    checkpoint_case: TelemetryCase,
+) -> None:
+    case = checkpoint_case
+    case.append()
+    assert case.export().exported == 1
+    checkpoint = case.checkpoint_path.read_bytes()
+    case.salt_path.write_bytes(b"\xff\xfeinvalid-selected-key")
+    with pytest.raises(UnicodeDecodeError):
+        case.preview()
+    with pytest.raises(UnicodeDecodeError):
+        case.export()
+    assert case.checkpoint_path.read_bytes() == checkpoint
+    assert len(case.calls) == 1
+
+
+@pytest.mark.parametrize("initially_available", [False, True])
+@pytest.mark.parametrize("variable", ["CTX_REVIEW_SELECTED_CUSTOM_SALT", "CTX_TELEMETRY_HASH_SALT"])
+def test_checkpoint_identity_resets_for_selected_env_availability(
+    checkpoint_case: TelemetryCase,
+    initially_available: bool,
+    variable: str,
+) -> None:
+    case = checkpoint_case
+    case.config["privacy"]["hash_salt_env"] = variable
+    case.monkeypatch.delenv(variable, raising=False)
+    if initially_available:
+        case.monkeypatch.setenv(variable, "selected-env-key")
+    case.append()
+    assert case.export().exported == 1
+    if initially_available:
+        case.monkeypatch.delenv(variable)
+    else:
+        case.monkeypatch.setenv(variable, "selected-env-key")
+    assert case.preview().attempted == 1
+    assert case.export().exported == 1
+
+
+@pytest.mark.parametrize("explicit_key", ["inline", "custom_env", "default_env"])
+@pytest.mark.parametrize("generated_key", [False, True])
+def test_legacy_keyed_checkpoint_resets_for_new_selected_explicit_key(
+    checkpoint_case: TelemetryCase,
+    explicit_key: str,
+    generated_key: bool,
+) -> None:
+    case = checkpoint_case
+    if generated_key:
+        case.salt_path.unlink()
+    case.append()
+    assert case.export().exported == 1
+    original_hashes = case.hashes()
+    case.legacy_checkpoint()
+    if explicit_key == "inline":
+        case.config["privacy"]["hash_salt"] = "new-selected-key"
+    else:
+        variable = (
+            "CTX_TELEMETRY_HASH_SALT"
+            if explicit_key == "default_env"
+            else "CTX_REVIEW_SELECTED_CUSTOM_SALT"
+        )
+        case.config["privacy"]["hash_salt_env"] = variable
+        case.monkeypatch.setenv(variable, "new-selected-key")
+    assert case.preview().attempted == 1
+    assert case.export().exported == 1
+    assert case.hashes() != original_hashes
+
+
+@pytest.mark.parametrize("intermediate_policy", ["inline", "other_file"])
+def test_checkpoint_identity_remembers_generations_across_policy_resets(
+    checkpoint_case: TelemetryCase,
+    intermediate_policy: str,
+) -> None:
+    case = checkpoint_case
+    case.salt_path.unlink()
+    case.append()
+    assert case.export().exported == 1
+    marker = case.salt_path.with_suffix(case.salt_path.suffix + ".generation.json")
+    first_key, first_marker = case.salt_path.read_bytes(), marker.read_bytes()
+    case.salt_path.unlink()
+    assert case.export().attempted == 0
+    second_key, second_marker = case.salt_path.read_bytes(), marker.read_bytes()
+    if intermediate_policy == "inline":
+        case.config["privacy"] = {"hash_salt": "intermediate-inline-key"}
+    else:
+        other_salt = case.root / "other-file-salt"
+        other_salt.write_text("intermediate-file-key", encoding="utf-8")
+        case.config["privacy"] = {"hash_salt_path": str(other_salt)}
+    assert case.export().exported == 1
+    case.config["privacy"] = {"hash_salt_path": str(case.salt_path)}
+    case.salt_path.write_bytes(first_key)
+    marker.write_bytes(first_marker)
+    assert case.export().exported == 1
+    case.salt_path.write_bytes(second_key)
+    marker.write_bytes(second_marker)
+    assert case.preview().attempted == 1
+    assert case.export().exported == 1
+
+
+@pytest.mark.parametrize("previous_key", ["current_generation", "manual_with_stale_marker"])
+def test_checkpoint_identity_migrates_known_v1_generations(
+    checkpoint_case: TelemetryCase,
+    previous_key: str,
+) -> None:
+    case = checkpoint_case
+    case.salt_path.unlink()
+    telemetry.hash_identifier("bootstrap-generation")
+    marker = case.salt_path.with_suffix(case.salt_path.suffix + ".generation.json")
+    saved_key, saved_marker = case.salt_path.read_bytes(), marker.read_bytes()
+    if previous_key == "manual_with_stale_marker":
+        case.salt_path.write_text("manual-before-migration", encoding="utf-8")
+    case.append()
+    assert case.export().exported == 1
+    checkpoint = case.checkpoint()
+    identity = checkpoint["checkpoint_identity"]
+    identity["version"] = 1
+    identity.pop("file_generation_history")
+    old_policy = [["file", next(iter(identity["file_keys"]))], ["unsalted"]]
+    identity["policy"] = (
+        "sha256:"
+        + hashlib.sha256(
+            b"ctx.telemetry.v1\x00" + json.dumps(old_policy, separators=(",", ":")).encode()
+        ).hexdigest()
+    )
+    case.write_checkpoint(checkpoint)
+    case.salt_path.unlink()
+    assert case.preview().attempted == 0
+    assert case.export().attempted == 0
+    case.salt_path.write_bytes(saved_key)
+    marker.write_bytes(saved_marker)
+    assert case.preview().attempted == 1
+    assert case.export().exported == 1
