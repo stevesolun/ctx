@@ -447,12 +447,16 @@ or use `--all` to explicitly replay it. Automatic event and metric capture keeps
 spooling locally if this prevents continuous export.
 An old keyed checkpoint also cannot distinguish a newly configured explicit
 fallback from one already present before a file failure. If that fallback cannot
-establish the old key, the same recovery choice applies. This includes an absent
-configured environment fallback after a primary file lock recovers: a readable
-primary key alone does not prove which key hashed the old checkpoint. Restoring
-the fallback value lets it establish the old hashes and migrate without replay;
+establish the old key, the same recovery choice applies. This includes a
+configured environment, inline, or alternate-file fallback whose old value is
+missing **or replaced**, even when every current candidate is readable after
+the primary file lock recovers. A readable primary key alone does not prove
+which key hashed the old checkpoint. Restoring the fallback value lets it
+establish the old hashes and migrate without replay;
 `--all` explicitly starts over. Implicit default-environment absence alone does
-not trigger this ambiguity rule. Changing only the source
+not trigger this ambiguity rule. A fallback removed from the configuration
+entirely cannot be reconstructed from legacy checkpoint metadata; retain its
+configuration and original key while migrating. Changing only the source
 or destination with a recognizable key starts a new scope; changing both at once
 may leave a legacy checkpoint ambiguous and require `--all` or a fresh checkpoint.
 

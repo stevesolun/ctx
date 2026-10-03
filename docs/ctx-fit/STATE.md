@@ -13,25 +13,29 @@
 
 - Updated: 2026-10-04 (Europe/Prague)
 - Active goal: inventory, test, repair, and retest every shipped user behavior
-- Phase: assigned CI repair for PR #286's optional-dependency test failures
+- Phase: telemetry and benchmark follow-up frozen and independently accepted; focused/static checks passed; committed fast/preflight and new delivery pending
 - Release decision: **1.0.21 REMAINS RELEASED; NEW AUDIT OPEN; NO NEW RELEASE DECISION**
 - Branch: `codex/full-feature-audit-delivery`
 - Active delivery branch: `codex/full-feature-audit-delivery`, submitted head
-  `18253e9a37cb215856fb79bac01ea9c7482eb6e6`; current CI repair target is
-  `5607252eb77cbf7f6704781fdc41489b1d38353a`
+  `18253e9a37cb215856fb79bac01ea9c7482eb6e6`; delivered baseline is now
+  `591b26c4595a5eb403bb2a4362c466989da99775`
 - Active delivery worktree:
-  `/Users/steves/.no-mistakes/worktrees/88e19bf0677f/01M3RWB2ZY374H29CTPEPNSWVH`
-- Current no-mistakes run is in its assigned CI phase. PR #286's supplied
-  hosted results failed `unit-linux` and consequently `CI required`; the
-  focused repair and fresh local evidence are recorded below. The preceding test
-  phase records an executor-supplied successful `scripts/no_mistakes_run.sh test`
-  baseline; the wrapper delegates to `python scripts/ci_preflight.py --profile pr`.
-  This supersedes
-  the earlier failed preflight as the supplied current baseline, without
-  changing that historical failure. Its focused and product-level evidence is
-  recorded below. Documentation reconciliation added no product execution evidence.
-  The outer executor owns subsequent phases, commits, push and hosted CI reruns;
-  complete delivery is not inferred from local testing.
+  `/Users/steves/.codex/worktrees/full-feature-audit-delivery/ctx`
+- Run `01M3RWB2ZY374H29CTPEPNSWVH` returned `checks-passed`; observer **6572**
+  is terminal exit 0. Its background PR monitor is not a repair gate. Guarded
+  synchronization preserved every pipeline commit and advanced the clean delivery
+  checkout to `591b26c4`. Hosted run `37160902911` passed: 9,272 unit tests,
+  51 skips, 91.27% coverage; actual clean-host, wheel upload and Linux/macOS
+  wheel smoke succeeded. No merge or release occurred. The original failed
+  hosted run and its four optional-LiteLLM fixture repairs remain recorded below.
+- Passing baseline delivery does not resolve review R3. A coordinator external
+  regression still reproduced six failures for present fallback replacement;
+  permanent expanded tests then reproduced 24 failures before source changes.
+  The human authorized remaining in-scope repairs. Two disjoint lanes now own
+  telemetry source/tests and the benchmark fixture test; the coordinator owns
+  documentation, CSV, integration and final verification. No new pipeline run
+  or competing source writer is active. See
+  `qa/feature-audit/telemetry-fallback-repair-20261004.md` for bounded evidence.
 - Previous no-mistakes run: `01M3RV98HW4HQDSM04HA6NRBJG` is **FAILED**; driver
   session `15506` is terminal, log `/tmp/ctx-feature-audit-delivery-54dfe28a.log`.
   Intent/rebase completed; review could not launch Codex and no later phase ran.
@@ -65,9 +69,9 @@
   - preserve user-owned and out-of-scope `.scratch/`
 - Parallel execution: all 314 active stories and four historical rows have
   received clause-by-clause coverage review. The coordinator owns CSV writes;
-  299 rows carry passing local acceptance evidence (179 tested, 120
-  retested); CLI-043 and LANE-D-004 were reopened and retested for the current
-  combined telemetry transitions. Thirteen need validation, two have
+  297 rows carry passing local acceptance evidence (179 tested, 118
+  retested); CLI-043 and LANE-D-004 are Needs Validation after the shared
+  fallback-replacement repair, not certified by older gates. Fifteen need validation, two have
   explicit owner prerequisites, and four are deprecated. The real optional SkillSpector scan passed under
   network denial with no credentials or model call, including coordinator
   replay. The actual clean-host script now tests installed dashboard HTTP;
@@ -103,7 +107,7 @@
   worktree cleanup reduced the Data volume's rounded used space from 280 GiB to
   262 GiB. No remote LFS object has been purged yet.
 
-## CI-phase optional-dependency repair (2026-10-04)
+## Prior CI-phase optional-dependency repair (2026-10-04)
 
 - Starting tree: clean, detached
   `5607252eb77cbf7f6704781fdc41489b1d38353a`, PR #286. Supplied hosted
@@ -135,7 +139,7 @@
   executor; full audit completion, `SEC-002` and existing external/human
   prerequisites remain unverified. Canonical feature statuses are unchanged.
 
-## Targeted test-phase evidence (2026-10-04)
+## Prior targeted test-phase evidence (2026-10-04)
 
 - Tested code: `627bb5255c67859457e3b9444d2c5ecfe8000770`. The executor
   supplied the successful configured PR-preflight baseline; this phase did not
@@ -184,7 +188,7 @@
   external/human prerequisites remain with their respective owners; this local
   test phase does not certify full audit completion.
 
-## Targeted test-phase investigation (2026-10-04)
+## Prior targeted test-phase investigation (2026-10-04)
 
 - Starting tree: `91cb979fc4d5234c4664cb482c1c51fabc920e16`, clean, detached
   delivery worktree. The supplied preflight ended with seven failures, 9,368
@@ -207,7 +211,7 @@
   coverage data was removed. Full delivery, hosted CI and existing external or
   human prerequisites remain unverified; `SEC-002` stays Needs Validation.
 
-## Authorized combined-transition repair (2026-10-04)
+## Prior authorized combined-transition repair (2026-10-04)
 
 - Starting commit: `84f45ffb4b4ae151ba9066ea5ebdd0c8e106b611`.
   Human authorization: “continue and fix what is needed”, addressing R2/R3/R6
@@ -253,7 +257,7 @@
   No source/test edits followed these checks. These static commands were
   explicitly authorized for R6; no full test suite, nested pipeline or
   authoritative gate ran in this phase.
-- Documentation inventory is 9,384: prior inventory 9,304 plus 80 new cases;
+- Documentation inventory at that checkpoint was 9,384: prior inventory 9,304 plus 80 new cases;
   this is inventory, not a full-suite result. Both canonical telemetry records
   preserve all 318 original acceptance contracts and historical bug IDs.
   Needs Validation sentinel/date/commit/retest fields remain unchanged.

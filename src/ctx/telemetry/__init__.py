@@ -2414,7 +2414,6 @@ def _hash_settings(privacy: Mapping[str, Any], *, create: bool) -> dict[str, Any
     selector: str | None = None
     selected_fingerprint: str | None = None
     selectors: list[str] = []
-    unavailable_legacy_candidate = False
     candidate_key: str | bytes | None
     for kind, key_selector, material in candidates:
         if key_selector in selectors:
@@ -2442,8 +2441,6 @@ def _hash_settings(privacy: Mapping[str, Any], *, create: bool) -> dict[str, Any
                 selector = key_selector
                 selected_fingerprint = fingerprint
             legacy_keys.append(candidate_key)
-        elif kind == "file" or key_selector in configured_envs:
-            unavailable_legacy_candidate = True
     return {
         "hash_salt": salt,
         "checkpoint_hash_context": {
@@ -2462,7 +2459,10 @@ def _hash_settings(privacy: Mapping[str, Any], *, create: bool) -> dict[str, Any
             "selector": selector,
             "key_fingerprint": selected_fingerprint,
             "legacy_keys": legacy_keys,
-            "unavailable_legacy_candidate": unavailable_legacy_candidate,
+            "configured_legacy_alternative": any(
+                key_selector != selector and (kind != "env" or key_selector in configured_envs)
+                for kind, key_selector in policy
+            ),
             "observed_history": {},
             "last_known_file_keys": {},
             "state": {},
@@ -3326,7 +3326,7 @@ def _read_checkpoint(
                     for file_hash, fingerprint in context["file_generations"].items()
                 )
                 or any(fingerprint is None for fingerprint in context["file_keys"].values())
-                or context["unavailable_legacy_candidate"]
+                or context["configured_legacy_alternative"]
             ):
                 raise _CheckpointIdentityUnavailable(
                     "telemetry checkpoint identity unavailable; restore the previous salt "

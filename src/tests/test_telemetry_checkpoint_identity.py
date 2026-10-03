@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 import shutil
 import stat
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 import pytest
 
@@ -1148,21 +1148,50 @@ def test_checkpoint_identity_retains_last_file_key_through_unavailable_resets(
     assert case.preview().attempted == 0
 
 
-@pytest.fixture
+@pytest.fixture(
+    params=[
+        ("env", None),
+        ("env", "replacement-fallback-key-c"),
+        ("inline", "replacement-fallback-key-c"),
+        ("file", "replacement-fallback-key-c"),
+    ],
+    ids=["env-absent", "env-replaced", "inline-replaced", "file-replaced"],
+)
 def recovered_legacy_fallback_case(
+    request: pytest.FixtureRequest,
     checkpoint_case: TelemetryCase,
-) -> tuple[TelemetryCase, str, bytes]:
+) -> tuple[TelemetryCase, Callable[[str | None], None], bytes]:
     case = checkpoint_case
+    fallback_kind, replacement = request.param
     variable = "CTX_REVIEW_LEGACY_GLOBAL_SALT"
     fallback_key = "legacy-fallback-key-b"
-    case.monkeypatch.setenv(variable, fallback_key)
+    fallback_path = case.root / "global-fallback-salt"
+    global_privacy: dict[str, str] = {}
+    if fallback_kind == "env":
+        global_privacy["hash_salt_env"] = variable
+    elif fallback_kind == "file":
+        global_privacy["hash_salt_path"] = str(fallback_path)
+
+    def set_fallback(value: str | None) -> None:
+        if fallback_kind == "env":
+            if value is None:
+                case.monkeypatch.delenv(variable, raising=False)
+            else:
+                case.monkeypatch.setenv(variable, value)
+        else:
+            assert value is not None
+            if fallback_kind == "inline":
+                global_privacy["hash_salt"] = value
+            else:
+                fallback_path.write_text(value, encoding="utf-8")
+
+    set_fallback(fallback_key)
     case.monkeypatch.setattr(
         telemetry,
         "_config_get",
-        lambda key, default: (
-            {"privacy": {"hash_salt_env": variable}} if key == "telemetry" else default
-        ),
+        lambda key, default: {"privacy": global_privacy} if key == "telemetry" else default,
     )
+    assert case.config["privacy"] == {"hash_salt_path": str(case.salt_path)}
     case.block_lock()
     record = case.append()
     exported = case.export()
@@ -1197,16 +1226,16 @@ def recovered_legacy_fallback_case(
         legacy.update(last_event_id=record.event_id, last_event_ts=record.ts)
     original = case.write_checkpoint(legacy)
     case.restore_lock()
-    case.monkeypatch.delenv(variable)
-    return case, variable, original
+    set_fallback(replacement)
+    return case, set_fallback, original
 
 
 @pytest.mark.parametrize("recovery", ["restore_fallback", "explicit_replay"])
 def test_legacy_fallback_checkpoint_rejects_ambiguous_recovery_until_resolved(
-    recovered_legacy_fallback_case: tuple[TelemetryCase, str, bytes],
+    recovered_legacy_fallback_case: tuple[TelemetryCase, Callable[[str | None], None], bytes],
     recovery: str,
 ) -> None:
-    case, variable, original = recovered_legacy_fallback_case
+    case, set_fallback, original = recovered_legacy_fallback_case
     for _ in range(2):
         with pytest.raises(ValueError, match="checkpoint identity unavailable"):
             case.preview()
@@ -1216,19 +1245,20 @@ def test_legacy_fallback_checkpoint_rejects_ambiguous_recovery_until_resolved(
         assert len(case.calls) == 1
         assert case.salt_path.read_text(encoding="utf-8") == "salt-a"
     if recovery == "restore_fallback":
-        case.monkeypatch.setenv(variable, "legacy-fallback-key-b")
+        set_fallback("legacy-fallback-key-b")
         assert case.preview().attempted == 0
         assert case.checkpoint_path.read_bytes() == original
         assert case.export().attempted == 0
         assert len(case.calls) == 1
         assert "checkpoint_identity" in case.checkpoint()
-        case.monkeypatch.delenv(variable)
+        set_fallback("replacement-fallback-key-c")
     else:
         assert case.export(include_exported=True).exported == 1
         assert len(case.calls) == 2
     checkpoint_text = case.checkpoint_path.read_text(encoding="utf-8")
     assert "salt-a" not in checkpoint_text
     assert "legacy-fallback-key-b" not in checkpoint_text
+    assert "replacement-fallback-key-c" not in checkpoint_text
     calls_before = len(case.calls)
     assert case.preview().attempted == 0
     assert case.export().attempted == 0
@@ -1240,18 +1270,70 @@ def test_legacy_fallback_checkpoint_rejects_ambiguous_recovery_until_resolved(
     assert case.preview().attempted == 0
 
 
+@pytest.mark.parametrize("changed_scope", ["none", "source", "endpoint"])
+def test_legacy_fallback_checkpoint_matches_available_original_key(
+    recovered_legacy_fallback_case: tuple[TelemetryCase, Callable[[str | None], None], bytes],
+    changed_scope: str,
+) -> None:
+    case, set_fallback, original = recovered_legacy_fallback_case
+    set_fallback("legacy-fallback-key-b")
+    if changed_scope == "source":
+        new_path = case.root / "other-spool.jsonl"
+        new_path.write_bytes(case.path.read_bytes())
+        case.path = new_path
+    elif changed_scope == "endpoint":
+        case.export_config["otlp"]["endpoint"] = "http://127.0.0.1:4318/v1/other"
+    expected = 0 if changed_scope == "none" else 1
+    assert case.preview().attempted == expected
+    assert case.checkpoint_path.read_bytes() == original
+    assert case.export().exported == expected
+    assert len(case.calls) == 1 + expected
+    assert "checkpoint_identity" in case.checkpoint()
+    assert case.preview().attempted == 0
+    assert case.export().attempted == 0
+
+
+@pytest.mark.parametrize("global_path", ["same", "alias"])
+def test_legacy_single_file_rotation_does_not_gain_an_implicit_alternative(
+    checkpoint_case: TelemetryCase,
+    global_path: str,
+) -> None:
+    case = checkpoint_case
+    fallback_path = case.salt_path
+    if global_path == "alias":
+        alias = case.root / "identity-alias"
+        alias.symlink_to(case.salt_path.parent, target_is_directory=True)
+        fallback_path = alias / case.salt_path.name
+    case.monkeypatch.setattr(
+        telemetry,
+        "_config_get",
+        lambda key, default: (
+            {"privacy": {"hash_salt_path": str(fallback_path)}} if key == "telemetry" else default
+        ),
+    )
+    case.append()
+    assert case.export().exported == 1
+    original = case.legacy_checkpoint()
+    case.salt_path.write_text("deliberately-rotated-key", encoding="utf-8")
+    assert case.preview().attempted == 1
+    assert case.checkpoint_path.read_bytes() == original
+    assert case.export().exported == 1
+    assert case.preview().attempted == 0
+    assert case.export().attempted == 0
+
+
 @pytest.mark.parametrize("checkpoint_case", ["events", "metrics"], indirect=True)
 def test_continuous_capture_retains_records_during_legacy_fallback_ambiguity(
-    recovered_legacy_fallback_case: tuple[TelemetryCase, str, bytes],
+    recovered_legacy_fallback_case: tuple[TelemetryCase, Callable[[str | None], None], bytes],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    case, variable, original = recovered_legacy_fallback_case
+    case, set_fallback, original = recovered_legacy_fallback_case
     assert case.append(continuous=True) is not None
     assert len(case.path.read_text(encoding="utf-8").splitlines()) == 2
     assert case.checkpoint_path.read_bytes() == original
     assert len(case.calls) == 1
     assert "checkpoint identity unavailable" in capsys.readouterr().err.lower()
-    case.monkeypatch.setenv(variable, "legacy-fallback-key-b")
+    set_fallback("legacy-fallback-key-b")
     assert case.preview().attempted == 1
     assert case.export().exported == 1
     assert case.preview().attempted == 0
