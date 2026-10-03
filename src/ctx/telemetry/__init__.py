@@ -2378,6 +2378,11 @@ def _hash_settings(privacy: Mapping[str, Any], *, create: bool) -> dict[str, Any
     raw = _config_get("telemetry", {}) or {}
     global_privacy = _mapping_get(raw, "privacy", {})
     scopes = [privacy, global_privacy if isinstance(global_privacy, Mapping) else {}]
+    configured_envs = {
+        _checkpoint_digest(f"env:{str(scope['hash_salt_env']).strip()}")
+        for scope in scopes
+        if scope.get("hash_salt_env") and str(scope["hash_salt_env"]).strip()
+    }
     candidates: list[tuple[str, str, str | bytes | Path | None]] = [
         (
             "env",
@@ -2409,28 +2414,36 @@ def _hash_settings(privacy: Mapping[str, Any], *, create: bool) -> dict[str, Any
     selector: str | None = None
     selected_fingerprint: str | None = None
     selectors: list[str] = []
+    unavailable_legacy_candidate = False
+    candidate_key: str | bytes | None
     for kind, key_selector, material in candidates:
         if key_selector in selectors:
             continue
         selectors.append(key_selector)
         policy.append([kind, key_selector])
         if isinstance(material, Path):
-            key, generation = _read_hash_salt_identity(material)
+            candidate_key, generation = _read_hash_salt_identity(material)
             fingerprint = (
-                hash_identifier("ctx.telemetry.checkpoint.key.v1", salt=key) if key else None
+                hash_identifier("ctx.telemetry.checkpoint.key.v1", salt=candidate_key)
+                if candidate_key
+                else None
             )
             file_keys[key_selector] = fingerprint
             file_generations[key_selector] = generation
         else:
-            key = material
+            candidate_key = material
             fingerprint = (
-                hash_identifier("ctx.telemetry.checkpoint.key.v1", salt=key) if key else None
+                hash_identifier("ctx.telemetry.checkpoint.key.v1", salt=candidate_key)
+                if candidate_key
+                else None
             )
-        if key:
+        if candidate_key:
             if selector is None:
                 selector = key_selector
                 selected_fingerprint = fingerprint
-            legacy_keys.append(key)
+            legacy_keys.append(candidate_key)
+        elif kind == "file" or key_selector in configured_envs:
+            unavailable_legacy_candidate = True
     return {
         "hash_salt": salt,
         "checkpoint_hash_context": {
@@ -2449,7 +2462,9 @@ def _hash_settings(privacy: Mapping[str, Any], *, create: bool) -> dict[str, Any
             "selector": selector,
             "key_fingerprint": selected_fingerprint,
             "legacy_keys": legacy_keys,
+            "unavailable_legacy_candidate": unavailable_legacy_candidate,
             "observed_history": {},
+            "last_known_file_keys": {},
             "state": {},
             "write_identity": create,
         },
@@ -3042,7 +3057,10 @@ def _checkpoint_scope(settings: Mapping[str, Any], source_path: Path) -> str:
 def _checkpoint_identity(settings: Mapping[str, Any], source_path: Path) -> dict[str, Any]:
     context = settings["checkpoint_hash_context"]
     history = {key: list(values) for key, values in context["observed_history"].items()}
+    last_known = dict(context["last_known_file_keys"])
     for path_hash, fingerprint in context["file_keys"].items():
+        if fingerprint is not None:
+            last_known[path_hash] = fingerprint
         history[path_hash] = sorted(
             set(history.get(path_hash, []))
             | {value for value in (fingerprint, context["file_generations"][path_hash]) if value}
@@ -3051,9 +3069,10 @@ def _checkpoint_identity(settings: Mapping[str, Any], source_path: Path) -> dict
         "version": 2,
         "scope": _checkpoint_scope(settings, source_path),
         "policy": context["policy"],
-        "file_keys": dict(context["file_keys"]),
+        "file_keys": {path_hash: last_known.get(path_hash) for path_hash in context["file_keys"]},
         "file_generations": dict(context["file_generations"]),
         "file_generation_history": history,
+        "file_last_known_keys": last_known,
         "selector": context["selector"],
         "key_fingerprint": context["key_fingerprint"],
     }
@@ -3063,7 +3082,9 @@ def _valid_checkpoint_hash(value: Any) -> bool:
     return isinstance(value, str) and re.fullmatch(r"sha256:[0-9a-f]{64}", value) is not None
 
 
-def _checkpoint_generation_history(identity: Any) -> dict[str, list[str]] | None:
+def _checkpoint_file_history(
+    identity: Any,
+) -> tuple[dict[str, list[str]], dict[str, str]] | None:
     if not isinstance(identity, dict):
         return None
     version = identity.get("version")
@@ -3100,7 +3121,23 @@ def _checkpoint_generation_history(identity: Any) -> dict[str, list[str]] | None
         result[path_hash] = sorted(
             set(observed) | {value for value in (fingerprint, generation) if value}
         )
-    return result
+    last_known = identity.get(
+        "file_last_known_keys",
+        {path_hash: fingerprint for path_hash, fingerprint in file_keys.items() if fingerprint},
+    )
+    if not isinstance(last_known, dict):
+        return None
+    for path_hash, fingerprint in last_known.items():
+        if not _valid_checkpoint_hash(path_hash) or not _valid_checkpoint_hash(fingerprint):
+            return None
+        if fingerprint not in result.get(path_hash, []):
+            return None
+    if any(
+        fingerprint is not None and last_known.get(path_hash) != fingerprint
+        for path_hash, fingerprint in file_keys.items()
+    ):
+        return None
+    return result, last_known
 
 
 def _read_checkpoint(
@@ -3122,10 +3159,12 @@ def _read_checkpoint(
     if not isinstance(payload, dict):
         return None
     if "checkpoint_identity" in payload:
-        history = _checkpoint_generation_history(payload["checkpoint_identity"])
-        if history is None:
+        file_history = _checkpoint_file_history(payload["checkpoint_identity"])
+        if file_history is None:
             return None
+        history, last_known = file_history
         context["observed_history"].update(history)
+        context["last_known_file_keys"].update(last_known)
     if ignore_cursor:
         return None
     schema = METRIC_SCHEMA_VERSION if metric else SCHEMA_VERSION
@@ -3208,13 +3247,29 @@ def _read_checkpoint(
             generation = generations[file_hash]
             if generation is not None and not _valid_checkpoint_hash(generation):
                 return None
-            current = identity["file_keys"][file_hash]
+            fingerprint = context["last_known_file_keys"].get(file_hash)
+            current = context["file_keys"][file_hash]
             current_generation = identity["file_generations"][file_hash]
+            observed = context["observed_history"].get(file_hash, [])
             generated = (
                 current_generation is not None
                 and current_generation == current
-                and current_generation not in context["observed_history"].get(file_hash, [])
+                and current_generation not in observed
             )
+            if (
+                fingerprint is None
+                and current is not None
+                and observed
+                and file_hash == selector
+                and compare_selected
+            ):
+                if current in observed:
+                    raise _CheckpointIdentityUnavailable(
+                        "telemetry checkpoint identity unavailable; restore checkpoint "
+                        "metadata with the last-known salt or explicitly replay with --all"
+                    )
+                if not generated:
+                    return None
             if (
                 fingerprint is not None
                 and current is not None
@@ -3271,6 +3326,7 @@ def _read_checkpoint(
                     for file_hash, fingerprint in context["file_generations"].items()
                 )
                 or any(fingerprint is None for fingerprint in context["file_keys"].values())
+                or context["unavailable_legacy_candidate"]
             ):
                 raise _CheckpointIdentityUnavailable(
                     "telemetry checkpoint identity unavailable; restore the previous salt "

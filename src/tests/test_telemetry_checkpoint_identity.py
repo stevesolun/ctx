@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass
 import hashlib
+import hmac
 import json
 from pathlib import Path
 import shutil
@@ -29,7 +30,10 @@ class TelemetryCase:
     use_global_config: bool = False
 
     def append(self, *, continuous: bool = False) -> Any:
-        config = self.config if continuous else {"privacy": {"hash_salt": "fixture-key"}}
+        config: dict[str, Any] = (
+            self.config if continuous else {"privacy": {"hash_salt": "fixture-key"}}
+        )
+        record: telemetry.TelemetryEvent | telemetry.TelemetryMetric | None
         if self.signal == "metrics":
             if not continuous:
                 config["metrics"] = {"enabled": True}
@@ -409,6 +413,13 @@ def test_checkpoint_identity_separates_signals_at_the_same_endpoint(
         "bad_history",
         "bad_history_path",
         "bad_history_value",
+        "bad_last_known_map",
+        "bad_last_known_path",
+        "bad_last_known_value",
+        "null_last_known_value",
+        "missing_last_known_key",
+        "unknown_last_known_key",
+        "inconsistent_last_known_key",
         "not_mapping",
     ],
 )
@@ -441,6 +452,22 @@ def test_checkpoint_identity_never_treats_invalid_metadata_as_legacy(
         identity["file_generation_history"]["raw-path"] = []
     elif damage == "bad_history_value":
         identity["file_generation_history"][next(iter(identity["file_keys"]))] = ["raw-key"]
+    elif damage == "bad_last_known_map":
+        identity["file_last_known_keys"] = []
+    elif damage == "bad_last_known_path":
+        identity["file_last_known_keys"]["raw-path"] = next(iter(identity["file_keys"].values()))
+    elif damage == "bad_last_known_value":
+        identity["file_last_known_keys"][next(iter(identity["file_keys"]))] = "raw-key"
+    elif damage == "null_last_known_value":
+        identity["file_last_known_keys"][next(iter(identity["file_keys"]))] = None
+    elif damage == "missing_last_known_key":
+        identity["file_last_known_keys"] = {}
+    elif damage in ("unknown_last_known_key", "inconsistent_last_known_key"):
+        file_hash = next(iter(identity["file_keys"]))
+        different_fingerprint = "sha256:" + "0" * 64
+        identity["file_last_known_keys"][file_hash] = different_fingerprint
+        if damage == "inconsistent_last_known_key":
+            identity["file_generation_history"][file_hash].append(different_fingerprint)
     else:
         checkpoint["checkpoint_identity"] = []
     case.write_checkpoint(checkpoint)
@@ -839,6 +866,7 @@ def test_checkpoint_identity_ignores_unused_custom_env_availability(
         checkpoint = case.checkpoint()
         identity = checkpoint["checkpoint_identity"]
         identity["version"] = 1
+        identity.pop("file_last_known_keys", None)
         identity.pop("file_generation_history", None)
         local_selector = next(iter(identity["file_keys"]))
         old_policy = [["file", local_selector]]
@@ -1042,6 +1070,7 @@ def test_checkpoint_identity_migrates_known_v1_generations(
     checkpoint = case.checkpoint()
     identity = checkpoint["checkpoint_identity"]
     identity["version"] = 1
+    identity.pop("file_last_known_keys", None)
     identity.pop("file_generation_history")
     old_policy = [["file", next(iter(identity["file_keys"]))], ["unsalted"]]
     identity["policy"] = (
@@ -1058,3 +1087,258 @@ def test_checkpoint_identity_migrates_known_v1_generations(
     marker.write_bytes(saved_marker)
     assert case.preview().attempted == 1
     assert case.export().exported == 1
+
+
+@pytest.mark.parametrize("scope_reset", ["endpoint", "replay"])
+@pytest.mark.parametrize("restored_generation", ["a", "b"])
+@pytest.mark.parametrize("policy_detour", ["none", "inline", "other_file"])
+def test_checkpoint_identity_retains_last_file_key_through_unavailable_resets(
+    checkpoint_case: TelemetryCase,
+    scope_reset: str,
+    restored_generation: str,
+    policy_detour: str,
+) -> None:
+    case = checkpoint_case
+    case.salt_path.unlink()
+    case.append()
+    assert case.export().exported == 1
+    marker = case.salt_path.with_suffix(case.salt_path.suffix + ".generation.json")
+    generations = {"a": (case.salt_path.read_bytes(), marker.read_bytes())}
+    case.salt_path.unlink()
+    case.append()
+    assert case.export().exported == 1
+    generations["b"] = case.salt_path.read_bytes(), marker.read_bytes()
+    assert generations["a"][0] != generations["b"][0]
+    case.block_storage()
+    if policy_detour != "none":
+        original_privacy = case.config["privacy"]
+        if policy_detour == "inline":
+            case.config["privacy"] = {"hash_salt": "detour-inline-key"}
+        else:
+            other_salt = case.root / "detour-salt"
+            other_salt.write_text("detour-file-key", encoding="utf-8")
+            case.config["privacy"] = {"hash_salt_path": str(other_salt)}
+        assert case.export().exported == 2
+        case.config["privacy"] = original_privacy
+        assert case.export().exported == 2
+    if scope_reset == "endpoint":
+        case.export_config["otlp"]["endpoint"] = "http://127.0.0.1:4318/v1/reset"
+        assert case.export().exported == 2
+    else:
+        assert case.export(include_exported=True).exported == 2
+    assert case.preview().attempted == 0
+    checkpoint_text = case.checkpoint_path.read_text(encoding="utf-8")
+    for key_bytes, _ in generations.values():
+        assert key_bytes.decode().strip() not in checkpoint_text
+    case.restore_storage(None)
+    restored_key, restored_marker = generations[restored_generation]
+    case.salt_path.write_bytes(restored_key)
+    marker.write_bytes(restored_marker)
+    calls_before = len(case.calls)
+    expected_replayed = 2 if restored_generation == "a" else 0
+    assert case.preview().attempted == expected_replayed
+    assert case.export().exported == expected_replayed
+    assert len(case.calls) == calls_before + (1 if expected_replayed else 0)
+    assert case.preview().attempted == 0
+    assert case.export().attempted == 0
+    assert len(case.calls) == calls_before + (1 if expected_replayed else 0)
+    case.append()
+    assert case.preview().attempted == 1
+    assert case.export().exported == 1
+    assert case.preview().attempted == 0
+
+
+@pytest.fixture
+def recovered_legacy_fallback_case(
+    checkpoint_case: TelemetryCase,
+) -> tuple[TelemetryCase, str, bytes]:
+    case = checkpoint_case
+    variable = "CTX_REVIEW_LEGACY_GLOBAL_SALT"
+    fallback_key = "legacy-fallback-key-b"
+    case.monkeypatch.setenv(variable, fallback_key)
+    case.monkeypatch.setattr(
+        telemetry,
+        "_config_get",
+        lambda key, default: (
+            {"privacy": {"hash_salt_env": variable}} if key == "telemetry" else default
+        ),
+    )
+    case.block_lock()
+    record = case.append()
+    exported = case.export()
+    assert exported.exported == 1
+    destination = f"otlp_http:{case.export_config['otlp']['endpoint']}"
+    if case.signal == "metrics":
+        destination = f"metrics:{destination}"
+    source_hash = (
+        "sha256:"
+        + hmac.new(fallback_key.encode(), str(case.path).encode(), hashlib.sha256).hexdigest()
+    )
+    destination_hash = (
+        "sha256:"
+        + hmac.new(fallback_key.encode(), destination.encode(), hashlib.sha256).hexdigest()
+    )
+    assert exported.destination_hash == destination_hash
+    assert case.salt_path.read_text(encoding="utf-8") == "salt-a"
+    legacy: dict[str, Any] = {
+        "schema_version": (
+            telemetry.METRIC_SCHEMA_VERSION
+            if case.signal == "metrics"
+            else telemetry.SCHEMA_VERSION
+        ),
+        "updated_at": record.ts,
+        "sink": "otlp_http",
+        "source_path_hash": source_hash,
+        "destination_hash": destination_hash,
+    }
+    if case.signal == "metrics":
+        legacy.update(last_metric_id=record.metric_id, last_metric_ts=record.ts)
+    else:
+        legacy.update(last_event_id=record.event_id, last_event_ts=record.ts)
+    original = case.write_checkpoint(legacy)
+    case.restore_lock()
+    case.monkeypatch.delenv(variable)
+    return case, variable, original
+
+
+@pytest.mark.parametrize("recovery", ["restore_fallback", "explicit_replay"])
+def test_legacy_fallback_checkpoint_rejects_ambiguous_recovery_until_resolved(
+    recovered_legacy_fallback_case: tuple[TelemetryCase, str, bytes],
+    recovery: str,
+) -> None:
+    case, variable, original = recovered_legacy_fallback_case
+    for _ in range(2):
+        with pytest.raises(ValueError, match="checkpoint identity unavailable"):
+            case.preview()
+        with pytest.raises(ValueError, match="checkpoint identity unavailable"):
+            case.export()
+        assert case.checkpoint_path.read_bytes() == original
+        assert len(case.calls) == 1
+        assert case.salt_path.read_text(encoding="utf-8") == "salt-a"
+    if recovery == "restore_fallback":
+        case.monkeypatch.setenv(variable, "legacy-fallback-key-b")
+        assert case.preview().attempted == 0
+        assert case.checkpoint_path.read_bytes() == original
+        assert case.export().attempted == 0
+        assert len(case.calls) == 1
+        assert "checkpoint_identity" in case.checkpoint()
+        case.monkeypatch.delenv(variable)
+    else:
+        assert case.export(include_exported=True).exported == 1
+        assert len(case.calls) == 2
+    checkpoint_text = case.checkpoint_path.read_text(encoding="utf-8")
+    assert "salt-a" not in checkpoint_text
+    assert "legacy-fallback-key-b" not in checkpoint_text
+    calls_before = len(case.calls)
+    assert case.preview().attempted == 0
+    assert case.export().attempted == 0
+    assert len(case.calls) == calls_before
+    case.append()
+    assert case.preview().attempted == 1
+    assert case.export().exported == 1
+    assert len(case.calls) == calls_before + 1
+    assert case.preview().attempted == 0
+
+
+@pytest.mark.parametrize("checkpoint_case", ["events", "metrics"], indirect=True)
+def test_continuous_capture_retains_records_during_legacy_fallback_ambiguity(
+    recovered_legacy_fallback_case: tuple[TelemetryCase, str, bytes],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    case, variable, original = recovered_legacy_fallback_case
+    assert case.append(continuous=True) is not None
+    assert len(case.path.read_text(encoding="utf-8").splitlines()) == 2
+    assert case.checkpoint_path.read_bytes() == original
+    assert len(case.calls) == 1
+    assert "checkpoint identity unavailable" in capsys.readouterr().err.lower()
+    case.monkeypatch.setenv(variable, "legacy-fallback-key-b")
+    assert case.preview().attempted == 1
+    assert case.export().exported == 1
+    assert case.preview().attempted == 0
+
+
+def test_checkpoint_identity_upgrades_v2_without_last_known_keys(
+    checkpoint_case: TelemetryCase,
+) -> None:
+    case = checkpoint_case
+    case.append()
+    assert case.export().exported == 1
+    checkpoint = case.checkpoint()
+    identity = checkpoint["checkpoint_identity"]
+    assert identity["version"] == 2
+    identity.pop("file_last_known_keys")
+    old_checkpoint = case.write_checkpoint(checkpoint)
+    assert case.preview().attempted == 0
+    assert case.checkpoint_path.read_bytes() == old_checkpoint
+    assert case.export().attempted == 0
+    assert len(case.calls) == 1
+    migrated = case.checkpoint()["checkpoint_identity"]
+    assert migrated["file_last_known_keys"] == identity["file_keys"]
+    case.append()
+    assert case.preview().attempted == 1
+    assert case.export().exported == 1
+    assert case.preview().attempted == 0
+
+
+@pytest.mark.parametrize("restored_key", ["known_a", "known_b", "generated_c", "manual_d"])
+def test_checkpoint_identity_migrates_v2_with_lost_last_known_key(
+    checkpoint_case: TelemetryCase,
+    restored_key: str,
+) -> None:
+    case = checkpoint_case
+    case.salt_path.unlink()
+    case.append()
+    assert case.export().exported == 1
+    marker = case.salt_path.with_suffix(case.salt_path.suffix + ".generation.json")
+    generations = {"known_a": (case.salt_path.read_bytes(), marker.read_bytes())}
+    case.salt_path.unlink()
+    case.append()
+    assert case.export().exported == 1
+    generations["known_b"] = case.salt_path.read_bytes(), marker.read_bytes()
+    case.block_storage()
+    case.export_config["otlp"]["endpoint"] = "http://127.0.0.1:4318/v1/legacy-reset"
+    assert case.export().exported == 2
+    checkpoint = case.checkpoint()
+    identity = checkpoint["checkpoint_identity"]
+    file_hash = next(iter(identity["file_keys"]))
+    identity.pop("file_last_known_keys")
+    identity["file_keys"][file_hash] = None
+    identity["file_generations"][file_hash] = None
+    identity["selector"] = None
+    identity["key_fingerprint"] = None
+    assert len(identity["file_generation_history"][file_hash]) == 2
+    original = case.write_checkpoint(checkpoint)
+    case.restore_storage(None)
+    calls_before = len(case.calls)
+    if restored_key in generations:
+        key_bytes, marker_bytes = generations[restored_key]
+        case.salt_path.write_bytes(key_bytes)
+        marker.write_bytes(marker_bytes)
+        with pytest.raises(ValueError, match="restore checkpoint metadata.*--all"):
+            case.preview()
+        with pytest.raises(ValueError, match="restore checkpoint metadata.*--all"):
+            case.export()
+        assert case.checkpoint_path.read_bytes() == original
+        assert len(case.calls) == calls_before
+        assert case.export(include_exported=True).exported == 2
+        assert len(case.calls) == calls_before + 1
+    elif restored_key == "generated_c":
+        assert case.preview().attempted == 0
+        assert case.checkpoint_path.read_bytes() == original
+        assert not case.salt_path.exists()
+        assert case.export().attempted == 0
+        assert case.salt_path.read_bytes() not in {
+            key_bytes for key_bytes, _ in generations.values()
+        }
+        assert len(case.calls) == calls_before
+    else:
+        case.salt_path.write_text("new-manual-key-d", encoding="utf-8")
+        assert case.preview().attempted == 2
+        assert case.checkpoint_path.read_bytes() == original
+        assert case.export().exported == 2
+        assert len(case.calls) == calls_before + 1
+    assert case.preview().attempted == 0
+    assert case.export().attempted == 0
+    case.append()
+    assert case.export().exported == 1
+    assert case.preview().attempted == 0

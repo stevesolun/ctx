@@ -411,10 +411,14 @@ Automatic salt creation writes an owner-only
 without the key itself. This lets later exports recognize generation performed
 by ordinary capture or identifier hashing. Keep this file with its salt;
 version 2 checkpoint metadata retains fingerprint-only history for observed
-file keys and generation markers. The history survives deliberate rotations,
+file keys and generation markers, plus an additive `file_last_known_keys` map
+that retains the last observed fingerprint for each file independently of
+availability and the export cursor. Both survive deliberate rotations,
 policy changes, destination changes and explicit `--all` replay; it never allows
 a cursor to cross those export scopes. Restoring a previously observed key with
-its saved generation marker therefore still counts as rotation. No raw key
+its saved generation marker therefore still counts as rotation, including after
+storage loss and a destination reset or explicit replay. Recovering the last
+observed key preserves progress. No raw key
 material is written into checkpoint or generation metadata.
 
 Older checkpoints migrate on a real export, including an export with no pending
@@ -424,7 +428,13 @@ configured selectors and its remaining scope/key checks succeed. Its migration
 seeds history from the key and generation fingerprints it actually retained;
 older generations already discarded by version 1 cannot be reconstructed.
 Restoration detection covers fingerprints retained at migration and observed
-afterward, not unknown pre-migration history.
+afterward, not unknown pre-migration history. Checkpoints without the additive
+last-known map seed it from retained non-null file-key fingerprints. If an older
+writer already discarded that latest identity but kept unordered history, a
+returning historical key is ambiguous: restore checkpoint metadata that retains
+the latest identity, or explicitly replay with `--all`. An unseen automatically
+generated key still counts as recovery, and an unseen manual replacement resets
+progress.
 Dry-run previews only read this metadata; they never create salts,
 locks, checkpoints, or status files. A legacy keyed checkpoint must match its
 historical source and destination hashes using an available key. If its key is
@@ -436,7 +446,12 @@ or use `--all` to explicitly replay it. Automatic event and metric capture keeps
 spooling locally if this prevents continuous export.
 An old keyed checkpoint also cannot distinguish a newly configured explicit
 fallback from one already present before a file failure. If that fallback cannot
-establish the old key, the same recovery choice applies. Changing only the source
+establish the old key, the same recovery choice applies. This includes an absent
+configured environment fallback after a primary file lock recovers: a readable
+primary key alone does not prove which key hashed the old checkpoint. Restoring
+the fallback value lets it establish the old hashes and migrate without replay;
+`--all` explicitly starts over. Implicit default-environment absence alone does
+not trigger this ambiguity rule. Changing only the source
 or destination with a recognizable key starts a new scope; changing both at once
 may leave a legacy checkpoint ambiguous and require `--all` or a fresh checkpoint.
 

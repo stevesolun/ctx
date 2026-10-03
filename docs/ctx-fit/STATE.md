@@ -11,14 +11,14 @@
 
 ## Checkpoint
 
-- Updated: 2026-10-03 (Europe/Prague)
+- Updated: 2026-10-04 (Europe/Prague)
 - Active goal: inventory, test, repair, and retest every shipped user behavior
-- Phase: accepted R1 retained; R2–R5 repair passed 660 focused checks and independent re-review
+- Phase: R2/R3/R6 repair passed 469 focused tests, full static checks and independent review
 - Release decision: **1.0.21 REMAINS RELEASED; NEW AUDIT OPEN; NO NEW RELEASE DECISION**
 - Branch: `codex/full-feature-audit-delivery`
 - Active delivery branch: `codex/full-feature-audit-delivery`, submitted head
   `18253e9a37cb215856fb79bac01ea9c7482eb6e6`; current review starts from committed
-  repair `fed56b9f7c8571568f8fcf1eba6cb7d8734c30f0`
+  repair `84f45ffb4b4ae151ba9066ea5ebdd0c8e106b611`
 - Active delivery worktree:
   `/Users/steves/.no-mistakes/worktrees/88e19bf0677f/01M3RWB2ZY374H29CTPEPNSWVH`
 - Current no-mistakes run is in its assigned review repair phase. The outer
@@ -58,8 +58,8 @@
 - Parallel execution: all 314 active stories and four historical rows have
   received clause-by-clause coverage review. The coordinator owns CSV writes;
   299 rows carry passing local acceptance evidence (179 tested, 120
-  retested); CLI-043, LANE-D-004 and DASH-015 were reopened and then retested
-  in this round. Thirteen need validation, two have
+  retested); CLI-043 and LANE-D-004 were reopened and retested for the current
+  combined telemetry transitions. Thirteen need validation, two have
   explicit owner prerequisites, and four are deprecated. The real optional SkillSpector scan passed under
   network denial with no credentials or model call, including coordinator
   replay. The actual clean-host script now tests installed dashboard HTTP;
@@ -69,8 +69,8 @@
   guards. Those audit source writers froze; final independent metadata review
   accepted all 65 guarded contracts and historical records with no blocking
   findings at their recorded checkpoints. The current review repairs telemetry
-  checkpoint compatibility and monitor fixture isolation; accepted MCP diagnostic
-  behavior remains intact, with only requested formatting changes. Focused evidence is recorded
+  checkpoint compatibility and telemetry typing; accepted MCP diagnostic and
+  monitor fixture repairs remain intact. Focused evidence is recorded
   below. Earlier full gates remain
   valid for their checkpoints, not the later script/test/prose delta. The
   coordinator owns integration, state, GitHub mutations, and final gates.
@@ -95,7 +95,72 @@
   worktree cleanup reduced the Data volume's rounded used space from 280 GiB to
   262 GiB. No remote LFS object has been purged yet.
 
-## Authorized telemetry and monitor follow-up (2026-10-03)
+## Authorized combined-transition repair (2026-10-04)
+
+- Starting commit: `84f45ffb4b4ae151ba9066ea5ebdd0c8e106b611`.
+  Human authorization: “continue and fix what is needed”, addressing R2/R3/R6
+  in this existing review phase. Prior commits and accepted MCP/monitor repairs
+  remain intact. The original checkout and user scratch were not accessed.
+- The supplied `/tmp/ctx-feature-audit-fast-84f45ffb.log` was read directly:
+  ten lanes passed; unit execution had **9,295 passed, 5 skipped in 338.27s**
+  with **92.09% coverage**; static failed with **22 mypy errors in three files**.
+  Ruff lint and formatting passed on that head. This prior-head evidence does
+  not certify the current repair tree, and the fast gate remains failed.
+- Source inspection confirmed R2 as a state-model omission: a set of observed
+  generations cannot identify which one was last used after storage outage plus
+  scope reset. R3 discarded absent configured fallback candidates before legacy
+  identity matching. R6 reflects missing heterogeneous/optional annotations and
+  an incomplete previous static verification scope, not changed runtime intent.
+- Failing-first command before any production/type edits:
+  `PYTHONPATH="$PWD/src" python -m pytest -q --no-cov src/tests/test_telemetry_checkpoint_identity.py -k 'retains_last_file_key_through_unavailable_resets or legacy_fallback_checkpoint_rejects_ambiguous_recovery_until_resolved or continuous_capture_retains_records_during_legacy_fallback_ambiguity'`.
+  **26 failed, 18 passed, 222 deselected in 3.11s**, exit 1,
+  `.gate/review-r6-red.txt`. Failures cover restoration of A after outage and
+  endpoint/replay reset (including inline/file policy detours), independently
+  calculated legacy B-HMAC checkpoints, and continuous event/metric capture.
+  Recovering the last generation B passed the controls.
+- The additive fingerprint-only `file_last_known_keys` map now retains the
+  last readable identity independently of current availability and cursor scope.
+  It survives scope resets, explicit replay and inactive-file policy detours.
+  Existing metadata seeds it from retained file fingerprints; old metadata that
+  already lost the latest value refuses ambiguous returning historical keys.
+  Explicit replay or restoring complete checkpoint metadata resolves that case.
+  Legacy matching now retains missing explicitly configured candidates, while
+  implicit default-environment absence alone is not ambiguous. Selected-key
+  validation, payload hash algorithms and accepted MCP/monitor fixes are intact.
+- After all fixes and formatting froze, the coordinator ran
+  `PYTHONPATH="$PWD/src" python -m pytest -q --no-cov src/tests/test_enterprise_telemetry.py src/tests/test_telemetry_checkpoint_identity.py src/tests/test_feature_user_story_tracker.py`:
+  **469 passed in 14.91s**, exit 0, `.gate/review-r6-focused.txt` (154 enterprise,
+  302 compatibility and 13 tracker cases). The 80 new cases include combined
+  transitions, independently computed legacy hashes, capture safety, invalid-map
+  rejection, older-field-absent migration and already-lost old-v2 identity.
+- The user's specifically requested full static checks all passed, exit 0,
+  `.gate/review-r6-static.txt`: `python -m ruff format --check src hooks scripts`
+  (**626 files**, 0.166s); `python -m ruff check src hooks scripts` (0.086s);
+  `python -m mypy src` (**no issues in 596 files**, 44.268s). No error ignores,
+  file exclusions, weakened assertions or new dependencies were introduced.
+  No source/test edits followed these checks. These static commands were
+  explicitly authorized for R6; no full test suite, nested pipeline or
+  authoritative gate ran in this phase.
+- Documentation inventory is 9,384: prior inventory 9,304 plus 80 new cases;
+  this is inventory, not a full-suite result. Both canonical telemetry records
+  preserve all 318 original acceptance contracts and historical bug IDs.
+  Needs Validation sentinel/date/commit/retest fields remain unchanged.
+  Existing verified commit/date fields remain historical; current evidence is
+  bound to the source/test/docs SHA-256 values below.
+- Independent combined-transition re-review accepted with no actionable findings.
+  The reviewer inspected source, tests, migration docs and canonical records,
+  read the red/green/static logs directly and independently matched all four
+  hashes below. No reviewer tests or writes were performed. The assigned review
+  repair is complete; the outer executor owns subsequent phases. Complete
+  delivery, authoritative preflight, hosted CI and external/owner prerequisites
+  remain unverified.
+
+  - `src/ctx/telemetry/__init__.py`: `bbec5790bcf878ee5f9d3592d8e32f65dee7cb096aa0ad47bb94560e5600ed8e`
+  - `src/tests/test_telemetry_checkpoint_identity.py`: `03a0d6cc9542da3afa78ac7dd5779f3bd76a02d31a8b9aa102398f2602b0de5a`
+  - `src/tests/test_enterprise_telemetry.py`: `846e29de771a6b0c9635d46d2eddd30e341cfc63779065297250c97103eac8a4`
+  - `docs/telemetry.md`: `ec6a8b3faf71b8f117dfe02c85fcc69a10bd6efde007dae9e55a5c0fcf2945d5`
+
+## Historical telemetry and monitor follow-up (2026-10-03)
 
 - Starting commit: `fed56b9f7c8571568f8fcf1eba6cb7d8734c30f0`.
   Human approval: “continue and unblock what is blocked”, explicitly authorizing

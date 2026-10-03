@@ -1031,21 +1031,31 @@ def test_partial_config_export_preview_preserves_checkpoint_and_files(
         "otlp": {"endpoint": f"http://127.0.0.1:4318/v1/{otlp_signal}"},
     }
     signal_config = {"enabled": True, "path": str(path), "export": export_config}
-    config: dict[str, Any] | None = signal_config if signal == "events" else {signal: signal_config}
+    configured: dict[str, Any] = signal_config if signal == "events" else {signal: signal_config}
     if partial_privacy == "empty_bytes":
-        config["privacy"] = {"hash_salt": b""}
+        configured["privacy"] = {"hash_salt": b""}
     elif partial_privacy == "global_config":
-        global_config.update(config)
-        config = None
+        global_config.update(configured)
     elif partial_privacy == "unavailable_local":
         local_salt_parent = tmp_path / "local-identity"
         local_salt_parent.write_text("not a directory", encoding="utf-8")
-        config["privacy"] = {"hash_salt_path": str(local_salt_parent / "hash-salt")}
-    export, preview = {
-        "events": (telemetry.export_events, telemetry.preview_export),
-        "metrics": (telemetry.export_metrics, telemetry.preview_metrics_export),
-        "traces": (telemetry.export_traces, telemetry.preview_traces_export),
-    }[signal]
+        configured["privacy"] = {"hash_salt_path": str(local_salt_parent / "hash-salt")}
+    config = None if partial_privacy == "global_config" else configured
+
+    def run_export(
+        *, preview: bool = False
+    ) -> telemetry.ExportResult | telemetry.MetricExportResult:
+        if signal == "metrics":
+            metric_exporter = (
+                telemetry.preview_metrics_export if preview else telemetry.export_metrics
+            )
+            return metric_exporter(path, trusted_root=tmp_path, config=config)
+        if signal == "events":
+            exporter = telemetry.preview_export if preview else telemetry.export_events
+        else:
+            exporter = telemetry.preview_traces_export if preview else telemetry.export_traces
+        return exporter(path, trusted_root=tmp_path, config=config)
+
     calls: list[dict[str, Any]] = []
 
     def fake_post_otlp_http(payload: dict[str, Any], settings: dict[str, Any]) -> None:
@@ -1068,14 +1078,14 @@ def test_partial_config_export_preview_preserves_checkpoint_and_files(
     before = snapshot()
     with monkeypatch.context() as readonly:
         readonly.setattr(telemetry, "_read_or_create_hash_salt", reject_salt_creation)
-        pending = preview(path, trusted_root=tmp_path, config=config)
+        pending = run_export(preview=True)
     assert snapshot() == before
     assert pending.attempted == 1
     assert pending.status == "ok"
     assert pending.exported == 0
     assert calls == []
 
-    exported = export(path, trusted_root=tmp_path, config=config)
+    exported = run_export()
     assert exported.exported == 1
     assert exported.status == "ok"
     assert exported.checkpoint_advanced is True
@@ -1105,7 +1115,7 @@ def test_partial_config_export_preview_preserves_checkpoint_and_files(
     before = snapshot()
     with monkeypatch.context() as readonly:
         readonly.setattr(telemetry, "_read_or_create_hash_salt", reject_salt_creation)
-        drained = preview(path, trusted_root=tmp_path, config=config)
+        drained = run_export(preview=True)
     assert snapshot() == before
     assert drained.attempted == 0
     assert drained.exported == 0
