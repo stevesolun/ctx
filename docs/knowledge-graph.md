@@ -2,10 +2,8 @@
 
 !!! info "Part of the recommendation surface, not CTX Fit"
 
-    The product is **CTX Fit** (`ctx fit`): it finds the cheapest AI coding
-    setup that reliably works on a repository. See the [home page](index.md).
-    This page documents the older graph-backed recommendation layer, which
-    still ships and is what the published PyPI release installs.
+    This page documents the shipped legacy recommendation graph. For CTX Fit
+    product usage, see the [home page](index.md).
 
 
 A pre-built weighted graph of skills, agents, MCP servers, and harnesses in the
@@ -430,12 +428,18 @@ python -m ctx.core.wiki.wiki_graphify \
   --semantic-vector-index numpy-flat
 ```
 
+`numpy-flat` is exact and portable. `--semantic-vector-index auto` uses the
+portable exact backend below the configured node threshold and can select the
+optional `hnswlib` ANN backend at or above it when installed. Shadow-gate that
+backend before release use.
+
 That graphify run reconciles the current entity set while it builds the index.
-An `entity-upsert` job whose earlier attach was skipped is recorded as
-successful, so it is not left pending for a later worker run. Future entity
-updates use the new index automatically; to revisit an older entity, update it
-again (which queues a new `entity-upsert`) or run the manual attach command
-above after reviewing its dry-run.
+A failed `entity-upsert` follows the queue retry policy. A job whose earlier
+attach was skipped is recorded as successful, so it is not left pending for a
+later worker run. Future entity updates use the new index automatically; to
+revisit an older entity, update it again (which queues a new `entity-upsert`)
+or run the manual attach command above after reviewing its dry-run. The wiki
+queue worker can still drain other ready maintenance work afterward.
 
 Before publishing graph artifacts, run the full rebuild/export path:
 

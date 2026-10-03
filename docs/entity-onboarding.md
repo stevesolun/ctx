@@ -2,10 +2,8 @@
 
 !!! info "Part of the recommendation surface, not CTX Fit"
 
-    The product is **CTX Fit** (`ctx fit`): it finds the cheapest AI coding
-    setup that reliably works on a repository. See the [home page](index.md).
-    This page documents the older graph-backed recommendation layer, which
-    still ships and is what the published PyPI release installs.
+    This page documents the shipped legacy entity intake workflows. For CTX Fit
+    product usage, see the [home page](index.md).
 
 
 ctx treats skills, agents, MCP servers, and harnesses as wiki entities that can
@@ -140,36 +138,9 @@ recall at the largest top-k is below the overlap floor.
 
 ## Repair Incremental Attach
 
-If the worker says `incremental attach skipped (no vector index)`, build the
-persisted semantic index once:
-
-```bash
-python -m ctx.core.wiki.wiki_graphify \
-  --wiki-dir ~/.claude/skill-wiki \
-  --incremental \
-  --graph-only \
-  --semantic-vector-index numpy-flat
-```
-
-`numpy-flat` is exact and portable. `--semantic-vector-index auto` keeps the
-portable exact backend at this graph size and can switch to the optional ANN
-backend only above the configured node threshold. `hnswlib` is optional and
-should be shadow-gated before release use.
-
-The graphify run reconciles the current entity set while it builds the index.
-You can still drain other ready maintenance work afterward:
-
-```bash
-python -m ctx.core.wiki.wiki_queue_worker --wiki ~/.claude/skill-wiki
-```
-
-A failed `entity-upsert` remains visible and follows the queue retry policy, but
-an attach that was skipped because the vector index was absent is recorded as a
-successful job. It is not pending after the index exists. Future updates attach
-through the new index automatically; update an older entity again to queue a
-fresh `entity-upsert`. Use a manual
-`python -m ctx.core.graph.incremental_attach attach --dry-run` for one-off
-review, not as the normal bulk path.
+If the worker says `incremental attach skipped (no vector index)`, follow the
+[graph rebuild and skipped-attachment guidance](knowledge-graph.md#rebuilding).
+It covers index recovery, retry behavior, and manual attach review.
 
 ## Security and Cyber Check
 
@@ -427,6 +398,11 @@ ctx-init
 ctx-init --wizard
 ctx-init --model-mode skip
 ```
+
+Setup can finish some steps before another fails. A failed toolbox seed makes
+`ctx-init` exit nonzero and report `completed with errors`; already-present
+starter toolboxes are a successful skip. Inspect the preceding step diagnostics
+before treating setup as complete.
 
 Install consent is persistent and independent for skills, agents, and MCP
 servers. The safe default is `ask-each-time`; choose `preapproved-auto` only

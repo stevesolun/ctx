@@ -112,7 +112,8 @@ Multiple triggers are allowed — a `ship-it` toolbox typically enables
 `slash`, `pre_commit`, and `session_end`. `file_save` is a glob string
 such as `"**/*.md"`; use `null` to disable file-save matching.
 `session-start` is not configured in the trigger map: any active toolbox
-with a non-empty `pre` list can preload those skills at session start.
+with a non-empty `pre` list matches that event. See [`pre` and `post`](#pre-and-post)
+for the host's execution responsibilities.
 
 ### `guardrail`
 

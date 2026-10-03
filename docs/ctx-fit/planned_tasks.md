@@ -15,10 +15,9 @@
 > and `ctx doctor --help` show the shipped command
 > surface. `git log --oneline -- src/ctx/fit` shows how it got there.
 >
-> One correction worth carrying forward: M10 now opens the pull request.
-> `ctx fit --pr` previews the plan, runs read-only safety probes, and after
-> confirmation creates a branch, commits, pushes, and invokes `gh pr create`.
-> It never merges. `--apply` remains a working-tree-only write.
+> For M9–M10 behavior, use the current
+> [user guide's apply and PR contract](../index.md),
+> which supersedes the preparation-only plan below.
 >
 > Kept as the planning record of intent and rationale, which is still accurate.
 

@@ -16,11 +16,8 @@ labels into action:
 | `skill_category.py` | `backfill`, `infer`                                       | Write the closed-set `category:` field into skill/agent frontmatter. |
 | `kpi_dashboard.py`  | `render`, `summary`                                       | Emit a single Markdown dashboard joined across all quality sinks. |
 
-`review` proposes transitions; only `review --auto` applies Watch and Demote
-without prompting. Automatic archive proposals require 14 days in the demoted
-state. The explicit `archive` command instead requires an already-demoted
-slug and confirmation, but does not enforce that age threshold. Deletion is
-available through `purge` and requires typed-slug confirmation.
+See [Lifecycle CLI](#lifecycle-cli) for transition eligibility and confirmation
+controls.
 
 ## Category taxonomy
 
@@ -48,7 +45,8 @@ curation.
 
 Five verbs. `review` is propose-and-confirm by default; its `--auto` option
 unlocks only Watch and Demote. Explicit `demote` and `archive` prompt unless
-`--force` is supplied.
+`--force` is supplied. Review proposes archive only after the configured
+`archive_threshold_days` in the demoted state.
 
 ```bash
 # List every pending transition; no writes.

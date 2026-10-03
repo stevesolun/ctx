@@ -217,9 +217,10 @@ raw session id, including when exporting legacy local records that predate
 so treat exported JSONL as local-sensitive if session ids are present.
 
 Identifier hashes are salted by default. ctx first checks the
-`CTX_TELEMETRY_HASH_SALT` environment variable, then any configured
-`privacy.hash_salt`, then an owner-only local salt file at
-`~/.ctx/telemetry/hash-salt`. Set `CTX_TELEMETRY_HASH_SALT` per tenant or
+`CTX_TELEMETRY_HASH_SALT` environment variable, then the variable named by
+`privacy.hash_salt_env` if different, then any configured `privacy.hash_salt`,
+then the owner-only file selected by `privacy.hash_salt_path` (default
+`~/.ctx/telemetry/hash-salt`). Set `CTX_TELEMETRY_HASH_SALT` per tenant or
 deployment when multiple hosts need to correlate the same redacted identifiers.
 Do not commit a literal `privacy.hash_salt` into shared source control.
 

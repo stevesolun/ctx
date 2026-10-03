@@ -6,9 +6,9 @@
 > have shipped: readiness, candidate generation, experiment planning, execution,
 > verification states, recommendation, apply, and pull-request creation all
 > live in `src/ctx/fit/` with tests in `src/tests/fit/`. Row 14 in particular —
-> "Prepare a GitHub PR" — was absent in this snapshot but has since shipped as
-> a confirmed remote write: `ctx fit --pr` creates a branch, commits, pushes,
-> and opens a pull request through `gh`; it never merges. Read the code and
+> "Prepare a GitHub PR" — was absent in this snapshot; the current
+> [user guide's apply and PR contract](../index.md)
+> supersedes that row. Read the code and
 > `git log --oneline -- src/ctx/fit` for the current state; read this document
 > for the reasoning that shaped it.
 

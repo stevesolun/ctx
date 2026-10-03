@@ -11,11 +11,8 @@ Status: draft v1, 2026-08-09. Owner: coordinator. Supersedes the earlier
 
 Headline: **Find the cheapest AI coding setup that actually works on your repo.**
 
-Bare `ctx fit` runs no git commands. `--apply` writes only the working tree;
-the write step stages, commits, and pushes nothing. `--pr` is deliberately
-different: after preview, confirmation, and read-only safety probes, it creates
-a branch, commits the winning configuration, pushes it, and opens a pull
-request through `gh`. CTX Fit never merges.
+See the [user guide](../index.md) for each command's cost and write boundaries,
+including the apply and PR contract.
 
 Three words carry the whole product. *Cheapest* is the objective. *Reliably* is
 the constraint that makes cheapest meaningful. *Configuration* is the
@@ -143,9 +140,8 @@ answer is **keep your current setup** — a success, not a failure.
 | M10 | PR | Branch, commit, push, and open a reviewable PR | none |
 
 **M1 through M10 have all shipped**: each milestone has landed code with tests
-under `src/ctx/fit/`, `src/ctx/cli/fit.py`, and `src/tests/fit/`. M10 opens a
-pull request only after preview, explicit confirmation, and preflight; it never
-merges. Individual follow-up tasks remain open, but the per-task board in
+under `src/ctx/fit/`, `src/ctx/cli/fit.py`, and `src/tests/fit/`.
+Individual follow-up tasks remain open, but the per-task board in
 [`planned_tasks.md`](planned_tasks.md) is a stale M0 snapshot, not current
 operational state.
 

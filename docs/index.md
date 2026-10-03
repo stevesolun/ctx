@@ -22,10 +22,9 @@ one.
 
     CTX Fit compares capability configurations within one coding-agent
     harness. It does not compare Codex, Claude Code, or other harnesses against
-    one another. It recognizes and can run repository-native verification
-    commands for Python, JavaScript/TypeScript, Go, Rust, and Make, and treats
-    the selected test command as the verification authority. For an installable
-    Python project, CTX Fit builds a campaign environment and installs it
+    one another. It treats the selected repository-native test command as the
+    verification authority. For an installable Python project, CTX Fit builds
+    a campaign environment and installs it
     without network access; its build backend and dependencies must already be
     available without downloading them. In the other ecosystems, verification
     is supported only when the runtime is usable from
@@ -55,6 +54,13 @@ repository profile: detected languages, the AI coding setup already in place,
 the verification commands the repository declares for itself, an agent-readiness
 score with its component breakdown, and the highest-impact improvements.
 
+In the current source, discovery includes C/C++ source and test evidence and
+root Maven projects (`pom.xml`). Maven commands use an executable `./mvnw` when present,
+otherwise `mvn`: `test` for tests and `package -DskipTests` for builds. Discovery
+does not establish evaluation support: historical task derivation remains
+limited to Python, JavaScript, TypeScript, Go, and Rust. A Java or C/C++ profile
+and discovered test command alone do not supply representative Fit tasks.
+
 | Command | What it costs | What it touches |
 | --- | --- | --- |
 | `ctx fit` | nothing; no model call | reads the working tree |
@@ -67,9 +73,12 @@ score with its component breakdown, and the highest-impact improvements.
 `--dry-run` reads history to derive tasks and writes nothing — not to the
 repository, not to the index, not to any ref.
 
-Spending requires two explicit flags. `--test` alone will not spend: without
-`--budget` CTX Fit only plans. Run `ctx doctor` to see whether a real evaluation
-can run where you are. A real evaluation needs
+Spending requires two explicit flags. `--budget` must be a finite, non-negative
+number of US dollars; negative values, NaN, and infinity exit with an error
+before profiling. Zero is valid input and authorizes no spending.
+`--test` alone will not spend: without `--budget` CTX Fit only plans.
+Run `ctx doctor` to see whether a real evaluation can run where you are.
+A real evaluation needs
 `pip install "claude-ctx[harness]"`, a matching provider credential, and
 Bubblewrap on Linux. The current source uses CTX's bundled filesystem MCP;
 it does not require Node.js or `npx` for Fit's workspace tools. The base install

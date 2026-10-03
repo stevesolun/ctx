@@ -13,18 +13,23 @@
 
 - Updated: 2026-10-04 (Europe/Prague)
 - Active goal: inventory, test, repair, and retest every shipped user behavior
-- Phase: test repair investigation; all seven named failures pass unchanged
+- Phase: assigned documentation reconciliation after targeted test validation
 - Release decision: **1.0.21 REMAINS RELEASED; NEW AUDIT OPEN; NO NEW RELEASE DECISION**
 - Branch: `codex/full-feature-audit-delivery`
 - Active delivery branch: `codex/full-feature-audit-delivery`, submitted head
-  `18253e9a37cb215856fb79bac01ea9c7482eb6e6`; current test investigation starts
-  from `91cb979fc4d5234c4664cb482c1c51fabc920e16`
+  `18253e9a37cb215856fb79bac01ea9c7482eb6e6`; current documentation target is
+  `627bb5255c67859457e3b9444d2c5ecfe8000770`
 - Active delivery worktree:
   `/Users/steves/.no-mistakes/worktrees/88e19bf0677f/01M3RWB2ZY374H29CTPEPNSWVH`
-- Current no-mistakes run is in its assigned test repair phase. The supplied
-  authoritative preflight failed its unit lane. The outer executor owns any
-  subsequent preflight, review, docs/lint, push/PR and CI; none is inferred from
-  focused replay evidence.
+- Current no-mistakes run is in its assigned document phase. The preceding test
+  phase records an executor-supplied successful `scripts/no_mistakes_run.sh test`
+  baseline; the wrapper delegates to `python scripts/ci_preflight.py --profile pr`.
+  This supersedes
+  the earlier failed preflight as the supplied current baseline, without
+  changing that historical failure. Its focused and product-level evidence is
+  recorded below. Documentation reconciliation adds no product execution evidence.
+  The outer executor owns subsequent phases, push/PR and hosted CI; complete
+  delivery is not inferred from local testing.
 - Previous no-mistakes run: `01M3RV98HW4HQDSM04HA6NRBJG` is **FAILED**; driver
   session `15506` is terminal, log `/tmp/ctx-feature-audit-delivery-54dfe28a.log`.
   Intent/rebase completed; review could not launch Codex and no later phase ran.
@@ -41,9 +46,9 @@
   the compatibility repair.” This permits a versioned checkpoint migration
   that preserves acknowledged progress across salt-storage failure and recovery,
   while retaining deliberate salt-rotation and destination scoping. The
-  accepted MCP repair and prior commits remain intact. The current repair is
-  being checked only within this assigned review phase; earlier 312-test
-  evidence does not certify the new compatibility implementation.
+  accepted MCP repair and prior commits remain intact. That review repair is
+  complete; the current test-phase evidence appears below. Earlier 312-test
+  evidence alone does not certify the later compatibility implementation.
 - Release commit: `38a33f8784e2bf408430a98fed81206c2cf39d00`
 - Release tag object: `a7b8e78559fda1d44dca844393458272071ae89b`
 - LFS migration PR: `https://github.com/stevesolun/ctx/pull/275`
@@ -69,9 +74,9 @@
   records were appended to 65 canonical rows with original-contract hash
   guards. Those audit source writers froze; final independent metadata review
   accepted all 65 guarded contracts and historical records with no blocking
-  findings at their recorded checkpoints. The current review repairs telemetry
+  findings at their recorded checkpoints. The completed review repaired telemetry
   checkpoint compatibility and telemetry typing; accepted MCP diagnostic and
-  monitor fixture repairs remain intact. Focused evidence is recorded
+  monitor fixture repairs remain intact. Current test evidence is recorded
   below. Earlier full gates remain
   valid for their checkpoints, not the later script/test/prose delta. The
   coordinator owns integration, state, GitHub mutations, and final gates.
@@ -95,6 +100,55 @@
   bare mirror, then restarted and verified the daemon. Safe cache and clean
   worktree cleanup reduced the Data volume's rounded used space from 280 GiB to
   262 GiB. No remote LFS object has been purged yet.
+
+## Current targeted test-phase evidence (2026-10-04)
+
+- Tested code: `627bb5255c67859457e3b9444d2c5ecfe8000770`. The executor
+  supplied the successful configured PR-preflight baseline; this phase did not
+  repeat the full suite, preflight, static checks or any pipeline-control action.
+  Only this STATE checkpoint was edited in the tracked tree.
+- Fresh focused tests passed for telemetry checkpoint identity and export,
+  workspace/legacy MCP and router behavior, Fit CLI/providers/repository
+  discovery, the five-language task derivation contract, launcher discovery,
+  canonical trackers and public surfaces, and dashboard HTTP privacy/error
+  handling. The Fit CLI selection required its own pytest invocation after a
+  mixed-directory invocation could not resolve `repo_with_history`; the
+  isolated selection passed without source or assertion changes.
+- Existing browser tests passed for dark contrast, mobile overflow, the
+  configuration/harness wizard and public catalog filtering. Captured and
+  visually inspected real Chromium screenshots show the dashboard and catalog;
+  the catalog screenshot uses the production app fragment/styles exercised by
+  its existing browser test, not a deployed Pages site.
+- Fresh CLI-entrypoint subprocesses sent events, metrics and traces to a real
+  loopback HTTP collector. Collector-observed record IDs and persisted
+  checkpoints prove that salt-storage failure/recovery/regeneration preserve
+  acknowledged progress, deliberate rotation replays the spool, previews remain
+  read-only, and HTTP 503 preserves pending records for recovery. Only synthetic
+  configuration was supplied; the exporter and transport were unpatched.
+- Actual `ctx` and `ctx-mcp-server` console commands ran against synthetic local
+  repositories/wiki data with child network access denied. The transcripts show
+  free profile/dry-run behavior and unchanged repository bytes, invalid-budget
+  errors, workspace edits with traversal/symlink refusal, legacy tool access and
+  errors, continued protocol responsiveness, and version negotiation. No model
+  execution or external host interoperability is claimed.
+- A real monitor HTTP/Chromium replay additionally demonstrates secret-shaped
+  session alias navigation and redaction without rewriting the persisted audit,
+  plus explicit unavailable-history alerts and HTTP 503 for invalid UTF-8.
+- Exact commands, source hashes and evidence scope are retained in
+  `test-phase-summary.json` under
+  `/var/folders/cj/j956f9v920b8wk3wvd8ms2nh0000gn/T/no-mistakes-evidence/01M3RWB2ZY374H29CTPEPNSWVH/`.
+  Product artifacts there include `mcp-cli-transcripts.md`,
+  `fit-repository-before-after.json`, `telemetry-cli-evidence.json`,
+  `telemetry-cli-transcript.txt`, `monitor-http-responses.json`, and the actual
+  browser PNG/HTML captures. The coordinator read the execution output and
+  artifacts directly. Synthetic working-tree fixtures were removed; existing
+  outer-run artifacts were preserved.
+- No product defect was reproduced and no production/test code or canonical
+  status changed. The CSV remains 318 rows: 299 local passes, 13 Needs
+  Validation, two owner prerequisites and four deprecated. `SEC-002` remains
+  Needs Validation. Complete delivery, the PR, required hosted CI and existing
+  external/human prerequisites remain with their respective owners; this local
+  test phase does not certify full audit completion.
 
 ## Targeted test-phase investigation (2026-10-04)
 
@@ -647,23 +701,17 @@ path remains unproven. Production PyPI Trusted Publishing succeeded.
 
 ## Immediate next actions
 
-1. Submitted `18253e9a` passed all 11 fast lanes: 8,981 unit passes, five
-   documented skips, 92.03% coverage, 334.256 seconds, return code 0 and
-   `committed_head_only=true`. The previous `53986b36` fast result remains
-   historical evidence for that checkpoint. Authoritative PR preflight at the earlier
-   `e187337a` passed all 20 checks, including 8,977 unit passes, five documented
-   skips, and 92.02% coverage. Sessions `92349` and `27260` are terminal;
-   do not restart these successful source gates merely for metadata.
-2. Independent review of the applied canonical record delta accepted all 35
-   families/65 rows; source and prose repairs are accepted. Root passed the actual clean-host
-   script, optional static scan, 94 Fit tests, and 56 latest tracker/surface/
-   clean-host tests. Generated inventory, global static checks, and strict
-   docs pass; retained source/prose hashes match.
-3. Return the bounded R1/R2 repair through this existing no-mistakes run for
-   re-review. Its configured test phase runs authoritative PR
-   preflight; do not redundantly run the same full preflight first. The pipeline
-   owns any fixes while active and creates the push/PR; never duplicate that
-   PR, skip its review decisions, or hand-merge. Inspect required hosted CI.
+1. Use the exact-target evidence in
+   [Current targeted test-phase evidence](#current-targeted-test-phase-evidence-2026-10-04).
+   Earlier gates remain evidence only for their named checkpoints; the
+   submitted launcher fast result is retained in the checkpoint above.
+2. Complete the remaining phases through this existing no-mistakes run. The
+   document phase reconciles owners and stale duplicates without running tests,
+   gates, lint, or delivery commands. Retained source/prose hashes certify their
+   named checkpoints, not later documentation edits.
+3. The outer executor owns remaining validation and creates the push/PR; never
+   duplicate that PR, skip its review decisions, or hand-merge. Inspect required
+   hosted CI.
    Update issue #283 with the durable PR and verified result; keep it open until
    integration. A new release or paid-provider run is not authorized.
 4. GitHub Support's prepared LFS purge request is at Submit. Wait for explicit
@@ -701,6 +749,15 @@ Support contact: `https://support.github.com/contact`
 > self-service route is therefore not available.
 
 ## Checkpoint log
+
+- 2026-10-04: Document phase reconciled `11b582a7` through `627bb525`, preserving
+  the preceding uncommitted test checkpoint and canonical feature statuses.
+  Updated existing user-guide owners for discovery limits, budget validation,
+  MCP response validation, dashboard history errors, and repaired tooling;
+  replaced stale duplicate contracts with owner links. Source and test
+  assertions were read for documentation accuracy; `git diff --check` passed.
+  No tests, builds, pipeline-control action, remote write, or release action
+  ran in this phase.
 
 - 2026-09-30: Source re-review at committed `4e6a61b6`, still within the audit
   scope relative to `11b582a7`, reopened the same two defect records. R1 still

@@ -59,5 +59,5 @@ differ only in transport and confirmation UX, not in ranking logic.
   identify stack signals.
 - [Skill-stack matrix](../skill-stack-matrix.md) - stack-to-capability mapping
   used as scanner evidence.
-- [Entity source registry](../marketplace-registry.md) - skill, GitHub,
-  MCP, harness, and local sources plus update rules.
+- [Entity source surfaces](../marketplace-registry.md) - discovery inputs,
+  ingestion validation, and explicit update rules.

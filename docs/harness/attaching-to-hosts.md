@@ -68,6 +68,8 @@ For permissioned adapters that should expose only read/query tools, start the
 same server with `--allow-tools` and `--entity-types`. For example,
 `ctx-mcp-server --allow-tools ctx__recommend_bundle,ctx__wiki_search,ctx__wiki_get --entity-types skill,mcp-server`
 limits tool discovery and read results to the named tools and entity types.
+Unknown `--allow-tools` names are a startup error; check spelling rather than
+expecting an unknown name to be ignored.
 
 ### Claude Agent SDK (Python)
 
@@ -142,6 +144,13 @@ receives an empty successful result. Ping notifications are also accepted
 without a response.
 
 ### Live MCP compatibility gate
+
+CTX's MCP client accepts the same legacy revisions listed above. The server's
+`initialize` result must explicitly select a supported revision; a missing,
+non-string, or unsupported `protocolVersion` stops startup before tool discovery.
+The client also validates JSON-RPC response envelopes and the object/array
+shapes used by `tools/list` and `tools/call`, reporting invalid shapes as
+`McpServerError`.
 
 The regular test suite never starts arbitrary third-party MCP servers.
 Those commands run as local subprocesses and can read files, use the

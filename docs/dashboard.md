@@ -47,6 +47,12 @@ the runtime lifecycle ledger. The dashboard exposes that ledger at
 escalation state, tool-selection totals, selected-vs-system source counts, token
 usage totals, attribution counts, and recent per-tool usage rows.
 
+If the runtime ledger cannot be read because of an I/O or UTF-8 error, the home
+page and `/runtime` show an unavailable-history alert. `/api/runtime.json`
+returns HTTP 503 with `path` and `error` fields instead of activity totals.
+Check the ledger's permissions and encoding; a missing ledger is still treated
+as empty history.
+
 ### Smoke-test the dashboard
 
 Use the repo smoke check after dashboard changes or before screenshots. It uses
@@ -194,9 +200,8 @@ tables:
 2. **Grade distribution** — A/B/C/D/F count and share.
 3. **Lifecycle tiers** — counts for `active`, `watch`, `demote`,
    `archive`.
-4. **Hard floors active** — which override reasons are currently
-   pinning entities to F (`never_loaded_stale`, `intake_fail`, etc.)
-   and how many entities each one catches.
+4. **Hard floors active** — which score overrides are active and how many
+   entities each one catches; see the [scoring rules](skill-quality-install.md#what-it-does).
 5. **By category** — per-category count, average score, and full
    A/B/C/D/F mix. This is the row most useful for "where are my D/F
    skills concentrated?"
@@ -346,21 +351,9 @@ Cards sorted by `(grade, -raw_score)` so high-scoring A's come first.
 The page renders the sidecar's grade, raw score, subject type, optional hard
 floor, and a raw JSON preview capped at 4,000 characters. When present, the
 preview's `signals` and `weights` fields contain the four-signal breakdown.
-Skill and MCP sidecars use these default weights:
-
-| Signal | Weight (default) | What it measures |
-|---|---:|---|
-| **Telemetry** | 0.40 | Load frequency + recency from `skill-events.jsonl`. Rewards skills that are actually used. |
-| **Intake** | 0.20 | Structural health: frontmatter fields present, H1 present, minimum body length, description length. Zero if `intake_fail` floor is active. |
-| **Graph** | 0.25 | Connectivity in the knowledge graph: degree, average edge weight, community size |
-| **Routing** | 0.15 | Router hit rate from `~/.claude/router-trace.jsonl`: how often this skill was among the top-K recommendations when surfaced |
-
-Agent sidecars use different defaults: telemetry 0.15, intake 0.30, graph
-0.35, and routing 0.20. The sidecar's stored `weights` map is authoritative.
-
-The final score is `sum(weight[i] * signal[i])`. A hard floor
-(`never_loaded_stale`, `intake_fail`) can override the score to
-force an F grade regardless of other signals.
+See the [quality scorer guide](skill-quality-install.md#what-it-does) for signal
+definitions, weights, and hard-floor behavior. The sidecar's stored `weights`
+map records the weights used for that result.
 
 The detail page also shows up to the latest 100 matching audit rows for the
 typed slug, with timestamp, event, and actor. Use `/session/<id>` when you need
@@ -382,6 +375,13 @@ observability proof that ctx's telemetry pipeline is live.
 
 ## Security
 
+- **Public session identifiers**. Home, session, and runtime views and their
+  session/runtime JSON summaries replace secret-shaped session IDs with stable
+  `session-public-...` aliases. Follow the returned alias to `/session/<id>`;
+  ordinary IDs remain unchanged unless they use that reserved prefix. These
+  views also redact recognized secrets in subject/tool fields and nested
+  `meta`/`metadata` values. This response projection does not rewrite local
+  logs or make arbitrary local data safe to share.
 - **Binds to 127.0.0.1 by default**. Use
   `python -m ctx_monitor serve --host 0.0.0.0 --allow-non-loopback` only if you
   actually want LAN-visible read-only access. The startup output prints a

@@ -21,10 +21,15 @@ local assets, GitHub repositories, or MCP catalogs by priority.
 - Host adapters and installers discover applicable user-local assets during
   their own workflows. There is no general `user-local` registry entry that
   automatically overrides every shipped candidate.
-- `ctx-source-registry` validates the built-in or supplied external-source
-  records against license, permission, revision, digest, and redistribution
-  rules. The only full-body importer currently wired to that registry is the
-  Design.md importer; other catalogs have their own import validation.
+- `ctx-source-registry` validates built-in or supplied external-source records.
+  Its provenance, license, and ingestion boundaries are described in the
+  [threat model](threat-model.md#graph-and-catalog-metadata).
+
+Supply a registry with `ctx-source-registry --registry PATH`. The JSON must be
+a list of record objects or an object containing a `sources` list of records.
+Unreadable files, invalid JSON or record structures, and policy failures exit
+with code `1`. Human output reports the error on stderr; `--json` instead emits
+`{"error": "...", "failed": 1}` on stdout. Successful validation exits `0`.
 
 The old names `ctx-shipped-graph`, `user-local`, `shipped-skills`,
 `github-entity-repos`, and `mcp-and-harness-sources` were documentation labels,
