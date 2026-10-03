@@ -13,17 +13,18 @@
 
 - Updated: 2026-10-04 (Europe/Prague)
 - Active goal: inventory, test, repair, and retest every shipped user behavior
-- Phase: R2/R3/R6 repair passed 469 focused tests, full static checks and independent review
+- Phase: test repair investigation; all seven named failures pass unchanged
 - Release decision: **1.0.21 REMAINS RELEASED; NEW AUDIT OPEN; NO NEW RELEASE DECISION**
 - Branch: `codex/full-feature-audit-delivery`
 - Active delivery branch: `codex/full-feature-audit-delivery`, submitted head
-  `18253e9a37cb215856fb79bac01ea9c7482eb6e6`; current review starts from committed
-  repair `84f45ffb4b4ae151ba9066ea5ebdd0c8e106b611`
+  `18253e9a37cb215856fb79bac01ea9c7482eb6e6`; current test investigation starts
+  from `91cb979fc4d5234c4664cb482c1c51fabc920e16`
 - Active delivery worktree:
   `/Users/steves/.no-mistakes/worktrees/88e19bf0677f/01M3RWB2ZY374H29CTPEPNSWVH`
-- Current no-mistakes run is in its assigned review repair phase. The outer
-  executor owns re-review, authoritative PR preflight, docs/lint, push/PR and CI;
-  none of those later phases is inferred from focused repair evidence.
+- Current no-mistakes run is in its assigned test repair phase. The supplied
+  authoritative preflight failed its unit lane. The outer executor owns any
+  subsequent preflight, review, docs/lint, push/PR and CI; none is inferred from
+  focused replay evidence.
 - Previous no-mistakes run: `01M3RV98HW4HQDSM04HA6NRBJG` is **FAILED**; driver
   session `15506` is terminal, log `/tmp/ctx-feature-audit-delivery-54dfe28a.log`.
   Intent/rebase completed; review could not launch Codex and no later phase ran.
@@ -94,6 +95,29 @@
   bare mirror, then restarted and verified the daemon. Safe cache and clean
   worktree cleanup reduced the Data volume's rounded used space from 280 GiB to
   262 GiB. No remote LFS object has been purged yet.
+
+## Targeted test-phase investigation (2026-10-04)
+
+- Starting tree: `91cb979fc4d5234c4664cb482c1c51fabc920e16`, clean, detached
+  delivery worktree. The supplied preflight ended with seven failures, 9,368
+  passes and five skips; that failed gate remains failed.
+- Replayed all seven named cases without source or test changes: the four
+  containment/holdout cases passed in 12.02s and the three query-delivery cases
+  passed in 13.63s. A combined replay of exactly those seven cases with coverage,
+  three xdist workers and file scheduling passed in 9.86s. Commands, scope and
+  retained output digests are in
+  [the test-phase evidence](../../qa/feature-audit/test-phase-91cb979f-20261004.md).
+- The visible original containment traces failed closed on five-second system
+  process-scan timeouts. Query-delivery lock exhaustion under load is plausible,
+  but the original process-test tracebacks and module-mode traceback were
+  truncated. Their historical root causes remain unconfirmed. Independent
+  bounded source inspections identified no justified product or fixture fix;
+  coordinator-read logs establish the current passes.
+- No production code, tests, timeouts, assertions, canonical feature statuses
+  or acceptance contracts changed. No broad suite, static tools, authoritative
+  preflight or pipeline-control command ran in this investigation. Transient
+  coverage data was removed. Full delivery, hosted CI and existing external or
+  human prerequisites remain unverified; `SEC-002` stays Needs Validation.
 
 ## Authorized combined-transition repair (2026-10-04)
 
