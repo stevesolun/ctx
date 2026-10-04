@@ -7,8 +7,9 @@ Toolbox config lives in two files:
 | **Global** | `~/.claude/toolboxes.json` | JSON | Every repo on this machine |
 | **Per-repo** | `.toolbox.yaml` (project root) | YAML | This repo only, overrides global |
 
-Per-repo entries shadow global entries with the same name. Fields absent
-from the per-repo file fall back to the global value.
+Per-repo entries replace global toolbox entries with the same name as a whole.
+Omitted fields use the schema defaults, not the matching global field values.
+The active-name lists are combined, with per-repo names first.
 
 ## Schema
 
@@ -32,9 +33,9 @@ from the per-repo file fall back to the global value.
       "scope": {
         // "diff" | "dynamic" | "graph-blast" | "full"
         "analysis": "dynamic",
-        // Optional: restrict to these glob projects
+        // Host metadata: optional project globs (not enforced by the planner)
         "projects": ["*"],
-        // Optional: match intent signals
+        // Host metadata: optional intent signals (not enforced by the planner)
         "signals": ["python"]
       },
 
@@ -69,13 +70,14 @@ from the per-repo file fall back to the global value.
 
 ### `pre` and `post`
 
-- `pre` — skills to load before work starts. Loaded into the session's
-  skill manifest, unloaded when the session ends.
-- `post` — agents to invoke after the trigger. Each runs in its own
-  sub-agent context window.
+- `pre` — requested skills for a host integration to load before work starts.
+  A non-empty list makes an active toolbox match `session-start`; the shipped
+  hook does not itself load or unload those skills.
+- `post` — agents named in the emitted plan. A host integration must invoke
+  them and choose their execution contexts.
 
-Either list can be empty. A toolbox with only `pre` is a skill preloader;
-one with only `post` is a review council.
+Either list can be empty. These are declarations, not evidence that a preload
+or review has executed.
 
 ### `scope.analysis`
 
@@ -88,10 +90,15 @@ Controls what files the council sees:
 | `graph-blast` | Current diff plus one-hop graph expansion when a graph edge map is supplied; otherwise the changed set. |
 | `full` | Every tracked file. Most thorough; expensive — reserve for security sweeps. |
 
+`scope.projects` and `scope.signals` are retained configuration metadata. The
+shipped planner and trigger matcher do not apply those fields as filters;
+a host integration must interpret them if it needs that behavior.
+
 ### `budget`
 
 Copied into the `RunPlan` as `budget_tokens` and `budget_seconds`.
-Downstream council execution enforces those caps.
+A downstream executor must enforce those caps. The planner and hook emitter
+do not execute agents or enforce runtime spending/time limits.
 
 ### `dedup`
 
@@ -105,13 +112,15 @@ Multiple triggers are allowed — a `ship-it` toolbox typically enables
 `slash`, `pre_commit`, and `session_end`. `file_save` is a glob string
 such as `"**/*.md"`; use `null` to disable file-save matching.
 `session-start` is not configured in the trigger map: any active toolbox
-with a non-empty `pre` list can preload those skills at session start.
+with a non-empty `pre` list matches that event. See [`pre` and `post`](#pre-and-post)
+for the host's execution responsibilities.
 
 ### `guardrail`
 
 When `true` and the trigger is `pre_commit`, the hook reads
-`<plan_hash>.verdict.json` after the council runs and exits `2` (blocks
-the commit) if level is `HIGH` or `CRITICAL`. See
+an already existing `<plan_hash>.verdict.json` and exits `2` if its level is
+`HIGH` or `CRITICAL`. It does not wait for a new council result. Blocking a
+commit requires a Git hook or host wrapper that propagates that exit code. See
 [Verdicts & guardrails](verdicts.md).
 
 ## Editing tools
@@ -126,8 +135,8 @@ python -m toolbox show ship-it
 # Activate a starter preset
 python -m toolbox activate ship-it
 
-# Export merged config
-python -m toolbox export > my-toolboxes.yaml
+# Export one resolved toolbox
+python -m toolbox export ship-it > my-toolboxes.yaml
 
 # Import from file
 python -m toolbox import my-toolboxes.yaml

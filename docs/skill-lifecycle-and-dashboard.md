@@ -16,10 +16,8 @@ labels into action:
 | `skill_category.py` | `backfill`, `infer`                                       | Write the closed-set `category:` field into skill/agent frontmatter. |
 | `kpi_dashboard.py`  | `render`, `summary`                                       | Emit a single Markdown dashboard joined across all quality sinks. |
 
-Asymmetric gates: downward transitions are automatic from a D-streak;
-upward transitions are deliberate. Archive needs aging (`active` for
-14 days in `_demoted`); delete needs a typed-slug confirmation even
-under `--auto`.
+See [Lifecycle CLI](#lifecycle-cli) for transition eligibility and confirmation
+controls.
 
 ## Category taxonomy
 
@@ -45,8 +43,10 @@ curation.
 
 ## Lifecycle CLI
 
-Four verbs. All are propose-and-confirm by default; `--auto` unlocks
-only the safe tiers (Watch + Demote).
+Five verbs. `review` is propose-and-confirm by default; its `--auto` option
+unlocks only Watch and Demote. Explicit `demote` and `archive` prompt unless
+`--force` is supplied. Review proposes archive only after the configured
+`archive_threshold_days` in the demoted state.
 
 ```bash
 # List every pending transition; no writes.
@@ -55,16 +55,17 @@ python -m ctx_lifecycle review --dry-run
 # Apply all Watch/Demote transitions without prompting.
 python -m ctx_lifecycle review --auto
 
-# Archive a specific slug. Requires the demoted aging threshold to have passed.
+# Explicitly archive an already-demoted slug after confirmation.
+# Unlike review's age-based proposal, this command does not enforce minimum age.
 python -m ctx_lifecycle archive <slug>
 
 # Delete archived slugs that exceeded the delete threshold.
-# Requires typed-slug confirmation per entry even with --auto.
+# Requires typed-slug confirmation per entry; purge has no --auto option.
 python -m ctx_lifecycle purge
 
-# List archived slugs with optional diffs, or restore one.
+# List archived slugs with optional diffs, or prompt for each restoration.
 python -m ctx_lifecycle review-archived --show-diff
-python -m ctx_lifecycle review-archived --restore <slug>
+python -m ctx_lifecycle review-archived --restore
 ```
 
 Filesystem moves: demote → `<skills_dir>/_demoted/<slug>/`, archive →
@@ -116,7 +117,7 @@ python -m kpi_dashboard summary
   or watch-tier entries sorted by (D-streak desc, score asc). These
   are the first slugs `ctx_lifecycle review --auto` will act on.
 - **Archived (restorable)** — every slug currently in the archive
-  tier; still recoverable via `review-archived --restore <slug>` until
+  tier; still recoverable via `review-archived --restore` until
   `purge` deletes them.
 
 ## Configuration

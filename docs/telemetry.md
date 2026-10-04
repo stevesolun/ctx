@@ -21,13 +21,18 @@ Events use the `ctx.telemetry.v1` envelope and OpenTelemetry-style naming:
 - `ctx.cli.run`
 - `ctx.cli.resume`
 
-Outcome and dimensions live in attributes such as `otel.status_code`,
+Event payload dimensions use keys such as `otel.status_code`,
 `ctx.operation`, `ctx.tool.name`, `ctx.result.count`,
 `ctx.selection.selected.count`, `ctx.selection.rejected.count`,
 `ctx.selection.source`, `ctx.selection.selected`, `ctx.usage.attribution`, and
 failure/correlation attributes such as `ctx.run.failure_stage`,
 `ctx.session.previous_trace_id`, `ctx.traceparent.received`, and hashed
 identifiers like `ctx.query.hash`, `ctx.slug.hash`, or `ctx.session.hash`.
+
+OTLP log export prefixes these payload keys with `ctx.payload.`; for example,
+`ctx.operation` becomes `ctx.payload.ctx.operation` and `otel.status_code`
+becomes `ctx.payload.otel.status_code`. Envelope fields are exported separately
+as attributes such as `ctx.outcome`, `ctx.source`, and `ctx.duration_ms`.
 
 Every recorded event gets a generated OpenTelemetry-compatible `trace_id` and
 `span_id` when the caller does not provide one. The local envelope also keeps
@@ -217,9 +222,10 @@ raw session id, including when exporting legacy local records that predate
 so treat exported JSONL as local-sensitive if session ids are present.
 
 Identifier hashes are salted by default. ctx first checks the
-`CTX_TELEMETRY_HASH_SALT` environment variable, then any configured
-`privacy.hash_salt`, then an owner-only local salt file at
-`~/.ctx/telemetry/hash-salt`. Set `CTX_TELEMETRY_HASH_SALT` per tenant or
+`CTX_TELEMETRY_HASH_SALT` environment variable, then the variable named by
+`privacy.hash_salt_env` if different, then any configured `privacy.hash_salt`,
+then the owner-only file selected by `privacy.hash_salt_path` (default
+`~/.ctx/telemetry/hash-salt`). Set `CTX_TELEMETRY_HASH_SALT` per tenant or
 deployment when multiple hosts need to correlate the same redacted identifiers.
 Do not commit a literal `privacy.hash_salt` into shared source control.
 
@@ -309,11 +315,11 @@ config = {
 }
 
 preview = preview_traces_export(
-    Path("~/.ctx/telemetry/events.jsonl"),
+    Path("~/.ctx/telemetry/events.jsonl").expanduser(),
     config=config,
 )
 result = export_traces(
-    Path("~/.ctx/telemetry/events.jsonl"),
+    Path("~/.ctx/telemetry/events.jsonl").expanduser(),
     config=config,
 )
 ```
@@ -359,7 +365,7 @@ record_counter("ctx.api.requests", attributes={"ctx.source": "api"})
 record_histogram("ctx.api.duration", value=42.0, unit="ms")
 
 result = export_metrics(
-    Path("~/.ctx/telemetry/metrics.jsonl"),
+    Path("~/.ctx/telemetry/metrics.jsonl").expanduser(),
     config={
         "metrics": {
             "enabled": True,
@@ -389,11 +395,98 @@ next to the spool as `events.jsonl.export-checkpoint.json`, so later runs export
 only new events. Use `--checkpoint /path/to/checkpoint.json` to choose another
 checkpoint file, or `--all` when you intentionally want to replay the full spool.
 
+Checkpoint compatibility metadata separates acknowledged progress from the salt
+currently available for hashing exported identifiers. It scopes progress to the
+source, signal, sink, destination, and configured salt policy, using digests
+rather than raw paths, endpoints, or keys. With valid compatibility metadata,
+temporary salt file or lock failures and subsequent recovery keep the cursor.
+Automatically regenerating a missing salt also keeps it. Manually replacing the
+selected file salt, changing a selected environment or inline salt, or changing
+the source, signal, destination, or salt policy starts a new export scope.
+Identifier hashing itself retains its
+existing keyed algorithm and unsalted fallback.
+
+Checkpoint rotation follows the key selected by a read-only lookup. A readable
+configured file remains authoritative even when its lock cannot be used for
+payload hashing. Changes to an unused fallback's key or availability do not
+reset progress. The policy records configured selectors independently of their
+availability; a fallback key becomes relevant when the primary key cannot be
+read. Invalid UTF-8 in unused fallback storage is unavailable observation data;
+validation of the key selected for hashing remains strict.
+Automatic salt creation writes an owner-only
+`<hash_salt_path>.generation.json` file containing a version and key fingerprint,
+without the key itself. This lets later exports recognize generation performed
+by ordinary capture or identifier hashing. Keep this file with its salt;
+version 2 checkpoint metadata retains fingerprint-only history for observed
+file keys and generation markers, plus an additive `file_last_known_keys` map
+that retains the last observed fingerprint for each file independently of
+availability and the export cursor. Both survive deliberate rotations,
+policy changes, destination changes and explicit `--all` replay; it never allows
+a cursor to cross those export scopes. Restoring an older observed key with
+its saved generation marker therefore still counts as rotation, including after
+storage loss and a destination reset or explicit replay. Recovering the last
+observed key preserves progress. No raw key
+material is written into checkpoint or generation metadata.
+
+Older checkpoints migrate on a real export, including an export with no pending
+records. Version 1 compatibility metadata is accepted only when its recorded
+availability-dependent policy matches a policy derivable from the currently
+configured selectors and its remaining scope/key checks succeed. Its migration
+seeds history from the key and generation fingerprints it actually retained;
+older generations already discarded by version 1 cannot be reconstructed.
+Restoration detection covers fingerprints retained at migration and observed
+afterward, not unknown pre-migration history. Checkpoints without the additive
+last-known map seed it from retained non-null file-key fingerprints. If an older
+writer already discarded that latest identity but kept unordered history, a
+returning historical key is ambiguous: restore checkpoint metadata that retains
+the latest identity, or explicitly replay with `--all`. An unseen automatically
+generated key still counts as recovery, and an unseen manual replacement resets
+progress.
+Dry-run previews only read this metadata; they never create salts,
+locks, checkpoints, or status files. Preserving a legacy keyed checkpoint's
+cursor requires an available key that matches its historical source and
+destination hashes. When file-key recovery cannot be distinguished from
+rotation, export stops with an actionable identity error instead of silently
+replaying the spool. This
+also covers restoring an older generated key that does not match a legacy
+checkpoint. Restore the original key
+or use `--all` to explicitly replay it. Automatic event and metric capture keeps
+spooling locally if this prevents continuous export.
+An old keyed checkpoint also cannot distinguish a newly configured explicit
+fallback from one already present before a file failure. If that fallback cannot
+establish the old key, the same recovery choice applies. This includes a
+configured environment, inline, or alternate-file fallback whose old value is
+missing **or replaced**, even when every current candidate is readable after
+the primary file lock recovers. A readable primary key alone does not prove
+which key hashed the old checkpoint. Restoring the fallback value lets it
+establish the old hashes and migrate without replay;
+`--all` explicitly starts over. Selecting a new explicit environment or inline
+key still starts a new scope. Implicit default-environment absence alone does
+not trigger this ambiguity rule. A fallback removed from the configuration
+entirely cannot be reconstructed from legacy checkpoint metadata; retain its
+configuration and original key while migrating. Changing only the source
+or destination with a recognizable key starts a new scope; changing both at once
+may leave a legacy checkpoint ambiguous and require `--all` or a fresh checkpoint.
+
+A legacy unsalted checkpoint has no key provenance. Its first available
+file-backed key is treated as storage recovery and adopted without replay;
+the next real export records that adoption, even if no records are pending.
+Later replacements reset the scope. A selected explicit environment or inline key,
+including a global fallback behind an unreadable file, resets an old unsalted
+checkpoint. This legacy ambiguity cannot be
+resolved from old checkpoint contents alone. New checkpoints also record the
+signal explicitly, so sharing a custom checkpoint between signals cannot make
+one signal inherit another's acknowledged progress.
+Legacy event and trace checkpoints lack this signal field: retain their
+dedicated checkpoint files and endpoints until migration. Older exporters do
+not understand compatibility metadata, so do not alternate old and new exporter
+versions against a migrated checkpoint.
+
 The command exits non-zero if the selected exporter or trace preview validation
 fails. Use
 `--fail-on-degraded` when running from cron or CI and you also want malformed
-pending records or checkpoint anomalies to fail the command. Real export
-attempts also write an owner-only status file next to the spool as
+pending records or checkpoint anomalies to fail the command. Attempts that reach
+the exporter also write an owner-only status file next to the spool as
 `events.jsonl.export-status.json`. It records an explicit `status` of `ok`,
 `noop`, `pending`, `partial_success`, `failed`, or `degraded`, plus the
 sink, destination hash,
@@ -611,14 +704,20 @@ raw message text:
 
 | Panel | Query dimensions |
 |---|---|
-| Request volume | count logs grouped by `event.name`, `ctx.source`, `ctx.operation` |
-| Error rate | count logs where `otel.status_code = ERROR`, grouped by `ctx.source` |
-| Exception fingerprints | count logs grouped by `ctx.exception.fingerprint`, `ctx.exception.type` |
+| Request volume | count logs grouped by `event.name`, `ctx.source`, `ctx.payload.ctx.operation` |
+| Error rate | count logs where `ctx.outcome = error`, grouped by `ctx.source` |
+| Exception fingerprints | count logs grouped by `ctx.payload.ctx.exception.fingerprint`, `ctx.payload.ctx.exception.type` |
 | Request traces | trace spans grouped by `service.name`, span name, status, and `ctx.source` |
-| API latency | histogram metric `ctx.api.duration` by `ctx.operation` |
+| API latency | aggregate `ctx.duration_ms` from logs where `ctx.source = ctx-api`, grouped by `ctx.payload.ctx.operation` |
 | CLI/runtime usage | count logs for `ctx.cli.run`, `ctx.cli.resume`, `ctx.runtime_lifecycle.record`, `ctx.mcp.external_tool_call` |
 | Exporter health | status JSON fields `status`, `attempted`, `exported`, `failed`, `malformed_pending_records`, `error_kind` |
 | Spool growth | `event_count`, `malformed_records`, and checkpoint age from `/api/status.json` |
+
+API instrumentation automatically records duration on events. The
+`ctx.api.duration` histogram in the Python example above is optional manual
+instrumentation. To group that custom histogram by operation, supply
+`attributes={"ctx.operation": "recommend_bundle"}` to `record_histogram()` and
+query the exported metric attribute `ctx.metric.ctx.operation`.
 
 Recommended enterprise alerts:
 
@@ -628,7 +727,7 @@ Recommended enterprise alerts:
 | `CtxTelemetryExporterDegraded` | latest export status is `degraded` or `malformed_pending_records > 0` |
 | `CtxTelemetrySilent` | telemetry is enabled but no new event appears during an expected active window |
 | `CtxTelemetrySpoolGrowing` | local spool count grows while checkpoint id stays unchanged |
-| `CtxTelemetryUnhandledExceptions` | new `ctx.exception.fingerprint` appears in prod |
+| `CtxTelemetryUnhandledExceptions` | new `ctx.payload.ctx.exception.fingerprint` appears in prod |
 
 For local dashboard checks, use:
 
@@ -668,8 +767,12 @@ ctx-telemetry-export --sink local_jsonl --output /tmp/ctx-telemetry-export.jsonl
 ctx-telemetry-export --all --sink local_jsonl --output /tmp/ctx-telemetry-replay.jsonl --json
 ```
 
-The exported JSONL should contain the same event ids as the local spool and no
-raw prompt, query, path, repo, stdout, stderr, token, or secret values.
+The replay file created with `--all` should contain the same well-formed event
+ids as the local spool. The incremental export contains only events after its
+checkpoint. Neither output should contain raw prompt, query, path, repo,
+stdout, stderr, token, or secret values. Local JSONL retains raw session ids for
+compatibility, so keep these output files owner-only and treat them as local
+sensitive data.
 
 Inspect the durable exporter status after a real run:
 

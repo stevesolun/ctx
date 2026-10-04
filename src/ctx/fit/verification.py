@@ -45,7 +45,7 @@ VERIFICATION_ENVIRONMENT_ASSUMPTION = (
     "For an installable Python project, CTX Fit builds a campaign environment and "
     "installs it without network access; its build backend and dependencies must be "
     "available without downloading them. "
-    "JavaScript/TypeScript, Go, Rust, and Make verification is supported only when "
+    "JavaScript/TypeScript, Go, Rust, Java/Maven, and Make verification is supported only when "
     "the runtime is usable from the host PATH under an isolated HOME and the "
     "verification dependencies are already available in the repository. Final "
     "verification uses that isolated HOME "
@@ -526,6 +526,32 @@ def _discover_other_ecosystems(root: Path) -> list[VerificationCommand]:
     return found
 
 
+def _discover_maven(root: Path) -> list[VerificationCommand]:
+    """Commands declared by a root Maven project, preferring its own wrapper."""
+
+    if not (root / "pom.xml").is_file():
+        return []
+    wrapper = root / "mvnw"
+    runner = "./mvnw" if wrapper.is_file() and os.access(wrapper, os.X_OK) else "mvn"
+    evidence = "repository Maven wrapper present" if runner == "./mvnw" else "root pom.xml present"
+    return [
+        VerificationCommand(
+            kind="test",
+            command=(runner, "test"),
+            source="pom.xml",
+            confidence="high",
+            evidence=(evidence,),
+        ),
+        VerificationCommand(
+            kind="build",
+            command=(runner, "package", "-DskipTests"),
+            source="pom.xml",
+            confidence="high",
+            evidence=(evidence, "package phase compiles and packages the project"),
+        ),
+    ]
+
+
 _MAKE_TARGET = re.compile(r"^([A-Za-z0-9_.-]+):(?!=)", re.MULTILINE)
 _MAKE_TARGET_KINDS: tuple[tuple[str, VerificationKind], ...] = (
     ("test", "test"),
@@ -566,13 +592,22 @@ _TEST_GLOBS: tuple[str, ...] = (
     "*.spec.ts",
     "*.spec.js",
     "*_test.rs",
+    "test_*.c",
+    "*_test.c",
+    "test_*.cc",
+    "*_test.cc",
+    "test_*.cpp",
+    "*_test.cpp",
+    "test_*.cxx",
+    "*_test.cxx",
 )
 #: How many directory levels below the root are searched. Go packages keep
 #: ``*_test.go`` beside the code in ``internal/a/b/``, and workspace monorepos
-#: keep ``packages/*/tests/``; stopping short of those told repositories with
-#: passing suites that they had no tests, which routed them to "cannot be
-#: evaluated honestly" — the exact inversion this product must never commit.
-_TEST_SCAN_DEPTH = 4
+#: keep ``packages/*/tests/`` and Maven follows ``src/test/java/<package>``;
+#: stopping short of those told repositories with passing suites that they had
+#: no tests, which routed them to "cannot be evaluated honestly" — the exact
+#: inversion this product must never commit.
+_TEST_SCAN_DEPTH = 8
 #: Directories that never hold a repository's *own* tests but often hold
 #: thousands of vendored ones. Walking them is both slow and misleading.
 _TEST_SCAN_SKIP_DIRS: frozenset[str] = frozenset(
@@ -638,6 +673,11 @@ _TEST_CODE_SUFFIXES: frozenset[str] = frozenset(
         ".c",
         ".cc",
         ".cpp",
+        ".cxx",
+        ".h",
+        ".hh",
+        ".hpp",
+        ".hxx",
         ".m",
         ".mm",
         ".sh",
@@ -666,6 +706,22 @@ _TEST_DECLARATION = re.compile(
     # accepted by one and rejected by the other would be reported both as
     # having tests and as having none.
     "|" + _RUST_INLINE_TEST_PATTERN,
+    re.MULTILINE | re.VERBOSE,
+)
+
+_C_FAMILY_TEST_SUFFIXES: frozenset[str] = frozenset(
+    {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"}
+)
+_C_FAMILY_TEST_DECLARATION = re.compile(
+    r"""
+    ^\s*(?:TEST|TEST_F|TEST_P|TYPED_TEST|TEST_CASE|SCENARIO)\s*\(
+                                             # GoogleTest / Catch2 / doctest
+    | ^\s*(?:BOOST_AUTO_TEST_CASE|START_TEST)\s*\(
+                                             # Boost.Test / Check
+    | ^\s*(?:static\s+)?void\s+test\w*\s*\(
+                                             # Unity / CMocka-style C tests
+    | \b(?:assert|static_assert)\s*\(       # hand-written C/C++ tests
+    """,
     re.MULTILINE | re.VERBOSE,
 )
 
@@ -864,7 +920,10 @@ def _find_test_declaration(
             except OSError:
                 unreadable.append(relative)
                 continue
-            if _TEST_DECLARATION.search(text):
+            declares_test = _TEST_DECLARATION.search(text) is not None
+            if candidate.suffix.lower() in _C_FAMILY_TEST_SUFFIXES:
+                declares_test = declares_test or _C_FAMILY_TEST_DECLARATION.search(text) is not None
+            if declares_test:
                 return relative, ()
     return None, tuple(sorted(set(unreadable))[:_TEST_REPORT_LIMIT])
 
@@ -907,6 +966,7 @@ def discover_verification(repo_path: str | Path) -> VerificationInventory:
     warnings.extend(node_warnings)
 
     commands.extend(_discover_other_ecosystems(root))
+    commands.extend(_discover_maven(root))
     commands.extend(_discover_make(root))
 
     test_files, unreadable = _find_test_files(root)

@@ -1,8 +1,7 @@
 """``ctx fit`` — repository-specific AI coding stack optimization.
 
-Milestone 1 scope: understand the repository and report a structured Fit
-profile.  This command performs **no model execution and spends nothing**;
-later milestones add candidate evaluation behind an explicit budget.
+Bare profiling stays free and read-only. Evaluation requires explicit spending
+authority; adopting a winner requires evidence from that same evaluation.
 
 The output deliberately leads with decisions rather than internals. Graph
 statistics, entity taxonomy, and planner detail belong in diagnostic output,
@@ -13,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import shlex
 import sys
 import time
@@ -65,8 +65,9 @@ def register(sub: argparse._SubParsersAction) -> None:
         action="store_true",
         help=(
             "Write the winning configuration into the working tree, showing "
-            "every change first. Runs no git command: review with `git diff`, "
-            "discard with `git checkout`."
+            "every change first. The write itself runs no git command. After writing, "
+            "restore tracked files with `git checkout`; remove newly created untracked "
+            "files yourself. Git cannot restore an overwritten untracked file."
         ),
     )
     parser.add_argument(
@@ -114,7 +115,7 @@ def register(sub: argparse._SubParsersAction) -> None:
     )
 
 
-def _format_profile(profile: FitProfile) -> str:
+def _format_profile(profile: FitProfile, *, suggest_dry_run: bool = True) -> str:
     lines: list[str] = []
     stack = profile.stack or {}
     languages = ", ".join(item["name"] for item in stack.get("languages", [])[:4]) or "unknown"
@@ -208,12 +209,13 @@ def _format_profile(profile: FitProfile) -> str:
         for warning in profile.warnings:
             lines.append(f"  - {warning}")
 
-    lines.append("")
-    lines.append(
-        "Next: `ctx fit --dry-run` shows what a full evaluation would involve."
-        if profile.is_fit_evaluable
-        else "Next: add a declared test suite, then re-run `ctx fit`."
-    )
+    if not profile.is_fit_evaluable or suggest_dry_run:
+        lines.append("")
+        lines.append(
+            "Next: `ctx fit --dry-run` shows what a full evaluation would involve."
+            if profile.is_fit_evaluable
+            else "Next: add a declared test suite, then re-run `ctx fit`."
+        )
     return "\n".join(lines)
 
 
@@ -446,10 +448,24 @@ def _json_payload(
     return payload
 
 
+def _serialize_json(payload: object) -> str:
+    """Render standards-compliant JSON; Python's NaN extensions are forbidden."""
+
+    return json.dumps(payload, indent=2, sort_keys=True, allow_nan=False)
+
+
 def cmd_fit(args: argparse.Namespace) -> int:
     """Run the Fit profiler. Returns a process exit code."""
 
     from ctx.fit.profile import build_fit_profile
+
+    if args.budget is not None and (not math.isfinite(args.budget) or args.budget < 0):
+        print(
+            "error: --budget must be a finite, non-negative number of US dollars "
+            "(for example, --budget 5).",
+            file=sys.stderr,
+        )
+        return 2
 
     if args.json and (args.apply or args.pr):
         # The JSON branch returns before the apply handling, so honouring these
@@ -494,7 +510,7 @@ def cmd_fit(args: argparse.Namespace) -> int:
                 print(_format_plan(plan))
                 print("\nNothing was run and nothing was spent.")
             else:
-                print(json.dumps(_json_payload(profile, args, plan=plan), indent=2, sort_keys=True))
+                print(_serialize_json(_json_payload(profile, args, plan=plan)))
             return 1
 
         if args.json:
@@ -507,13 +523,13 @@ def cmd_fit(args: argparse.Namespace) -> int:
                 "JSON evaluation is plan-only; review this plan and run without "
                 "--json to authorize it interactively or with --yes"
             )
-            print(json.dumps(payload, indent=2, sort_keys=True))
+            print(_serialize_json(payload))
             return 1
 
         # Human output is the pre-spend review, so it must reach the terminal
         # before the provider stack is even imported. JSON cannot prompt or
         # emit a second document; its safe non-interactive contract is --yes.
-        print(_format_profile(profile))
+        print(_format_profile(profile, suggest_dry_run=not args.dry_run))
         print(_format_plan(plan))
         # ``--yes`` may be used with redirected output, where stdout is
         # block-buffered. Ensure the preview is observable before the next
@@ -522,7 +538,7 @@ def cmd_fit(args: argparse.Namespace) -> int:
         profile_rendered = True
         if not _confirm_evaluation(plan, args):
             if args.json:
-                print(json.dumps(_json_payload(profile, args, plan=plan), indent=2, sort_keys=True))
+                print(_serialize_json(_json_payload(profile, args, plan=plan)))
             else:
                 print(
                     "\nNothing was run and nothing was spent. Re-run with --yes "
@@ -554,22 +570,20 @@ def cmd_fit(args: argparse.Namespace) -> int:
 
     if args.json:
         print(
-            json.dumps(
+            _serialize_json(
                 _json_payload(
                     profile,
                     args,
                     plan=plan,
                     recommendation=outcome.recommendation if outcome is not None else None,
                     report=outcome.report if outcome is not None else None,
-                ),
-                indent=2,
-                sort_keys=True,
+                )
             )
         )
         return 0
 
     if not profile_rendered:
-        print(_format_profile(profile))
+        print(_format_profile(profile, suggest_dry_run=not args.dry_run))
     if args.dry_run:
         print(_format_dry_run(profile))
     if plan is not None and not evaluating:
@@ -635,12 +649,28 @@ def _handle_apply(
 
     written = apply_plan(plan, args.repo)
     print(f"\nWrote: {', '.join(written)}")
-    # --apply runs no git command by design, so the review and the undo are the
-    # two the user already trusts. Naming them is the whole handover.
-    print(
-        "Nothing was committed and no branch was created. Review with `git diff`, "
-        f"discard with `git checkout -- {' '.join(written)}`."
-    )
+    # --apply runs no git command by design. That means it cannot know whether a
+    # modified path is tracked, and Git has no preimage for an untracked file.
+    # Recovery advice must preserve that distinction instead of promising that
+    # `git checkout` can restore bytes Git never recorded.
+    print("Nothing was committed and no branch was created.")
+    actions = {artifact.path: artifact.action for artifact in plan.artifacts}
+    for path in written:
+        rendered = shlex.quote(path)
+        if actions.get(path) == "create":
+            print(
+                f"CTX Fit created {path}. Review it with `git status --short -- {rendered}` "
+                f"and `git diff --no-index /dev/null -- {rendered}`. If Git reports it as "
+                f"untracked, remove `{path}` to undo; if it was tracked, restore it with "
+                f"`git checkout -- {rendered}`."
+            )
+        else:
+            print(f"Review the modified {path} with `git diff -- {rendered}` if it is tracked.")
+            print(f"If it was tracked, restore it with `git checkout -- {rendered}`.")
+            print(
+                "If it was untracked, Git cannot restore its previous contents; "
+                "recover those bytes from your own backup or history."
+            )
     return 0
 
 

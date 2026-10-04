@@ -37,6 +37,7 @@ from pathlib import Path
 from ctx.fit.candidates import CandidateConfiguration, render_candidate_user_context
 from ctx.fit.live_runner import AgentDriver, AgentInvocation, AgentOutcome, _symlink_hop_paths
 from ctx.fit.sandbox import SandboxUnavailable, require_sandbox_available, sandboxed_command
+from ctx.fit.workspace_mcp import workspace_mcp_spec
 
 DEFAULT_MAX_ITERATIONS = 25
 
@@ -47,7 +48,7 @@ DEFAULT_PER_TRIAL_BUDGET_USD = 2.0
 # The coding surface is a harness contract, not prompt advice.  One existing
 # filesystem MCP is rooted at the trial subprocess's cwd; built-in CTX tools
 # are disabled and no Git, shell, or network-capable server is attached.
-_WORKSPACE_MCP_SPEC = "filesystem:."
+_WORKSPACE_MCP_SPEC = workspace_mcp_spec()
 _WORKSPACE_TOOL_PATTERN = "filesystem__*"
 
 # Provider HTTPS calls may depend on an enterprise proxy or CA bundle.  These
@@ -158,6 +159,38 @@ class ModelCredential:
     configured: bool
 
 
+_BARE_MODEL_PROVIDER_PREFIXES: tuple[tuple[str, str], ...] = (
+    ("claude", "anthropic"),
+    ("gpt-", "openai"),
+    ("chatgpt-", "openai"),
+    ("o1", "openai"),
+    ("o3", "openai"),
+    ("o4", "openai"),
+    ("gemini", "gemini"),
+    ("mistral", "mistral"),
+    ("codestral", "mistral"),
+    ("ministral", "mistral"),
+    ("deepseek", "deepseek"),
+)
+
+
+def _bare_model_provider(model: str) -> str | None:
+    """Return a stable provider identity for well-known bare model namespaces.
+
+    Credential routing is an execution fact, not pricing metadata.  In
+    particular, old but still callable models may disappear from LiteLLM's
+    mutable price table while their provider and credential remain unchanged.
+    Explicit ``provider/model`` identifiers are handled by ``ctx run`` itself;
+    this compatibility map covers historical unprefixed applied sidecars.
+    """
+
+    normalized = model.strip().lower()
+    for prefix, provider in _BARE_MODEL_PROVIDER_PREFIXES:
+        if normalized.startswith(prefix):
+            return provider
+    return None
+
+
 def resolve_model_credential(
     model: str,
     *,
@@ -168,10 +201,10 @@ def resolve_model_credential(
     Provider-prefixed models are already understood by ``ctx run``. CTX Fit's
     own unprefixed default is resolved from the provider declared beside that
     default, so clean base installs do not depend on optional LiteLLM metadata.
-    Other bare model names use LiteLLM metadata when the harness extra is
-    installed. The resulting provider is always passed to the same
-    side-effect-free key resolver the harness calls; CTX keeps no second key
-    table here.
+    Historical bare model names first use stable provider namespaces,
+    independently of mutable price metadata. Unrecognized bare identifiers
+    retain the optional LiteLLM catalog fallback. The resulting provider is
+    always passed to the same side-effect-free key resolver the harness calls.
     """
 
     from ctx.cli.run import _resolve_api_key_env
@@ -179,6 +212,9 @@ def resolve_model_credential(
 
     provider: str | None = DEFAULT_MODEL_PROVIDER if model == DEFAULT_MODEL else None
     name = _resolve_api_key_env(None, model, provider)
+    if name is None:
+        provider = _bare_model_provider(model)
+        name = _resolve_api_key_env(None, model, provider)
     if name is None:
         try:
             import litellm
@@ -189,8 +225,7 @@ def resolve_model_credential(
             entry = table.get(model) if isinstance(table, dict) else None
             candidate = entry.get("litellm_provider") if isinstance(entry, dict) else None
             if isinstance(candidate, str) and candidate:
-                provider = candidate
-                name = _resolve_api_key_env(None, model, provider)
+                name = _resolve_api_key_env(None, model, candidate)
 
     source = os.environ if environment is None else environment
     return ModelCredential(
@@ -398,7 +433,7 @@ def _runtime_read_access(
 ) -> tuple[tuple[Path, ...], tuple[Path, ...]]:
     """Trusted provider runtime trees and exact multihop executable paths."""
 
-    roots: list[Path] = [Path(__file__).resolve().parents[2]]
+    roots: list[Path] = [Path(__file__).resolve().parents[2], Path(sys.prefix).resolve()]
     paths: list[Path] = []
     for name in executables:
         hops = _symlink_hop_paths(Path(name))
@@ -433,12 +468,6 @@ def build_agent_driver(
         _require_operational_sandbox({"PATH": os.environ.get("PATH", os.defpath)})
     except SandboxUnavailable as exc:
         raise ProviderUnavailable(f"a trial cannot be isolated: {exc}") from exc
-    npx_executable = shutil.which("npx")
-    if npx_executable is None:
-        raise ProviderUnavailable(
-            "npx is not on PATH, so the workspace filesystem MCP cannot be started"
-        )
-
     _reject_unparsable_command(
         _command(
             binary,
@@ -463,9 +492,7 @@ def build_agent_driver(
                 environment = _trial_environment(
                     Path(runtime_directory), model=invocation.model or ""
                 )
-                read_roots, read_paths = _runtime_read_access(
-                    binary, npx_executable, sys.executable
-                )
+                read_roots, read_paths = _runtime_read_access(binary, sys.executable)
                 isolated = sandboxed_command(
                     command,
                     cwd=invocation.workspace,

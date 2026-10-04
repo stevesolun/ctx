@@ -29,6 +29,7 @@ def _contract(
     scenario: benchmark.Scenario,
     *,
     scenarios_path: Path = SCENARIOS,
+    provider_timeout: float = 5,
 ) -> dict[str, Any]:
     return benchmark.deterministic_bridge_pair_contract(
         scenario=scenario,
@@ -36,7 +37,7 @@ def _contract(
         model="openai/ctx-ab-deterministic",
         timeout=30,
         max_tokens=512,
-        provider_timeout=5,
+        provider_timeout=provider_timeout,
         token_budget=100_000,
     )
 
@@ -257,7 +258,16 @@ def test_deterministic_bridge_pair_uses_current_delivery_and_exact_provider_delt
 ) -> None:
     pytest.importorskip("litellm")
     scenario, cache, scenarios_path = _local_scenario(tmp_path)
-    contract = _contract(scenario, scenarios_path=scenarios_path)
+    # Each arm is a fresh process, so its provider timer includes LiteLLM's
+    # deferred import as well as the loopback request.  Under the parallel full
+    # gate that import alone can approach five seconds; keep the subprocess's
+    # 30-second outer bound while giving this real-adapter check startup room.
+    provider_timeout = 15
+    contract = _contract(
+        scenario,
+        scenarios_path=scenarios_path,
+        provider_timeout=provider_timeout,
+    )
     approval = benchmark.deterministic_bridge_pair_contract_sha256(contract)
     verification_roots: list[Path] = []
     release_factory_calls = 0
@@ -317,7 +327,7 @@ def test_deterministic_bridge_pair_uses_current_delivery_and_exact_provider_delt
         model="openai/ctx-ab-deterministic",
         timeout=30,
         max_tokens=512,
-        provider_timeout=5,
+        provider_timeout=provider_timeout,
         token_budget=100_000,
         approval_digest=approval,
         contract=contract,

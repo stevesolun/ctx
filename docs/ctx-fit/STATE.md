@@ -11,27 +11,116 @@
 
 ## Checkpoint
 
-- Updated: 2026-08-21 (Asia/Jerusalem)
-- Active goal: retire Git LFS safely after CTX Fit 1.0.21
-- Phase: repository and Mac-local cleanup complete; remote LFS purge pending
-- Release decision: **1.0.21 REMAINS RELEASED; LFS MIGRATION MERGED; REMOTE PURGE PENDING**
-- Branch: `main`
+- Updated: 2026-10-04 (Europe/Prague)
+- Active goal: complete the final evidence handoff and remaining delivery phases
+- Phase: document-phase reconciliation complete; starter-command duplicate removed and corrected page verified; prior runtime acceptance remains applicable, and remaining delivery phases belong to the outer executor
+- Release decision: **1.0.21 REMAINS RELEASED; NO NEW RELEASE DECISION**
+- Branch: `codex/full-feature-audit-delivery`
+- Current scope: finish this evidence handoff and correct concrete documentation
+  drift; current story outcomes live only in `qa/feature_status.csv`.
+
+### Historical coordinator checkpoints
+
+The following delivery, status, and scope records preserve earlier checkpoints.
+They do not identify the current isolated worktree or reopen the completed audit.
+See the current document phase below and the canonical CSV for present status.
+
+- Delivered branch: `codex/full-feature-audit-delivery`; verified and
+  delivered product/documentation head `ff0d4301885f0888dfd8e23104291141538cc4f8`
+- Coordinator delivery worktree:
+  `/Users/steves/.codex/worktrees/full-feature-audit-delivery/ctx`
+- Completed run `01M4229GT0BD5FAWR71CFQFHNX` returned **checks-passed**, observer
+  **45597 terminal exit0**. Guarded sync preserved every repair commit. All
+  22 hosted checks passed with two intentional classifier skips. Actual Linux
+  unit job:9,339passed/51skipped,91.26%coverage. Clean-host, uploaded wheel and
+  both macOS/Ubuntu installed-wheel smoke jobs passed. PR286 is draft,
+  unmerged/unreleased. Background merge monitoring is not unfinished repair.
+- Final ff0d4301 local verification: all11 committed-fast lanes passed
+  (373.931s,9,442unit passes/five skips,92.09%coverage); then the exact-final
+  serial preflight passed all20checks (9,442unit passes/five skips in288.24s,
+  92.09%coverage). Drivers93630and80495 are terminal. Both final rendered docs
+  pages passed with431valid local links/anchors, no script errors, and inspected
+  screenshots. No further code repair or full-suite retry is needed for ff0.
+- Final evidence-only handoff must preserve all318 original contracts, history,
+  and remaining six publication-dependent/two owner-decision stories. Detailed
+  evidence: `qa/feature-audit/verification-ff0d4301.md`. The canonical tracker
+  is the only current status ledger; no production/source/docs behavior changes
+  accompany final evidence reconciliation. Do not re-open settled source work
+  or run external publishing, merge, paid evaluation, credential/governance or
+  LFS/Support actions merely to close the remaining rows.
+- Evidence-only handoff acceptance at `8858f019`: independent read-only review
+  **ACCEPT**, no material findings. Exactly14 canonical rows became Retested Pass; all318
+  contracts/mappings/bug records and prefix-preserved history verified. Historical
+  board:177Tested Pass,129Retested Pass,sixNeeds Validation,twoBlocked/Human
+  Decision,fourDeprecated. Focused tracker/bug-smoke/surface checks:
+  **41passed3.02s**; diff whitespace and every retained checksum passed. Reviewer
+  independently corroborated final local logs, pipeline outcome, current hosted
+  jobs/artifact, rendered hashes and open authorization boundaries. These are
+  evidence-only changes on top of ff0; no product source or public-doc behavior
+  changed. Complete their supported final delivery without broadening scope.
+- Historical baseline: run `01M3RWB2ZY374H29CTPEPNSWVH` returned `checks-passed`; observer **6572**
+  is terminal exit 0. Its background PR monitor is not a repair gate. Guarded
+  synchronization preserved every pipeline commit and advanced the clean delivery
+  checkout to `591b26c4`. Hosted run `37160902911` passed: 9,272 unit tests,
+  51 skips, 91.27% coverage; actual clean-host, wheel upload and Linux/macOS
+  wheel smoke succeeded. No merge or release occurred. The original failed
+  hosted run and its four optional-LiteLLM fixture repairs remain recorded below.
+- At that historical baseline, delivery did not resolve review R3. A coordinator external
+  regression still reproduced six failures for present fallback replacement;
+  permanent expanded tests then reproduced 24 failures before source changes.
+  The human authorized the in-scope repairs, which were completed in disjoint
+  telemetry and benchmark lanes before the successful current run. See
+  `qa/feature-audit/telemetry-fallback-repair-20261004.md` for bounded evidence.
+- Previous no-mistakes run: `01M3RV98HW4HQDSM04HA6NRBJG` is **FAILED**; driver
+  session `15506` is terminal, log `/tmp/ctx-feature-audit-delivery-54dfe28a.log`.
+  Intent/rebase completed; review could not launch Codex and no later phase ran.
+  No pipeline fixes or PR were created by that failed run. The independently
+  accepted launcher/tests/docs repair is now committed as `18253e9a`.
+- Exact submitted `18253e9a` local-fast checkpoint passed all 11 lanes,
+  return code 0, `committed_head_only=true`, in 334.256 seconds: 8,981 unit
+  passes, five documented skips, 92.03% coverage. The supplied checkpoint
+  metadata names `/tmp/ctx-feature-audit-fast-18253e9a.log` and original-checkout
+  `.gate/local-fast.json`; this review read the retained log, not that checkout.
+  This is evidence for `18253e9a`, not the later R1/R2 repair commits or current tree
+  or complete delivery. `SEC-002` remains Needs Validation.
+- Human authorization for the remaining R2 compatibility change: “I approve
+  the compatibility repair.” This permits a versioned checkpoint migration
+  that preserves acknowledged progress across salt-storage failure and recovery,
+  while retaining deliberate salt-rotation and destination scoping. The
+  accepted MCP repair and prior commits remain intact. That review repair is
+  complete; the current test-phase evidence appears below. Earlier 312-test
+  evidence alone does not certify the later compatibility implementation.
 - Release commit: `38a33f8784e2bf408430a98fed81206c2cf39d00`
 - Release tag object: `a7b8e78559fda1d44dca844393458272071ae89b`
 - LFS migration PR: `https://github.com/stevesolun/ctx/pull/275`
 - Cleanup checkpoint PR: `https://github.com/stevesolun/ctx/pull/276`
-- Follow-up scope at checkpoint:
-  - ask GitHub Support to purge the historical remote LFS objects
-  - add repository/environment protection rules as defense in depth
-  - choose a retention policy before removing Codex task transcripts
-  - user-owned and out of scope: `.scratch/`
-- Parallel execution: complete. Independent product, security, spend,
-  activation, packaging, release, Linux, SBOM, and recovery reviewers accepted
-  the shipped tree. Exact-main Tests run `31914958343`, CodeQL run
-  `31914958371`, and Hugging Face sync `31914958347` are green. Production
-  publish run `31915534546` completed successfully, including reproducible
-  package build, package and graph provenance, CycloneDX attestation, release
-  assets, and PyPI Trusted Publishing.
+- Original audit scope:
+  - reconcile every shipped behavior with one canonical user-story row in
+    `qa/feature_status.csv`
+  - execute each story's current verification, record every defect, fix
+    reproduced logistical/UX defects test-first, and retest the same behavior
+  - perform independent architecture/code and public-documentation reviews
+  - reproduce, fix, and reply to applicable open GitHub issues
+  - preserve user-owned and out-of-scope `.scratch/`
+- Historical parallel-execution checkpoint: all 314 active stories and four historical rows have
+  received clause-by-clause coverage review. The coordinator owns CSV writes;
+  297 rows carry passing local acceptance evidence (179 tested, 118
+  retested); CLI-043 and LANE-D-004 are Needs Validation after the shared
+  fallback-replacement repair, not certified by older gates. Fifteen need validation, two have
+  explicit owner prerequisites, and four are deprecated. The real optional SkillSpector scan passed under
+  network denial with no credentials or model call, including coordinator
+  replay. The actual clean-host script now tests installed dashboard HTTP;
+  coordinator replay and independent semantic review passed. Independent code
+  and prose lanes accepted the remaining repair families; 35 current defect
+  records were appended to 65 canonical rows with original-contract hash
+  guards. Those audit source writers froze; final independent metadata review
+  accepted all 65 guarded contracts and historical records with no blocking
+  findings at their recorded checkpoints. The completed review repaired telemetry
+  checkpoint compatibility and telemetry typing; accepted MCP diagnostic and
+  monitor fixture repairs remain intact. Current test evidence is recorded
+  below. Earlier full gates remain
+  valid for their checkpoints, not the later script/test/prose delta. The
+  coordinator owns integration, state, GitHub mutations, and final gates.
 - LFS migration execution: three parallel lanes completed repository resolver,
   workflow migration, and independent storage/identity audit. Merged `main`
   removes the two tracked archive pointers, LFS hooks/rules/fallbacks, and
@@ -52,6 +141,639 @@
   bare mirror, then restarted and verified the daemon. Safe cache and clean
   worktree cleanup reduced the Data volume's rounded used space from 280 GiB to
   262 GiB. No remote LFS object has been purged yet.
+
+## Current isolated document phase (2026-10-04)
+
+- Removed the remaining unsupported `toolbox init` duplicate from the starter
+  page's use-case description. The opening paragraph remains the owner of the
+  supported initialization command. No runtime, template, navigation, or
+  acceptance-contract change accompanies this deletion.
+- Earlier runtime evidence applies to unchanged source; prior page hashes
+  identify the earlier prose. The `ff0d4301` report and checksum are unchanged.
+- Marked superseded coordinator checkpoints and audit goals as historical;
+  current outcomes remain solely in `qa/feature_status.csv`. Updated the next
+  actions to preserve the existing draft PR and avoid duplicate issue updates.
+- Document validation only: `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python -m
+  mkdocs build --strict --site-dir tmp/document-phase-4578394a/site` exited 0
+  (0.52s). Local Chromium inspection returned HTTP 200, confirmed the supported
+  commands and all starter sections, and resolved 46 distinct local link/anchor
+  targets with no page errors. External requests were blocked; the server and
+  browser exited. The full-page screenshot was visually inspected.
+- Corrected page SHA-256:
+  `c291924d89ead75230e243298ffa550d91567f56333e952861859a8207ad68a4`;
+  rendered page SHA-256:
+  `5b9a5fd33f4505bfd5575373c80c285efa96cc0c57e98cb7c17bcd91687f9c42`.
+  Results and screenshots remain under `tmp/document-phase-4578394a/` in this
+  worktree. These hashes identify the document-phase prose delta after
+  `4578394a`; they do not relabel it as earlier committed evidence.
+- DOC-NAV-012 retains its prior runtime acceptance with this new local page
+  evidence. Independent read-only review accepted the duplicate removal and
+  checkpoint clarification. No CLI tests, test suite, lint, gate, delivery,
+  or external mutation ran in this phase.
+- Read-only reconciliation confirmed all 318 contracts unchanged, only
+  DOC-NAV-012 updated in the canonical CSV, preserved prior field prefixes,
+  unchanged status totals, and matching retained checksums. `git diff --check`
+  passed. Remaining configured phases belong to the outer executor.
+
+## Prior isolated handoff test phase (2026-10-04)
+
+- Tested commit: `4578394a7c82091280506890510fd7ef71011437`. The configured
+  `scripts/no_mistakes_run.sh test` baseline was supplied as successful; this
+  phase did not repeat it or run any other pipeline phase, static checks,
+  full-suite selection, GitHub mutation or external publication.
+- Fresh focused command, with the existing trusted Python and current worktree
+  `src` first on `PYTHONPATH`:
+  `python -m pytest -q --no-cov src/tests/test_feature_user_story_tracker.py
+  src/tests/test_dashboard_user_story_tracker.py src/tests/test_bug_smoke_tracker.py
+  src/tests/test_surface_truth.py src/tests/test_toolbox_cli.py`:
+  **53 passed in 3.20s**. Strict local build:
+  `python -m mkdocs build --strict --site-dir tmp/test-phase-4578394a/site`,
+  exit 0 in 0.76s. No dependency installation or assertion change was needed.
+- Actual `toolbox` module `__main__` ran in fresh subprocesses through `runpy`;
+  only `global_config_path` was redirected to a worktree fixture. Initialization
+  exited 0 and persisted exactly five inactive presets; activation exited 0
+  and persisted only `ship-it`; unknown activation exited 1 and preserved the
+  configuration bytes. The transcript and both persisted states are retained.
+- Chromium inspected the actual local `/toolbox/starters/` page: HTTP 200,
+  corrected opening command, all five starter sections and Activation present,
+  **46 distinct local link/anchor targets valid**, no page errors. External
+  requests were blocked. The coordinator inspected opening/full-page screenshots;
+  the full-page image includes the actual activation command block. Source and
+  rendered hashes match the prior R1 checkpoint below. This is local evidence,
+  not deployed Pages acceptance or proof of host agent execution.
+- Evidence directory:
+  `/var/folders/cj/j956f9v920b8wk3wvd8ms2nh0000gn/T/no-mistakes-evidence/01M4269BKK7CWVT7YMKEGYWWYE/`.
+  Replay: `verify_handoff.py`; outputs: `starter-results.json`,
+  `starter-cli-transcript.txt`, `toolboxes-after-init.json`,
+  `toolboxes-after-activation.json`, `starters-opening.png`, and
+  `starters-full-page.png`. A supplemental immediate-scroll screenshot missed
+  the painted code block; follow-up capture probes initially used relative
+  anchor selectors while Material rewrites live links to absolute URLs.
+  `activation-capture-notes.txt` retains this probe setup issue separately from
+  the passing product evidence; source and assertions were not weakened.
+  The corrected TOC-link probe passed with the command visible in the viewport;
+  `starters-activation-settled.png` was also visually inspected.
+- Reconciled only `DOC-NAV-012` to Retested Pass against committed `4578394a`,
+  preserving its R1 bug and historical evidence. The canonical board is again
+  **177 Tested Pass, 129 Retested Pass, six Needs Validation, two
+  Blocked/Human Decision, four Deprecated**. All six publication prerequisites
+  and both owner decisions remain unchanged. This closes the local story
+  contract, not the remaining outer delivery phases.
+- Post-update tracker selection: 15 passed and one schema failure exposed a
+  missing `PASS:` prefix in this phase's new retest entry. The entry was
+  corrected, with no assertion changes; the exact failing schema test then
+  passed in 12.08s. `check_acceptance.py` passed after distinguishing the
+  explicit no-evidence sentinel from substantive historical proof; its probe
+  corrections are retained in `acceptance-check-notes.txt`. The resulting
+  `acceptance-board.json` verifies all 318 original contracts, history prefixes,
+  all retained checksums, the 14 original acceptance transitions and unchanged
+  external prerequisites. Independent read-only corroboration found no issue.
+- Only this row and this operational checkpoint were edited in the test phase.
+  The generated `tmp/test-phase-4578394a/` site and fixture were removed;
+  dedicated evidence and all pre-existing worktree material were preserved.
+- Historical checkpoint preserved: ff0d4301 delivery and its evidence-only
+  handoff remain historical accepted checkpoints; R1 starter-command prose
+  repair passed focused review-phase checks; final committed acceptance was
+  pending outer reconciliation before this test phase. The original
+  `verification-ff0d4301.md` report and checksum remain byte-identical.
+
+## Prior isolated R1 review-phase repair (2026-10-04)
+
+- Starting gate-worktree HEAD: `8858f0191ee42773f6ad363d6a4ca5977f90f9ea`
+  (detached). Only this worktree is used; prior delivery checkout/run paths
+  above are historical, not the active worktree or pipeline for this review.
+- R1 is confirmed local documentation invocation drift: `pyproject.toml`
+  packages the `toolbox` module but no `toolbox` console script. Corrected
+  only the opening `toolbox activate NAME` to
+  `python -m toolbox activate NAME` in `docs/toolbox/starters.md`.
+  The existing module and fixtures already implement activation correctly;
+  product source, entry points and PUBLIC-004 template bytes are unchanged.
+- DOC-NAV-012 alone is reopened pending its original final-tree acceptance
+  contract. Its prior acceptance fields are preserved verbatim in historical
+  notes. All 318 original contracts and the exact 14 accepted ff0 handoff
+  transitions remain intact; the other 317 rows, including all six publication
+  and two owner rows, are unchanged. Pending reconciliation, the board is
+  177 Tested Pass, 128 Retested Pass, seven Needs Validation, two
+  Blocked/Human Decision and four Deprecated. The intended final board remains
+  the earlier 177/129/6/2/4 after DOC-NAV-012 final acceptance.
+- One focused verification round used the existing environment and current
+  worktree `src` on `PYTHONPATH`. Actual `toolbox` module `__main__` execution
+  via `runpy.run_module("toolbox", run_name="__main__")` redirected only
+  `toolbox_config.global_config_path` to an isolated worktree fixture.
+  `init` exited 0 with five inactive starters; `activate ship-it` exited 0
+  and persisted only `ship-it`; unknown activation exited 1 and preserved
+  the configuration bytes. No host user configuration was touched.
+- `python -m pytest -q --no-cov src/tests/test_toolbox_cli.py --basetemp
+  tmp/r1-review-20261004/pytest-temp`: **12 passed in 0.14s**.
+  `python -m mkdocs build --strict --site-dir
+  tmp/r1-review-20261004/site`: exit 0, build completed in 0.42s.
+  Existing dependencies and MkDocs configuration were reused unchanged.
+- Headless Chromium inspected only `/toolbox/starters/` from the local build:
+  **HTTP 200, 75 local links/anchors valid, zero page errors**; the corrected
+  opening command, five starter sections and Activation section were visible.
+  The coordinator inspected the full-page screenshot. External API/font
+  requests were blocked; the loopback server and browser terminated.
+- The first page probe stopped on an exact accessible heading-name assertion:
+  MkDocs adds a permalink marker. Only that probe selector changed to the
+  actual heading IDs; the page/content/visibility assertions stayed intact.
+  Page inspection then passed on the same built files. Passed module, pytest
+  and MkDocs checks were not repeated. This probe failure is retained in the
+  working evidence, not treated as a product failure or silently discarded.
+- Deterministic preservation guard passed: all 318 contracts retained;
+  only DOC-NAV-012 changed; its old history remains prefix-preserved or copied
+  verbatim into notes; all 14 accepted transitions remain; the other 317 rows
+  and five PUBLIC-004 templates are unchanged. `git diff --check` passed
+  before this evidence-only result append. Independent read-only semantic
+  review found no material issue; it is supplemental to the executed proof.
+- Current corrected page SHA-256:
+  `7f06384751c0c80a58516f9abfc259ae4ec76c57e777196f89c39a0dc0596e00`.
+  Rendered `toolbox/starters/index.html` SHA-256:
+  `11a18fe08b47f0525acb6cdaa9e3eac933e46bb677881cad4e7993277bdfd559`.
+  These are post-8858f019 current-page proofs, not prose evidence dated to ff0.
+  The older 34-command evidence remains applicable to source-equivalent
+  behavior; its old starter-page prose hash does not describe this edit.
+- Source SHA-256 values checked equal to ff0:
+  `src/toolbox.py`: `31621ad14c09e5d92ece32f48fc805fbb90149410d4f26a00853457c12f26112`;
+  `src/toolbox_config.py`: `ce7651bc1f563265f0fe234473bbb09a3340fc75b05ca09d4d018ab50ee51d69`;
+  `src/tests/test_toolbox_cli.py`: `db7a52303fbda4e8ed9399bd8f5c0961f3be8ea60848e31d5902a4d237265dbb`;
+  `pyproject.toml`: `c806dd8074b324416eab7ad07f27e1087c8324299b219f0f8224f371b44dd486`.
+- Raw working evidence is under `tmp/r1-review-20261004/`: `verify.py`,
+  `page_inspection.py`, module/pytest/MkDocs logs, `results.json`, and
+  `starters.png`. This ignored directory is local supporting material;
+  durable results and hashes are recorded here and in DOC-NAV-012.
+  `qa/feature-audit/verification-ff0d4301.md` and all existing `SHA256SUMS`
+  bytes remain unchanged. The report's verified checksum remains
+  `62a5cf0ed6770af3da1490b4c0b00c4b4f6a863b689d80d8350a2e18ef257c4c`.
+- No final repair commit exists in this phase. Final committed acceptance,
+  configured gates and delivery belong to the outer executor. This phase
+  does not run full tests/lint, control pipelines, commit, push, publish or
+  alter PR286/issues, credentials, governance, archives or external services.
+
+## Prior isolated test-phase repair (2026-10-04)
+
+- Starting gate-worktree HEAD: `14045187f85606f0e2e9d725e26243421b74d13c`
+  (detached); the original delivery checkout and its operational history were
+  not accessed. `test-1` reproduced as two deterministic failures when the
+  test module's UTC import date preceded execution by one day. A class-local
+  clock fixture makes the same two cases pass; production and assertions are
+  unchanged. All four unmatched-count cases plus eight telemetry cases pass.
+- DOC-1 corrects telemetry dashboard/alert exported keys and automatic API
+  log-duration aggregation. Actual intercepted OTLP output confirms the keys;
+  the optional manual histogram remains documented. Independent source review
+  found no material issue. Evidence and frozen source hashes:
+  `qa/feature-audit/context-clock-telemetry-docs-20261004.md`.
+- All 318 contracts and historical defect evidence are preserved. B-ADAPT-002
+  is now Needs Validation; DOC-NAV-007 and LANE-D-036 remain Needs Validation.
+  Earlier totals below predate this reopening. Original acceptance, rendered
+  page, committed gates and delivery remain pending. No full suite, static
+  checks or pipeline controls ran; the outer executor owns subsequent phases.
+
+## Prior isolated review-phase repair (2026-10-04)
+
+- Starting HEAD in this gate worktree: `03cc9e791059aa9dae8792ce6ff5dd0c300ac520`.
+  Both review findings were confirmed from their real callers. R1 supplies a
+  fixture privacy salt to the safe example's in-process event recorder; R2
+  binds the browser fixture's lifecycle path to its own temporary directory.
+  Production telemetry and monitor behavior are unchanged.
+- Two behavior regressions exercise the actual helper and home-page reader
+  with temporary sentinel defaults. Pre-fix isolated-copy controls failed
+  twice, then 20 focused tests and the actual helper passed. One format-only
+  adjustment passed its affected regression rerun; changed-file Ruff and
+  format checks are green. Source is frozen for explicit fix-review. See
+  `qa/feature-audit/isolation-repair-20261004.md` for commands and source hashes.
+- DASH-001, DOC-NAV-003, DOC-NAV-007 and LANE-D-036 are reopened as Needs
+  Validation; their prior acceptance remains verbatim in notes. Earlier
+  checkpoint totals above predate these four reopened rows. The two added
+  test cases increase the inventory from 9,450 to 9,452; the outer executor
+  owns the next full live collection and authoritative gates.
+- The supplied clean-03cc9e79 fast pass is historical for this changed tree.
+  After explicit fix-review and commit, the outer executor must run a fresh
+  committed fast gate before its authoritative PR preflight. This review
+  phase does not control pipelines, commit, push, update PRs/issues, or run
+  full test/lint suites. Draft PR #286, existing telemetry Needs Validation
+  rows, and all owner/external prerequisites remain open.
+
+## Prior CI-phase optional-dependency repair (2026-10-04)
+
+- Starting tree: clean, detached
+  `5607252eb77cbf7f6704781fdc41489b1d38353a`, PR #286. Supplied hosted
+  `unit-linux` output reports four failures, 9,268 passes and 51 skips;
+  coverage passed at 91.26%. `CI required` failed because `unit-linux` failed.
+- Root cause: two credential-routing tests imported optional `litellm`
+  directly, but `unit-linux` installs only `.[dev]`; LiteLLM belongs to the
+  `harness` extra. The tests now inject per-test catalog stand-ins through
+  `monkeypatch.setitem(sys.modules, "litellm", ...)`, preserving the real
+  credential resolver, empty/matching catalog cases and every assertion.
+  Production code, dependency declarations and CI configuration are unchanged.
+- Fresh failing-first reproduction set `sys.modules["litellm"] = None`
+  before `pytest.main(["-q", "--no-cov", "src/tests/fit/test_providers.py",
+  "-k", "bare_anthropic_model_credential or unrecognized_bare_models_keep_catalog"])`:
+  **4 failed, 33 deselected**, all at the direct imports.
+- After the repair, with `PYTHONPATH="$PWD/src"`,
+  `python -m pytest -q --no-cov src/tests/fit/test_providers.py src/tests/test_litellm_provider.py`
+  passed **88 tests in 8.90s** with the installed LiteLLM available. Running
+  the same pytest arguments via `pytest.main` in a fresh Python process after
+  setting `sys.modules["litellm"] = None` passed **88 tests in 4.92s**.
+  These are local macOS checks of the repaired working tree, not a hosted
+  Linux rerun or a complete gate. The coordinator read both results directly.
+  Tested `src/tests/fit/test_providers.py` SHA-256:
+  `e988fddd5e1ea26539a0c998b6626b1d054b77886e30009704dc2f77d288b9e2`.
+- A bounded independent source inspection found no concerns with assertion
+  preservation or per-test restoration of the original module state; that
+  inspection is supplemental to the executed checks above. No other pipeline
+  phase or pipeline-control command ran. Hosted CI must be rerun by the outer
+  executor; full audit completion, `SEC-002` and existing external/human
+  prerequisites remain unverified. Canonical feature statuses are unchanged.
+
+## Prior targeted test-phase evidence (2026-10-04)
+
+- Tested code: `627bb5255c67859457e3b9444d2c5ecfe8000770`. The executor
+  supplied the successful configured PR-preflight baseline; this phase did not
+  repeat the full suite, preflight, static checks or any pipeline-control action.
+  Only this STATE checkpoint was edited in the tracked tree.
+- Fresh focused tests passed for telemetry checkpoint identity and export,
+  workspace/legacy MCP and router behavior, Fit CLI/providers/repository
+  discovery, the five-language task derivation contract, launcher discovery,
+  canonical trackers and public surfaces, and dashboard HTTP privacy/error
+  handling. The Fit CLI selection required its own pytest invocation after a
+  mixed-directory invocation could not resolve `repo_with_history`; the
+  isolated selection passed without source or assertion changes.
+- Existing browser tests passed for dark contrast, mobile overflow, the
+  configuration/harness wizard and public catalog filtering. Captured and
+  visually inspected real Chromium screenshots show the dashboard and catalog;
+  the catalog screenshot uses the production app fragment/styles exercised by
+  its existing browser test, not a deployed Pages site.
+- Fresh CLI-entrypoint subprocesses sent events, metrics and traces to a real
+  loopback HTTP collector. Collector-observed record IDs and persisted
+  checkpoints prove that salt-storage failure/recovery/regeneration preserve
+  acknowledged progress, deliberate rotation replays the spool, previews remain
+  read-only, and HTTP 503 preserves pending records for recovery. Only synthetic
+  configuration was supplied; the exporter and transport were unpatched.
+- Actual `ctx` and `ctx-mcp-server` console commands ran against synthetic local
+  repositories/wiki data with child network access denied. The transcripts show
+  free profile/dry-run behavior and unchanged repository bytes, invalid-budget
+  errors, workspace edits with traversal/symlink refusal, legacy tool access and
+  errors, continued protocol responsiveness, and version negotiation. No model
+  execution or external host interoperability is claimed.
+- A real monitor HTTP/Chromium replay additionally demonstrates secret-shaped
+  session alias navigation and redaction without rewriting the persisted audit,
+  plus explicit unavailable-history alerts and HTTP 503 for invalid UTF-8.
+- Exact commands, source hashes and evidence scope are retained in
+  `test-phase-summary.json` under
+  `/var/folders/cj/j956f9v920b8wk3wvd8ms2nh0000gn/T/no-mistakes-evidence/01M3RWB2ZY374H29CTPEPNSWVH/`.
+  Product artifacts there include `mcp-cli-transcripts.md`,
+  `fit-repository-before-after.json`, `telemetry-cli-evidence.json`,
+  `telemetry-cli-transcript.txt`, `monitor-http-responses.json`, and the actual
+  browser PNG/HTML captures. The coordinator read the execution output and
+  artifacts directly. Synthetic working-tree fixtures were removed; existing
+  outer-run artifacts were preserved.
+- No product defect was reproduced and no production/test code or canonical
+  status changed. The CSV remains 318 rows: 299 local passes, 13 Needs
+  Validation, two owner prerequisites and four deprecated. `SEC-002` remains
+  Needs Validation. Complete delivery, the PR, required hosted CI and existing
+  external/human prerequisites remain with their respective owners; this local
+  test phase does not certify full audit completion.
+
+## Prior targeted test-phase investigation (2026-10-04)
+
+- Starting tree: `91cb979fc4d5234c4664cb482c1c51fabc920e16`, clean, detached
+  delivery worktree. The supplied preflight ended with seven failures, 9,368
+  passes and five skips; that failed gate remains failed.
+- Replayed all seven named cases without source or test changes: the four
+  containment/holdout cases passed in 12.02s and the three query-delivery cases
+  passed in 13.63s. A combined replay of exactly those seven cases with coverage,
+  three xdist workers and file scheduling passed in 9.86s. Commands, scope and
+  retained output digests are in
+  [the test-phase evidence](../../qa/feature-audit/test-phase-91cb979f-20261004.md).
+- The visible original containment traces failed closed on five-second system
+  process-scan timeouts. Query-delivery lock exhaustion under load is plausible,
+  but the original process-test tracebacks and module-mode traceback were
+  truncated. Their historical root causes remain unconfirmed. Independent
+  bounded source inspections identified no justified product or fixture fix;
+  coordinator-read logs establish the current passes.
+- No production code, tests, timeouts, assertions, canonical feature statuses
+  or acceptance contracts changed. No broad suite, static tools, authoritative
+  preflight or pipeline-control command ran in this investigation. Transient
+  coverage data was removed. Full delivery, hosted CI and existing external or
+  human prerequisites remain unverified; `SEC-002` stays Needs Validation.
+
+## Prior authorized combined-transition repair (2026-10-04)
+
+- Starting commit: `84f45ffb4b4ae151ba9066ea5ebdd0c8e106b611`.
+  Human authorization: “continue and fix what is needed”, addressing R2/R3/R6
+  in this existing review phase. Prior commits and accepted MCP/monitor repairs
+  remain intact. The original checkout and user scratch were not accessed.
+- The supplied `/tmp/ctx-feature-audit-fast-84f45ffb.log` was read directly:
+  ten lanes passed; unit execution had **9,295 passed, 5 skipped in 338.27s**
+  with **92.09% coverage**; static failed with **22 mypy errors in three files**.
+  Ruff lint and formatting passed on that head. This prior-head evidence does
+  not certify the current repair tree, and the fast gate remains failed.
+- Source inspection confirmed R2 as a state-model omission: a set of observed
+  generations cannot identify which one was last used after storage outage plus
+  scope reset. R3 discarded absent configured fallback candidates before legacy
+  identity matching. R6 reflects missing heterogeneous/optional annotations and
+  an incomplete previous static verification scope, not changed runtime intent.
+- Failing-first command before any production/type edits:
+  `PYTHONPATH="$PWD/src" python -m pytest -q --no-cov src/tests/test_telemetry_checkpoint_identity.py -k 'retains_last_file_key_through_unavailable_resets or legacy_fallback_checkpoint_rejects_ambiguous_recovery_until_resolved or continuous_capture_retains_records_during_legacy_fallback_ambiguity'`.
+  **26 failed, 18 passed, 222 deselected in 3.11s**, exit 1,
+  `.gate/review-r6-red.txt`. Failures cover restoration of A after outage and
+  endpoint/replay reset (including inline/file policy detours), independently
+  calculated legacy B-HMAC checkpoints, and continuous event/metric capture.
+  Recovering the last generation B passed the controls.
+- The additive fingerprint-only `file_last_known_keys` map now retains the
+  last readable identity independently of current availability and cursor scope.
+  It survives scope resets, explicit replay and inactive-file policy detours.
+  Existing metadata seeds it from retained file fingerprints; old metadata that
+  already lost the latest value refuses ambiguous returning historical keys.
+  Explicit replay or restoring complete checkpoint metadata resolves that case.
+  Legacy matching now retains missing explicitly configured candidates, while
+  implicit default-environment absence alone is not ambiguous. Selected-key
+  validation, payload hash algorithms and accepted MCP/monitor fixes are intact.
+- After all fixes and formatting froze, the coordinator ran
+  `PYTHONPATH="$PWD/src" python -m pytest -q --no-cov src/tests/test_enterprise_telemetry.py src/tests/test_telemetry_checkpoint_identity.py src/tests/test_feature_user_story_tracker.py`:
+  **469 passed in 14.91s**, exit 0, `.gate/review-r6-focused.txt` (154 enterprise,
+  302 compatibility and 13 tracker cases). The 80 new cases include combined
+  transitions, independently computed legacy hashes, capture safety, invalid-map
+  rejection, older-field-absent migration and already-lost old-v2 identity.
+- The user's specifically requested full static checks all passed, exit 0,
+  `.gate/review-r6-static.txt`: `python -m ruff format --check src hooks scripts`
+  (**626 files**, 0.166s); `python -m ruff check src hooks scripts` (0.086s);
+  `python -m mypy src` (**no issues in 596 files**, 44.268s). No error ignores,
+  file exclusions, weakened assertions or new dependencies were introduced.
+  No source/test edits followed these checks. These static commands were
+  explicitly authorized for R6; no full test suite, nested pipeline or
+  authoritative gate ran in this phase.
+- Documentation inventory at that checkpoint was 9,384: prior inventory 9,304 plus 80 new cases;
+  this is inventory, not a full-suite result. Both canonical telemetry records
+  preserve all 318 original acceptance contracts and historical bug IDs.
+  Needs Validation sentinel/date/commit/retest fields remain unchanged.
+  Existing verified commit/date fields remain historical; current evidence is
+  bound to the source/test/docs SHA-256 values below.
+- Independent combined-transition re-review accepted with no actionable findings.
+  The reviewer inspected source, tests, migration docs and canonical records,
+  read the red/green/static logs directly and independently matched all four
+  hashes below. No reviewer tests or writes were performed. The assigned review
+  repair is complete; the outer executor owns subsequent phases. Complete
+  delivery, authoritative preflight, hosted CI and external/owner prerequisites
+  remain unverified.
+
+  - `src/ctx/telemetry/__init__.py`: `bbec5790bcf878ee5f9d3592d8e32f65dee7cb096aa0ad47bb94560e5600ed8e`
+  - `src/tests/test_telemetry_checkpoint_identity.py`: `03a0d6cc9542da3afa78ac7dd5779f3bd76a02d31a8b9aa102398f2602b0de5a`
+  - `src/tests/test_enterprise_telemetry.py`: `846e29de771a6b0c9635d46d2eddd30e341cfc63779065297250c97103eac8a4`
+  - `docs/telemetry.md`: `ec6a8b3faf71b8f117dfe02c85fcc69a10bd6efde007dae9e55a5c0fcf2945d5`
+
+## Historical telemetry and monitor follow-up (2026-10-03)
+
+- Starting commit: `fed56b9f7c8571568f8fcf1eba6cb7d8734c30f0`.
+  Human approval: “continue and unblock what is blocked”, explicitly authorizing
+  observed generation history for R2 plus R3/R4 and the R5 fixture repair.
+  This continues the existing canonical telemetry defect and records the fixture
+  defect on DASH-015; original acceptance contracts and historical evidence remain.
+- Coordinator source inspection confirmed all findings before edits. The
+  checkpoint remembered only the latest generation, policy depended on unused
+  environment availability, and observational fallback decoding could abort
+  capture. The monitor fixture left its runtime-history reader outside isolation.
+- Supplied exact-head fast evidence in `/tmp/ctx-feature-audit-fast-fed56b9f.log`
+  was read directly: static formatting rejected `mcp_router.py` and
+  `test_enterprise_telemetry.py`; unit execution ended with **1 failed, 9,201
+  passed, 5 skipped in 559.33s**. The failure was the real HTTP session
+  privacy/navigation test at its five-second response timeout. An isolated
+  diagnostic pass does not erase this gate failure. The original checkout and
+  its `.gate/local-fast.json` were not accessed.
+- Failing-first command, before production or fixture edits:
+  `PYTHONPATH="$PWD/src" python -m pytest -q --no-cov src/tests/test_telemetry_checkpoint_identity.py src/tests/test_ctx_monitor.py -k 'restored_observed_generation or unused_custom_env_availability or selected_custom_env_rotation or malformed_unused_fallback or malformed_selected_key or selected_env_availability or fake_claude_http_runtime_history_is_isolated'`.
+  Result: **33 failed, 18 passed, 400 deselected in 3.65s**, exit 1;
+  `.gate/review-r5-red.txt`. The 32 telemetry failures cover restoration,
+  unused environment toggles/v1 migration, corrupt unused storage and capture.
+  The monitor regression blocked both attempted external runtime reads before
+  I/O, using synthetic fixtures. Selected-key validation and actual environment
+  rotation controls passed.
+- The monitor repair isolates `runtime_lifecycle_path` through its existing
+  fixture seam, retains actual HTTP/readers/privacy/navigation assertions, and
+  does not change the timeout. Source inspection of
+  `src/ctx/monitor/services/runtime.py::lifecycle_summary` and
+  `_runtime_tool_summary` confirms full-history aggregation and projection before
+  recent-output slicing. Full history preserves old open escalations, as required
+  by `test_runtime_lifecycle_summary_uses_full_history_for_open_state`.
+  Production aggregate latency remains unmeasured; fixture isolation is not
+  proof of scalability. No speculative production optimization was made.
+- Source/test writers froze with 92 additional telemetry cases and one monitor
+  regression. README and documentation inventory now show 9,304 (the prior
+  9,211 plus these 93 cases); this is inventory, not a full-suite pass.
+- Version 2 retains only safe key/path fingerprints across rotation, policy/scope
+  reset and explicit replay. Stable configured selectors separate policy from
+  unused environment availability; only observational fallback decoding treats
+  invalid UTF-8 as unavailable. Selected-key validation and payload hashing are
+  unchanged. V1 migration seeds only fingerprints present in its metadata;
+  discarded pre-migration history cannot be recovered. Bounded design review
+  added legacy explicit-key activation and policy-detour restoration controls
+  before the final freeze.
+- After all source/test fixes froze and were formatted, the coordinator ran
+  `PYTHONPATH="$PWD/src" python -m pytest -q --no-cov src/tests/test_enterprise_telemetry.py src/tests/test_telemetry_checkpoint_identity.py src/tests/test_ctx_monitor.py src/tests/test_feature_user_story_tracker.py`.
+  **660 passed in 47.85s**, exit 0, `.gate/review-r5-focused.txt`: 154 enterprise
+  telemetry, 222 checkpoint compatibility, 271 monitor and 13 tracker cases.
+  The original HTTP timeout regression, new isolation regression and full-history
+  open-state control all passed. No production or test edits followed this pass.
+- Concurrent bounded static verification passed, exit 0,
+  `.gate/review-r5-static.txt`: `python -m ruff format --check` on the five
+  touched Python files; AST equality against HEAD for MCP source and enterprise
+  telemetry tests; all 318 original acceptance contracts and historical bug IDs
+  preserved; Needs Validation reserved evidence fields unchanged and valid.
+  This is focused formatting/metadata evidence, not the outer static lane.
+- CLI-043, LANE-D-004 and DASH-015 now record this scoped local retest. Prior
+  verified commit/date fields remain historical checkpoint identifiers; current
+  evidence is tied to the following repair-tree SHA-256 values. Independent
+  read-only re-review accepted with no actionable findings after inspecting
+  source, tests, migration docs and canonical records, directly reading all
+  three retained logs, and matching all six hashes below. The reviewer ran no
+  tests and made no writes. Production aggregate latency, full preflight,
+  hosted CI, complete delivery, publication and owner prerequisites remain
+  unverified for this tree. The assigned review phase is complete; the outer
+  executor owns subsequent phases.
+
+  - `src/ctx/telemetry/__init__.py`: `162a0e4aeee1f959b906dc842e2adb48fa16e5258ea2b047432b31eb8e59de4b`
+  - `src/tests/test_telemetry_checkpoint_identity.py`: `7852e1b967052f11bc47755446954762b8079704be48ad875648c317e952bf39`
+  - `src/tests/test_ctx_monitor.py`: `002a1bd558b1b5d3adb65dffb5e933e22c7c7a51747d27f7769fbef907cdce42`
+  - `src/ctx/adapters/generic/tools/mcp_router.py`: `9c594fdf46f83a31b4f92158ec5a74a204022c2b9a09c4e24435070931e2ac80`
+  - `src/tests/test_enterprise_telemetry.py`: `98671f5cc6490abcef6ce8d2f21ef7ac49bd3c91da18683f176f140e8ebd601a`
+  - `docs/telemetry.md`: `459f68134a80abfeeebf57a850017da834bfda0c77cce88c516180d16695a45f`
+
+## Historical approved telemetry checkpoint compatibility repair (2026-09-30)
+
+- Starting commit: `99883b4d69527c4efbbf86d53e0d148939a914e2`.
+  Human authorization: “I approve the compatibility repair.” This is a
+  continuation of `AUDIT-20260930-TELEMETRY-PREVIEW-IDENTITY`, not a new audit
+  or a replacement for its historical evidence. Accepted MCP R1 source and
+  tests are unchanged.
+- Coordinator source inspection confirmed the finding: checkpoint comparison
+  used whichever payload salt was currently available. Reading a salt did not
+  establish that the writer could obtain its lock; generating a key after
+  recovery changed the hashes of already acknowledged progress. A lock check
+  alone would not resolve both transitions.
+- Failing-first command against unchanged starting production source:
+  `PYTHONPATH="$PWD/src" python -m pytest -q --no-cov src/tests/test_telemetry_checkpoint_identity.py`.
+  Result: **46 failed, 15 passed in 31.00s**, exit 1, retained local log
+  `.gate/review-r4-red.txt`. The all-signal cases reproduced duplicate export
+  during lock failure, preview recounting after initial lock failure, and
+  replay after storage recovery. Legacy migration, no-op adoption, missing-key
+  diagnostics, and signal-isolation expectations also exposed missing behavior.
+- The selected design adds versioned checkpoint scope and salt-policy
+  provenance while retaining the existing payload hash algorithms. Independent
+  design review identified the legacy unsalted first-key ambiguity and the need
+  to persist adoption on a real no-op export. Operator policy is documented in
+  `docs/telemetry.md`; previews remain read-only. Further coordinator inspection
+  found that generation can occur during ordinary capture or identifier hashing
+  before export. Generation provenance therefore persists in an owner-only
+  fingerprint sidecar, with no change to the plaintext salt format. Checkpoints
+  remember generation history so automatic recovery is distinguished from
+  deliberate replacement or restoration of a previously observed key.
+- After the source/test writer froze, the coordinator formatted only
+  `src/ctx/telemetry/__init__.py` and
+  `src/tests/test_telemetry_checkpoint_identity.py`, then ran one focused
+  verification command:
+  `PYTHONPATH="$PWD/src" python -m pytest -q --no-cov src/tests/test_enterprise_telemetry.py src/tests/test_telemetry_checkpoint_identity.py src/tests/test_feature_user_story_tracker.py`.
+  Result: **282 passed in 134.13s**, exit 0; local log
+  `.gate/review-r4-focused.txt`. This includes the 115-case new compatibility
+  matrix and the existing telemetry and canonical-tracker checks. The initial
+  61-case red matrix was extended with 54 cases before this final focused run.
+  No broad tests, lint, preflight, pipeline control, or external delivery ran.
+- That first candidate added 115 cases. The follow-up below adds 15 more, raising
+  the documented test inventory from 9,081 to 9,211; README and the docs index
+  retain the explicit inventory label. This arithmetic is not a claim that
+  the full inventory passed on the current repair tree.
+- Exact SHA-256 identities of the first, 282-pass candidate over `99883b4d`
+  (superseded by the follow-up below):
+
+  | File | SHA-256 |
+  | --- | --- |
+  | `src/ctx/telemetry/__init__.py` | `6d23a07991c16c34adb8a2b12ea4bd1bd71bdc139fdcf90f3dc6711d6d748442` |
+  | `src/tests/test_telemetry_checkpoint_identity.py` | `d10a406916d2c7d30f2febeb70c632a38baea37cd2a8097b5d981054897e2d11` |
+  | `src/tests/test_enterprise_telemetry.py` (unchanged) | `569daf5b28eeec8ad978e03e7a965f4be725cc9c378e29cb257f0fe1eba183f1` |
+  | `docs/telemetry.md` | `ad494a97c847f3eeffaf0e0ae07dae6b5d8cc33e8f93b99811eb5b938f9afbb0` |
+
+- Independent read-only review confirmed those logs and hashes, then found a
+  legacy unsalted checkpoint could be adopted when an unavailable local file
+  selected a newly explicit global inline/custom-environment key. Coordinator
+  reproduction:
+  `PYTHONPATH="$PWD/src" python -m pytest -q --no-cov src/tests/test_telemetry_checkpoint_identity.py -k selected_explicit_global_fallback`
+  produced **6 failed, 115 deselected in 0.35s**, exit 1, log
+  `.gate/review-r4-fallback-red.txt`.
+- Coordinator inspection also found that a readable generated key plus a
+  changed source or endpoint could falsely trigger the legacy unavailable-key
+  guard. Before further source edits,
+  `PYTHONPATH="$PWD/src" python -m pytest -q --no-cov src/tests/test_telemetry_checkpoint_identity.py -k available_generated_key_remains_scoped`
+  produced **6 failed, 121 deselected in 7.61s**, exit 1, log
+  `.gate/review-r4-legacy-scope-red.txt`. These are the same R2 compatibility
+  defect family. The first 282-case pass did not cover them.
+- The follow-up applies both matcher fixes together: selected explicit keys
+  reset an exact legacy unsalted checkpoint; an available key recognized by one
+  historical scope hash identifies a source/endpoint change. A full pair match
+  wins before partial matches are considered. Unmatched keyed legacy identity
+  under unavailable storage remains an actionable error, preserving safety when
+  an existing explicit fallback becomes active after a file failure. The
+  130-case matrix includes three additional controls for this last case.
+- After all follow-up fixes froze, the coordinator repeated only the focused
+  telemetry/compatibility/tracker command above. Result: **297 passed in
+  54.22s**, exit 0, log `.gate/review-r4-final-focused.txt`. This covers the
+  complete 130-case compatibility matrix, existing telemetry tests and 13
+  canonical-tracker checks. No production/test changes followed this pass.
+  Final SHA-256 identities:
+
+  | File | SHA-256 |
+  | --- | --- |
+  | `src/ctx/telemetry/__init__.py` | `d8e8211c68839a17d84ee246e655922600e3c4bbbdd6dce181b00441136fc1a5` |
+  | `src/tests/test_telemetry_checkpoint_identity.py` | `0fd01bb812b28f8d3a57686ff8483008e16c9e4affe8ec2e82d168d9ca5e8365` |
+  | `docs/telemetry.md` | `26e6a2cff969dc5eca1b3c4a2e25983c81568e803bfd07ddd5f63a2915fe8af8` |
+
+- Independent read-only final re-review **accepted with no actionable findings**.
+  The reviewer independently read the final retained result and matched all
+  three final hashes, then checked failure/recovery, legacy migration, explicit
+  rotation, scope changes, read-only previews, durable generation provenance,
+  CAS migration and continuous capture. The reviewer performed no tests or
+  writes. Accepted MCP source/tests remain unchanged. This is bounded review
+  and focused execution evidence, not full-delivery certification. The original
+  `CLI-043` and `LANE-D-004` defect records retain their historical IDs,
+  acceptance contracts, and earlier evidence; current results are supplemental.
+  Both telemetry rows return to Retested Pass. Their recorded commit remains
+  the historical acceptance checkpoint; this repair is identified by the final
+  source/test hashes until the outer executor commits it.
+  The outer executor still owns authoritative preflight and all remaining
+  delivery phases. Complete delivery, publication and owner prerequisites
+  remain unverified.
+
+## Historical audit goal map
+
+This map retains the audit's earlier scope and open questions. Its counts,
+traffic, and pending-gate statements are historical; use the [checkpoint](#checkpoint)
+and `qa/feature_status.csv` for the current handoff and remaining prerequisites.
+
+### Destination
+
+Every externally meaningful behavior shipped by this repository has exactly
+one canonical user story with explicit expected behavior and executable
+verification in `qa/feature_status.csv`. Every story is freshly tested against
+the final tree; every reproduced logistical or UX defect is recorded, repaired
+with the smallest root-cause change, independently reviewed where risk warrants,
+and retested through the same observable behavior. Open repository issues are
+truthfully triaged and resolved or answered, and README, documentation, package
+metadata, and GitHub About describe the same product with synchronized facts
+and working examples.
+
+### Settled decisions
+
+- `qa/feature_status.csv` is the single canonical feature/user-story tracker.
+  The three files under `docs/qa/` remain historical/supporting inputs or
+  canonical-row pointers; this audit will not create a competing spreadsheet.
+- Code, tests, accepted ADRs, and executable behavior outrank stale tracker or
+  prose claims.
+- Bare/read-only product paths may be exercised automatically. No paid provider
+  evaluation is authorized by this audit.
+- Issue comments, labels, and closures wait for reproduced evidence and, where
+  applicable, a verified fix. Triage comments use the repository's disclosure
+  prefix.
+- Remote LFS purging and Codex transcript retention remain recorded residual
+  operations, but do not block this product-behavior audit.
+
+### Initial evidence
+
+- The canonical tracker has 327 unique rows and 27 columns: 198 `Tested Pass`,
+  109 `Retested Pass`, 17 `Needs Validation`, and 3 `Blocked/Human Decision`.
+  Every row currently has the schema's required descriptive fields and a
+  `last_verified_at` value, but most evidence predates this audit and is not
+  accepted as fresh proof.
+- GitHub currently has four open issues (`#274`, `#282`, `#283`, `#285`) and
+  two open Dependabot pull requests (`#268`, `#284`). Issue `#228` was closed
+  after reproduced scope/product review; `#274`, `#282`, and `#285` have
+  evidence-backed maintainer/author questions, and `#283` is in TDD repair.
+- GitHub's available fourteen-day traffic window reports 303 views from 102
+  unique visitors and 698 clones from 139 unique cloners. Repository lifetime
+  unique traffic is not exposed by this API.
+
+### Open questions / frontier
+
+The initial six discovery lanes completed inventory, semantic acceptance
+mapping, issue triage, documentation review, architecture review, and local
+execution. The remaining frontier is narrower, without reducing the destination:
+
+1. Does the new committed tree pass the fast gate and complete no-mistakes
+   sequence, including authoritative PR preflight? Owner: coordinator;
+   no duplicate full-gate run merely for unchanged metadata.
+2. Does the frozen repaired tree pass required hosted CI, and can the durable
+   PR resolve #283? Owner: coordinator; depends on final local verification.
+3. Which remaining deployed, publish, host, OCR, and governance requirements
+   genuinely require external state or owner authority? Owner: coordinator;
+   do not convert missing evidence to a pass or run paid/publication actions
+   simply to make the tracker green.
+
+### Fog and boundaries
+
+- Discovery is complete; exact hosted behavior and optional external services
+  remain unverified until their named evidence exists. New reproduced findings
+  reopen only the affected surface; writers retain disjoint ownership.
+- Paid live-model quality, a new release/tag, external credential rotation,
+  repository deletion/recreation, and unsupported native Windows execution are
+  outside this audit unless separately authorized or required to reproduce an
+  existing supported contract.
 
 ## Product destination
 
@@ -127,11 +849,15 @@ provider call. The required Ubuntu lane proved Bubblewrap, Node, `npx`, the
 optional harness, and zero-spend driver construction without invoking a model.
 This is an evidence limit, not a claim the release makes.
 
-External release settings remain a P2 operational risk: observed `main` and
-the `pypi` environment have no server-side protection rules. The workflow now
-fails closed unless the tag is the exact current `main` head with a successful
-exact-SHA Tests run, but repository settings should still add reviewer/tag
-protection after this release.
+External release settings remain a P2 operational risk. At release, `main` and
+the `pypi` environment had no observed server-side protection rules. The
+2026-09-30 read-only recheck found active main ruleset `15907020`, requiring
+the exact `CI required` check with strict status checks. It contains no
+reviewer-approval rule; the legacy branch-protection endpoint returns 404.
+The shipped workflow also fails closed unless the tag is the exact current
+`main` head with a successful exact-SHA Tests run. Reviewer/tag/environment
+protection remains an explicit owner decision, not something this audit
+silently changes.
 
 ## Verification ledger
 
@@ -263,16 +989,23 @@ path remains unproven. Production PyPI Trusted Publishing succeeded.
 
 ## Immediate next actions
 
-1. Ask GitHub Support to purge all 45 historical LFS objects (12.131 GiB).
-   Pointer removal alone does not release GitHub's billed remote storage.
-2. Recheck billed storage after Support confirms purge and after the next
-   billing-cycle reset.
-3. Add `main`, tag, and `pypi` environment protection rules as defense in depth;
-   the shipped workflow already enforces exact-main and exact-successful-Tests
-   provenance.
-4. Decide whether to permanently remove Codex task history. Archived transcripts
-   older than 30 days account for 3.43 GiB; active transcripts older than 90
-   days account for 0.455 GiB. The current task and recent history must remain.
+1. Use the [current document-phase checkpoint](#current-isolated-document-phase-2026-10-04)
+   and canonical CSV. Earlier gates and page hashes remain evidence for their
+   named snapshots; unchanged runtime evidence remains applicable.
+2. Complete the remaining phases through this existing no-mistakes run. The
+   document phase is complete; its local rendering evidence is recorded above.
+   Retained source/prose hashes certify their named checkpoints, not later
+   documentation edits.
+3. The outer executor owns remaining validation and delivery on the existing
+   branch and draft PR #286. Issue #283 already has the AI-labeled PR update;
+   keep it open and avoid duplicate unchanged messages. No merge, release,
+   publication, or paid-provider run is authorized.
+4. GitHub Support's prepared LFS purge request is at Submit. Wait for explicit
+   action-time confirmation before sending it; no ticket or remote purge
+   exists. Preserve the repository and release assets. Recheck billed storage
+   only after Support confirms the purge.
+5. Reviewer/tag/environment protection and Codex transcript retention remain
+   owner decisions. Do not silently change settings or delete user history.
 
 ### GitHub Support handoff
 
@@ -303,6 +1036,537 @@ Support contact: `https://support.github.com/contact`
 
 ## Checkpoint log
 
+- 2026-10-04: Document phase reconciled `11b582a7` through `627bb525`, preserving
+  the preceding uncommitted test checkpoint and canonical feature statuses.
+  Updated existing user-guide owners for discovery limits, budget validation,
+  MCP response validation, dashboard history errors, and repaired tooling;
+  replaced stale duplicate contracts with owner links. Source and test
+  assertions were read for documentation accuracy; `git diff --check` passed.
+  No tests, builds, pipeline-control action, remote write, or release action
+  ran in this phase.
+
+- 2026-09-30: Source re-review at committed `4e6a61b6`, still within the audit
+  scope relative to `11b582a7`, reopened the same two defect records. R1 still
+  converted malformed tool content into escaped representations before
+  credential redaction. R2 still selected a different preview identity when
+  salt storage was unavailable, despite real export successfully checkpointing
+  with the established unsalted hash. Coordinator failing-first execution on
+  unchanged production source produced **41 failed, 37 passed, 221 deselected
+  in 22.23 seconds**, exit 1: 17 malformed-content failures and 24 degraded
+  salt/fallback failures. The exact command was `PYTHONPATH=src python -m
+  pytest -q --no-cov src/tests/test_mcp_router.py
+  src/tests/test_enterprise_telemetry.py -k
+  'malformed_tool_content_rejects_without_credential_diagnostics or
+  test_non_dict_block or valid_mixed_content_preserves_text_and_safe_summaries
+  or partial_config_export_preview_preserves_checkpoint_and_files' --tb=short`;
+  local raw output is `.gate/review-r3-red.txt`.
+  R1 now rejects malformed block/type/text/mime values before representation
+  and preserves legitimate summaries and cleanup. R2 distinguishes resolved
+  unsalted identity from default lookup at the shared boundary, preserving the
+  exact prefixed SHA-256 fallback and existing keyed HMAC. The 60-case telemetry
+  matrix covers global and partial configurations, a portable non-directory
+  salt parent, existing checkpoints, exact independent digest expectations,
+  before/after file snapshots, and a prohibition on preview creation-helper
+  calls. README/docs inventory advances from 9,028 to 9,081 for 17 added MCP
+  cases and 36 added telemetry combinations; the outer preflight owns the
+  authoritative collection check. Focused repaired-tree verification passed;
+  post-suite independent review accepted R1 but found another R2 storage case.
+  The four existing canonical rows retain the same two defect IDs
+  and all original acceptance contracts; Needs Validation sentinel and blank
+  date/commit/retest fields remain untouched. This phase does not run outer
+  pipeline stages or external/model/release/settings/Support actions. The later
+  document phase owns reconciliation of historical uncommitted-repair wording
+  after committed verification; older checkpoint evidence remains scoped to
+  its named tree.
+- 2026-09-30: With both writers frozen, coordinator ran the single focused
+  post-fix command `PYTHONPATH=src python -m pytest -q --no-cov
+  src/tests/test_mcp_router.py src/tests/test_enterprise_telemetry.py
+  src/tests/test_feature_user_story_tracker.py --tb=short`: **312 passed in
+  7.61 seconds**, exit 0 (299 MCP/telemetry cases and 13 canonical-tracker
+  checks). Local raw output: `.gate/review-r3-focused.txt`. Independent
+  read-only review was started after this pass; it does not substitute for
+  the coordinator's execution evidence. Source/tests remain frozen, identified
+  by SHA-256 below. These results qualify this repair over `4e6a61b6` only;
+  no outer authoritative preflight, lint, docs, push/PR or CI phase ran here.
+
+  - `src/ctx/adapters/generic/tools/mcp_router.py`:
+    `a9fcb8dbebb3903cff3647b82ef7f0c9b6d624d3fd9ca7f632f64ccd6274a159`
+  - `src/ctx/telemetry/__init__.py`:
+    `76c622d437192d3e1c756aa4c2a5508e3a86ddeafcbfa879aadf6bd3d74ed6fb`
+  - `src/tests/test_mcp_router.py`:
+    `7eac1487c74f71a2c31dbaf6b18f2c56ed903e23a99813be4a1146fc0aae6811`
+  - `src/tests/test_enterprise_telemetry.py`:
+    `569daf5b28eeec8ad978e03e7a965f4be725cc9c378e29cb257f0fe1eba183f1`
+- 2026-09-30: Post-suite independent read-only review accepted R1's shared
+  malformed-content boundary and found R2 still incomplete when a nonempty
+  salt is readable but its companion lock is unusable. A directory at
+  `hash-salt.lock` is a portable example: real export requires the writable
+  lock and catches its `OSError`, selecting the existing unsalted/global
+  fallback; preview can read `hash-salt` and selects HMAC. Coordinator source
+  inspection confirmed `_read_or_create_hash_salt` and `file_lock` diverge from
+  the preview branch in this way; this additional edge was not executed.
+  The passing 60-case matrix covers unavailable salt parents, not unusable
+  locks beside readable salts. `CLI-043` and `LANE-D-004` are now Needs Fix
+  under the same defect ID, preserving their historical evidence and original
+  acceptance contracts. The other 13 Needs Validation rows retain all reserved
+  sentinel/blank fields. R1 is accepted; R2's tested improvement is retained
+  without claiming complete resolution.
+  A read-only preview cannot infer every failure of a future writable lock.
+  Reading existing salt before locking would change legacy unsalted checkpoint
+  identity, while matching alternate checkpoint hashes can change salt-rotation
+  behavior. Those compatibility choices were not silently changed; outer
+  re-review must settle them before full R2 acceptance. No source/test changes
+  or additional test executions followed the 312-test pass.
+  Independent final metadata inspection accepted the preserved contracts,
+  defect IDs, reserved fields and reconciled counts. The 13 tracker passes
+  apply to the pre-review-result metadata snapshot; the final Needs Fix and
+  evidence updates received read-only review, not another test execution.
+- 2026-09-30: Review of submitted `18253e9a` against base `11b582a7` confirmed
+  R1 (server-controlled protocol/error diagnostics bypass credential redaction)
+  and R2 (partial-config previews use a different hash identity from exports).
+  A coordinator failing-first run on unchanged production source reproduced
+  all 26 targeted cases: 14 MCP diagnostic cases and 12 event/metric/trace
+  checkpoint cases, 208 deselected, 1.27 seconds, exit 1. The repair omits
+  rejected protocol values, redacts raw JSON-RPC and tool-error messages before
+  exception construction and cleanup, and resolves missing preview identity
+  through the existing global salt fallback with file creation disabled.
+  Independent source review also identified the same fallback issue for an
+  explicit empty bytes salt; this branch is repaired with 12 supplemental
+  cases. Independent bounded source review accepted both repairs and the
+  preserved tracker contracts with no actionable finding. README/docs inventory advances by the 38 added parameter cases
+  from 8,990 to 9,028; the outer preflight owns the full collection check.
+  Exact red command: `PYTHONPATH=src python -m pytest -q --no-cov
+  src/tests/test_mcp_router.py src/tests/test_enterprise_telemetry.py -k
+  'rejected_protocol_version_diagnostic_redacts_credentials or
+  server_error_diagnostic_redacts_credentials or
+  partial_config_export_preview_preserves_checkpoint_and_files' --tb=short`.
+  Raw local output: `.gate/review-repair-red.txt`. The canonical existing rows
+  retain their original IDs, stories, expected behavior, setup and verification
+  contracts. Full delivery, hosted CI and external/human acceptance remain open;
+  no nested pipeline, push, release, paid evaluation or external mutation ran.
+- 2026-09-30: After all source fixes, coordinator ran `PYTHONPATH=src python
+  -m pytest -q --no-cov src/tests/test_mcp_router.py
+  src/tests/test_enterprise_telemetry.py
+  src/tests/test_feature_user_story_tracker.py --tb=short`: **258 passed,
+  1 failed in 6.19 seconds**. All 246 MCP/telemetry tests passed, including
+  the 38 new parameter cases and existing legitimate negotiation/error tests.
+  The failure was the tracker schema: Needs Validation rows reserve both
+  `retest_evidence` and `evidence` rather than accepting partial checkpoint
+  results there. Moved SEC-002 checkpoint details to `notes` and retained its
+  original reserved field values and non-pass status. The first one-case
+  schema retest exposed the second reserved field (1 failed, 0.16 seconds);
+  the final retest passed (1 passed, 0.16 seconds). Exact retest command:
+  `PYTHONPATH=src python -m pytest -q --no-cov
+  src/tests/test_feature_user_story_tracker.py::test_canonical_tracker_schema_paths_status_and_freshness_are_valid
+  --tb=short`. Raw local logs are `.gate/review-repair-green.txt`,
+  `.gate/review-repair-tracker-retest.txt` and
+  `.gate/review-repair-tracker-retest-2.txt`. No production/test source changed
+  after the 246-test pass. Independent review accepted the eight-file delta;
+  these are bounded review-phase results, not preflight or hosted-CI results.
+  Source/test SHA-256 identities for that pass:
+  - `src/ctx/adapters/generic/tools/mcp_router.py`:
+    `57210616fe51a55f3adabb4c8c4a3a0c8cd0b84f5e8b62153d23e3363a851c0c`
+  - `src/ctx/telemetry/__init__.py`:
+    `53d074fca33e760544c49c92000eae78b3da372119ec1ab98f477770424e635f`
+  - `src/tests/test_mcp_router.py`:
+    `a16d01249a59f421b46fcd96c3f1ce7f2fa7320a8bf9bf6b01518519cd7120e9`
+  - `src/tests/test_enterprise_telemetry.py`:
+    `befac4ee8738399e07d6febe25415520fff6854aa4d372aab29d290dda392698`
+- 2026-09-30: Retained the supplied exact-head `18253e9a` fast result: all
+  11 lanes passed, return code 0, `committed_head_only=true`, 334.256 seconds,
+  8,981 passes, five skips and 92.03% coverage. Read-only inspection of
+  `/tmp/ctx-feature-audit-fast-18253e9a.log` confirms the unit totals and
+  coverage; the original checkout and its `.gate/local-fast.json` were not
+  accessed. That successful checkpoint retires the pending launcher fast-gate
+  action only; it does not qualify this later repair tree or complete delivery.
+- 2026-09-30: Resumed after a Support-only turn (no product-goal progress).
+  The full delivery run remains authoritatively FAILED, with no hidden fixes,
+  branch divergence, or structured synchronization action offered. Accepted
+  the minimal nested-app discovery repair after coordinator replay of all 17
+  wrapper tests and a real stripped-environment version-only launch, plus
+  independent review of nine boundary cases with no P0-P3 findings. Explicit
+  overrides, legacy paths, self-recursion protection, empty-list opt-out, and
+  PATH fallback remain intact. The corresponding CONTRIBUTING paragraph now
+  matches both-override validation. SEC-002 returns to Needs Validation, not
+  Pass: the complete pipeline still must run. Source hashes and red/green
+  evidence are in `qa/feature-audit/launcher-repair-20260930.md`. Generated
+  README/docs inventory is 8,990. A parallel read-only GitHub lane checks for
+  changed issue/PR/traffic state; no Support submission is authorized.
+- 2026-09-30: Full pipeline run `01M3RV98HW4HQDSM04HA6NRBJG` failed before
+  review-agent start: configured repository wrapper cannot find the nested
+  installed CodexCLI binary. Its actual default-path probe also exits127 under
+  `env -i HOME=<user-home> PATH=/usr/bin:/bin ... --version`, although doctor
+  can find `/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex`.
+  `SEC-002` now records `AUDIT-20260930-CODEX-BUNDLE-DISCOVERY` as Needs Fix.
+  The writer owns only wrapper/tests/CONTRIBUTING in the original checkout;
+  global configuration stays unchanged. An adjacent prose error about explicit
+  resource validation is included. No model was invoked; no push/PR occurred.
+  AXI home/status confirm the run is terminal and no branch-sync action is
+  offered. Preserve the tested `53986b36` result as its checkpoint, not proof
+  of this newly exposed launch path.
+- 2026-09-30: Result-only commit `54dfe28a` passed its cheap/docs committed
+  lanes (five checks); all 19 retained bundle hashes pass. The initial delivery
+  invocation refused original-checkout `.scratch/` before creating any run.
+  Created an attached clean linked worktree at the exact same head and branch
+  `codex/full-feature-audit-delivery`, without moving, hiding or staging user
+  files. Full no-mistakes run `01M3RV98HW4HQDSM04HA6NRBJG` now exists there;
+  initial authoritative status is pending. Session `15506` is live. The
+  pipeline owns review/test/docs/lint/fixes/push/PR/CI; coordinator must use its
+  gates, not edit around them. No PR exists yet and no merge is authorized.
+  This original-checkout note is a resumption pointer, not a pipeline-source
+  change; preserve every pipeline commit before any eventual synchronization.
+- 2026-09-30: Exact `53986b36` fast gate completed with exit0: all11 lanes,
+  8,979 unit passes, five documented skips, 92.03% coverage in341.916 seconds.
+  Session50413 is terminal. Durable evidence is
+  `qa/feature-audit/verification-53986b36.md`. The actual clean-host script and
+  two honest host-documentation contracts now pass; external interoperability
+  remains unclaimed. Canonical counts:299pass,13needs-validation,2owner
+  prerequisites,4deprecated. All29 retained source/prose hashes still match.
+  This follow-up changes evidence/state only; full delivery/serial preflight
+  and exact hosted CI remain, along with the explicitly open external rows.
+- 2026-09-30: Committed the accepted installed-dashboard, honest host guide,
+  real scanner evidence, and canonical repair records as `53986b36`. Only
+  user-owned `.scratch/` remained untracked. The exact committed fast gate is
+  running in session `50413`, log `/tmp/ctx-feature-audit-fast-53986b36.log`,
+  four isolated lanes at a time. Its explicit dirty-worktree allowance preserves
+  `.scratch/`; no uncommitted file enters the tested checkout. Initial lanes
+  passed. Recheck this handle before any restart. Latest remote readback still
+  has four unchanged open issues and no audit PR; GitHub traffic remains 303
+  views/102 unique visitors and 698 clones/139 unique cloners, September 15–28.
+  No LFS submission, release, merge, settings change, or paid model call occurred.
+- 2026-09-30: The preceding Support-only turn made no product-goal progress;
+  this continuation applied 35 canonical defect families to 65 rows, retaining
+  original-contract hashes, old bug IDs and external non-passes. Independent
+  final code review accepted seven families after 40 focused and three browser
+  passes; prose review accepted eight families with all 29 retained hashes
+  matching. Actual clean-host dashboard integration received independent
+  ACCEPT after coordinator real-install replay and 18 focused passes. The
+  real optional static-scanner integration is closed with no network, credentials
+  or model call; its disposable 199 MB environment was moved recoverably to
+  Trash, not claimed as freed disk space. New review evidence is retained in
+  `qa/feature-audit/review-refreeze-20260930.md`; the scanner has a compact JSON
+  receipt. Root's latest tracker/surface/clean-host selection passed 56 tests.
+  No current-branch no-mistakes run or PR exists yet; doctor confirms a runnable
+  Codex pipeline agent. Final metadata review subsequently accepted the 35
+  families/65 guarded rows; new committed gates remain. CLI-039's separately
+  corrected checklist is supported by its real scanner receipt, not covered by
+  the 65-row preservation statement.
+  LFS Support remains at Submit with no ticket or purge.
+- 2026-09-30: Acceptance review rejected MAINT-007 closure from the separate
+  installed-wheel probe: the promised clean-host script itself still skipped
+  dashboard HTTP. A bounded writer owns that script/tests/documentation to
+  close the actual contract, rather than narrowing it to the context hook.
+  Another review found several current defects lacked populated canonical
+  bug/repro/fix fields despite passing tests; exact evidence reconciliation
+  is in progress. Earlier local gates stay recorded as checkpoint evidence;
+  final gates will run after the new integration delta is frozen.
+- 2026-09-30: The preceding Support-only turn did not advance product work;
+  this continuation reconciled the actual live gate handle to terminal exit 0.
+  Authoritative preflight at `e187337a` passed all 20 checks, with 8,977 unit
+  passes, five skips, and 92.02% coverage. The coordinator's installed-wheel
+  dashboard replay also passed four real HTTP routes. Independent review found
+  stale review metadata on 41 passed rows; their historical mapping and current
+  acceptance are now distinguished without changing any behavior contract.
+  Two independent lanes are checking remaining closure clauses and a real
+  zero-model optional scanner in a disposable environment. Durable local-gate
+  evidence is `qa/feature-audit/verification-e187337a.md`. No PR, new release,
+  Support submission, or remote LFS purge has occurred.
+- 2026-09-30: The exact `05d16854` fast gate passed all 11 lanes with 8,977
+  unit passes, five documented skips, and 92.02% coverage. Final strict docs
+  build and browser homepage assertions passed; all 3,407 links/anchors across
+  29 navigation pages resolve. Coordinator reran all 79 isolated documentation
+  examples. Thirty-nine independently mapped checklist contracts now carry
+  precise passing evidence; optional/external prerequisites remain explicit.
+  Durable result: `qa/feature-audit/verification-05d16854.md`. Authoritative
+  preflight and remote integration remain; no publication is authorized.
+- 2026-09-30: Committed the accepted test fixture, homepage corrections,
+  canonical executable-row evidence, and portable audit bundle as `05d16854`.
+  All 14 bundle hashes verify; all helpers pass lint/format; the 79 documented
+  examples reran successfully. The 11-lane committed fast gate is running in
+  session `92349`. Read-only parallel lanes are closing checklist evidence and
+  proving installed-wheel dashboard HTTP behavior; no production edits are
+  allowed during verification. GitHub still has four unchanged open issues;
+  About and September 15–28 traffic facts match the earlier readback. No branch
+  push, PR, publication, Support submission, or remote LFS purge has occurred.
+- 2026-09-30: Independent timeout review accepted the bounded fixture repair
+  with no findings after inspecting the frozen failure, tracing lazy import
+  inside the provider timer, and running the exact regression (one passed)
+  plus the full pair file (23 passed). Both arms remain approval-bound to the
+  same allowance; production defaults and all exact correctness guards remain
+  unchanged. Coordinator passed 37 tracker/surface tests, reran real safe
+  graph/telemetry examples, and matched all 29 retained example source hashes.
+  Final committed gate execution is next.
+- 2026-09-30: Resumed after a Support-only handoff (no product progress in
+  that turn). Revalidated the actual dirty tree and dispatched independent
+  timeout review, checklist closure, and remote issue/traffic reconciliation.
+  The timeout writer changed only the real two-process test fixture: its
+  provider allowance is 15 seconds under the unchanged 30-second outer bound;
+  contract/drift tests retain five seconds. Production code is unchanged.
+  Writer evidence is 50 nearby tests plus a parallel cold-import stress pass;
+  independent acceptance and final gates remain required. Canonical executable
+  rows carry 254 specific passing outcomes; 60 checklists remain unverified.
+- 2026-09-30: Committed the reviewed audit as `2f7a6a23`. Ten of eleven
+  committed fast lanes passed, including real clean-host installation,
+  reproducible packaging, browser, docs, static, and similarity. The unit lane
+  finished 8,976 passed / 5 documented skips / 1 failure: the deterministic
+  pair's context arm recorded `provider_timeout` after five seconds and made
+  no provider request. The exact-request guard correctly rejected it. A
+  bounded diagnosis owns only that failure; no green retry has replaced the
+  red evidence. All five integration checks separately passed. Compact durable
+  evidence is `qa/feature-audit/verification-2f7a6a23.md`.
+- 2026-09-30: Opened all 29 rendered documentation navigation pages and
+  checked 3,407 local links/anchors with no missing target. The built catalog
+  correctly hides eleven excluded cards; all four deployed badge targets are
+  reachable but still exhibit the old fifteen-visible-cards defect until
+  deployment. Rendering found stale homepage prerequisites and automatic host
+  execution/budget claims; failing-first documentation assertions and all 21
+  surface tests pass after correction. This prose/test delta remains separate
+  from the implementation commit and requires final committed verification.
+- 2026-09-30: Canonical mapper handoff is frozen: 318 rows comprise 254
+  executable contracts, 60 explicit checklists, and four deprecated contracts.
+  All 314 active contracts have source/assertion mappings; no blanket final
+  pass was recorded. The compact, redacted evidence bundle is retained in
+  `qa/feature-audit/`, including portable reproducers and SHA-256 inventory.
+  Exact release-manifest hydration and real deep validation now pass the full
+  pair: 79,958 nodes, 1,778,069 edges, 1,088,763 semantic edges, all four entity
+  page counts, and 111,652 full archive members. No LFS was used. Remaining
+  safe documentation command examples run in isolated fixtures in parallel
+  with committed verification; those lanes may not modify production source.
+- 2026-09-30: Closed the actual browser-generated harness command acceptance
+  path: the real child CLI, isolated home and empty catalog produce the no-fit
+  plan with provider/model/tools/verification/privacy intact and no injected
+  secret value. The full browser file passed 19 tests; coordinator separately
+  passed four real public-doc browser tests and 66 tracker/surface/stat tests.
+  Global Ruff and formatting (625 files), mypy (595 files), dependency integrity,
+  generated 8,986-test inventory, and GitHub About readback pass. Fresh traffic
+  API evidence still reports 303 views / 102 unique visitors and 698 clones /
+  139 unique cloners for September 15–28. Full graph hydration/deep validation
+  is running; committed fast and authoritative preflight gates are next.
+- 2026-09-30: Resumed the audit after the Support-only turn, which did not
+  advance product verification. The final MCP router suite passed 114 tests;
+  independent review accepted the notification-method/stale-ID diagnostic
+  redaction regression and closed the prior P3. Telemetry sanitizer and
+  lifecycle dry-run repairs also received independent acceptance. All source
+  writers are frozen. The full static pass found six formatting differences
+  and two test typing defects; formatting and explicit type refinements were
+  applied, both targeted regressions passed, and full mypy now passes all 595
+  source files. Final committed gates remain required.
+- 2026-09-30: Completed bounded acceptance lanes: real four-type entity
+  authoring/index/graph integration, atomic maintenance interruption and
+  preservation tests, twelve-threshold CLI aggregation with input hashes,
+  and exact dashboard status/privacy/read-token routes. The latest dashboard
+  acceptance plus monitor run passed 276 tests (writer evidence); archive and
+  deep release-validation slice passed 74. Documentation lanes executed 79
+  isolated examples plus a real no-network graph-only quality projection.
+  Reproducers and compact outputs are being retained under `qa/feature-audit/`.
+  Real SkillSpector execution remains unavailable: no configured binary,
+  installed command, or importable package. There is no shipped
+  `audit-directory` command; that old checklist clause was corrected rather
+  than inventing a new feature.
+- 2026-09-30: Retained dashboard performance evidence records an actual
+  110,283,462-byte runtime archive: first extraction/request 1.079 seconds,
+  warm request 0.00161 seconds. A synthetic 10,000-sidecar KPI corpus takes
+  0.800 seconds cold and 0.027 seconds warm; this is not full-catalog KPI
+  evidence. All 24 real HTTP smoke checks passed. Public catalog CSS now has
+  a real-layout regression proving filtered cards occupy no space; no public
+  site deployment of this uncommitted change has occurred.
+- 2026-09-30: Additional independent refreezes accepted session privacy after
+  fixing a public-alias/raw-ID collision, and accepted related-tool filtering
+  after excluding status-only phantom entries while retaining concretely
+  installable uninstalled capabilities. Coordinator MCP response validation
+  passed 110 real-child/router tests before two additional no-ID notification
+  rejection cases; source and test static checks passed. Coverage closure
+  exposed a five-tool provisioning cap bypass (seven installs); the writer
+  fixed the installation boundary and an independent reviewer accepted it.
+  Its six adjacent suites passed 229 tests (writer evidence).
+- 2026-09-30: Coordinator executed missing-Hugging-Face-token refusal and fork
+  skip steps in isolated uncredentialed shells (exit 1 and 0 respectively),
+  asserted experimental workflow triggers/timing evidence, and parsed both
+  user-service templates. This found the systemd restart-rate settings in the
+  wrong section; moving them to `[Unit]` closed the failing-first regression.
+  The combined workflow/service suite passed 34 tests, Ruff/format/mypy passed,
+  and the launchd template passed `plutil -lint`. No service was installed.
+  The M5 runner is online/idle, but its latest recorded accelerator run
+  `29019837261` is an old cancelled run, not current-tree success.
+- 2026-09-30: Five public telemetry-sanitizer boundary cases established the
+  default key/depth/string/collection limits and exposed two defects: custom
+  key limits were lost in nested values, and non-JSON diagnostic objects could
+  leak an unredacted/unbounded representation. The shared sanitizer now
+  propagates limits and sanitizes that representation through its scalar path.
+  All 134 telemetry/skill-telemetry tests passed; Ruff/format/mypy passed.
+  Independent sanitizer refreeze is pending. The canonical mapper is also
+  correcting unsupported upload/import claims: the shipped Manage page is a
+  manual content CRUD editor, not a file-upload/import wizard.
+- 2026-09-30: Finished semantic mapping of all 318 canonical rows (314 active,
+  four historical), including exact missing acceptance clauses rather than
+  treating broad test paths as proof. The map remains local working evidence
+  at `/tmp/ctx-story-plan/execution-map.json`; the canonical tracker is still
+  `qa/feature_status.csv`. Exact MCP initialize capability assertion and both
+  tracker suites passed (1 + 16 tests, auditor evidence). Independent parser
+  review accepted the nested shell-quote repair after 117 tests; coordinator
+  also passed 173 adjacent authoring/graph tests. Independent workspace MCP
+  refreeze accepted 59 tests, Ruff/mypy, preserved overwrite permissions, and
+  hostile-cwd/PYTHONPATH clean-wheel launch. Its two documented low-severity
+  limits remain: portable compare-to-rename race and buffering a raw stdio
+  line before enforcing its length cap.
+- 2026-09-30: Browser inspection found a public catalog defect not captured by
+  the earlier attribute-only tests: every hidden card still had computed
+  `display:grid` and nonzero height on the deployed site. A dedicated writer
+  owns a real-stylesheet visibility regression and minimal CSS repair; no site
+  publish has occurred. Session privacy is writer-green (268 monitor tests)
+  and awaiting independent review. Related-tool filtering was reopened when
+  independent review showed a bare `status: available` graph node could still
+  be suggested without any concrete installation route. Root reproduced 13
+  malformed JSON-RPC response cases test-first; the corrected boundary now
+  rejects them with `McpServerError` and reaps startup children. Final broad
+  execution and all per-story pass records still require a frozen tree.
+- 2026-09-30: Continuation made implementation and verification progress while
+  Support submission awaits confirmation. Preserved the public filesystem MCP
+  preset's existing tool contract; the bundled server remains Fit-specific.
+  The restored preset plus Fit routing/discovery regressions passed 228 tests.
+  Reproduced unreadable/invalid-UTF8 runtime history failures, then repaired
+  their service, page, home-card, and HTTP API paths: explicit unavailable
+  state, no false zero/healthy counts, and API status 503. Added real HTTP
+  negative delete/no-mutation checks and KPI/grades/runtime/config payload and
+  redaction checks. All 262 monitor tests pass; source/test Ruff and mypy pass.
+  Independently reran all 27 deterministic bridge tests after the writer fixed
+  a real five-connection listener-backlog overflow. The other prior aggregate
+  failure was a fail-closed tree-drift check during concurrent source edits;
+  the final aggregate must run after writers freeze, not while they edit.
+- 2026-09-30: The user signed into the in-app GitHub Support browser. Located
+  the dedicated Repositories → Remove LFS objects form, selected that the
+  repository cannot be deleted/recreated, and prepared the scoped request for
+  all 45 retired objects (13,025,281,486 bytes). The request explicitly protects
+  repository identity/history and release assets, and acknowledges that old
+  LFS pointers will no longer resolve. Reached the final Submit page; submission
+  awaits action-time confirmation. No ticket number or remote purge exists yet.
+  Independent workspace MCP review meanwhile reproduced pathname-swap escape,
+  oversized aggregate output, unbounded traversal, and concurrent-edit loss;
+  its existing writer was reactivated with ownership limited to server/tests.
+  The aggregate unit run completed with 8,853 passed, 5 skipped, and 2 legacy
+  benchmark failures; the prior live-session note below is superseded.
+- 2026-09-30: Resumed the product audit after exhausting safe LFS APIs. The
+  LFS handoff remains pending Support sign-in; there is independent product
+  work available. Reconciled 318 canonical rows (314 needing current evidence,
+  4 deprecated), with all prior stale pass claims cleared. Initial exact
+  command deduplication found 124 commands across 165 executable rows; the
+  remaining 149 checklist rows require semantic acceptance mapping before any
+  pass claim. Found additional stale expectations for the primary CLI, About,
+  and review-enforcement stories and assigned their correction. Synced GitHub
+  About to the tested CTX Fit description and confirmed the remote readback.
+  Removed Node/npx requirements from the Linux live-driver workflow now that
+  its filesystem server ships with CTX; its three focused contracts pass.
+- 2026-09-30: Independent first-wave review reproduced four defects: malformed
+  source registry structures, FIFO-blocking SQLite sidecars, hardlinked SQLite
+  sidecar permission changes, and non-object MCP initialize results. Disjoint
+  writers are closing these with regressions. The registry writer reports 87
+  focused passes; coordinator aggregate verification is still pending. A
+  separate independent review found a P0 in the new workspace MCP launcher:
+  `python -m` from the trial repository permits a malicious local `ctx`
+  package to shadow the bundled server before its digest check. This is an
+  open integration blocker; an isolated-launch fix and real subprocess
+  regression are in progress, with independent revalidation required.
+- 2026-09-30: Stopped the initial aggregate unit run after 1,685 passes and
+  15 missing-catalog failures because the cleanup had correctly removed the
+  optional runtime archive. The manifest-backed 110,283,462-byte runtime test
+  fixture is being hydrated before restarting aggregate validation. This
+  interrupted run is not completion evidence. No paid model was invoked.
+- 2026-09-30: Manifest hydration completed. Fresh browser checks passed all
+  11 tests; the four local integration checks (editable trial environments,
+  reproducible wheel/sdist, and real similarity precision/recall) passed.
+  The repaired registry/SQLite/MCP/provider/workspace selection passed 166
+  tests. Aggregate unit rerun is still live in execution session `66492`,
+  with output `/tmp/ctx-feature-audit-unit.log` and JUnit output
+  `/tmp/ctx-feature-audit-unit.xml`; do not restart without checking that
+  handle. The P0 workspace launcher now uses isolated Python (`-I`) and
+  malicious-cwd/PYTHONPATH subprocess regressions pass; clean-wheel handshake
+  evidence also passes, pending the independent reviewer. Follow-up review
+  found two additional regressions (C-style assertion detection misclassifying
+  Python helpers; lost catalog fallback for bare model credential routing).
+  The Fit writer owns these fixes. C/C++ and Maven additions are static
+  discovery only; task derivation still supports the existing five languages.
+  The story mapper has converted 67 generic checklists to real acceptance
+  commands, retaining 82 unresolved concrete checklists without pass claims.
+- 2026-09-30: User reports GitHub/Support sign-in in Chrome. Native Chrome
+  access is denied by macOS computer-use permissions; both accessible in-app
+  browser tabs still show GitHub's sign-in form. No support ticket has been
+  submitted. Prepared request can be submitted by the user from their signed-in
+  Chrome session; no credentials or cookies should be copied into chat.
+- 2026-09-30: Completed the first parallel discovery wave. Tracker audits found
+  60 rows advertising retired commands, 32 passing rows that execute missing
+  commands, 27 malformed MkDocs commands, 47 prose-only automated steps, and
+  265 rows whose evidence predates referenced code changes. Public smoke found
+  MCP ping and allowlist defects, unsafe Fit apply-recovery advice, redundant
+  dry-run guidance, missing C/C++ and Maven coverage, and telemetry dry-run
+  filesystem writes. Documentation audit found stale GitHub About generation,
+  false `ctx fit --pr` claims, incomplete consent documentation, and an
+  overlong README. Five disjoint TDD writer lanes were dispatched; the
+  independent architecture/code review remains active.
+- 2026-09-30: Applied evidence-backed GitHub triage. Added
+  `enhancement`/`question` labels and comments to issues #274, #282, and #285;
+  labeled #228 `enhancement`/`wontfix`, explained the product/privacy/support
+  mismatch, and closed it as not planned. Every comment carries the required
+  AI-triage disclosure. Issue #283 remains open until the negotiated legacy MCP
+  compatibility patch is implemented and verified.
+- 2026-09-30: Implemented and independently reverified the issue #283 legacy
+  MCP repair. The server negotiates `2025-11-25` and `2024-11-05`, retains the
+  selected revision, answers request-form `ping`, rejects unknown
+  `--allow-tools` values, and still refuses to claim `2026-07-28`. The full MCP
+  suite passed 51 tests; a live initialize/ping subprocess returned valid
+  JSON-RPC; Ruff, format, and mypy passed. External 2025 conformance reported
+  13 passed, 0 failed, and 7 not verified. Issue #283 was labeled and updated
+  with this evidence; it remains open until the branch is integrated.
+- 2026-09-30: Repaired two reproduced local-runtime defects test-first.
+  Telemetry export previews now read existing salt material without creating a
+  lock and use a process-local preview salt when absent; an exact isolated-HOME
+  smoke left the home empty, the full telemetry suite passed 89 tests, and
+  Ruff/mypy passed. SQLite benefit-audit sidecars are now opened through a
+  pinned directory descriptor and disappearance during normal WAL/SHM lifecycle
+  is tolerated without weakening regular-file, owner, or mode checks. The
+  deterministic race regression plus the 21-test store suite and five fresh
+  concurrent-writer repetitions passed; Ruff and mypy passed.
+- 2026-09-30: Repaired installer false-success reporting test-first. A failed
+  starter-toolbox seed now propagates its nonzero status and prints
+  `ctx-init: completed with errors` instead of `done`; successful and
+  already-present paths remain zero. Independent verification passed all 66
+  initializer tests plus Ruff and mypy.
+- 2026-09-30: Reviewed both open Dependabot PRs and their failing job logs.
+  PR #268 updates action SHAs without updating five exact-pin contract tests;
+  its xdist lane also exercises retired LFS-backed A/B tests, and both its unit
+  lane and PR #284 reproduce the benefit-audit WAL/SHM disappearance race now
+  repaired in this tree. PR #284 also moves Ruff from 0.15.20 to 0.16.5,
+  enabling 2,175 findings across the existing tree, so it is not mergeable as
+  a dependency-only update without a deliberate lint migration or splitting
+  Ruff from the otherwise bounded dependency group.
+- 2026-09-30: Retried GitHub's documented LFS-disable API with the authenticated
+  repository owner's OAuth token (`repo` scope) and API version `2026-03-10`:
+  `DELETE /repos/stevesolun/ctx/lfs` again returned HTTP 404, request ID
+  `D343:2BCE4:452C5E9:4562838:6ABCB3C8`. No remote state changed. Recounted the
+  retired inventory at 45 unique objects totaling 13,025,281,486 bytes
+  (12.131 GiB); current `main` contains no LFS paths and the exact replacement
+  archives remain available as attested v1.0.21 release assets. GitHub Support
+  purge remains the only safe route that preserves repository identity, stars,
+  forks, issues, and pull requests.
+- 2026-09-30: Exhausted the remaining authenticated machine interfaces without
+  deleting, recreating, transferring, or rewriting the repository. The active
+  `stevesolun` OAuth token still has repository administrator access (`GET
+  /repos/stevesolun/ctx` returned HTTP 200, request ID
+  `D859:8A8C9:470BF82:474A3E6:6ABCB942`). GitHub's LFS batch API returned the
+  retained object and a download action (HTTP 200, request ID
+  `D747:1DE99C:4397811:42B891C:6ABCB848`), proving that repository access and
+  the remote object both exist. An exact object-scoped `DELETE` against a
+  retired OID returned HTTP 405 with no state change (request ID
+  `D765:2E858D:448AFB4:439E35E:6ABCB867`). The current GitHub.com REST OpenAPI
+  and all 275 public GraphQL mutations contain no LFS object-delete or purge
+  operation; plausible REST object paths returned 404. The standard Git LFS
+  transfer protocol exposes upload/download/verification only. GitHub
+  Support's web application does expose `POST /internal_api/contact`, but it
+  requires a separate signed-in Support browser session: bearer and basic use
+  of the working repository OAuth token both returned HTTP 403 (`You must be
+  signed in to view tickets`) from the corresponding ticket API. No token was
+  printed, no Support ticket was submitted, and no remote repository state
+  changed. The remaining safe action is to authenticate that Support session
+  and submit the prepared purge request through its API.
 - 2026-08-21: Retried the documented `DELETE /repos/stevesolun/ctx/lfs`
   endpoint with GitHub REST API version `2026-03-10`. The active `gh` OAuth
   token has `repo` scope, the authenticated user owns the repository, and the

@@ -2,10 +2,8 @@
 
 !!! info "Part of the recommendation surface, not CTX Fit"
 
-    The product is **CTX Fit** (`ctx fit`): it finds the cheapest AI coding
-    setup that reliably works on a repository. See the [home page](index.md).
-    This page documents the older graph-backed recommendation layer, which
-    still ships and is what the published PyPI release installs.
+    This page documents the shipped legacy recommendation graph. For CTX Fit
+    product usage, see the [home page](index.md).
 
 
 A pre-built weighted graph of skills, agents, MCP servers, and harnesses in the
@@ -105,8 +103,9 @@ Obsidian's native graph view if you prefer it to the web dashboard.
 
 ## How edges are built
 
-Edges are built and explained by the `python -m ctx.core.wiki.wiki_graphify` console script
-(`ctx.core.wiki.wiki_graphify`). A pair must first have at least one base
+Edges are built and explained by the
+`python -m ctx.core.wiki.wiki_graphify` module invocation. A pair must first
+have at least one base
 signal:
 
 1. **Semantic cosine** — when the embedding backend is available, entity
@@ -164,8 +163,9 @@ shared tags.
 
 The legacy CNM ("greedy modularity") algorithm is still available
 behind `CTX_GRAPH_COMMUNITY=cnm` — it's deterministic but O(n²) on
-dense graphs and hangs on the live 13K-node dataset (~50min run was
-killed on 2026-04-27 inside the priority-queue siftup). Louvain is
+dense graphs and hung on the historical 12,934-node curated-core snapshot
+(a ~50min run was killed on 2026-04-27 inside the priority-queue siftup).
+Louvain is
 the default because it finishes in seconds and produces equivalent
 quality clusters for the recommendation use case.
 
@@ -220,10 +220,9 @@ The helper `resolve_graph.load_graph()` does this for you.
 
 The graph backs these recommendation paths:
 
-- Execution recommendation surfaces (`ctx.recommend_bundle`,
-  `ctx.recommend_related`, MCP `ctx__recommend_bundle` /
-  `ctx__recommend_related`, generic harness tools, LoopFlow/agent-loop
-  adapter capability and related recommendations, Claude Code hook suggestions, and
+- Bundle recommendation surfaces (`ctx.recommend_bundle`,
+  MCP `ctx__recommend_bundle`, generic harness bundle tools, LoopFlow/agent-loop
+  adapter capability recommendations, Claude Code hook suggestions, and
   repo-scan advisory output) share
   `ctx.core.resolve.recommendations.recommend_by_tags` for skills,
   agents, and MCP servers. That engine ranks candidates by
@@ -238,6 +237,9 @@ The graph backs these recommendation paths:
   wrong-language rows for local/no-key coding loops. If an older
   extracted wiki has the skill index JSON but no graph nodes for
   those records, the same recommender falls back to the index file.
+- Related recommendations walk graph neighbors of selected IDs. See the
+  [host integration guide](harness/attaching-to-hosts.md#2-python-library-path)
+  for their availability and exclusion rules.
 - Harness recommendations are a separate path for custom/API/local
   model onboarding (`ctx-init --model-mode custom ...`),
   `python -m harness_install`, and LoopFlow/agent-loop adapter calls that pass
@@ -428,9 +430,18 @@ python -m ctx.core.wiki.wiki_graphify \
   --semantic-vector-index numpy-flat
 ```
 
-Then drain pending entity-upsert work with `python -m ctx.core.wiki.wiki_queue_worker --wiki
-~/.claude/skill-wiki`. This is the current repair path for "build index" and
-"attach pending" without adding another command surface.
+`numpy-flat` is exact and portable. `--semantic-vector-index auto` uses the
+portable exact backend below the configured node threshold and can select the
+optional `hnswlib` ANN backend at or above it when installed. Shadow-gate that
+backend before release use.
+
+That graphify run reconciles the current entity set while it builds the index.
+A failed `entity-upsert` follows the queue retry policy. A job whose earlier
+attach was skipped is recorded as successful, so it is not left pending for a
+later worker run. Future entity updates use the new index automatically; to
+revisit an older entity, update it again (which queues a new `entity-upsert`)
+or run the manual attach command above after reviewing its dry-run. The wiki
+queue worker can still drain other ready maintenance work afterward.
 
 Before publishing graph artifacts, run the full rebuild/export path:
 

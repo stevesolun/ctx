@@ -22,10 +22,9 @@ one.
 
     CTX Fit compares capability configurations within one coding-agent
     harness. It does not compare Codex, Claude Code, or other harnesses against
-    one another. It recognizes and can run repository-native verification
-    commands for Python, JavaScript/TypeScript, Go, Rust, and Make, and treats
-    the selected test command as the verification authority. For an installable
-    Python project, CTX Fit builds a campaign environment and installs it
+    one another. It treats the selected repository-native test command as the
+    verification authority. For an installable Python project, CTX Fit builds
+    a campaign environment and installs it
     without network access; its build backend and dependencies must already be
     available without downloading them. In the other ecosystems, verification
     is supported only when the runtime is usable from
@@ -55,24 +54,35 @@ repository profile: detected languages, the AI coding setup already in place,
 the verification commands the repository declares for itself, an agent-readiness
 score with its component breakdown, and the highest-impact improvements.
 
+In the current source, discovery includes C/C++ source and test evidence and
+root Maven projects (`pom.xml`). Maven commands use an executable `./mvnw` when present,
+otherwise `mvn`: `test` for tests and `package -DskipTests` for builds. Discovery
+does not establish evaluation support: historical task derivation remains
+limited to Python, JavaScript, TypeScript, Go, and Rust. A Java or C/C++ profile
+and discovered test command alone do not supply representative Fit tasks.
+
 | Command | What it costs | What it touches |
 | --- | --- | --- |
 | `ctx fit` | nothing; no model call | reads the working tree |
 | `ctx fit --json` | nothing; no model call | reads the working tree, prints the profile as JSON |
 | `ctx fit --dry-run` | nothing; no model call | additionally runs read-only git queries (`log`, `show --name-only`, `ls-tree`, `rev-parse`) to derive representative tasks, then prints the experiment plan and a cost estimate |
 | `ctx fit --test --budget N` | up to `N` dollars | runs candidates and verifies each trial with the repository's own test command |
-| `ctx fit --apply` | nothing beyond the evaluation | writes the winning configuration into your working tree; the write runs no git command, though the evaluation it needs first does |
-| `ctx fit --pr` | nothing beyond the evaluation | creates a branch, commits, **pushes to your remote**, and opens a pull request through `gh` |
+| `ctx fit --test --budget N --apply --yes` | up to `N` dollars for evaluation | writes the winning configuration into your working tree; the write runs no git command, though evaluation does |
+| `ctx fit --test --budget N --pr --yes` | up to `N` dollars for evaluation | creates a branch, commits, **pushes to your remote**, and opens a pull request through `gh` |
 
 `--dry-run` reads history to derive tasks and writes nothing — not to the
 repository, not to the index, not to any ref.
 
-Spending requires two explicit flags. `--test` alone will not spend: without
-`--budget` CTX Fit only plans. Run `ctx doctor` to see whether a real evaluation
-can run where you are. A real evaluation needs
-`pip install "claude-ctx[harness]"`, Node.js with `npx` for the
-workspace-filesystem MCP, a matching provider credential, and Bubblewrap on
-Linux; the base install can profile, plan, and simulate. Without a matching
+Spending requires two explicit flags. `--budget` must be a finite, non-negative
+number of US dollars; negative values, NaN, and infinity exit with an error
+before profiling. Zero is valid input and authorizes no spending.
+`--test` alone will not spend: without `--budget` CTX Fit only plans.
+Run `ctx doctor` to see whether a real evaluation can run where you are.
+A real evaluation needs
+`pip install "claude-ctx[harness]"`, a matching provider credential, and
+Bubblewrap on Linux. The current source uses CTX's bundled filesystem MCP;
+it does not require Node.js or `npx` for Fit's workspace tools. The base install
+can profile, plan, and simulate. Without a matching
 provider credential, `--test` runs in simulation, which proves the pipeline but
 never your repository. With a credential but a missing live prerequisite, CTX
 refuses the run before trial setup. A simulated result is refused as evidence
@@ -109,12 +119,17 @@ and the [packaged Bubblewrap profile](https://gitlab.com/apparmor/apparmor/-/blo
 
 ### `--apply` and `--pr` are different writes
 
-`--apply` writes files into your working tree, on whatever branch you are
-standing on. It prints every proposed change first and, unless you pass
-`--yes`, stops there so you can look. The write itself runs no git command:
-nothing is staged, committed, or pushed. Getting to it does run git — `--apply`
-is refused without evidence from `ctx fit --test --budget N`, and deriving the
-tasks for that evaluation uses the same read-only queries `--dry-run` uses.
+Include `--apply` or `--pr` in the same `ctx fit --test --budget N` invocation.
+CTX Fit does not load evidence from prior evaluations, so either write flag
+alone is refused. `--yes` authorizes both the displayed evaluation plan and
+its resulting write. Without `--yes`, evaluation can be confirmed interactively,
+but a winning result only previews the write; there is no second confirmation
+prompt. Rerunning with `--yes` also reruns the evaluation and can spend again.
+
+`--apply` writes files into your working tree on the current branch, after
+printing every proposed change. The write itself runs no git command: nothing
+is staged, committed, or pushed. Deriving tasks for the evaluation uses the
+same read-only queries `--dry-run` uses.
 
 Each proposed change names the file and whether CTX Fit is *creating* or
 *modifying* it. Today every plan contains exactly one CTX-owned artifact,
@@ -125,14 +140,14 @@ ordinary `ctx run` invocations validate and activate that configuration.
 | It printed | State after the write | Review with | Undo with |
 | --- | --- | --- | --- |
 | `modify: .ctx/fit-configuration.json` | existing sidecar replaced after a compare-and-swap check | `git diff -- .ctx/fit-configuration.json` when tracked; otherwise inspect the file directly | restore the tracked file from version control, or restore your saved copy if it was untracked |
-| `create: .ctx/fit-configuration.json` | new and **untracked** until you add it | `git status --short --untracked-files=all` and inspect the file directly | delete `.ctx/fit-configuration.json` |
+| `create: .ctx/fit-configuration.json` | a previously absent sidecar is written; it may be untracked or a tracked file restored after deletion | `git status --short --untracked-files=all` and inspect the file directly | delete it if untracked; restore it from version control if tracked |
 
 !!! warning "Version control cannot restore an untracked sidecar"
 
     CTX Fit does not rewrite `AGENTS.md`, `CLAUDE.md`, or other user-authored
     instruction files. Their evaluated bytes are embedded in the sidecar
     instead. If an existing untracked sidecar matters to you, save a copy
-    before confirming the write; version-control restore commands cannot
+    before authorizing the write; version-control restore commands cannot
     recover an untracked file.
 
 **`--pr` writes to a remote.** It creates a branch, commits the winning
@@ -199,7 +214,8 @@ routing machinery underneath, useful on its own.
     `ctx-init --model-mode custom --model <provider/model> --goal "<task>"`
     to record the model profile and surface harness recommendations.
 
-Point it at your organization's own tools, or use the pre-built graph, and ctx
+Point it at your organization's own tools, use the pre-built graph, or enrich
+that graph with private knowledge, and ctx
 recommends the smallest useful bundle for the current development window: the
 right skills, agents, MCP servers, and optional harness at the right moment, so
 hosted LLMs burn fewer tokens and local models waste less CPU/GPU work.
@@ -208,7 +224,9 @@ It walks a knowledge graph of **68,494 skill pages, 467 agents, 10,790 MCP serve
 The live execution bundle is skills, agents, and MCP servers only; custom/API/local
 model users and external loop adapters get separate harness recommendations
 after explicit user-owned model consent, ranked by model choice and task goal.
-You decide what to load, install, or adopt.
+You decide what to load, install, or adopt. Install decisions follow the
+persisted per-kind consent selected during `ctx-init`; unload and uninstall
+remain explicit actions.
 
 ### Why this surface exists
 
@@ -256,16 +274,15 @@ graph-based discovery:
   backups are not shipped in the tarball.
 - **52 Louvain communities** group related entities into named
   communities (e.g., *AI + Devops + Frontend*, *Python + API*).
-- PostToolUse and Stop hooks update the wiki automatically during each
-  Claude Code session.
+- Installed PostToolUse and Stop hooks can record tool activity and update
+  quality evidence during a Claude Code session; they require host configuration.
 - Hydrated skills over 180 lines are converted to gated micro-skill
   pipelines so the router can load them incrementally.
-- At session start, the skill-router scans your project and
-  **recommends** the best-matching skills, agents, and MCP servers.
-- Mid-session, the context monitor watches every tool call, detects new
-  stack signals, walks the graph, and **recommends** relevant skills,
-  agents, and MCP servers in real time — **nothing loads or
-  installs without your approval**.
+- A host can scan the project at session start and request relevant skills,
+  agents, and MCP servers from the shared recommender.
+- Mid-session recommendations use observations supplied by an installed hook
+  or host integration. CTX does not automatically observe every tool call in
+  every host. Installation follows the user's per-kind approval policy.
 - Recommendation calls can suppress already selected, rejected, active, or
   baseline context and can filter local/no-key or language-mismatched rows
   before they enter a plan.
@@ -284,7 +301,8 @@ graph-based discovery:
 
     79,958 shipped graph nodes: 12,934 curated skill/agent/MCP/harness nodes plus 67,024 body-backed skill nodes. The graph has
     1,778,069 weighted edges and 52 Louvain communities.
-    Ships pre-built in `graph/wiki-graph.tar.gz` and powers the
+    Published as the manifest-bound GitHub release asset
+    `wiki-graph.tar.gz`; it is not stored in Git or Git LFS. It powers the
     graph-aware recommendations + the pre-ship
     `python -m ctx.core.quality.dedup_check` gate.
 
@@ -305,7 +323,7 @@ graph-based discovery:
     ---
 
     `python -m ctx_monitor serve` opens a local HTTP dashboard over the
-    recommendation surface: live graph, skill grades + four-signal scores,
+    recommendation surface: live graph, skill grades and quality scores,
     session timelines, one-click load/unload for skills, agents, and MCP
     servers, selectable recommendations, runtime token history, plus harness
     wiki and graph browsing. It shows no CTX Fit state. It is served by stdlib
@@ -318,9 +336,10 @@ graph-based discovery:
 
     ---
 
-    Curated councils of skills and agents that fire at session-start,
-    file-save, pre-commit, and session-end. Blocks `git commit` on
-    HIGH/CRITICAL findings. Five starter toolboxes ship out of the box.
+    Curated skill and agent plans for configured session-start, file-save,
+    pre-commit, and session-end triggers. The consuming host executes the plan
+    and records findings; the installed pre-commit hook can block on an existing
+    HIGH/CRITICAL verdict. Five starter toolboxes ship out of the box.
 
     [:octicons-arrow-right-24: Toolbox overview](toolbox/index.md) ·
     [Starter toolboxes](toolbox/starters.md) ·
@@ -331,9 +350,9 @@ graph-based discovery:
     ---
 
     Scans the active repo, detects the stack from file signatures, walks
-    the stack matrix, loads exactly the skills that apply, and can
-    recommend supporting agents and MCP servers. Loop adapters can call
-    the same recommender before each plan.
+    the stack matrix, and recommends relevant skills, agents, and MCP servers.
+    Host integrations decide when to install or load them. Loop adapters can
+    call the same recommender before each plan.
 
     [:octicons-arrow-right-24: Router overview](skill-router/index.md) ·
     [Stack signatures](stack-signatures.md) ·
@@ -356,8 +375,9 @@ graph-based discovery:
 
     ---
 
-    Current main is **v1.0.21** — MIT, tested on CPython 3.11+ for Linux and macOS,
-    8,803 test inventory. Ships seven console scripts led by `ctx` and
+    The latest release is **v1.0.21** — MIT, tested on CPython 3.11+ for Linux and macOS.
+    Current source has a 9,452 test inventory (not a test-pass count).
+    Ships seven console scripts led by `ctx` and
     `ctx-init`. The maintenance
     tools are still shipped and still work, now via `python -m`:
     `ctx_monitor serve` (local dashboard with graph + wiki + load/unload for
@@ -383,14 +403,16 @@ graph-based discovery:
   installed.
 - **Unknown cost stays unknown.** A cost record carries its completeness state,
   and an incomplete record is never compared as if it were complete.
-- **Explicit approval.** ctx can recommend, review, install, update, unload,
-  or uninstall, but it does not mutate live skills, agents, MCP servers, or
-  harness installs without a command or approval path.
+- **Explicit installation policy.** During `ctx-init`, users choose independently
+  whether recommended skills, agents, and MCP servers require approval each
+  time or may be installed under persisted preapproval. That preapproval does
+  not authorize unload or uninstall; those require confirmation or an explicit
+  instruction.
 - **Configurable gates.** Recommendation floors, semantic edge thresholds,
   micro-skill line limits, and harness match floors live in config so teams
   can tune behavior without forking the code.
-- **Token discipline.** Every council run honors `max_tokens` /
-  `max_seconds` budgets.
+- **Token discipline.** Council plans carry `max_tokens` / `max_seconds`
+  budgets. The consuming host must enforce them while executing agents.
 
 ## Before pushing a change to ctx itself
 
@@ -430,14 +452,9 @@ even for docs-only or graph-only changes. Docs changes run public docs
 tracker checks before the strict MkDocs build, including bug-smoke,
 feature, dashboard, and toolbox coverage. Always pass an explicit narrow
 no-mistakes intent so review/test/doc agents validate this branch instead
-of inferring a stale broader goal from local transcripts. Public docs
-surfaces are release-tracked: when
-`mkdocs.yml` adds, removes, or moves a nav `.md` page, or public linked
-assets under `docs/assets/javascripts/`, `docs/services/`, or
-`docs/toolbox/templates/` change, update the relevant supporting ledger
-(`docs/qa/feature-user-story-status.csv` or
-`docs/qa/dashboard-user-story-status.csv`) and the canonical
-`qa/feature_status.csv` with the exact path in `entrypoint_or_route`.
+of inferring a stale broader goal from local transcripts. For public docs
+tracker requirements, follow the
+[contribution guide](https://github.com/stevesolun/ctx/blob/main/CONTRIBUTING.md#documentation-changes).
 Bug-smoke audit rows live in `qa/bug_smoke_status.csv` and are validated
 by the same public docs tracker; `Retested Pass` rows must include `PASS:`
 retest evidence and a closed `next_action` starting with `Closed;`.

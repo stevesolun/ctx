@@ -3432,6 +3432,106 @@ class TestGraphQuery:
         assert reviewer["related_to"] == ["python-patterns"]
         assert "python-patterns" in reviewer["reason"]
 
+    def test_related_keeps_actionable_uninstalled_rows_and_excludes_unavailable_rows(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        graph = nx.Graph()
+        graph.add_node("skill:seed", label="seed", type="skill", tags=["python"])
+        graph.add_node(
+            "agent:local-reviewer",
+            label="local-reviewer",
+            type="agent",
+            tags=["python", "review"],
+        )
+        graph.add_node(
+            "skill:installable-helper",
+            label="installable-helper",
+            type="skill",
+            tags=["python"],
+            status="available",
+            source_catalog="skill-index",
+            install_command="ctx-skill-install installable-helper",
+        )
+        graph.add_node(
+            "skill:a-status-only-helper",
+            label="a-status-only-helper",
+            type="skill",
+            tags=["python"],
+            status="available",
+        )
+        missing_reviewers = [f"agent:missing-reviewer-{index}" for index in range(7)]
+        for node_id in missing_reviewers:
+            graph.add_node(
+                node_id,
+                label=node_id.removeprefix("agent:"),
+                type="agent",
+                tags=["python", "review"],
+            )
+        graph.add_node(
+            "agent:deprecated-reviewer",
+            label="deprecated-reviewer",
+            type="agent",
+            tags=["python", "review"],
+            status="deprecated",
+        )
+        graph.add_node(
+            "agent:rejected-reviewer",
+            label="rejected-reviewer",
+            type="agent",
+            tags=["python", "review"],
+        )
+        for neighbor in (
+            "agent:local-reviewer",
+            "skill:installable-helper",
+            "skill:a-status-only-helper",
+            "agent:deprecated-reviewer",
+            "agent:rejected-reviewer",
+            *missing_reviewers,
+        ):
+            graph.add_edge("skill:seed", neighbor, weight=1.0, shared_tags=["python"])
+
+        graph_path = tmp_path / "graph.json"
+        graph_path.write_text(
+            json.dumps(nx.node_link_data(graph, edges="edges")),
+            encoding="utf-8",
+        )
+        wiki = tmp_path / "wiki"
+        agents = wiki / "entities" / "agents"
+        agents.mkdir(parents=True)
+        for slug in ("local-reviewer", "deprecated-reviewer", "rejected-reviewer"):
+            (agents / f"{slug}.md").write_text(
+                f"---\nname: {slug}\ntype: agent\n---\n# {slug}\n",
+                encoding="utf-8",
+            )
+        toolbox = CtxCoreToolbox(wiki_dir=wiki, graph_path=graph_path)
+
+        related = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="availability-boundary",
+                    name="ctx__recommend_related",
+                    arguments={
+                        "selected": ["skill:seed"],
+                        "rejected": ["agent:rejected-reviewer"],
+                        "max_hops": 1,
+                        "top_n": 3,
+                    },
+                )
+            )
+        )
+
+        rows = {row["id"]: row for row in related["results"]}
+        assert set(rows) == {"agent:local-reviewer", "skill:installable-helper"}
+        assert rows["agent:local-reviewer"]["installable"] is True
+        assert rows["agent:local-reviewer"]["load_status"] == "local-wiki"
+        assert rows["skill:installable-helper"]["installable"] is False
+        assert rows["skill:installable-helper"]["load_status"] == "external-install-required"
+        assert rows["skill:installable-helper"]["install_command"] == (
+            "ctx-skill-install installable-helper"
+        )
+        assert all(row["reason"] for row in rows.values())
+
     def test_missing_seeds(self, toolbox: CtxCoreToolbox) -> None:
         result = json.loads(
             toolbox.dispatch(ToolCall(id="c1", name="ctx__graph_query", arguments={"seeds": []}))

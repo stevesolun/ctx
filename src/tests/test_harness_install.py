@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -33,7 +34,7 @@ def _write_harness_page(
     for key, value in data.items():
         if isinstance(value, list):
             lines.append(f"{key}:")
-            lines.extend(f"  - {item}" for item in value)
+            lines.extend(f"  - {json.dumps(item)}" for item in value)
         else:
             lines.append(f"{key}: {value}")
     lines.extend(["---", "", "# Harness"])
@@ -452,6 +453,74 @@ def test_setup_and_verify_commands_require_explicit_flags(
     assert calls[0][1:] == ["-m", "pip", "install", "-e", "."]
     assert Path(calls[1][0]).name.lower().startswith("python")
     assert calls[1][1:] == ["-m", "pytest"]
+
+
+@pytest.mark.parametrize(
+    ("flag", "expected_marker", "unapproved_marker"),
+    [
+        ("--approve-commands", "setup-ran", "verify-ran"),
+        ("--run-verify", "verify-ran", "setup-ran"),
+    ],
+)
+def test_cli_setup_and_verify_approvals_are_independent(
+    tmp_path: Path, flag: str, expected_marker: str, unapproved_marker: str
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    for kind in ("setup", "verify"):
+        (source / f"{kind}_probe.py").write_text(
+            f"from pathlib import Path\nPath('{kind}-ran').write_text('executed')\n",
+            encoding="utf-8",
+        )
+    wiki = tmp_path / "wiki"
+    _write_harness_page(
+        wiki,
+        repo_url=str(source),
+        setup_commands=[f"'{sys.executable}' setup_probe.py"],
+        verify_commands=[f"'{sys.executable}' verify_probe.py"],
+    )
+    installs = tmp_path / "installs"
+    assert (
+        harness_install.main(
+            [
+                "text-to-cad",
+                "--wiki",
+                str(wiki),
+                "--installs-root",
+                str(installs),
+                "--manifest-dir",
+                str(tmp_path / "manifests"),
+                "--allow-local-source",
+                flag,
+            ]
+        )
+        == 0
+    )
+    target = installs / "text-to-cad"
+    assert (target / expected_marker).read_text(encoding="utf-8") == "executed"
+    assert not (target / unapproved_marker).exists()
+
+
+def test_cli_keep_files_without_uninstall_refuses_before_writing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert (
+        harness_install.main(
+            [
+                "text-to-cad",
+                "--keep-files",
+                "--wiki",
+                str(tmp_path / "wiki"),
+                "--installs-root",
+                str(tmp_path / "installs"),
+                "--manifest-dir",
+                str(tmp_path / "manifests"),
+            ]
+        )
+        == 2
+    )
+    assert "--keep-files requires --uninstall" in capsys.readouterr().err
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_target_must_stay_inside_installs_root(tmp_path: Path) -> None:

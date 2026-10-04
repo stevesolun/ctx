@@ -27,8 +27,6 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 README = REPO_ROOT / "README.md"
 DOCS = REPO_ROOT / "docs"
 MKDOCS = REPO_ROOT / "mkdocs.yml"
-CLI_FIT = REPO_ROOT / "src" / "ctx" / "cli" / "fit.py"
-
 #: The two surfaces that describe `--apply` and `--pr` to a user about to run them.
 WRITE_SURFACES = ("README.md", "docs/index.md")
 
@@ -113,14 +111,6 @@ def _write_section(surface: str) -> tuple[str, str]:
     return _flat(section[:split_at]), _flat(section[split_at:])
 
 
-def _handle_apply_source() -> str:
-    """The body of the CLI handler that prints the post-write advice."""
-
-    source = CLI_FIT.read_text(encoding="utf-8")
-    body = source.split("def _handle_apply(", 1)[1]
-    return body.split("\ndef ", 1)[0]
-
-
 # ---------------------------------------------------------------------------
 # The single line most people read about this project.
 # ---------------------------------------------------------------------------
@@ -169,6 +159,10 @@ def test_docs_front_door_leads_with_ctx_fit() -> None:
 
     lead = text.split("## ", 1)[0]
     assert "ctx fit" in lead.lower(), "the docs home page never names the command"
+    assert "bundled filesystem MCP" in _flat(text)
+    assert "Node.js with `npx` for the workspace-filesystem MCP" not in _flat(text)
+    assert "Every council run honors" not in text
+    assert "The consuming host must enforce" in text
 
 
 def test_release_front_doors_describe_1_0_21_without_old_install_claims() -> None:
@@ -233,6 +227,31 @@ def test_some_nav_page_documents_the_product() -> None:
     assert naming, "no page in the mkdocs nav mentions `ctx fit`"
 
 
+def test_host_attachment_recipes_do_not_claim_unverified_interoperability() -> None:
+    """Named-host examples must say what was and was not exercised.
+
+    CTX can prove its own stdio server locally. That is not evidence that every
+    named host still accepts a copied configuration shape or exposes the tools
+    without a host-native configuration and handshake check.
+    """
+
+    page = (DOCS / "harness" / "attaching-to-hosts.md").read_text(encoding="utf-8")
+    flat = _flat(page)
+
+    assert "version-dependent configuration examples" in flat
+    assert "not external-host interoperability evidence" in flat
+    assert "Claude Code, Cline, Continue, Goose, and OpenHands" in flat
+    assert "appear to Claude on the next turn" not in flat
+    for proof in (
+        "accepts and lists the configuration",
+        "starts `ctx-mcp-server`",
+        "`initialize`",
+        "`tools/list`",
+        "one read-only `tools/call`",
+    ):
+        assert proof in flat, f"host-native verification omits {proof!r}"
+
+
 # ---------------------------------------------------------------------------
 # `--apply` and `--pr` write different things, and the docs said otherwise.
 # ---------------------------------------------------------------------------
@@ -274,10 +293,10 @@ def _observed_apply_outcomes(workspace: Path) -> dict[str, dict[str, object]]:
     rather than against a remembered fact. `--apply` writes the CTX-owned
     `.ctx/fit-configuration.json` sidecar, whose action depends on whether an
     owned manifest already exists. A `create` lands untracked, where `git diff`
-    and `git checkout` -- the pair the CLI still prints unconditionally -- do
-    nothing and fail respectively. If `--apply` ever starts staging what it
-    writes, this dictionary changes and the doc assertions fail rather than
-    quietly describing the old behaviour.
+    shows nothing and `git checkout` fails; the CLI and docs now distinguish
+    that case from a tracked modification. If `--apply` ever starts staging
+    what it writes, this dictionary changes and the doc assertions fail rather
+    than quietly describing the old behaviour.
     """
 
     from ctx.fit.apply import apply_plan, plan_apply
@@ -451,27 +470,6 @@ def test_apply_no_git_claim_is_scoped_to_the_write(surface: str) -> None:
         f"{surface} does not tell the reader that `--apply` needs evidence from "
         "`--test --budget N`, which is where the git reads happen"
     )
-
-
-def test_docs_qualify_the_undo_line_that_ctx_fit_prints_after_a_write() -> None:
-    """A reader who trusts the tool's own closing line is stuck on a create.
-
-    The claim this pins is about `src/ctx/cli/fit.py`, which this lane does not
-    own, so it is asserted against that file rather than restated. If the CLI
-    starts branching on the artifact action, the caveat becomes wrong and this
-    test turns red so it is deleted rather than left to rot.
-    """
-
-    handler = _handle_apply_source()
-    unconditional = "git checkout" in handler and "untracked" not in handler
-
-    assert unconditional, "the CLI now qualifies its undo advice; remove the docs caveat test"
-    for surface in WRITE_SURFACES:
-        apply_half, _ = _write_section(surface)
-        assert "cannot recover an untracked file" in apply_half, (
-            f"{surface} does not qualify the unconditional `git checkout` advice "
-            "for a newly created sidecar"
-        )
 
 
 @pytest.mark.parametrize("surface", WRITE_SURFACES)

@@ -560,30 +560,13 @@ def test_readme_entity_badges_are_updated() -> None:
     assert "127.0.0.1" not in patched
 
 
-def test_github_about_description_uses_entity_counts() -> None:
-    stats = {
-        "nodes": 123456,
-        "edges": 789000,
-        "skills": 4321,
-        "agents": 56,
-        "mcps": 789,
-        "harnesses": 10,
-        "communities": 52,
-    }
+def test_github_about_description_names_ctx_fit_without_volatile_counts() -> None:
+    description = urs.build_github_about_description()
 
-    description = urs.build_github_about_description(stats)
-
-    assert description.startswith("Not an Amazon-style catalog or marketplace.")
-    assert "recommendation layer" in description
-    assert "bring your org tools" in description
-    assert "use the shipped graph" in description
-    assert "only for the current dev window" in description
-    assert "cutting token bills and local compute waste" in description
-    assert "123,456-node LLM-wiki graph" in description
-    assert "4,321 skills" in description
-    assert "56 agents" in description
-    assert "789 MCPs" in description
-    assert "10 harnesses" in description
+    assert description == (
+        "CTX Fit finds the cheapest AI coding setup that reliably works on your "
+        "repository, then applies the winner as a reviewable change."
+    )
 
 
 def test_patch_readme_checks_docs_and_catalog(

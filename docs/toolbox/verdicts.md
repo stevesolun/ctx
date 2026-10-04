@@ -2,8 +2,8 @@
 
 [`src/toolbox_verdict.py`](https://github.com/stevesolun/ctx/blob/main/src/toolbox_verdict.py)
 owns the council's finding ledger. A `RunPlan` says *what should run*; a
-`Verdict` says *what was found* and, if the level escalates high enough,
-blocks `git commit`.
+`Verdict` says *what was found*. An installed hook or host wrapper can block
+`git commit` when the verdict meets its guardrail policy.
 
 ## Data model
 
@@ -55,15 +55,18 @@ update). This is how a `security-reviewer` can start with a MEDIUM
 finding, then bump it to CRITICAL after deeper analysis — without
 leaving duplicate entries.
 
-The default id is `sha256(level|agent|title)[:12]`, so the same
-agent recording the same titled issue naturally dedups. Pass
-`--id custom-value` if you need a different stable key.
+The default id is `sha256(level|agent|title)[:12]`, so identical level, agent
+and title values deduplicate. Changing the level changes that default id.
+Pass the same explicit `--id custom-value` when refining an issue across
+severity changes.
 
 ## Blocking
 
-`toolbox_hooks` reads `<plan>.verdict.json` after a `pre-commit`
-council runs. If `level in {"HIGH", "CRITICAL"}` and the toolbox has
-`guardrail: true`, it returns exit `2`, which stops the commit.
+`toolbox_hooks` reads an existing `<plan>.verdict.json` during a `pre-commit`
+trigger. It does not execute a council or wait for a new verdict. If
+`level in {"HIGH", "CRITICAL"}` and the toolbox has `guardrail: true`, it
+returns exit `2`; a Git hook or host wrapper must propagate that result to
+stop the commit.
 
 `LOW` and `MEDIUM` findings are logged but never block.
 
@@ -73,10 +76,11 @@ council runs. If `level in {"HIGH", "CRITICAL"}` and the toolbox has
 # Record a finding
 python -m toolbox_verdict record \
   --plan-hash abc123 \
+  --id users-sql-injection \
   --level HIGH \
   --title "SQL injection in users.py" \
   --agent security-reviewer \
-  --evidence src/users.py:42:unescaped input \
+  --evidence "src/users.py:42:unescaped input" \
   --rationale "req.form values flow into raw SQL"
 
 # Show the verdict
@@ -95,7 +99,7 @@ python -m toolbox_verdict retro --min-level HIGH
 python -m toolbox_verdict explain --plan-hash abc123
 
 # Remove a single finding
-python -m toolbox_verdict clear --plan-hash abc123 --id <id>
+python -m toolbox_verdict clear --plan-hash abc123 --id users-sql-injection
 ```
 
 ## Evidence parsing

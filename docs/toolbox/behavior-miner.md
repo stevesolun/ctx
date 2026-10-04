@@ -11,9 +11,9 @@ can surface:
 
 | Signal | Source | Example suggestion |
 |---|---|---|
-| **Co-invocation** | Pairs of agents invoked in the same session | "You ran `code-reviewer` + `security-reviewer` together 4 times — consider a bundle." |
-| **Skill cadence** | Skill load frequency over time | "`python-patterns` loaded every session — promote to `pre`." |
-| **File-type** | File extensions of work-in-progress | "60% of your diffs touch `.tf` files — consider a Terraform toolbox." |
+| **Co-invocation** | Pairs of signal strings in the same intent-log event | "Signals `python` and `pytest` co-occurred 4 times — consider a bundle." |
+| **Skill cadence** | Load and unload entries in the skill manifest | "`python-patterns` has 12 load/unload entries — consider a `pre` declaration." |
+| **File-type** | Frequency of intent-log signal strings, despite the historical field name | "The `terraform` signal appeared in 8 tool uses — consider a scoped toolbox." |
 | **Commit-type** | Conventional Commit parsing | "8 of your last 10 commits are `fix:` — consider a pre-commit test toolbox." |
 
 ## User profile
@@ -71,10 +71,11 @@ python -m behavior_miner suggest --save
 ## Privacy
 
 All signal data stays in `~/.claude/`. Nothing is sent over the network.
-The miner never reads file contents — only names, extensions, and commit
-message prefixes.
+The miner does not read repository source-file bodies. It reads local intent
+signals, manifest load/unload entries and Git commit subjects; it makes no
+network requests.
 
 ## Related
 
 - [Intent interview](intent-interview.md) — surfaces miner suggestions
-  during the `toolbox init` flow.
+  during the `python -m intent_interview init` flow.

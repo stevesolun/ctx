@@ -56,6 +56,7 @@ def render_session_detail(
 ) -> str:
     """Render one session timeline."""
     detail = session_detail(session_id)
+    public_session_id = str(detail["session_id"])
     audit = detail["audit_entries"]
     events = detail["load_events"]
 
@@ -74,7 +75,7 @@ def render_session_detail(
     )
 
     body = (
-        f"<h1>Session {html.escape(session_id)}</h1>"
+        f"<h1>Session {html.escape(public_session_id)}</h1>"
         f"<div class='card'><strong>{len(audit)}</strong> audit entries &middot; "
         f"<strong>{len(events)}</strong> load/unload events</div>"
         "<h2>Audit timeline</h2>"
@@ -84,7 +85,7 @@ def render_session_detail(
         "<h2>Load/unload events</h2>"
         "<table><tr><th>ts</th><th>event</th><th>subject</th></tr>" + event_rows + "</table>"
     )
-    return layout(f"Session {session_id}", body)
+    return layout(f"Session {public_session_id}", body)
 
 
 def render_events(
@@ -137,6 +138,13 @@ def render_runtime_lifecycle(
 ) -> str:
     """Render runtime validation and escalation status."""
     summary = runtime_lifecycle_summary()
+    if summary.get("error"):
+        return layout(
+            "Runtime lifecycle",
+            "<h1>Runtime lifecycle</h1><div class='card' role='alert'>"
+            + html.escape(str(summary["error"]))
+            + "</div>",
+        )
 
     def event_cell(event: dict[str, Any], key: str, limit: int = 120) -> str:
         return html.escape(str(event.get(key) or ""))[:limit]

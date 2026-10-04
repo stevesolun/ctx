@@ -16,10 +16,11 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from ctx.fit import providers
+from ctx.fit import providers, workspace_mcp
 from ctx.fit.candidates import CapabilityMaterial, InstructionMaterial
 from ctx.fit.live_runner import AgentInvocation
 from ctx.fit.providers import (
@@ -35,13 +36,9 @@ _REAL_SANDBOXED_COMMAND = providers.sandboxed_command
 
 
 @pytest.fixture(autouse=True)
-def _deterministic_production_dependencies(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Supply process-level stand-ins for the production sandbox and MCP host."""
+def _deterministic_production_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Supply deterministic stand-ins for the production sandbox boundary."""
 
-    npx = tmp_path / "npx"
-    npx.write_text(f"#!{sys.executable}\nraise SystemExit(0)\n", encoding="utf-8")
-    npx.chmod(0o755)
-    monkeypatch.setenv("PATH", os.pathsep.join((str(tmp_path), os.environ.get("PATH", ""))))
     monkeypatch.setattr(providers, "require_sandbox_available", lambda environment: None)
     monkeypatch.setattr(providers, "_require_harness_dependency", lambda: None)
     monkeypatch.setattr(providers, "_require_operational_sandbox", lambda environment: None)
@@ -210,6 +207,47 @@ def test_default_model_credential_resolution_does_not_require_litellm(
 # ── FITBUG-006: the command must be one `ctx run` accepts ──────────────────
 
 
+def test_bare_anthropic_model_credential_does_not_depend_on_the_price_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Provider identity is durable even after LiteLLM removes an old rate."""
+
+    monkeypatch.setitem(sys.modules, "litellm", SimpleNamespace(model_cost={}))
+
+    resolved = resolve_model_credential(
+        "claude-sonnet-4-20250514",
+        environment={"ANTHROPIC_API_KEY": "configured"},
+    )
+
+    assert resolved.environment_variable == "ANTHROPIC_API_KEY"
+    assert resolved.configured is True
+
+
+@pytest.mark.parametrize(
+    "model",
+    ("chat-latest", "computer-use-preview", "ft:gpt-4o-mini-2024-07-18"),
+)
+def test_unrecognized_bare_models_keep_catalog_credential_routing(
+    model: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exact-priced bare models retain the harness catalog's provider identity."""
+
+    monkeypatch.setitem(
+        sys.modules,
+        "litellm",
+        SimpleNamespace(model_cost={model: {"litellm_provider": "openai"}}),
+    )
+
+    resolved = resolve_model_credential(
+        model,
+        environment={"OPENAI_API_KEY": "configured"},
+    )
+
+    assert resolved.environment_variable == "OPENAI_API_KEY"
+    assert resolved.configured is True
+
+
 def test_the_prompt_is_passed_as_task_not_as_a_positional(tmp_path: Path) -> None:
     """`ctx run` has no positionals, so a bare prompt dies in argparse."""
 
@@ -267,17 +305,52 @@ def test_a_trial_gets_only_a_workspace_rooted_filesystem_tool_surface(tmp_path: 
     configs = tuple(_parse_mcp_spec(spec) for spec in args.mcp)
 
     assert args.no_ctx_tools is True
-    assert args.mcp == ["filesystem:."]
+    assert len(args.mcp) == 1
     assert args.allow_tool == ["filesystem__*"]
     assert len(configs) == 1
     assert configs[0].name == "filesystem"
-    assert configs[0].args[-1] == "."
+    assert configs[0].args[configs[0].args.index("--root") + 1] == "."
     assert not any(name.startswith(("ctx__", "git__", "shell__")) for name in args.allow_tool)
+
+
+def test_trial_filesystem_material_is_bundled_and_resolved_before_spend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A paid trial must not resolve executable MCP material through npm."""
+
+    from ctx.cli.run import _build_parser, _parse_mcp_spec
+
+    binary, argv_path = _fake_harness(tmp_path, _real_ctx_run_json_stdout())
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    real_which = providers.shutil.which
+    monkeypatch.setattr(
+        providers.shutil,
+        "which",
+        lambda name: None if name == "npx" else real_which(name),
+    )
+
+    build_agent_driver(executable=str(binary))(_invocation(workspace))
+
+    argv = json.loads(argv_path.read_text(encoding="utf-8"))
+    args = _build_parser().parse_args(argv)
+    assert len(args.mcp) == 1
+    assert "npx" not in args.mcp[0]
+    assert "@modelcontextprotocol/server-filesystem" not in args.mcp[0]
+    config = _parse_mcp_spec(args.mcp[0])
+    assert config.command == sys.executable
+    assert config.args[0] == "-I"
+    assert Path(config.args[1]).samefile(Path(workspace_mcp.__file__))
+    assert config.args[2] == "--material-digest"
+    assert config.args[config.args.index("--root") + 1] == "."
+    digest = config.args[config.args.index("--material-digest") + 1]
+    assert len(digest) == 64
+    assert set(digest) <= set("0123456789abcdef")
 
 
 @pytest.mark.parametrize(
     ("missing", "message"),
-    (("sandbox", "isolated"), ("npx", "filesystem MCP")),
+    (("sandbox", "isolated"),),
 )
 def test_building_a_driver_refuses_when_required_isolation_tooling_is_missing(
     tmp_path: Path,
@@ -502,6 +575,14 @@ def test_provider_runtime_access_tracks_multihop_shims_without_broadening_them(
     assert executable in paths
     assert shim.parent.parent not in roots
     assert cellar in roots
+
+
+def test_provider_sandbox_can_read_the_bundled_workspace_mcp_source() -> None:
+    roots, _paths = providers._runtime_read_access(sys.executable)
+    source = Path(workspace_mcp.__file__).resolve(strict=True)
+
+    assert any(source.is_relative_to(root) for root in roots)
+    assert Path(sys.prefix).resolve(strict=True) in roots
 
 
 def test_a_trial_subprocess_inherits_only_required_runtime_and_provider_environment(

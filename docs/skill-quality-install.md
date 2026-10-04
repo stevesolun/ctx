@@ -6,7 +6,8 @@ sidecars, and verify the data flows into the wiki and the knowledge graph.
 ## What it does
 
 Every installed skill and agent gets a continuous quality score in
-`[0.0, 1.0]` plus an A/B/C/D/F letter grade, derived from four signals:
+`[0.0, 1.0]` plus an A/B/C/D/F letter grade, derived from four signals.
+The table shows skill weights; agent weights differ as described below:
 
 | Signal    | Weight | What it measures                                      |
 | --------- | -----: | ----------------------------------------------------- |
@@ -39,7 +40,7 @@ node on its next build.
 The hook runs once per session-end. It reads `skill-events.jsonl` since
 its last run, collects every slug that appeared, and calls
 `skill_quality.py recompute --slugs <comma-list>` — so scoring is
-incremental (touched skills only), not a full 2,000-page sweep.
+incremental (touched skills only), not a full-catalog sweep.
 
 Edit `~/.claude/settings.json` and add, replacing `<REPO>` with the
 absolute path to this checkout:
@@ -52,7 +53,7 @@ absolute path to this checkout:
         "hooks": [
           {
             "type": "command",
-            "command": "python <REPO>/hooks/quality_on_session_end.py"
+            "command": "python \"<REPO>/hooks/quality_on_session_end.py\""
           }
         ]
       }
@@ -75,8 +76,9 @@ python -m skill_quality recompute --all
 ```
 
 This walks `~/.claude/skills/*/SKILL.md` and `~/.claude/agents/*.md`,
-scores each, and writes the three on-disk sinks. Expect ~15–30s depending on
-corpus size and disk.
+scores each, and writes the three on-disk sinks where a matching wiki page is
+available. Runtime depends on corpus size, graph inputs and disk; measure it
+on the target installation rather than assuming a fixed duration.
 
 ## CLI reference
 
@@ -97,14 +99,15 @@ python -m skill_quality explain python-testing
 python -m skill_quality list --grade D
 ```
 
-All verbs accept `--json` for piping into other tools.
+`recompute`, `show`, and `list` accept `--json` for piping into other tools.
+`explain` is the human-readable evidence view and does not accept `--json`.
 
 ## Graph integration
 
 `wiki_graphify.py` reads the sidecar directory automatically and
-attaches `quality_score` and `quality_grade` to every matching node. The
-Obsidian graph view can then color nodes by grade — configure the
-`quality_grade` property in Obsidian's graph settings.
+attaches `quality_score` and `quality_grade` to every matching node. Consumers
+of the exported graph can use those attributes for grade-based display. This
+does not configure a separate application's graph view automatically.
 
 Nodes without a sidecar get `quality_score: null` and `quality_grade:
 null` so downstream consumers can always read the attribute safely.
@@ -168,5 +171,6 @@ reason.
   `persist_quality` is idempotent via the HTML-comment markers. If it
   does, delete both blocks and rerun `recompute`; the first pass will
   re-emit exactly one.
-- **Graph view shows no color.** Run `python -m ctx.core.wiki.wiki_graphify
-  --graph-only` to rebuild; it reads sidecars fresh on every build.
+- **Exported graph lacks current grades.** Run `python -m ctx.core.wiki.wiki_graphify
+  --graph-only` to rebuild; it reads sidecars fresh on every build. Display
+  colors still depend on the graph viewer consuming those attributes.

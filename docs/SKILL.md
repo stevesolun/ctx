@@ -1,6 +1,6 @@
 ---
 name: skill-router
-description: "Repo-aware recommendation manager for ctx. Scans the active repository, identifies stack and workflow signals, recommends a capped set of skills, agents, and MCP servers, and unloads helpers that no longer match the current work after user confirmation. Harnesses are recommended by the custom-model onboarding flow or loop adapters and then attach to the same recommendation layer."
+description: "Legacy repo-aware recommendation guide for ctx. Scans the active repository, identifies stack and workflow signals, recommends skills, agents, and MCP servers, and proposes unloading helpers that no longer match the current work. Installation and unloading are separate host actions. Harnesses are recommended by the custom-model onboarding flow or loop adapters and then attach to the same recommendation layer."
 ---
 
 # Skill Router
@@ -9,6 +9,12 @@ Scan a repo. Know what the current work needs. Recommend only that. Keep the
 wiki and graph as the durable catalog behind the decision.
 
 ## Scope
+
+This is the legacy router workflow, not the read-only `ctx fit` product. The
+scanner's shared recommendation bundle and the legacy resolver's load/unload
+manifest are different outputs. Neither performs the recommended installation,
+load, or unload. Startup and incremental triggers below are instructions for an
+integrating host, not automatically installed watchers.
 
 The router manages runtime recommendations for:
 
@@ -54,9 +60,11 @@ The router has three halves:
 
 1. Read the shipped graph/wiki metadata and local user overrides.
 2. Run `ctx-scan-repo --repo . --recommend` for the active repo.
-3. Resolve a load/unload manifest with the shared recommendation engine.
-4. Present changes with reasons and require confirmation unless the user enabled
-   automatic mode.
+3. If the host needs a load/unload manifest, separately run
+   `python -m ctx.core.resolve.resolve_skills --profile <stack-profile.json>`.
+   The scanner's `--recommend` output does not create that manifest.
+4. Present changes with reasons. Install under the persisted per-kind policy;
+   require confirmation or an explicit instruction for unload and uninstall.
 5. Record usage/quality changes after the user accepts or rejects suggestions.
 
 ## Scanner
@@ -64,6 +72,11 @@ The router has three halves:
 The scanner reads repo structure and files to produce a stack profile. Detection
 is evidence-based: every claim should map to a file, dependency, config value, or
 import pattern.
+
+Use `--output PATH` to choose the profile JSON destination. If it cannot be
+written, the scanner reports the path error on stderr and exits `1` without a
+traceback. `--recommend` requires an installed graph; use `ctx-init --graph`
+to install it before requesting recommendations.
 
 ### Detection Categories
 
@@ -89,38 +102,41 @@ import pattern.
 
 ## Resolver
 
-The resolver produces a manifest containing the exact helper set to load or
-unload.
+The legacy resolver produces a proposed load/unload manifest. This illustrative
+shape uses its actual field names; priority is not a normalized relevance score,
+and this manifest does not contain a profile hash.
 
 ```json
 {
   "generated_at": "ISO-8601",
   "repo_path": "/absolute/path",
-  "profile_hash": "sha256 of stack profile",
   "load": [
     {
-      "name": "fastapi",
+      "skill": "fastapi",
+      "entity_type": "skill",
       "type": "skill",
+      "path": "/absolute/path/fastapi/SKILL.md",
       "reason": "FastAPI detected in pyproject.toml dependencies",
-      "score": 0.94
+      "priority": 18
     }
   ],
   "unload": [
     {
-      "name": "react",
-      "type": "skill",
-      "reason": "No active frontend signal in the current repo window"
+      "skill": "react",
+      "reason": "Not needed for detected stack"
     }
   ],
   "suggestions": [
     {
-      "name": "github",
-      "type": "mcp",
-      "reason": ".github/workflows exists and the repo uses GitHub Actions",
-      "install_command": "python -m mcp_add ..."
+      "skill": "openapi-generator",
+      "reason": "OpenAPI tooling detected",
+      "install_from": "marketplace:search/openapi-generator"
     }
   ],
-  "warnings": []
+  "warnings": [],
+  "mcp_servers": [],
+  "harnesses": [],
+  "plugins": []
 }
 ```
 
@@ -217,7 +233,9 @@ request.
 3. Save the scan result.
 4. Resolve load/unload recommendations.
 5. Present reasons, scores, and install/update commands.
-6. Apply only after confirmation unless configured otherwise.
+6. Install only under the persisted per-kind consent selected during
+   `ctx-init`: approval each time or preapproved automatic installation.
+   Unload and uninstall remain confirmation or explicit-instruction actions.
 7. Record usage and decisions.
 
 ### Incremental Scan
@@ -226,8 +244,8 @@ Triggers: changed config files, new dependencies, new MCP config, new tests, new
 infrastructure files, or user task change.
 
 If a helper is no longer useful, ctx should suggest unloading it and ask for
-confirmation. If the user asks to skip unload prompts, ctx should respect that
-preference.
+confirmation. An explicit unload instruction may satisfy that confirmation;
+install preapproval does not.
 
 ### Manual Override
 
@@ -280,19 +298,15 @@ None
 
 ## Configuration
 
-Router behavior is controlled by ctx config and user overrides. Important knobs:
+Operational defaults:
 
-```yaml
-recommendations:
-  max_total: 5
-  min_score: 0.85
-micro_skills:
-  max_lines: 180
-router:
-  auto_scan: true
-  auto_apply: false
-  ask_before_unload: true
-```
+The shared recommendation bundle is capped at five. The separate legacy
+resolver CLI defaults to one automatic skill; `--max-skills` permits an explicit
+limit up to the configured maximum. Explicit `always_load` overrides and the
+available `skill-router` / `file-reading` meta skills can add entries beyond that
+automatic limit. Installation consent is stored separately for skills, agents,
+and MCP servers through `ctx-init`; there is no automatic-unload consent setting.
+Unload requires confirmation or an explicit instruction.
 
 ## Pitfalls
 

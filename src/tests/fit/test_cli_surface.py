@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import sys
@@ -137,6 +138,40 @@ def test_bare_ctx_runs_the_product_rather_than_erroring() -> None:
     assert result.returncode == 0
     assert "Repository:" in result.stdout
     assert "AI agent readiness" in result.stdout
+
+
+def test_apply_help_distinguishes_git_tracked_files_from_untracked_files() -> None:
+    """Git cannot restore bytes that were never recorded in its index."""
+
+    result = _ctx("fit", "--help")
+    help_text = " ".join(result.stdout.split())
+
+    assert result.returncode == 0
+    assert "restore tracked files" in help_text
+    assert "remove newly created untracked files" in help_text
+    assert "cannot restore an overwritten untracked file" in help_text
+    assert "discard with `git checkout`" not in help_text
+
+
+@pytest.mark.parametrize("budget", ("nan", "inf", "-inf", "-1"))
+def test_non_finite_or_negative_budget_is_rejected_before_json_planning(budget: str) -> None:
+    result = _ctx("fit", ".", "--json", f"--budget={budget}")
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "--budget must be a finite, non-negative number" in result.stderr
+
+
+def test_json_budget_output_is_strictly_parseable_json() -> None:
+    result = _ctx("fit", ".", "--json", "--budget", "1")
+
+    assert result.returncode == 0
+
+    def reject_non_json_number(token: str) -> None:
+        pytest.fail(f"non-JSON numeric constant emitted: {token}")
+
+    payload = json.loads(result.stdout, parse_constant=reject_non_json_number)
+    assert payload["plan"]["budget_usd"] == 1.0
 
 
 def test_doctor_reports_why_a_real_run_is_not_possible() -> None:

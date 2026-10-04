@@ -187,12 +187,24 @@ def test_cli_binds_live_selection_to_the_resolved_applied_model(
         encoding="utf-8",
     )
     observed: list[str] = []
+    assert selected.model is not None
+    exact_price = ModelPrice(
+        model=selected.model,
+        usd_per_million_input=3.0,
+        usd_per_million_output=15.0,
+        source="test fixture",
+    )
 
     def availability(model: str) -> bool:
         observed.append(model)
         return False
 
     monkeypatch.setattr("ctx.cli.fit._provider_available", availability)
+    monkeypatch.setattr(
+        ModelPrice,
+        "from_litellm",
+        staticmethod(lambda _model: exact_price),
+    )
     monkeypatch.setattr(
         experiment_module,
         "run_experiment",
@@ -422,6 +434,18 @@ def test_the_dry_run_script_describes_what_the_product_actually_does(repo_with_h
     assert "without network access" in script
 
 
+def test_dry_run_does_not_tell_the_user_to_run_the_dry_run_again(
+    repo_with_history, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo = repo_with_history()
+
+    assert cmd_fit(_args(repo, dry_run=True)) == 0
+
+    rendered = capsys.readouterr().out
+    assert "Dry run — a full Fit evaluation would:" in rendered
+    assert "Next: `ctx fit --dry-run`" not in rendered
+
+
 # --------------------------------------------------------------------------
 # FITBUG-036: --apply writes files and runs no git; --pr opens the PR, after
 # announcing every command it will run.
@@ -495,8 +519,40 @@ def test_apply_writes_the_configuration_and_runs_no_git_command(
     assert commands.calls == []  # no branch, no commit, no push
     out = capsys.readouterr().out
     assert "no branch was created" in out
-    assert "git diff" in out
-    assert "git checkout -- .ctx/fit-configuration.json" in out
+    assert "CTX Fit created .ctx/fit-configuration.json" in out
+    assert "If Git reports it as untracked, remove `.ctx/fit-configuration.json`" in out
+    assert "if it was tracked, restore it with `git checkout --" in out
+
+
+def test_apply_does_not_claim_git_can_restore_an_overwritten_untracked_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A valid CTX manifest may itself be untracked, so recovery is conditional."""
+
+    target = tmp_path / ".ctx" / "fit-configuration.json"
+    target.parent.mkdir(parents=True)
+    target.write_text(
+        json.dumps(
+            {
+                "schema": "ctx.fit.applied-configuration-v1",
+                "configuration_hash": "old-configuration",
+                "candidate": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    commands = _Commands()
+    monkeypatch.setattr(apply_module, "run_command", commands)
+
+    exit_code = _handle_apply(
+        _winning_recommendation(), (_winning_candidate(),), _args(tmp_path, apply=True, yes=True)
+    )
+
+    assert exit_code == 0
+    assert commands.calls == []
+    out = capsys.readouterr().out
+    assert "If it was tracked, restore it with `git checkout --" in out
+    assert "If it was untracked, Git cannot restore its previous contents" in out
 
 
 def test_pr_announces_every_command_before_running_any_of_them(

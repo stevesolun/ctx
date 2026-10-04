@@ -7,12 +7,12 @@ Status: draft v1, 2026-08-09. Owner: coordinator. Supersedes the earlier
 
 > Point CTX Fit at your repository. It finds the cheapest AI coding setup that
 > reliably works on your codebase, writes the winning configuration into your
-> working tree, and hands you a pull-request body to open yourself.
+> working tree or opens a pull request containing it.
 
 Headline: **Find the cheapest AI coding setup that actually works on your repo.**
 
-CTX Fit runs no git *write* commands: it reads history to derive tasks, but creates no branch, commits nothing, pushes nothing and never merges. `ctx fit --pr` prints a PR body and a suggested
-branch name; it creates no branch, commits nothing and never merges.
+See the [user guide](../index.md) for each command's cost and write boundaries,
+including the apply and PR contract.
 
 Three words carry the whole product. *Cheapest* is the objective. *Reliably* is
 the constraint that makes cheapest meaningful. *Configuration* is the
@@ -42,15 +42,12 @@ Both problems have the same fix: put the complexity behind a single answer.
 Three levels, increasing in cost and commitment. Level 1 must be safe, fast,
 read-only, and free.
 
-```text
-ctx fit            understand   — readiness + what to improve      (free)
-ctx fit --test     verify       — controlled experiments           (costs money, gated)
-ctx fit --apply    act          — generate the configuration       (reviewable)
-```
+1. **Understand:** assess readiness and what to improve.
+2. **Verify:** run controlled experiments within an explicitly authorized budget.
+3. **Act:** preview and adopt the winning configuration as a reviewable change.
 
-Supporting flags, as shipped: `--budget USD`, `--dry-run`, `--pr`, `--yes`,
-`--json`, `--max-depth`. Diagnostics live in `ctx doctor`. Anything else must
-justify its existence; run `ctx fit --help` for the current surface.
+The [user guide](../index.md) owns the current commands, spending controls,
+diagnostics, and apply/PR contract.
 
 ## 5. Scope
 
@@ -65,7 +62,7 @@ justify its existence; run `ctx fit --help` for the current surface.
   verified / failed / inconclusive` states.
 - Honest cost accounting where unknown stays unknown.
 - Deterministic recommendation policy plus a Pareto view.
-- Artifact generation with preview, apply, and rollback.
+- Artifact generation with preview, local apply, and explicit recovery guidance.
 
 ### Explicitly out of scope for V1
 
@@ -136,15 +133,14 @@ answer is **keep your current setup** — a success, not a failure.
 | M6 | Execution | Isolated, reproducible runs with usage | money |
 | M7 | Verification | Structured evidence per candidate/task | money |
 | M8 | Recommendation | First complete Fit result | money |
-| M9 | Apply | Generate config, preview, rollback | none |
-| M10 | PR | PR body and suggested branch, with evidence | none |
+| M9 | Apply | Generate config, preview, and recovery guidance | none |
+| M10 | PR | Branch, commit, push, and open a reviewable PR | none |
 
 **M1 through M10 have all shipped**: each milestone has landed code with tests
-(`src/ctx/fit/`, `src/ctx/cli/fit.py`, `src/tests/fit/` — 273 tests passing).
-M10 shipped as *prepare* a pull request rather than *open* one: CTX Fit runs no
-git commands. Individual follow-up tasks remain open, but the per-task board in
-[`planned_tasks.md`](planned_tasks.md) is a stale M0 snapshot and is not a
-record of which — read the code.
+under `src/ctx/fit/`, `src/ctx/cli/fit.py`, and `src/tests/fit/`.
+Individual follow-up tasks remain open, but the per-task board in
+[`planned_tasks.md`](planned_tasks.md) is a stale M0 snapshot, not current
+operational state.
 
 ## 9. Definition of done
 
@@ -156,8 +152,8 @@ reject a technically complete milestone that does not improve the outcome.
 
 V1 overall: a developer installs, runs `ctx fit` in a real repository, gets
 useful readiness output; runs `ctx fit --test --budget 10` and receives an
-honest recommendation with verified evidence and real cost; optionally runs
-`ctx fit --apply` to generate the configuration.
+honest recommendation with verified evidence and real cost; optionally adopts
+the winner through the [user guide's apply and PR contract](../index.md).
 
 ## 10. Success criteria
 

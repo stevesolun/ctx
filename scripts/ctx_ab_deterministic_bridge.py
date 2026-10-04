@@ -107,6 +107,10 @@ class _BridgeHTTPServer(ThreadingHTTPServer):
     daemon_threads = False
     block_on_close = True
     allow_reuse_address = False
+    # TCPServer defaults to a backlog of five, smaller than the bridge's tested
+    # parallel request surface. On macOS the excess loopback connects are reset
+    # before ThreadingMixIn can hand them to worker threads.
+    request_queue_size = socket.SOMAXCONN
 
     bridge: DeterministicProviderBridge
 

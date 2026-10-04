@@ -180,6 +180,91 @@ def test_equal_language_counts_break_ties_by_name(tmp_path: Path) -> None:
         assert [item["name"] for item in languages] == baseline == ["go", "python"]
 
 
+@pytest.mark.parametrize(
+    ("language", "files", "declaration"),
+    (
+        (
+            "c",
+            ("src/calc.c", "include/calc.h", "tests/test_calc.c"),
+            "#include <assert.h>\nint main(void) { assert(1 + 1 == 2); }\n",
+        ),
+        (
+            "cpp",
+            ("src/calc.cpp", "include/calc.h", "include/detail.hpp", "tests/calc_test.cc"),
+            "TEST(Calculator, Adds) { EXPECT_EQ(1 + 1, 2); }\n",
+        ),
+    ),
+)
+def test_makefile_c_family_repositories_are_profiled_and_evaluable(
+    tmp_path: Path,
+    language: str,
+    files: tuple[str, ...],
+    declaration: str,
+) -> None:
+    """C and C++ are common Fit inputs, including their conventional headers."""
+
+    for relative in files[:-1]:
+        _write(tmp_path / relative, "int add(int a, int b);\n")
+    _write(tmp_path / files[-1], declaration)
+    _write(
+        tmp_path / "Makefile",
+        "test:\n\t./build/tests\n\nbuild:\n\t$(CC) -o build/tests src/calc.c tests/test_calc.c\n",
+    )
+
+    profile = build_fit_profile(tmp_path)
+    inventory = profile.verification
+    language_entry = next(item for item in profile.stack["languages"] if item["name"] == language)
+
+    assert language_entry["evidence"] == [f"{len(files)} files with matching extensions"]
+    other_family = "cpp" if language == "c" else "c"
+    assert all(item["name"] != other_family for item in profile.stack["languages"])
+    test_command = inventory.best("test")
+    build_command = inventory.best("build")
+    assert test_command is not None
+    assert test_command.command == ("make", "test")
+    assert build_command is not None
+    assert build_command.command == ("make", "build")
+    assert inventory.test_declaration == files[-1]
+    assert profile.is_fit_evaluable is True
+
+
+@pytest.mark.parametrize(
+    ("wrapper", "runner"),
+    ((False, "mvn"), (True, "./mvnw")),
+    ids=("system-maven", "repository-wrapper"),
+)
+def test_maven_repositories_discover_native_test_and_build_commands(
+    tmp_path: Path, wrapper: bool, runner: str
+) -> None:
+    _write(
+        tmp_path / "pom.xml",
+        "<project><modelVersion>4.0.0</modelVersion>"
+        "<groupId>org.example</groupId><artifactId>demo</artifactId>"
+        "<version>1.0.0</version></project>\n",
+    )
+    if wrapper:
+        wrapper_path = tmp_path / "mvnw"
+        _write(wrapper_path, '#!/bin/sh\nexec mvn "$@"\n')
+        wrapper_path.chmod(0o755)
+    _write(
+        tmp_path / "src" / "test" / "java" / "org" / "example" / "CalculatorTest.java",
+        "class CalculatorTest {\n    @Test\n    void adds() {}\n}\n",
+    )
+
+    profile = build_fit_profile(tmp_path)
+    inventory = profile.verification
+
+    test_command = inventory.best("test")
+    build_command = inventory.best("build")
+    assert test_command is not None
+    assert test_command.command == (runner, "test")
+    assert build_command is not None
+    assert build_command.command == (runner, "package", "-DskipTests")
+    assert inventory.test_declaration is not None
+    assert inventory.test_declaration.endswith("CalculatorTest.java")
+    assert profile.is_fit_evaluable is True
+
+
 # --------------------------------------------------------------------------
 # Verification discovery must not describe files it never read
 # (FITBUG-049, FITBUG-050, FITBUG-051, FITBUG-071).
@@ -906,6 +991,23 @@ def test_test_files_that_declare_no_test_case_are_not_executable_tests(tmp_path:
     assert inventory.test_files == ("tests/",)  # named like tests, and found
     assert inventory.has_executable_tests is False
     assert inventory.has_deterministic_verification is False
+    assert build_fit_profile(repo).is_fit_evaluable is False
+
+
+def test_python_helper_assertion_is_not_a_c_family_test_declaration(tmp_path: Path) -> None:
+    """A Python helper assertion is not a test that pytest can collect."""
+
+    repo = _python_repo(tmp_path)
+    _write(
+        repo / "tests" / "helpers.py",
+        "def check_value(value):\n    assert(value == 1)\n",
+    )
+
+    inventory = discover_verification(repo)
+
+    assert inventory.test_files == ("tests/",)
+    assert inventory.test_declaration is None
+    assert inventory.has_executable_tests is False
     assert build_fit_profile(repo).is_fit_evaluable is False
 
 

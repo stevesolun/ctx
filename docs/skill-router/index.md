@@ -5,7 +5,7 @@
     The product is **CTX Fit** (`ctx fit`): it finds the cheapest AI coding
     setup that reliably works on a repository. See the [home page](../index.md).
     This page documents the older graph-backed recommendation layer, which
-    still ships and is what the published PyPI release installs.
+    still ships alongside CTX Fit in the published PyPI distribution.
 
 
 The skill router decides which skills, agents, and MCP servers are useful for
@@ -40,8 +40,13 @@ ctx/
 1. `ctx-scan-repo --repo . --recommend` scans the repository and produces stack signals.
 2. The shared resolver scores graph/wiki entities by tags, categories, semantic
    edges, usage, quality, and configured gates.
-3. The resolver returns a capped manifest: what to load, what to unload, and why.
-4. The user confirms load/unload changes unless they configured automatic mode.
+3. Recommendation surfaces return a capped bundle with relevance reasons and
+   availability/selection metadata. The separate legacy `resolve_skills`
+   workflow can produce a load/unload manifest; a recommendation read does not
+   itself install or unload anything.
+4. Host-managed installs follow the persisted per-kind consent chosen during `ctx-init`:
+   approval each time or preapproved automatic installation. Unload and
+   uninstall still require confirmation or an explicit instruction.
 5. Usage and quality signals are recorded so future recommendations improve.
 
 The same recommender is used by the CLI, MCP/library tools, Claude Code hooks,
@@ -50,9 +55,9 @@ differ only in transport and confirmation UX, not in ranking logic.
 
 ## Reference Pages
 
-- [Stack signatures](../stack-signatures.md) - file/config patterns used to
-  identify stack signals.
-- [Skill-stack matrix](../skill-stack-matrix.md) - stack-to-capability mapping
-  used as scanner evidence.
-- [Entity source registry](../marketplace-registry.md) - skill, GitHub,
-  MCP, harness, and local sources plus update rules.
+- [Stack signatures](../stack-signatures.md) - implemented scanner boundary
+  and proposed detection coverage.
+- [Skill-stack matrix](../skill-stack-matrix.md) - implemented resolver boundary
+  and proposed stack-to-capability mappings.
+- [Entity source surfaces](../marketplace-registry.md) - discovery inputs,
+  ingestion validation, and explicit update rules.

@@ -1216,7 +1216,7 @@ class CtxCoreToolbox:
             graph,
             seed_ids,
             max_hops=max_hops,
-            top_n=min(50, top_n + len(excluded) + 5),
+            top_n=50,
         )
         results: list[dict[str, Any]] = []
         for r in raw:
@@ -1242,6 +1242,8 @@ class CtxCoreToolbox:
             row["selection_state"] = "suggested_related"
             row["related_to"] = r.get("via", [])
             row["reason"] = _related_recommendation_reason(row)
+            if not _related_recommendation_is_actionable(row):
+                continue
             results.append(row)
             if len(results) >= top_n:
                 break
@@ -2948,6 +2950,12 @@ def _related_node_is_recommendable(graph: Any, node_id: str) -> bool:
     if status in _RELATED_BLOCKED_STATUSES:
         return False
     return not _truthy_recommendation_flag(node_data.get("never_load"))
+
+
+def _related_recommendation_is_actionable(row: Mapping[str, Any]) -> bool:
+    if row.get("installable") is True:
+        return True
+    return _optional_str(row.get("install_command")) is not None
 
 
 def _truthy_recommendation_flag(value: object) -> bool:

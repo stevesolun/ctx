@@ -13,6 +13,7 @@ from ipaddress import IPv6Address
 import json
 import re
 import secrets
+import sys
 import unicodedata
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path, PurePosixPath
@@ -1153,16 +1154,22 @@ def load_source_registry(path: Path) -> list[ExternalSourceRecord]:
     raw = json.loads(path.read_text(encoding="utf-8"))
     records_raw: Iterable[Any]
     if isinstance(raw, dict):
-        records_raw = raw.get("sources", [])
+        if "sources" not in raw:
+            raise ValueError("source registry object must contain a sources list")
+        records_raw = raw["sources"]
     else:
         records_raw = raw
     if not isinstance(records_raw, list):
         raise ValueError("source registry must be a list or an object with a sources list")
-    records = [ExternalSourceRecord.from_mapping(item) for item in records_raw]
+    records: list[ExternalSourceRecord] = []
+    for index, item in enumerate(records_raw):
+        if not isinstance(item, Mapping):
+            raise ValueError(f"source registry item {index} must be an object")
+        records.append(ExternalSourceRecord.from_mapping(dict(item)))
     return list(validate_source_registry(records))
 
 
-def main(argv: list[str] | None = None) -> None:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Validate ctx external source import policy.")
     parser.add_argument("--registry", type=Path, help="Optional JSON registry path.")
     output = parser.add_mutually_exclusive_group()
@@ -1170,10 +1177,17 @@ def main(argv: list[str] | None = None) -> None:
     output.add_argument("--notice", action="store_true", help="Emit the generated notice.")
     args = parser.parse_args(argv)
 
-    records = (
-        load_source_registry(args.registry) if args.registry else list(BUILTIN_EXTERNAL_SOURCES)
-    )
-    records = list(validate_source_registry(records))
+    try:
+        records = (
+            load_source_registry(args.registry) if args.registry else list(BUILTIN_EXTERNAL_SOURCES)
+        )
+        records = list(validate_source_registry(records))
+    except (OSError, ValueError) as exc:
+        if args.json:
+            print(json.dumps({"error": str(exc), "failed": 1}, sort_keys=True))
+        else:
+            print(f"Source registry validation failed: {exc}", file=sys.stderr)
+        return 1
 
     if args.json:
         print(json.dumps({"sources": [record.to_dict() for record in records]}, indent=2))
@@ -1181,7 +1195,8 @@ def main(argv: list[str] | None = None) -> None:
         print(render_third_party_notice(records), end="")
     else:
         print(f"Validated {len(records)} external source record(s).")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

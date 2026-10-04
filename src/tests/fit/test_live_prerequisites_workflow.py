@@ -45,7 +45,6 @@ def test_linux_live_prerequisite_lane_is_pinned_bounded_and_zero_spend() -> None
     job = _workflow()["jobs"]["fit-live-prerequisites-linux"]
     checkout = _step(job, "Checkout")
     setup_python = _step(job, "Set up Python 3.11")
-    setup_node = _step(job, "Set up Node.js 24")
     adversarial = _step(job, "Run adversarial Linux sandbox checks")["run"]
     probe = _step(job, "Verify the zero-spend live-driver prerequisites")
     command = probe["run"]
@@ -55,8 +54,8 @@ def test_linux_live_prerequisite_lane_is_pinned_bounded_and_zero_spend() -> None
     assert job["needs"] == "classify"
     assert checkout["uses"].startswith("actions/checkout@")
     assert setup_python["uses"].startswith("actions/setup-python@")
-    assert setup_node["uses"].startswith("actions/setup-node@")
-    for action in (checkout["uses"], setup_python["uses"], setup_node["uses"]):
+    assert not any(step.get("uses", "").startswith("actions/setup-node@") for step in job["steps"])
+    for action in (checkout["uses"], setup_python["uses"]):
         assert len(action.rsplit("@", 1)[1]) == 40
 
     assert "test_repository_process_can_write_inside_but_not_beside_its_workspace" in adversarial
@@ -73,9 +72,8 @@ def test_linux_live_prerequisite_lane_is_pinned_bounded_and_zero_spend() -> None
     assert "build_agent_driver()" in command
     assert "_constructed_driver(" not in command
     assert "completion(" not in command
-    assert command.count('"npx"') == 1
-    assert command.count('"node"') == 1
-    assert 'subprocess.run(["npx"' not in command
+    assert '"npx"' not in command
+    assert '"node"' not in command
 
     # Secrets are not mapped into the job, and common ambient provider keys are
     # explicitly blanked so this smoke cannot spend even if repository settings

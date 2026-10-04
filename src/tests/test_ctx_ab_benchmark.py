@@ -3903,16 +3903,18 @@ def test_official_arm_mismatch_fails_before_workspace_or_codex(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    holdout_root = tmp_path / "holdout"
-    holdout_root.mkdir()
-    holdout, _ = _official_holdout_fixture(holdout_root)
-    scenario = holdout.scenarios[0]
-
     def side_effect_forbidden(*_args: object, **_kwargs: object) -> object:
         raise AssertionError("arm mismatch must fail before external work")
 
     monkeypatch.setattr(benchmark, "prepare_official_workspace", side_effect_forbidden)
     monkeypatch.setattr(benchmark, "run_process", side_effect_forbidden)
+    # Early arm rejection does not depend on the host's installed packages.
+    monkeypatch.setattr(benchmark, "python_dependencies_sha256", lambda _python: "0" * 64)
+
+    holdout_root = tmp_path / "holdout"
+    holdout_root.mkdir()
+    holdout, _ = _official_holdout_fixture(holdout_root)
+    scenario = holdout.scenarios[0]
 
     with pytest.raises(ValueError, match="arm does not match"):
         benchmark.run_trial(

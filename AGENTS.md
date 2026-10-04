@@ -19,9 +19,10 @@ destination, not yet the state.
 ctx fit                      # free, local, read-only: profile + readiness
 ctx fit --dry-run            # what a full evaluation would involve
 ctx fit --test --budget 10   # evaluate candidates; spending requires both flags
-ctx fit --apply              # write the winning configuration
-ctx fit --pr                 # print a PR body and branch name; commits nothing
 ```
+
+For evaluation-and-write commands, confirmation, and recovery, see the
+[`--apply` / `--pr` guide](docs/index.md#-apply-and-pr-are-different-writes).
 
 ## Where the code lives
 
