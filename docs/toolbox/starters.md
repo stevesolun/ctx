@@ -83,7 +83,7 @@ requires `--apply`.
 - **Scope**: `diff`.
 - **Budget**: 100 k tokens / 300 seconds.
 
-Best for: `git init` followed by `toolbox init`.
+Best for: bootstrapping a newly initialized repository.
 
 ## Activation
 

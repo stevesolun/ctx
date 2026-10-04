@@ -12,15 +12,24 @@
 ## Checkpoint
 
 - Updated: 2026-10-04 (Europe/Prague)
-- Active goal: inventory, test, repair, and retest every shipped user behavior
-- Phase: ff0d4301 delivery and its evidence-only handoff remain historical accepted checkpoints; R1 starter-command prose repair passed focused review-phase checks; final committed acceptance remains pending outer reconciliation
-- Release decision: **1.0.21 REMAINS RELEASED; NEW AUDIT OPEN; NO NEW RELEASE DECISION**
+- Active goal: complete the final evidence handoff and remaining delivery phases
+- Phase: document-phase reconciliation complete; starter-command duplicate removed and corrected page verified; prior runtime acceptance remains applicable, and remaining delivery phases belong to the outer executor
+- Release decision: **1.0.21 REMAINS RELEASED; NO NEW RELEASE DECISION**
 - Branch: `codex/full-feature-audit-delivery`
-- Active delivery branch: `codex/full-feature-audit-delivery`; verified and
+- Current scope: finish this evidence handoff and correct concrete documentation
+  drift; current story outcomes live only in `qa/feature_status.csv`.
+
+### Historical coordinator checkpoints
+
+The following delivery, status, and scope records preserve earlier checkpoints.
+They do not identify the current isolated worktree or reopen the completed audit.
+See the current document phase below and the canonical CSV for present status.
+
+- Delivered branch: `codex/full-feature-audit-delivery`; verified and
   delivered product/documentation head `ff0d4301885f0888dfd8e23104291141538cc4f8`
-- Active delivery worktree:
+- Coordinator delivery worktree:
   `/Users/steves/.codex/worktrees/full-feature-audit-delivery/ctx`
-- Current run `01M4229GT0BD5FAWR71CFQFHNX` returned **checks-passed**, observer
+- Completed run `01M4229GT0BD5FAWR71CFQFHNX` returned **checks-passed**, observer
   **45597 terminal exit0**. Guarded sync preserved every repair commit. All
   22 hosted checks passed with two intentional classifier skips. Actual Linux
   unit job:9,339passed/51skipped,91.26%coverage. Clean-host, uploaded wheel and
@@ -39,9 +48,9 @@
   accompany final evidence reconciliation. Do not re-open settled source work
   or run external publishing, merge, paid evaluation, credential/governance or
   LFS/Support actions merely to close the remaining rows.
-- Evidence-only handoff acceptance: independent read-only review **ACCEPT**,
-  no material findings. Exactly14 canonical rows now Retested Pass; all318
-  contracts/mappings/bug records and prefix-preserved history verified. Current
+- Evidence-only handoff acceptance at `8858f019`: independent read-only review
+  **ACCEPT**, no material findings. Exactly14 canonical rows became Retested Pass; all318
+  contracts/mappings/bug records and prefix-preserved history verified. Historical
   board:177Tested Pass,129Retested Pass,sixNeeds Validation,twoBlocked/Human
   Decision,fourDeprecated. Focused tracker/bug-smoke/surface checks:
   **41passed3.02s**; diff whitespace and every retained checksum passed. Reviewer
@@ -85,7 +94,7 @@
 - Release tag object: `a7b8e78559fda1d44dca844393458272071ae89b`
 - LFS migration PR: `https://github.com/stevesolun/ctx/pull/275`
 - Cleanup checkpoint PR: `https://github.com/stevesolun/ctx/pull/276`
-- Current scope:
+- Original audit scope:
   - reconcile every shipped behavior with one canonical user-story row in
     `qa/feature_status.csv`
   - execute each story's current verification, record every defect, fix
@@ -93,7 +102,7 @@
   - perform independent architecture/code and public-documentation reviews
   - reproduce, fix, and reply to applicable open GitHub issues
   - preserve user-owned and out-of-scope `.scratch/`
-- Parallel execution: all 314 active stories and four historical rows have
+- Historical parallel-execution checkpoint: all 314 active stories and four historical rows have
   received clause-by-clause coverage review. The coordinator owns CSV writes;
   297 rows carry passing local acceptance evidence (179 tested, 118
   retested); CLI-043 and LANE-D-004 are Needs Validation after the shared
@@ -133,7 +142,102 @@
   worktree cleanup reduced the Data volume's rounded used space from 280 GiB to
   262 GiB. No remote LFS object has been purged yet.
 
-## Current isolated R1 review-phase repair (2026-10-04)
+## Current isolated document phase (2026-10-04)
+
+- Removed the remaining unsupported `toolbox init` duplicate from the starter
+  page's use-case description. The opening paragraph remains the owner of the
+  supported initialization command. No runtime, template, navigation, or
+  acceptance-contract change accompanies this deletion.
+- Earlier runtime evidence applies to unchanged source; prior page hashes
+  identify the earlier prose. The `ff0d4301` report and checksum are unchanged.
+- Marked superseded coordinator checkpoints and audit goals as historical;
+  current outcomes remain solely in `qa/feature_status.csv`. Updated the next
+  actions to preserve the existing draft PR and avoid duplicate issue updates.
+- Document validation only: `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python -m
+  mkdocs build --strict --site-dir tmp/document-phase-4578394a/site` exited 0
+  (0.52s). Local Chromium inspection returned HTTP 200, confirmed the supported
+  commands and all starter sections, and resolved 46 distinct local link/anchor
+  targets with no page errors. External requests were blocked; the server and
+  browser exited. The full-page screenshot was visually inspected.
+- Corrected page SHA-256:
+  `c291924d89ead75230e243298ffa550d91567f56333e952861859a8207ad68a4`;
+  rendered page SHA-256:
+  `5b9a5fd33f4505bfd5575373c80c285efa96cc0c57e98cb7c17bcd91687f9c42`.
+  Results and screenshots remain under `tmp/document-phase-4578394a/` in this
+  worktree. These hashes identify the document-phase prose delta after
+  `4578394a`; they do not relabel it as earlier committed evidence.
+- DOC-NAV-012 retains its prior runtime acceptance with this new local page
+  evidence. Independent read-only review accepted the duplicate removal and
+  checkpoint clarification. No CLI tests, test suite, lint, gate, delivery,
+  or external mutation ran in this phase.
+- Read-only reconciliation confirmed all 318 contracts unchanged, only
+  DOC-NAV-012 updated in the canonical CSV, preserved prior field prefixes,
+  unchanged status totals, and matching retained checksums. `git diff --check`
+  passed. Remaining configured phases belong to the outer executor.
+
+## Prior isolated handoff test phase (2026-10-04)
+
+- Tested commit: `4578394a7c82091280506890510fd7ef71011437`. The configured
+  `scripts/no_mistakes_run.sh test` baseline was supplied as successful; this
+  phase did not repeat it or run any other pipeline phase, static checks,
+  full-suite selection, GitHub mutation or external publication.
+- Fresh focused command, with the existing trusted Python and current worktree
+  `src` first on `PYTHONPATH`:
+  `python -m pytest -q --no-cov src/tests/test_feature_user_story_tracker.py
+  src/tests/test_dashboard_user_story_tracker.py src/tests/test_bug_smoke_tracker.py
+  src/tests/test_surface_truth.py src/tests/test_toolbox_cli.py`:
+  **53 passed in 3.20s**. Strict local build:
+  `python -m mkdocs build --strict --site-dir tmp/test-phase-4578394a/site`,
+  exit 0 in 0.76s. No dependency installation or assertion change was needed.
+- Actual `toolbox` module `__main__` ran in fresh subprocesses through `runpy`;
+  only `global_config_path` was redirected to a worktree fixture. Initialization
+  exited 0 and persisted exactly five inactive presets; activation exited 0
+  and persisted only `ship-it`; unknown activation exited 1 and preserved the
+  configuration bytes. The transcript and both persisted states are retained.
+- Chromium inspected the actual local `/toolbox/starters/` page: HTTP 200,
+  corrected opening command, all five starter sections and Activation present,
+  **46 distinct local link/anchor targets valid**, no page errors. External
+  requests were blocked. The coordinator inspected opening/full-page screenshots;
+  the full-page image includes the actual activation command block. Source and
+  rendered hashes match the prior R1 checkpoint below. This is local evidence,
+  not deployed Pages acceptance or proof of host agent execution.
+- Evidence directory:
+  `/var/folders/cj/j956f9v920b8wk3wvd8ms2nh0000gn/T/no-mistakes-evidence/01M4269BKK7CWVT7YMKEGYWWYE/`.
+  Replay: `verify_handoff.py`; outputs: `starter-results.json`,
+  `starter-cli-transcript.txt`, `toolboxes-after-init.json`,
+  `toolboxes-after-activation.json`, `starters-opening.png`, and
+  `starters-full-page.png`. A supplemental immediate-scroll screenshot missed
+  the painted code block; follow-up capture probes initially used relative
+  anchor selectors while Material rewrites live links to absolute URLs.
+  `activation-capture-notes.txt` retains this probe setup issue separately from
+  the passing product evidence; source and assertions were not weakened.
+  The corrected TOC-link probe passed with the command visible in the viewport;
+  `starters-activation-settled.png` was also visually inspected.
+- Reconciled only `DOC-NAV-012` to Retested Pass against committed `4578394a`,
+  preserving its R1 bug and historical evidence. The canonical board is again
+  **177 Tested Pass, 129 Retested Pass, six Needs Validation, two
+  Blocked/Human Decision, four Deprecated**. All six publication prerequisites
+  and both owner decisions remain unchanged. This closes the local story
+  contract, not the remaining outer delivery phases.
+- Post-update tracker selection: 15 passed and one schema failure exposed a
+  missing `PASS:` prefix in this phase's new retest entry. The entry was
+  corrected, with no assertion changes; the exact failing schema test then
+  passed in 12.08s. `check_acceptance.py` passed after distinguishing the
+  explicit no-evidence sentinel from substantive historical proof; its probe
+  corrections are retained in `acceptance-check-notes.txt`. The resulting
+  `acceptance-board.json` verifies all 318 original contracts, history prefixes,
+  all retained checksums, the 14 original acceptance transitions and unchanged
+  external prerequisites. Independent read-only corroboration found no issue.
+- Only this row and this operational checkpoint were edited in the test phase.
+  The generated `tmp/test-phase-4578394a/` site and fixture were removed;
+  dedicated evidence and all pre-existing worktree material were preserved.
+- Historical checkpoint preserved: ff0d4301 delivery and its evidence-only
+  handoff remain historical accepted checkpoints; R1 starter-command prose
+  repair passed focused review-phase checks; final committed acceptance was
+  pending outer reconciliation before this test phase. The original
+  `verification-ff0d4301.md` report and checksum remain byte-identical.
+
+## Prior isolated R1 review-phase repair (2026-10-04)
 
 - Starting gate-worktree HEAD: `8858f0191ee42773f6ad363d6a4ca5977f90f9ea`
   (detached). Only this worktree is used; prior delivery checkout/run paths
@@ -205,7 +309,7 @@
   does not run full tests/lint, control pipelines, commit, push, publish or
   alter PR286/issues, credentials, governance, archives or external services.
 
-## Current isolated test-phase repair (2026-10-04)
+## Prior isolated test-phase repair (2026-10-04)
 
 - Starting gate-worktree HEAD: `14045187f85606f0e2e9d725e26243421b74d13c`
   (detached); the original delivery checkout and its operational history were
@@ -597,7 +701,11 @@
   delivery phases. Complete delivery, publication and owner prerequisites
   remain unverified.
 
-## Current goal map
+## Historical audit goal map
+
+This map retains the audit's earlier scope and open questions. Its counts,
+traffic, and pending-gate statements are historical; use the [checkpoint](#checkpoint)
+and `qa/feature_status.csv` for the current handoff and remaining prerequisites.
 
 ### Destination
 
@@ -881,19 +989,17 @@ path remains unproven. Production PyPI Trusted Publishing succeeded.
 
 ## Immediate next actions
 
-1. Use the exact-target evidence in
-   [Current targeted test-phase evidence](#current-targeted-test-phase-evidence-2026-10-04).
-   Earlier gates remain evidence only for their named checkpoints; the
-   submitted launcher fast result is retained in the checkpoint above.
+1. Use the [current document-phase checkpoint](#current-isolated-document-phase-2026-10-04)
+   and canonical CSV. Earlier gates and page hashes remain evidence for their
+   named snapshots; unchanged runtime evidence remains applicable.
 2. Complete the remaining phases through this existing no-mistakes run. The
-   document phase reconciles owners and stale duplicates without running tests,
-   gates, lint, or delivery commands. Retained source/prose hashes certify their
-   named checkpoints, not later documentation edits.
-3. The outer executor owns remaining validation and creates the push/PR; never
-   duplicate that PR, skip its review decisions, or hand-merge. Inspect required
-   hosted CI.
-   Update issue #283 with the durable PR and verified result; keep it open until
-   integration. A new release or paid-provider run is not authorized.
+   document phase is complete; its local rendering evidence is recorded above.
+   Retained source/prose hashes certify their named checkpoints, not later
+   documentation edits.
+3. The outer executor owns remaining validation and delivery on the existing
+   branch and draft PR #286. Issue #283 already has the AI-labeled PR update;
+   keep it open and avoid duplicate unchanged messages. No merge, release,
+   publication, or paid-provider run is authorized.
 4. GitHub Support's prepared LFS purge request is at Submit. Wait for explicit
    action-time confirmation before sending it; no ticket or remote purge
    exists. Preserve the repository and release assets. Recheck billed storage
