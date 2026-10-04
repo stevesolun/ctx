@@ -13,7 +13,7 @@
 
 - Updated: 2026-10-04 (Europe/Prague)
 - Active goal: inventory, test, repair, and retest every shipped user behavior
-- Phase: all authorized source repairs verified and delivered in draft PR286 at ff0d4301; evidence-only handoff independently accepted and ready for validation/delivery; publication and owner prerequisites remain open
+- Phase: ff0d4301 delivery and its evidence-only handoff remain historical accepted checkpoints; R1 starter-command prose repair passed focused review-phase checks; final committed acceptance remains pending outer reconciliation
 - Release decision: **1.0.21 REMAINS RELEASED; NEW AUDIT OPEN; NO NEW RELEASE DECISION**
 - Branch: `codex/full-feature-audit-delivery`
 - Active delivery branch: `codex/full-feature-audit-delivery`; verified and
@@ -132,6 +132,78 @@
   bare mirror, then restarted and verified the daemon. Safe cache and clean
   worktree cleanup reduced the Data volume's rounded used space from 280 GiB to
   262 GiB. No remote LFS object has been purged yet.
+
+## Current isolated R1 review-phase repair (2026-10-04)
+
+- Starting gate-worktree HEAD: `8858f0191ee42773f6ad363d6a4ca5977f90f9ea`
+  (detached). Only this worktree is used; prior delivery checkout/run paths
+  above are historical, not the active worktree or pipeline for this review.
+- R1 is confirmed local documentation invocation drift: `pyproject.toml`
+  packages the `toolbox` module but no `toolbox` console script. Corrected
+  only the opening `toolbox activate NAME` to
+  `python -m toolbox activate NAME` in `docs/toolbox/starters.md`.
+  The existing module and fixtures already implement activation correctly;
+  product source, entry points and PUBLIC-004 template bytes are unchanged.
+- DOC-NAV-012 alone is reopened pending its original final-tree acceptance
+  contract. Its prior acceptance fields are preserved verbatim in historical
+  notes. All 318 original contracts and the exact 14 accepted ff0 handoff
+  transitions remain intact; the other 317 rows, including all six publication
+  and two owner rows, are unchanged. Pending reconciliation, the board is
+  177 Tested Pass, 128 Retested Pass, seven Needs Validation, two
+  Blocked/Human Decision and four Deprecated. The intended final board remains
+  the earlier 177/129/6/2/4 after DOC-NAV-012 final acceptance.
+- One focused verification round used the existing environment and current
+  worktree `src` on `PYTHONPATH`. Actual `toolbox` module `__main__` execution
+  via `runpy.run_module("toolbox", run_name="__main__")` redirected only
+  `toolbox_config.global_config_path` to an isolated worktree fixture.
+  `init` exited 0 with five inactive starters; `activate ship-it` exited 0
+  and persisted only `ship-it`; unknown activation exited 1 and preserved
+  the configuration bytes. No host user configuration was touched.
+- `python -m pytest -q --no-cov src/tests/test_toolbox_cli.py --basetemp
+  tmp/r1-review-20261004/pytest-temp`: **12 passed in 0.14s**.
+  `python -m mkdocs build --strict --site-dir
+  tmp/r1-review-20261004/site`: exit 0, build completed in 0.42s.
+  Existing dependencies and MkDocs configuration were reused unchanged.
+- Headless Chromium inspected only `/toolbox/starters/` from the local build:
+  **HTTP 200, 75 local links/anchors valid, zero page errors**; the corrected
+  opening command, five starter sections and Activation section were visible.
+  The coordinator inspected the full-page screenshot. External API/font
+  requests were blocked; the loopback server and browser terminated.
+- The first page probe stopped on an exact accessible heading-name assertion:
+  MkDocs adds a permalink marker. Only that probe selector changed to the
+  actual heading IDs; the page/content/visibility assertions stayed intact.
+  Page inspection then passed on the same built files. Passed module, pytest
+  and MkDocs checks were not repeated. This probe failure is retained in the
+  working evidence, not treated as a product failure or silently discarded.
+- Deterministic preservation guard passed: all 318 contracts retained;
+  only DOC-NAV-012 changed; its old history remains prefix-preserved or copied
+  verbatim into notes; all 14 accepted transitions remain; the other 317 rows
+  and five PUBLIC-004 templates are unchanged. `git diff --check` passed
+  before this evidence-only result append. Independent read-only semantic
+  review found no material issue; it is supplemental to the executed proof.
+- Current corrected page SHA-256:
+  `7f06384751c0c80a58516f9abfc259ae4ec76c57e777196f89c39a0dc0596e00`.
+  Rendered `toolbox/starters/index.html` SHA-256:
+  `11a18fe08b47f0525acb6cdaa9e3eac933e46bb677881cad4e7993277bdfd559`.
+  These are post-8858f019 current-page proofs, not prose evidence dated to ff0.
+  The older 34-command evidence remains applicable to source-equivalent
+  behavior; its old starter-page prose hash does not describe this edit.
+- Source SHA-256 values checked equal to ff0:
+  `src/toolbox.py`: `31621ad14c09e5d92ece32f48fc805fbb90149410d4f26a00853457c12f26112`;
+  `src/toolbox_config.py`: `ce7651bc1f563265f0fe234473bbb09a3340fc75b05ca09d4d018ab50ee51d69`;
+  `src/tests/test_toolbox_cli.py`: `db7a52303fbda4e8ed9399bd8f5c0961f3be8ea60848e31d5902a4d237265dbb`;
+  `pyproject.toml`: `c806dd8074b324416eab7ad07f27e1087c8324299b219f0f8224f371b44dd486`.
+- Raw working evidence is under `tmp/r1-review-20261004/`: `verify.py`,
+  `page_inspection.py`, module/pytest/MkDocs logs, `results.json`, and
+  `starters.png`. This ignored directory is local supporting material;
+  durable results and hashes are recorded here and in DOC-NAV-012.
+  `qa/feature-audit/verification-ff0d4301.md` and all existing `SHA256SUMS`
+  bytes remain unchanged. The report's verified checksum remains
+  `62a5cf0ed6770af3da1490b4c0b00c4b4f6a863b689d80d8350a2e18ef257c4c`.
+- No final repair commit exists in this phase. Final committed acceptance,
+  configured gates and delivery belong to the outer executor. This phase
+  does not run full tests/lint, control pipelines, commit, push, publish or
+  alter PR286/issues, credentials, governance, archives or external services.
 
 ## Current isolated test-phase repair (2026-10-04)
 

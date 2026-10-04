@@ -2,7 +2,7 @@
 
 Five presets ship in `docs/toolbox/templates/`. `python -m toolbox init` seeds their
 definitions into `~/.claude/toolboxes.json`; it does not activate any of them.
-Use `toolbox activate NAME` or the intent interview to choose an active preset,
+Use `python -m toolbox activate NAME` or the intent interview to choose an active preset,
 then define per-repo replacements in `.toolbox.yaml`. A same-name per-repo
 entry replaces the complete global toolbox, not individual fields.
 
