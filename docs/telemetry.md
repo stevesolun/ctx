@@ -21,13 +21,18 @@ Events use the `ctx.telemetry.v1` envelope and OpenTelemetry-style naming:
 - `ctx.cli.run`
 - `ctx.cli.resume`
 
-Outcome and dimensions live in attributes such as `otel.status_code`,
+Event payload dimensions use keys such as `otel.status_code`,
 `ctx.operation`, `ctx.tool.name`, `ctx.result.count`,
 `ctx.selection.selected.count`, `ctx.selection.rejected.count`,
 `ctx.selection.source`, `ctx.selection.selected`, `ctx.usage.attribution`, and
 failure/correlation attributes such as `ctx.run.failure_stage`,
 `ctx.session.previous_trace_id`, `ctx.traceparent.received`, and hashed
 identifiers like `ctx.query.hash`, `ctx.slug.hash`, or `ctx.session.hash`.
+
+OTLP log export prefixes these payload keys with `ctx.payload.`; for example,
+`ctx.operation` becomes `ctx.payload.ctx.operation` and `otel.status_code`
+becomes `ctx.payload.otel.status_code`. Envelope fields are exported separately
+as attributes such as `ctx.outcome`, `ctx.source`, and `ctx.duration_ms`.
 
 Every recorded event gets a generated OpenTelemetry-compatible `trace_id` and
 `span_id` when the caller does not provide one. The local envelope also keeps
@@ -696,14 +701,20 @@ raw message text:
 
 | Panel | Query dimensions |
 |---|---|
-| Request volume | count logs grouped by `event.name`, `ctx.source`, `ctx.operation` |
-| Error rate | count logs where `otel.status_code = ERROR`, grouped by `ctx.source` |
-| Exception fingerprints | count logs grouped by `ctx.exception.fingerprint`, `ctx.exception.type` |
+| Request volume | count logs grouped by `event.name`, `ctx.source`, `ctx.payload.ctx.operation` |
+| Error rate | count logs where `ctx.outcome = error`, grouped by `ctx.source` |
+| Exception fingerprints | count logs grouped by `ctx.payload.ctx.exception.fingerprint`, `ctx.payload.ctx.exception.type` |
 | Request traces | trace spans grouped by `service.name`, span name, status, and `ctx.source` |
-| API latency | histogram metric `ctx.api.duration` by `ctx.operation` |
+| API latency | aggregate `ctx.duration_ms` from logs where `ctx.source = ctx-api`, grouped by `ctx.payload.ctx.operation` |
 | CLI/runtime usage | count logs for `ctx.cli.run`, `ctx.cli.resume`, `ctx.runtime_lifecycle.record`, `ctx.mcp.external_tool_call` |
 | Exporter health | status JSON fields `status`, `attempted`, `exported`, `failed`, `malformed_pending_records`, `error_kind` |
 | Spool growth | `event_count`, `malformed_records`, and checkpoint age from `/api/status.json` |
+
+API instrumentation automatically records duration on events. The
+`ctx.api.duration` histogram in the Python example above is optional manual
+instrumentation. To group that custom histogram by operation, supply
+`attributes={"ctx.operation": "recommend_bundle"}` to `record_histogram()` and
+query the exported metric attribute `ctx.metric.ctx.operation`.
 
 Recommended enterprise alerts:
 
@@ -713,7 +724,7 @@ Recommended enterprise alerts:
 | `CtxTelemetryExporterDegraded` | latest export status is `degraded` or `malformed_pending_records > 0` |
 | `CtxTelemetrySilent` | telemetry is enabled but no new event appears during an expected active window |
 | `CtxTelemetrySpoolGrowing` | local spool count grows while checkpoint id stays unchanged |
-| `CtxTelemetryUnhandledExceptions` | new `ctx.exception.fingerprint` appears in prod |
+| `CtxTelemetryUnhandledExceptions` | new `ctx.payload.ctx.exception.fingerprint` appears in prod |
 
 For local dashboard checks, use:
 

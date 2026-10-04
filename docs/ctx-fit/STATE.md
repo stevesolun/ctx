@@ -107,7 +107,26 @@
   worktree cleanup reduced the Data volume's rounded used space from 280 GiB to
   262 GiB. No remote LFS object has been purged yet.
 
-## Current isolated review-phase repair (2026-10-04)
+## Current isolated test-phase repair (2026-10-04)
+
+- Starting gate-worktree HEAD: `14045187f85606f0e2e9d725e26243421b74d13c`
+  (detached); the original delivery checkout and its operational history were
+  not accessed. `test-1` reproduced as two deterministic failures when the
+  test module's UTC import date preceded execution by one day. A class-local
+  clock fixture makes the same two cases pass; production and assertions are
+  unchanged. All four unmatched-count cases plus eight telemetry cases pass.
+- DOC-1 corrects telemetry dashboard/alert exported keys and automatic API
+  log-duration aggregation. Actual intercepted OTLP output confirms the keys;
+  the optional manual histogram remains documented. Independent source review
+  found no material issue. Evidence and frozen source hashes:
+  `qa/feature-audit/context-clock-telemetry-docs-20261004.md`.
+- All 318 contracts and historical defect evidence are preserved. B-ADAPT-002
+  is now Needs Validation; DOC-NAV-007 and LANE-D-036 remain Needs Validation.
+  Earlier totals below predate this reopening. Original acceptance, rendered
+  page, committed gates and delivery remain pending. No full suite, static
+  checks or pipeline controls ran; the outer executor owns subsequent phases.
+
+## Prior isolated review-phase repair (2026-10-04)
 
 - Starting HEAD in this gate worktree: `03cc9e791059aa9dae8792ce6ff5dd0c300ac520`.
   Both review findings were confirmed from their real callers. R1 supplies a
