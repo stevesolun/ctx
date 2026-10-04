@@ -13,28 +13,54 @@
 
 - Updated: 2026-10-04 (Europe/Prague)
 - Active goal: inventory, test, repair, and retest every shipped user behavior
-- Phase: telemetry and benchmark follow-up frozen and independently accepted; focused/static checks passed; committed fast/preflight and new delivery pending
+- Phase: all authorized source repairs verified and delivered in draft PR286 at ff0d4301; evidence-only handoff independently accepted and ready for validation/delivery; publication and owner prerequisites remain open
 - Release decision: **1.0.21 REMAINS RELEASED; NEW AUDIT OPEN; NO NEW RELEASE DECISION**
 - Branch: `codex/full-feature-audit-delivery`
-- Active delivery branch: `codex/full-feature-audit-delivery`, submitted head
-  `18253e9a37cb215856fb79bac01ea9c7482eb6e6`; delivered baseline is now
-  `591b26c4595a5eb403bb2a4362c466989da99775`
+- Active delivery branch: `codex/full-feature-audit-delivery`; verified and
+  delivered product/documentation head `ff0d4301885f0888dfd8e23104291141538cc4f8`
 - Active delivery worktree:
   `/Users/steves/.codex/worktrees/full-feature-audit-delivery/ctx`
-- Run `01M3RWB2ZY374H29CTPEPNSWVH` returned `checks-passed`; observer **6572**
+- Current run `01M4229GT0BD5FAWR71CFQFHNX` returned **checks-passed**, observer
+  **45597 terminal exit0**. Guarded sync preserved every repair commit. All
+  22 hosted checks passed with two intentional classifier skips. Actual Linux
+  unit job:9,339passed/51skipped,91.26%coverage. Clean-host, uploaded wheel and
+  both macOS/Ubuntu installed-wheel smoke jobs passed. PR286 is draft,
+  unmerged/unreleased. Background merge monitoring is not unfinished repair.
+- Final ff0d4301 local verification: all11 committed-fast lanes passed
+  (373.931s,9,442unit passes/five skips,92.09%coverage); then the exact-final
+  serial preflight passed all20checks (9,442unit passes/five skips in288.24s,
+  92.09%coverage). Drivers93630and80495 are terminal. Both final rendered docs
+  pages passed with431valid local links/anchors, no script errors, and inspected
+  screenshots. No further code repair or full-suite retry is needed for ff0.
+- Final evidence-only handoff must preserve all318 original contracts, history,
+  and remaining six publication-dependent/two owner-decision stories. Detailed
+  evidence: `qa/feature-audit/verification-ff0d4301.md`. The canonical tracker
+  is the only current status ledger; no production/source/docs behavior changes
+  accompany final evidence reconciliation. Do not re-open settled source work
+  or run external publishing, merge, paid evaluation, credential/governance or
+  LFS/Support actions merely to close the remaining rows.
+- Evidence-only handoff acceptance: independent read-only review **ACCEPT**,
+  no material findings. Exactly14 canonical rows now Retested Pass; all318
+  contracts/mappings/bug records and prefix-preserved history verified. Current
+  board:177Tested Pass,129Retested Pass,sixNeeds Validation,twoBlocked/Human
+  Decision,fourDeprecated. Focused tracker/bug-smoke/surface checks:
+  **41passed3.02s**; diff whitespace and every retained checksum passed. Reviewer
+  independently corroborated final local logs, pipeline outcome, current hosted
+  jobs/artifact, rendered hashes and open authorization boundaries. These are
+  evidence-only changes on top of ff0; no product source or public-doc behavior
+  changed. Complete their supported final delivery without broadening scope.
+- Historical baseline: run `01M3RWB2ZY374H29CTPEPNSWVH` returned `checks-passed`; observer **6572**
   is terminal exit 0. Its background PR monitor is not a repair gate. Guarded
   synchronization preserved every pipeline commit and advanced the clean delivery
   checkout to `591b26c4`. Hosted run `37160902911` passed: 9,272 unit tests,
   51 skips, 91.27% coverage; actual clean-host, wheel upload and Linux/macOS
   wheel smoke succeeded. No merge or release occurred. The original failed
   hosted run and its four optional-LiteLLM fixture repairs remain recorded below.
-- Passing baseline delivery does not resolve review R3. A coordinator external
+- At that historical baseline, delivery did not resolve review R3. A coordinator external
   regression still reproduced six failures for present fallback replacement;
   permanent expanded tests then reproduced 24 failures before source changes.
-  The human authorized remaining in-scope repairs. Two disjoint lanes now own
-  telemetry source/tests and the benchmark fixture test; the coordinator owns
-  documentation, CSV, integration and final verification. No new pipeline run
-  or competing source writer is active. See
+  The human authorized the in-scope repairs, which were completed in disjoint
+  telemetry and benchmark lanes before the successful current run. See
   `qa/feature-audit/telemetry-fallback-repair-20261004.md` for bounded evidence.
 - Previous no-mistakes run: `01M3RV98HW4HQDSM04HA6NRBJG` is **FAILED**; driver
   session `15506` is terminal, log `/tmp/ctx-feature-audit-delivery-54dfe28a.log`.
