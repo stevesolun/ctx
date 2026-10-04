@@ -131,13 +131,12 @@ the changed surface. Local-fast and preflight remain the first pass.
 
 ## Documentation changes
 
-Public docs surfaces are release-tracked in the canonical
-`qa/feature_status.csv` tracker, with supporting rows in
-`docs/qa/feature-user-story-status.csv` and
-`docs/qa/dashboard-user-story-status.csv`. If you add, remove, or move a
+Public docs surfaces are release-tracked only in `qa/feature_status.csv`.
+The former status CSVs under `docs/qa/` are non-authoritative pointers; do not
+add status or evidence there. If you add, remove, or move a
 `.md` entry under `mkdocs.yml` `nav`, or change linked public assets under
 `docs/assets/javascripts/`, `docs/services/`, or `docs/toolbox/templates/`,
-update the relevant supporting row and canonical row with the exact path in
+update the relevant canonical row with the exact path in
 `entrypoint_or_route` and run:
 
 ```bash

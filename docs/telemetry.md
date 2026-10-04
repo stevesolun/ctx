@@ -398,17 +398,18 @@ checkpoint file, or `--all` when you intentionally want to replay the full spool
 Checkpoint compatibility metadata separates acknowledged progress from the salt
 currently available for hashing exported identifiers. It scopes progress to the
 source, signal, sink, destination, and configured salt policy, using digests
-rather than raw paths, endpoints, or keys. Temporary salt or lock failures and
-subsequent recovery keep the cursor. Automatically regenerating a missing salt
-also keeps it. Replacing an existing salt with a different value, changing an
-explicit environment or inline salt, or changing the source, signal, destination,
-or salt policy starts a new export scope. Identifier hashing itself retains its
+rather than raw paths, endpoints, or keys. With valid compatibility metadata,
+temporary salt file or lock failures and subsequent recovery keep the cursor.
+Automatically regenerating a missing salt also keeps it. Manually replacing the
+selected file salt, changing a selected environment or inline salt, or changing
+the source, signal, destination, or salt policy starts a new export scope.
+Identifier hashing itself retains its
 existing keyed algorithm and unsalted fallback.
 
 Checkpoint rotation follows the key selected by a read-only lookup. A readable
 configured file remains authoritative even when its lock cannot be used for
-payload hashing. Changes to an unused fallback key or environment availability do not reset
-progress. The policy records configured selectors independently of their
+payload hashing. Changes to an unused fallback's key or availability do not
+reset progress. The policy records configured selectors independently of their
 availability; a fallback key becomes relevant when the primary key cannot be
 read. Invalid UTF-8 in unused fallback storage is unavailable observation data;
 validation of the key selected for hashing remains strict.
@@ -421,7 +422,7 @@ file keys and generation markers, plus an additive `file_last_known_keys` map
 that retains the last observed fingerprint for each file independently of
 availability and the export cursor. Both survive deliberate rotations,
 policy changes, destination changes and explicit `--all` replay; it never allows
-a cursor to cross those export scopes. Restoring a previously observed key with
+a cursor to cross those export scopes. Restoring an older observed key with
 its saved generation marker therefore still counts as rotation, including after
 storage loss and a destination reset or explicit replay. Recovering the last
 observed key preserves progress. No raw key
@@ -442,10 +443,11 @@ the latest identity, or explicitly replay with `--all`. An unseen automatically
 generated key still counts as recovery, and an unseen manual replacement resets
 progress.
 Dry-run previews only read this metadata; they never create salts,
-locks, checkpoints, or status files. A legacy keyed checkpoint must match its
-historical source and destination hashes using an available key. If its key is
-unavailable or generation history makes that identity ambiguous, export stops
-with an actionable identity error instead of silently replaying the spool. This
+locks, checkpoints, or status files. Preserving a legacy keyed checkpoint's
+cursor requires an available key that matches its historical source and
+destination hashes. When file-key recovery cannot be distinguished from
+rotation, export stops with an actionable identity error instead of silently
+replaying the spool. This
 also covers restoring an older generated key that does not match a legacy
 checkpoint. Restore the original key
 or use `--all` to explicitly replay it. Automatic event and metric capture keeps
@@ -458,7 +460,8 @@ missing **or replaced**, even when every current candidate is readable after
 the primary file lock recovers. A readable primary key alone does not prove
 which key hashed the old checkpoint. Restoring the fallback value lets it
 establish the old hashes and migrate without replay;
-`--all` explicitly starts over. Implicit default-environment absence alone does
+`--all` explicitly starts over. Selecting a new explicit environment or inline
+key still starts a new scope. Implicit default-environment absence alone does
 not trigger this ambiguity rule. A fallback removed from the configuration
 entirely cannot be reconstructed from legacy checkpoint metadata; retain its
 configuration and original key while migrating. Changing only the source
@@ -482,8 +485,8 @@ versions against a migrated checkpoint.
 The command exits non-zero if the selected exporter or trace preview validation
 fails. Use
 `--fail-on-degraded` when running from cron or CI and you also want malformed
-pending records or checkpoint anomalies to fail the command. Real export
-attempts also write an owner-only status file next to the spool as
+pending records or checkpoint anomalies to fail the command. Attempts that reach
+the exporter also write an owner-only status file next to the spool as
 `events.jsonl.export-status.json`. It records an explicit `status` of `ok`,
 `noop`, `pending`, `partial_success`, `failed`, or `degraded`, plus the
 sink, destination hash,

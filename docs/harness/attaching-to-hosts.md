@@ -250,6 +250,11 @@ Returned rows include availability metadata (`installable`, `load_status`, and
 `source_path`) so hosts can distinguish local wiki entries from manual or
 external-install rows.
 
+`recommend_related()` returns only rows that are locally installable or have a
+non-empty `install_command`; an `available` status alone is insufficient.
+It applies this filter before the requested `top_n` limit, so fewer results
+may remain when graph neighbors have no usable installation path.
+
 Advanced: build a `CtxCoreToolbox` directly if you need to point at
 a non-default wiki/graph path:
 

@@ -150,8 +150,8 @@ def _release_manifest_artifact_identity(path: str) -> tuple[str, int] | None:
 def _read_graph_artifact_stats() -> dict[str, int | None] | None:
     """Read the shipped graph stats sidecar after checking artifact identity.
 
-    A gzip tarball has no central index. Counting its members on every README,
-    docs, or GitHub About check is too slow for normal local/CI feedback, so
+    A gzip tarball has no central index. Counting its members on every README
+    or docs check is too slow for normal local/CI feedback, so
     releases ship a small sidecar tied to the artifact size and promotion hash.
     """
     graph_dir = REPO_ROOT / "graph"
@@ -510,7 +510,7 @@ def read_graph_stats() -> dict:
 
     Priority:
       1. ``graph/wiki-graph-stats.json`` — the checked sidecar for the
-         shipped graph artifact. This keeps docs/About updates fast while
+         shipped graph artifact. This keeps README/docs updates fast while
          still tying counts to the release manifest's exact hash and size.
       2. ``graph/wiki-graph.tar.gz`` — the release-manifest-pinned tarball
          when it has been hydrated locally. Canonical but slow to enumerate.

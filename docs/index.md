@@ -67,8 +67,8 @@ and discovered test command alone do not supply representative Fit tasks.
 | `ctx fit --json` | nothing; no model call | reads the working tree, prints the profile as JSON |
 | `ctx fit --dry-run` | nothing; no model call | additionally runs read-only git queries (`log`, `show --name-only`, `ls-tree`, `rev-parse`) to derive representative tasks, then prints the experiment plan and a cost estimate |
 | `ctx fit --test --budget N` | up to `N` dollars | runs candidates and verifies each trial with the repository's own test command |
-| `ctx fit --apply` | nothing beyond the evaluation | writes the winning configuration into your working tree; the write runs no git command, though the evaluation it needs first does |
-| `ctx fit --pr` | nothing beyond the evaluation | creates a branch, commits, **pushes to your remote**, and opens a pull request through `gh` |
+| `ctx fit --test --budget N --apply --yes` | up to `N` dollars for evaluation | writes the winning configuration into your working tree; the write runs no git command, though evaluation does |
+| `ctx fit --test --budget N --pr --yes` | up to `N` dollars for evaluation | creates a branch, commits, **pushes to your remote**, and opens a pull request through `gh` |
 
 `--dry-run` reads history to derive tasks and writes nothing — not to the
 repository, not to the index, not to any ref.
@@ -119,12 +119,17 @@ and the [packaged Bubblewrap profile](https://gitlab.com/apparmor/apparmor/-/blo
 
 ### `--apply` and `--pr` are different writes
 
-`--apply` writes files into your working tree, on whatever branch you are
-standing on. It prints every proposed change first and, unless you pass
-`--yes`, stops there so you can look. The write itself runs no git command:
-nothing is staged, committed, or pushed. Getting to it does run git — `--apply`
-is refused without evidence from `ctx fit --test --budget N`, and deriving the
-tasks for that evaluation uses the same read-only queries `--dry-run` uses.
+Include `--apply` or `--pr` in the same `ctx fit --test --budget N` invocation.
+CTX Fit does not load evidence from prior evaluations, so either write flag
+alone is refused. `--yes` authorizes both the displayed evaluation plan and
+its resulting write. Without `--yes`, evaluation can be confirmed interactively,
+but a winning result only previews the write; there is no second confirmation
+prompt. Rerunning with `--yes` also reruns the evaluation and can spend again.
+
+`--apply` writes files into your working tree on the current branch, after
+printing every proposed change. The write itself runs no git command: nothing
+is staged, committed, or pushed. Deriving tasks for the evaluation uses the
+same read-only queries `--dry-run` uses.
 
 Each proposed change names the file and whether CTX Fit is *creating* or
 *modifying* it. Today every plan contains exactly one CTX-owned artifact,
@@ -135,14 +140,14 @@ ordinary `ctx run` invocations validate and activate that configuration.
 | It printed | State after the write | Review with | Undo with |
 | --- | --- | --- | --- |
 | `modify: .ctx/fit-configuration.json` | existing sidecar replaced after a compare-and-swap check | `git diff -- .ctx/fit-configuration.json` when tracked; otherwise inspect the file directly | restore the tracked file from version control, or restore your saved copy if it was untracked |
-| `create: .ctx/fit-configuration.json` | new and **untracked** until you add it | `git status --short --untracked-files=all` and inspect the file directly | delete `.ctx/fit-configuration.json` |
+| `create: .ctx/fit-configuration.json` | a previously absent sidecar is written; it may be untracked or a tracked file restored after deletion | `git status --short --untracked-files=all` and inspect the file directly | delete it if untracked; restore it from version control if tracked |
 
 !!! warning "Version control cannot restore an untracked sidecar"
 
     CTX Fit does not rewrite `AGENTS.md`, `CLAUDE.md`, or other user-authored
     instruction files. Their evaluated bytes are embedded in the sidecar
     instead. If an existing untracked sidecar matters to you, save a copy
-    before confirming the write; version-control restore commands cannot
+    before authorizing the write; version-control restore commands cannot
     recover an untracked file.
 
 **`--pr` writes to a remote.** It creates a branch, commits the winning
@@ -447,14 +452,9 @@ even for docs-only or graph-only changes. Docs changes run public docs
 tracker checks before the strict MkDocs build, including bug-smoke,
 feature, dashboard, and toolbox coverage. Always pass an explicit narrow
 no-mistakes intent so review/test/doc agents validate this branch instead
-of inferring a stale broader goal from local transcripts. Public docs
-surfaces are release-tracked: when
-`mkdocs.yml` adds, removes, or moves a nav `.md` page, or public linked
-assets under `docs/assets/javascripts/`, `docs/services/`, or
-`docs/toolbox/templates/` change, update the relevant supporting ledger
-(`docs/qa/feature-user-story-status.csv` or
-`docs/qa/dashboard-user-story-status.csv`) and the canonical
-`qa/feature_status.csv` with the exact path in `entrypoint_or_route`.
+of inferring a stale broader goal from local transcripts. For public docs
+tracker requirements, follow the
+[contribution guide](https://github.com/stevesolun/ctx/blob/main/CONTRIBUTING.md#documentation-changes).
 Bug-smoke audit rows live in `qa/bug_smoke_status.csv` and are validated
 by the same public docs tracker; `Retested Pass` rows must include `PASS:`
 retest evidence and a closed `next_action` starting with `Closed;`.

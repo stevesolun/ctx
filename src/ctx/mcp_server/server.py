@@ -57,10 +57,11 @@ module is the source of truth for the tool catalogue):
     ctx__session_end(...)
     ctx__session_state(...)
 
-Protocol coverage mirrors H2's client implementation — the minimal
-operational subset: initialize + initialized notification +
-tools/list + tools/call + shutdown. Plus the server-only extras:
+Protocol coverage includes the client's minimal operational subset:
+initialize + initialized notification + tools/list + tools/call + shutdown.
+The server also handles:
 
+    * ping requests with an empty successful result
     * serverInfo reported in the initialize response
     * tools capability declared
     * notifications/cancelled accepted (no-op for this server since

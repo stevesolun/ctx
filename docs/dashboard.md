@@ -256,7 +256,7 @@ per-process monitor token injected into the rendered page.
 | `/kpi` | **KPI dashboard** — total entity count with subject breakdown, grade distribution pills, two-column tables for grade counts and lifecycle tiers (active · watch · demote · archive), hard-floor reasons with counts, **By category** table (count · avg score · A/B/C/D/F mix per category), **Top demotion candidates** (active/watch entries graded D or F, sorted by consecutive-D streak desc then score asc), and the **Archived** list. Same shape as `python -m kpi_dashboard render` but HTML |
 | `/runtime` | Generic harness runtime ledger from `CTX_RUNTIME_LIFECYCLE_DIR` or `~/.ctx/runtime/events.jsonl`: validation totals, failed/error checks, tool-selection totals, active selected loads, user/system/host source split, token totals, exact/estimated/unavailable attribution counts, recent tool usage rows, and open escalations. Grouped token history is available in `/api/runtime.json`. |
 | `/sessions` | Index of every session (audit + skill-events), first/last seen, counts of skills loaded/unloaded, agents loaded/unloaded, MCPs loaded/unloaded, and lifecycle transitions |
-| `/session/<id>` | Per-session audit and load/unload timelines, scoped to the requested session; a session may contain any subset of lifecycle events |
+| `/session/<id>` | Per-session audit and load/unload timelines |
 | `/logs` | Last 500 audit events in a filterable table (client-side filter on event name, subject, session id) |
 | `/events` | Live SSE stream of new audit events |
 
@@ -361,17 +361,15 @@ the session-scoped audit and load/unload timelines.
 
 ### On `/session/<id>`
 
-The per-session view lets you watch a skill's lifecycle inside one
-session:
+The per-session view shows separate audit and load/unload timelines for the
+requested session. A session can contain any subset of lifecycle events; for
+example, its audit timeline might include:
 
 ```
 skill.loaded        fastapi-pro       session-abc  @ 10:23:05
 skill.score_updated fastapi-pro       session-abc  @ 10:31:47   grade C->B
 skill.unloaded      fastapi-pro       session-abc  @ 11:04:02
 ```
-
-The `load → score_updated → unload` triad is the canonical
-observability proof that ctx's telemetry pipeline is live.
 
 ## Security
 

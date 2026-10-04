@@ -73,6 +73,11 @@ The scanner reads repo structure and files to produce a stack profile. Detection
 is evidence-based: every claim should map to a file, dependency, config value, or
 import pattern.
 
+Use `--output PATH` to choose the profile JSON destination. If it cannot be
+written, the scanner reports the path error on stderr and exits `1` without a
+traceback. `--recommend` requires an installed graph; use `ctx-init --graph`
+to install it before requesting recommendations.
+
 ### Detection Categories
 
 - **Languages** - file extensions, shebangs, lock files.

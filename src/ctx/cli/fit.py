@@ -1,8 +1,7 @@
 """``ctx fit`` — repository-specific AI coding stack optimization.
 
-Milestone 1 scope: understand the repository and report a structured Fit
-profile.  This command performs **no model execution and spends nothing**;
-later milestones add candidate evaluation behind an explicit budget.
+Bare profiling stays free and read-only. Evaluation requires explicit spending
+authority; adopting a winner requires evidence from that same evaluation.
 
 The output deliberately leads with decisions rather than internals. Graph
 statistics, entity taxonomy, and planner detail belong in diagnostic output,

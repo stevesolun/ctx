@@ -42,15 +42,12 @@ Both problems have the same fix: put the complexity behind a single answer.
 Three levels, increasing in cost and commitment. Level 1 must be safe, fast,
 read-only, and free.
 
-```text
-ctx fit            understand   — readiness + what to improve      (free)
-ctx fit --test     verify       — controlled experiments           (costs money, gated)
-ctx fit --apply    act          — generate the configuration       (reviewable)
-```
+1. **Understand:** assess readiness and what to improve.
+2. **Verify:** run controlled experiments within an explicitly authorized budget.
+3. **Act:** preview and adopt the winning configuration as a reviewable change.
 
-Supporting flags, as shipped: `--budget USD`, `--dry-run`, `--pr`, `--yes`,
-`--json`, `--max-depth`. Diagnostics live in `ctx doctor`. Anything else must
-justify its existence; run `ctx fit --help` for the current surface.
+The [user guide](../index.md) owns the current commands, spending controls,
+diagnostics, and apply/PR contract.
 
 ## 5. Scope
 
@@ -155,9 +152,8 @@ reject a technically complete milestone that does not improve the outcome.
 
 V1 overall: a developer installs, runs `ctx fit` in a real repository, gets
 useful readiness output; runs `ctx fit --test --budget 10` and receives an
-honest recommendation with verified evidence and real cost; then optionally
-uses `--apply` for a working-tree change or `--pr` for a branch, commit, push,
-and opened pull request.
+honest recommendation with verified evidence and real cost; optionally adopts
+the winner through the [user guide's apply and PR contract](../index.md).
 
 ## 10. Success criteria
 

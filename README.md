@@ -32,8 +32,8 @@ and runtime prerequisites without contacting a model or spending money.
 | Profile a repository (`ctx` is the same as `ctx fit`) | `ctx fit` |
 | Preview an evaluation | `ctx fit --dry-run` |
 | Evaluate candidates | `ctx fit --test --budget 10` |
-| Write the winner locally | `ctx fit --apply` |
-| Open a pull request with the winner | `ctx fit --pr` |
+| Evaluate and write the winner locally | `ctx fit --test --budget 10 --apply --yes` |
+| Evaluate and open a pull request with the winner | `ctx fit --test --budget 10 --pr --yes` |
 
 Bare `ctx fit` is free, local, and read-only. It runs no model, spends nothing, and issues no git commands.
 `--dry-run` adds read-only history queries. Spending needs `--test` plus `--budget`; simulation cannot authorize writes.
@@ -49,19 +49,16 @@ Bare `ctx fit` is free, local, and read-only. It runs no model, spends nothing, 
 
 ### `--apply` writes the working tree
 
-`ctx fit --apply` requires verified evidence from `ctx fit --test --budget N`. It previews the change
-and asks for confirmation unless `--yes` is present. The write itself runs no git command, although evaluation uses read-only history queries.
+Include `--apply` in the same `ctx fit --test --budget N` invocation; prior evaluations are not loaded.
+`--yes` authorizes the evaluation and resulting write. Without it, a winning result is only previewed.
+The write itself runs no git command, although evaluation uses read-only history queries.
 
-- `modify: .ctx/fit-configuration.json` replaces an existing sidecar. Review a tracked file with
-  `git diff` and restore it through version control.
-- `create: .ctx/fit-configuration.json` creates an untracked file. Review it with `git status
-  --short --untracked-files=all`, and delete it to undo the change. Version control cannot recover
-  an untracked file.
+For `modify: .ctx/fit-configuration.json` or `create: .ctx/fit-configuration.json`, check tracking with
+`git status` before undoing a write: version control cannot recover an untracked file.
+See the [write, review, and recovery guide](https://stevesolun.github.io/ctx/#-apply-and-pr-are-different-writes)
+for the sidecar contract and recovery steps.
 
-CTX Fit does not rewrite user-authored instructions; it records the exact evaluated bytes and
-hashes in the sidecar.
-
-**`--pr` writes to a remote.** After preview and confirmation, it runs read-only probes including
+**`--pr` writes to a remote.** It uses the same evaluation and `--yes` requirements and runs read-only probes including
 `git status`, remote checks, and `gh auth status`. It refuses before writing if `gh` is not installed
 or not logged in, or if the tree and remote are unsuitable. It then performs:
 
@@ -108,9 +105,8 @@ agent, and MCP content, refreshes runtime-managed harness pages, and fails close
 ## Example user stories
 
 `CLI-002` covers bounded repository recommendations, `CLI-026` reviewed harness installation, and
-`API-011` validated local entity management. Canonical status lives in `qa/feature_status.csv`;
-`docs/qa/feature-user-story-status.csv`, `docs/qa/dashboard-user-story-status.csv`, and
-`qa/tool-selection-token-history/tracker.csv` are supporting detail ledgers.
+`API-011` validated local entity management. Current status lives only in
+[`qa/feature_status.csv`](qa/feature_status.csv).
 
 See the [full documentation](https://stevesolun.github.io/ctx/) for evaluation semantics, platform setup, privacy and telemetry, configuration, and APIs.
 

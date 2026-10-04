@@ -55,9 +55,9 @@ differ only in transport and confirmation UX, not in ranking logic.
 
 ## Reference Pages
 
-- [Stack signatures](../stack-signatures.md) - file/config patterns used to
-  identify stack signals.
-- [Skill-stack matrix](../skill-stack-matrix.md) - stack-to-capability mapping
-  used as scanner evidence.
+- [Stack signatures](../stack-signatures.md) - implemented scanner boundary
+  and proposed detection coverage.
+- [Skill-stack matrix](../skill-stack-matrix.md) - implemented resolver boundary
+  and proposed stack-to-capability mappings.
 - [Entity source surfaces](../marketplace-registry.md) - discovery inputs,
   ingestion validation, and explicit update rules.

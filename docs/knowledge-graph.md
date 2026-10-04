@@ -220,10 +220,9 @@ The helper `resolve_graph.load_graph()` does this for you.
 
 The graph backs these recommendation paths:
 
-- Execution recommendation surfaces (`ctx.recommend_bundle`,
-  `ctx.recommend_related`, MCP `ctx__recommend_bundle` /
-  `ctx__recommend_related`, generic harness tools, LoopFlow/agent-loop
-  adapter capability and related recommendations, Claude Code hook suggestions, and
+- Bundle recommendation surfaces (`ctx.recommend_bundle`,
+  MCP `ctx__recommend_bundle`, generic harness bundle tools, LoopFlow/agent-loop
+  adapter capability recommendations, Claude Code hook suggestions, and
   repo-scan advisory output) share
   `ctx.core.resolve.recommendations.recommend_by_tags` for skills,
   agents, and MCP servers. That engine ranks candidates by
@@ -238,6 +237,9 @@ The graph backs these recommendation paths:
   wrong-language rows for local/no-key coding loops. If an older
   extracted wiki has the skill index JSON but no graph nodes for
   those records, the same recommender falls back to the index file.
+- Related recommendations walk graph neighbors of selected IDs. See the
+  [host integration guide](harness/attaching-to-hosts.md#2-python-library-path)
+  for their availability and exclusion rules.
 - Harness recommendations are a separate path for custom/API/local
   model onboarding (`ctx-init --model-mode custom ...`),
   `python -m harness_install`, and LoopFlow/agent-loop adapter calls that pass
