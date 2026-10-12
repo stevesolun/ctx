@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import subprocess
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -15,7 +14,6 @@ from ctx.core.source_registry import (
     LicenseGateError,
     canonical_ingestion_manifest_sha256,
     entity_provenance,
-    get_external_source,
     load_source_registry,
     render_third_party_notice,
     validate_ingestion_manifest,
@@ -24,10 +22,22 @@ from ctx.core.source_registry import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-MATT_REVISION = "e74f0061bb67222181640effa98c675bdb2fdaa7"
-MATT_LICENSE_PATH = "imported-skills/mattpocock/LICENSE"
-MATT_LICENSE_SHA256 = "0e7ac423bf2c6e223b7c5b156f8cf72da49d748e56a1641402c31f22ad07dbb5"
+FIXTURE_REVISION = "a" * 40
+FIXTURE_LICENSE_PATH = "imported-skills/fixture/LICENSE"
+FIXTURE_LICENSE = b"MIT License\nPermission is hereby granted for this synthetic test fixture.\n"
+FIXTURE_LICENSE_SHA256 = hashlib.sha256(FIXTURE_LICENSE).hexdigest()
 RETAIN_MIT = ("retain-copyright-notice", "retain-license-notice")
+
+pytestmark = pytest.mark.usefixtures("user_license_evidence")
+
+
+@pytest.fixture
+def user_license_evidence(tmp_path, monkeypatch):
+    """Use synthetic user evidence, never a downloaded source or package fallback."""
+    path = tmp_path / FIXTURE_LICENSE_PATH
+    path.parent.mkdir(parents=True)
+    path.write_bytes(FIXTURE_LICENSE)
+    monkeypatch.setattr("ctx.core.source_registry.REPO_ROOT", tmp_path)
 
 
 def _manifest_entry(
@@ -57,7 +67,7 @@ def _ingestion_manifest(
         "fetched_on": "2026-07-11",
         "license": "MIT",
         "license_url": f"https://example.test/{revision}/LICENSE",
-        "license_evidence_sha256": MATT_LICENSE_SHA256,
+        "license_evidence_sha256": FIXTURE_LICENSE_SHA256,
         "entries": entries if entries is not None else [_manifest_entry()],
     }
 
@@ -66,13 +76,13 @@ def test_license_gate_allows_full_body_for_policy_allowlisted_license() -> None:
     record = ExternalSourceRecord(
         name="optillm",
         url="https://github.com/algorithmicsuperintelligence/optillm",
-        revision=MATT_REVISION,
+        revision=FIXTURE_REVISION,
         license="MIT",
-        license_url=f"https://example.test/{MATT_REVISION}/LICENSE",
-        license_evidence_sha256=MATT_LICENSE_SHA256,
-        license_evidence_path=MATT_LICENSE_PATH,
+        license_url=f"https://example.test/{FIXTURE_REVISION}/LICENSE",
+        license_evidence_sha256=FIXTURE_LICENSE_SHA256,
+        license_evidence_path=FIXTURE_LICENSE_PATH,
         redistribution_obligations=RETAIN_MIT,
-        notice_reference=f"https://example.test/{MATT_REVISION}/LICENSE",
+        notice_reference=f"https://example.test/{FIXTURE_REVISION}/LICENSE",
         source_kind="harness",
         import_mode="full",
         permission_status="license",
@@ -118,7 +128,7 @@ def test_license_gate_allows_full_body_when_permission_is_recorded(
 ) -> None:
     permission_payload = b"Permission granted for redistribution of this fixture.\n"
     permission_path = tmp_path / "imported-skills" / "fixture" / "permission.txt"
-    permission_path.parent.mkdir(parents=True)
+    permission_path.parent.mkdir(parents=True, exist_ok=True)
     permission_path.write_bytes(permission_payload)
     permission_digest = hashlib.sha256(permission_payload).hexdigest()
     permission_reference = "imported-skills/fixture/permission.txt"
@@ -140,21 +150,8 @@ def test_license_gate_allows_full_body_when_permission_is_recorded(
     assert validate_import_plan(record) == record
 
 
-def test_builtin_registry_records_requested_sources() -> None:
-    names = {source.name for source in BUILTIN_EXTERNAL_SOURCES}
-
-    assert {
-        "mattpocock-skills",
-        "academic-research-skills",
-        "agents-md",
-        "lat-md",
-        "optillm",
-        "julius-caveman",
-        "strix",
-        "no-mistakes",
-        "designdotmd",
-        "skills-sh",
-    } <= names
+def test_builtin_registry_is_empty() -> None:
+    assert BUILTIN_EXTERNAL_SOURCES == ()
 
 
 def test_builtin_registry_records_are_valid_and_full_body_sources_are_pinned() -> None:
@@ -169,24 +166,8 @@ def test_builtin_registry_records_are_valid_and_full_body_sources_are_pinned() -
             assert source.notice_reference
 
 
-def test_full_body_evidence_files_are_checked_in() -> None:
-    full_body_sources = [
-        source for source in BUILTIN_EXTERNAL_SOURCES if source.import_mode in {"full", "full-body"}
-    ]
-    evidence_paths = [
-        source.license_evidence_path
-        for source in full_body_sources
-        if source.license_evidence_path is not None
-    ]
-    assert len(evidence_paths) == len(full_body_sources)
-
-    subprocess.run(
-        ["git", "ls-files", "--error-unmatch", *evidence_paths],
-        cwd=REPO_ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+def test_no_package_license_evidence_is_distributed() -> None:
+    assert not (REPO_ROOT / "src" / "ctx" / "assets" / "license-evidence.json").exists()
 
 
 def test_license_gate_blocks_unknown_full_body() -> None:
@@ -368,14 +349,14 @@ def test_full_body_requires_immutable_license_evidence() -> None:
     source = ExternalSourceRecord(
         name="mutable-evidence",
         url="https://example.test/source",
-        revision=MATT_REVISION,
+        revision=FIXTURE_REVISION,
         license="MIT",
-        license_url=f"https://example.test/{MATT_REVISION}/LICENSE",
+        license_url=f"https://example.test/{FIXTURE_REVISION}/LICENSE",
         source_kind="skill-suite",
         import_mode="full-body",
         permission_status="license",
         redistribution_obligations=RETAIN_MIT,
-        notice_reference=f"https://example.test/{MATT_REVISION}/LICENSE",
+        notice_reference=f"https://example.test/{FIXTURE_REVISION}/LICENSE",
     )
 
     with pytest.raises(LicenseGateError, match="checked-in license evidence"):
@@ -383,10 +364,10 @@ def test_full_body_requires_immutable_license_evidence() -> None:
 
     permitted = replace(
         source,
-        license_evidence_sha256=MATT_LICENSE_SHA256.upper(),
-        license_evidence_path=MATT_LICENSE_PATH,
+        license_evidence_sha256=FIXTURE_LICENSE_SHA256.upper(),
+        license_evidence_path=FIXTURE_LICENSE_PATH,
     )
-    assert validate_import_plan(permitted).license_evidence_sha256 == MATT_LICENSE_SHA256
+    assert validate_import_plan(permitted).license_evidence_sha256 == FIXTURE_LICENSE_SHA256
 
 
 @pytest.mark.parametrize("license_name", ["CC-BY-4.0", "CC0-1.0", "MPL-2.0"])
@@ -411,7 +392,16 @@ def test_cc_and_mpl_are_not_unconditionally_allowed_for_full_body(
 
 
 def test_manifest_binding_rejects_license_drift() -> None:
-    source = get_external_source("designdotmd")
+    source = ExternalSourceRecord(
+        name="restricted-fixture",
+        url="https://example.test/source",
+        revision="2026-01-01",
+        license="CC-BY-NC-4.0",
+        license_url="https://example.test/LICENSE",
+        source_kind="skill-suite",
+        import_mode="metadata-only",
+        permission_status="license",
+    )
     manifest: dict[str, Any] = {
         "upstream": source.url,
         "fetched_on": source.revision,
@@ -432,8 +422,8 @@ def test_manifest_binding_requires_registered_license_evidence_digest() -> None:
         revision=revision,
         license="MIT",
         license_url=f"https://example.test/{revision}/LICENSE",
-        license_evidence_sha256=MATT_LICENSE_SHA256,
-        license_evidence_path=MATT_LICENSE_PATH,
+        license_evidence_sha256=FIXTURE_LICENSE_SHA256,
+        license_evidence_path=FIXTURE_LICENSE_PATH,
         manifest_sha256=canonical_ingestion_manifest_sha256(manifest),
         redistribution_obligations=RETAIN_MIT,
         notice_reference=f"https://example.test/{revision}/LICENSE",
@@ -445,7 +435,7 @@ def test_manifest_binding_requires_registered_license_evidence_digest() -> None:
     validated = validate_ingestion_manifest(source, manifest, import_mode=" FULL-BODY ")
 
     assert validated.import_mode == "full-body"
-    assert validated.license_evidence_sha256 == MATT_LICENSE_SHA256
+    assert validated.license_evidence_sha256 == FIXTURE_LICENSE_SHA256
 
     manifest["license_evidence_sha256"] = "e" * 64
     with pytest.raises(ValueError, match="license evidence digest does not match"):
@@ -464,8 +454,8 @@ def test_full_manifest_binding_rejects_body_and_entry_digest_rewrite() -> None:
         revision=revision,
         license="MIT",
         license_url=manifest["license_url"],
-        license_evidence_sha256=MATT_LICENSE_SHA256,
-        license_evidence_path=MATT_LICENSE_PATH,
+        license_evidence_sha256=FIXTURE_LICENSE_SHA256,
+        license_evidence_path=FIXTURE_LICENSE_PATH,
         manifest_sha256=canonical_ingestion_manifest_sha256(manifest),
         redistribution_obligations=RETAIN_MIT,
         notice_reference=manifest["license_url"],
@@ -606,13 +596,13 @@ def test_checked_in_license_evidence_must_match_digest_and_declared_license() ->
     base = ExternalSourceRecord(
         name="evidence-mismatch",
         url="https://example.test/source",
-        revision=MATT_REVISION,
+        revision=FIXTURE_REVISION,
         license="MIT",
-        license_url=f"https://example.test/{MATT_REVISION}/LICENSE",
+        license_url=f"https://example.test/{FIXTURE_REVISION}/LICENSE",
         license_evidence_sha256="f" * 64,
-        license_evidence_path=MATT_LICENSE_PATH,
+        license_evidence_path=FIXTURE_LICENSE_PATH,
         redistribution_obligations=RETAIN_MIT,
-        notice_reference=f"https://example.test/{MATT_REVISION}/LICENSE",
+        notice_reference=f"https://example.test/{FIXTURE_REVISION}/LICENSE",
         source_kind="skill-suite",
         import_mode="full-body",
         permission_status="license",
@@ -623,7 +613,7 @@ def test_checked_in_license_evidence_must_match_digest_and_declared_license() ->
     wrong_identity = replace(
         base,
         license="Apache-2.0",
-        license_evidence_sha256=MATT_LICENSE_SHA256,
+        license_evidence_sha256=FIXTURE_LICENSE_SHA256,
         redistribution_obligations=("retain-license-notice",),
     )
     with pytest.raises(LicenseGateError, match="does not identify declared license"):
@@ -634,13 +624,13 @@ def test_full_body_rejects_free_form_redistribution_obligations() -> None:
     source = ExternalSourceRecord(
         name="free-form-obligation",
         url="https://example.test/source",
-        revision=MATT_REVISION,
+        revision=FIXTURE_REVISION,
         license="MIT",
-        license_url=f"https://example.test/{MATT_REVISION}/LICENSE",
-        license_evidence_sha256=MATT_LICENSE_SHA256,
-        license_evidence_path=MATT_LICENSE_PATH,
+        license_url=f"https://example.test/{FIXTURE_REVISION}/LICENSE",
+        license_evidence_sha256=FIXTURE_LICENSE_SHA256,
+        license_evidence_path=FIXTURE_LICENSE_PATH,
         redistribution_obligations=("anything",),
-        notice_reference=f"https://example.test/{MATT_REVISION}/LICENSE",
+        notice_reference=f"https://example.test/{FIXTURE_REVISION}/LICENSE",
         source_kind="skill-suite",
         import_mode="full-body",
         permission_status="license",
@@ -745,7 +735,16 @@ def test_notice_escapes_markdown_labels_and_link_destinations() -> None:
 
 
 def test_entity_provenance_is_complete_and_explicit() -> None:
-    source = get_external_source("mattpocock-skills")
+    source = ExternalSourceRecord(
+        name="user-fixture",
+        url="https://example.test/source",
+        revision="a" * 40,
+        license="MIT",
+        license_url="https://example.test/LICENSE",
+        source_kind="skill-suite",
+        import_mode="metadata-only",
+        permission_status="license",
+    )
 
     assert entity_provenance(source) == {
         "source": source.name,
@@ -775,7 +774,7 @@ def test_checked_in_notice_is_generated_from_registry() -> None:
     assert "Permission evidence" in notice
     assert "Manifest SHA-256" in notice
     assert "Redistribution controls" in notice
-    assert "| [designdotmd]" in notice
+    assert "| [designdotmd]" not in notice
     assert "Existing unresolved corpus remains blocked" in notice
 
 

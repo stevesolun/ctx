@@ -37,18 +37,19 @@ def make_query_hooks() -> dict[str, object]:
     """Return the exact current Codex hook group without trust state."""
 
     return {
-        "UserPromptSubmit": [
+        event: [
             {
                 "hooks": [
                     {
                         "type": "command",
                         "command": _module_cmd("ctx.adapters.codex.hook_handler"),
                         "timeout": 10,
-                        "additionalContextLimit": 0,
+                        "additionalContextLimit": 4096,
                     }
                 ]
             }
         ]
+        for event in ("UserPromptSubmit", "PostToolUse")
     }
 
 
@@ -115,11 +116,12 @@ def install_query_hook(path: Path) -> dict[str, object]:
     """Merge the CTX command under one complete locked update."""
 
     def update(existing: dict[str, object]) -> dict[str, object]:
-        remove_python_module_handlers(
-            existing,
-            event_name="UserPromptSubmit",
-            module="ctx.adapters.codex.hook_handler",
-        )
+        for event in ("UserPromptSubmit", "PostToolUse"):
+            remove_python_module_handlers(
+                existing,
+                event_name=event,
+                module="ctx.adapters.codex.hook_handler",
+            )
         _validate_codex_hooks_file(existing)
         return merge_hook_events(existing, make_query_hooks())
 

@@ -23,14 +23,11 @@ installed separately. This is the dependency set CI installs in
 `-e` is for local work).
 
 `git config core.hooksPath .githooks` enables `.githooks/pre-commit`, which
-re-runs `src/update_repo_stats.py` and re-stages the refreshed `README.md`,
-`docs/index.md`, `docs/knowledge-graph.md`, and `docs/catalog.md` whenever a
-commit touches `src/tests/*.py` or the other stat sources. The `repo stats`
-check in `scripts/ci_preflight.py` is unconditional — it runs on every profile
-— and it fails when those files are stale. Since the no-test policy pushes
-nearly every PR to add or change tests, and changing the test count changes the
-README inventory badge, skipping the hook means fixing the badge by hand on
-almost every PR.
+runs the cheap public-stats check for relevant changes. CTX ships empty
+knowledge infrastructure: the updater must not read a personal wiki, hydrate
+a retired graph, or recreate corpus-count badges. It updates a test-inventory
+marker only when one is explicitly present; the current front doors have none.
+The preflight `repo stats` check is still unconditional.
 
 ## Running tests
 
@@ -94,9 +91,12 @@ release metadata update.
 
 ## Design decisions
 
-CTX Fit has a decision log. Before proposing a change to how Fit works, read it
-— sixteen ADRs (ADR-001 through ADR-016) are `ACCEPTED`, and they are not
-open for re-litigation without new evidence.
+CTX has a decision log. Read it before changing product behavior. ADR-017
+records the user-owned knowledge mandate and supersedes the earlier Fit-primary
+and shipped-corpus direction. The older decisions remain historical evidence;
+their safety, consent, cost-honesty, and verification boundaries still apply
+unless the newer decision explicitly supersedes them. Fit is now an optional
+evaluator, not the default product.
 
 - [`docs/ctx-fit/DECISIONS.md`](docs/ctx-fit/DECISIONS.md) — the ADRs
   themselves, each recorded once with its evidence.
@@ -199,12 +199,13 @@ PyPI publishes must run from a version tag that matches `pyproject.toml`; manual
 PyPI workflow dispatch is disabled. The tagged commit must be the exact current
 `main` head and the latest canonical `Tests` workflow for that exact SHA must be
 a successful `main` push run. The publish workflow verifies those facts before
-building. `graph/release-artifacts.json` names the exact GitHub release or graph
-cache release that owns the five graph assets and binds every asset to its
-path, byte size, and SHA-256. The full and runtime archives are deliberately
-not tracked in Git. CI downloads only those two manifest-declared archives,
-validates the three small tracked assets against the same manifest, and has no
-Git LFS fallback.
+building. Build and inspect the wheel and source distribution for engine,
+configuration, and UI infrastructure only. Downloaded tool bodies, populated
+catalogs, graph archives, and test fixtures must not enter either artifact.
+CI does not hydrate historical graph releases and software publishing does not
+upload a CTX-owned graph dataset. Keep package identity, hashes, attestations,
+clean-install checks, and exact-head publication guards. Explicit user imports
+remain separately reviewed operations; they are not release prerequisites.
 
 ## Commit conventions
 

@@ -79,6 +79,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import re
 import time
 from pathlib import Path
@@ -225,7 +226,13 @@ _RESPONSE_FORMAT_PROPERTY = {
 
 FileSignature = tuple[int, int, str]
 PackSignature = tuple[tuple[str, FileSignature | None], ...]
-GraphSignature = tuple[FileSignature | None, FileSignature | None, PackSignature]
+GraphSignature = tuple[
+    FileSignature | None,
+    FileSignature | None,
+    PackSignature,
+    FileSignature | None,
+    tuple[tuple[str, bool], ...],
+]
 RuntimePageSignature = tuple[tuple[str, bool], ...]
 PageSignature = tuple[int, int, int, PackSignature, RuntimePageSignature]
 
@@ -1076,7 +1083,7 @@ class CtxCoreToolbox:
             if graph.number_of_nodes() == 0:
                 return json.dumps(
                     {
-                        "error": "knowledge graph not available; run python -m ctx.core.wiki.wiki_graphify",
+                        "status": "empty-knowledge",
                         "results": [],
                     }
                 )
@@ -1128,7 +1135,7 @@ class CtxCoreToolbox:
         model_provider = _optional_str(args.get("model_provider"))
         model = _optional_str(args.get("model"))
         companion_harnesses: list[dict[str, Any]] = []
-        if (model_provider or model) and self._entity_type_allowed("harness"):
+        if (model_provider or model) and self._entity_type_allowed("harness") and len(results) < 5:
             harness_exclusions = [
                 value
                 for value in selected + rejected + active_context + baseline_context
@@ -1152,7 +1159,7 @@ class CtxCoreToolbox:
                 if candidate_keys & excluded:
                     continue
                 companion_harnesses.append(row)
-                if len(companion_harnesses) >= top_k:
+                if len(companion_harnesses) >= min(top_k, 5 - len(results)):
                     break
         return _encode_response(
             {
@@ -1196,13 +1203,13 @@ class CtxCoreToolbox:
             )
 
         max_hops = _clamp_int(args.get("max_hops"), default=2, lo=1, hi=4)
-        top_n = _clamp_int(args.get("top_n"), default=5, lo=1, hi=50)
+        top_n = _clamp_int(args.get("top_n"), default=5, lo=1, hi=5)
 
         graph = self._ensure_graph()
         if graph.number_of_nodes() == 0:
             return json.dumps(
                 {
-                    "error": "knowledge graph not available; run python -m ctx.core.wiki.wiki_graphify",
+                    "status": "empty-knowledge",
                     "results": [],
                 }
             )
@@ -1755,7 +1762,12 @@ class CtxCoreToolbox:
             return self._graph
         from ctx.core.graph.resolve_graph import load_graph  # noqa: PLC0415
 
-        self._graph = load_graph(graph_path)
+        if graph_path is not None and not _graph_source_available(graph_path):
+            import networkx as nx  # noqa: PLC0415
+
+            self._graph = nx.Graph()
+        else:
+            self._graph = load_graph(graph_path)
         self._graph_signature = signature
         return self._graph
 
@@ -1817,6 +1829,12 @@ class CtxCoreToolbox:
     def _wiki_dir_resolved(self) -> Path | None:
         if self._wiki_dir is not None:
             return self._wiki_dir
+        configured = os.environ.get("CTX_WIKI_DIR", "")
+        if configured:
+            wiki = Path(configured)
+            if not wiki.is_absolute() or wiki.is_symlink():
+                raise ValueError("CTX_WIKI_DIR must be an absolute non-symlink directory")
+            return wiki
         try:
             from ctx_config import cfg  # noqa: PLC0415
 
@@ -1953,10 +1971,30 @@ def _file_signature(path: Path) -> FileSignature | None:
 
 
 def _graph_file_signature(path: Path) -> GraphSignature:
+    manifest = path.with_name("graph-export-manifest.json")
+    companions: list[tuple[str, bool]] = []
+    try:
+        # Only these three existence checks affect legacy export validity.
+        # Never traverse arbitrary paths or read companion bodies for a cache key.
+        if manifest.stat().st_size <= 1024 * 1024:
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+            artifacts = data.get("artifacts") if isinstance(data, dict) else None
+            if isinstance(artifacts, dict):
+                for key in ("delta", "communities", "report"):
+                    name = artifacts.get(key)
+                    if isinstance(name, str):
+                        try:
+                            companions.append((name, path.with_name(name).is_file()))
+                        except ValueError:
+                            companions.append((name, False))
+    except (OSError, ValueError):
+        pass
     return (
         _file_signature(path),
         _file_signature(path.with_name("entity-overlays.jsonl")),
         _graph_pack_signature(path),
+        _file_signature(manifest),
+        tuple(companions),
     )
 
 
@@ -2395,14 +2433,9 @@ def _recommendation_context_skip_reason(
 ) -> str | None:
     local_code_task = bool(context.get("local_code_task"))
     no_api_keys = bool(context.get("no_api_keys"))
-    include_unavailable = bool(context.get("include_unavailable"))
     text_tokens = set(_recommendation_text_tokens(_recommendation_context_text(row)))
-    if (
-        (local_code_task or no_api_keys)
-        and not include_unavailable
-        and not _is_loadable_recommendation_row(row)
-    ):
-        return "not locally loadable for local/no-key context"
+    # Advisory discovery includes tools not yet installed or downloaded.
+    # Material availability is reported separately; it is not a policy veto.
     if no_api_keys and text_tokens & _EXTERNAL_SERVICE_TOKENS:
         return "external service requires credentials"
     if local_code_task and text_tokens & _GENERIC_PLANNING_TOKENS:

@@ -29,6 +29,9 @@ from ctx.runtime.query_session import (
 )
 
 
+pytestmark = pytest.mark.usefixtures("historical_release_catalog")
+
+
 def _digest(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 

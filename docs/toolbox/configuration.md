@@ -125,6 +125,9 @@ commit requires a Git hook or host wrapper that propagates that exit code. See
 
 ## Editing tools
 
+The examples below assume you have authored or imported a definition named
+`ship-it`. A fresh `python -m toolbox init` creates no presets or tools.
+
 ```bash
 # List all toolboxes, both layers merged
 python -m toolbox list
@@ -132,7 +135,7 @@ python -m toolbox list
 # Show resolved config for one toolbox
 python -m toolbox show ship-it
 
-# Activate a starter preset
+# Activate your existing definition
 python -m toolbox activate ship-it
 
 # Export one resolved toolbox

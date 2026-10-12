@@ -1,440 +1,135 @@
-# Entity Onboarding
+# Add your own knowledge
 
-!!! info "Part of the recommendation surface, not CTX Fit"
+CTX starts with an empty wiki and graph. It does not supply out-of-the-box
+skills, agents, or MCP servers. Add only records and tool content that you or
+your organization choose to trust. `ctx fit` is an optional evaluator,
+not an onboarding requirement.
 
-    This page documents the shipped legacy entity intake workflows. For CTX Fit
-    product usage, see the [home page](index.md).
-
-
-ctx treats skills, agents, MCP servers, and harnesses as wiki entities that can
-be indexed, linked in the knowledge graph, and recommended from the same
-surface. The important distinction is install behavior:
-
-- Skills and agents are local Claude Code assets.
-- MCP servers are recorded first, then installed only when the user opts in.
-- Harnesses are recorded first. A harness describes the machinery around the
-  model: runtime, tools, access boundaries, memory, verification, and approval
-  policy. Adding one never executes upstream setup commands.
-
-After adding any entity, drain the durable wiki queue when you want the local
-runtime graph to see it immediately:
+## Choose your wiki
 
 ```bash
-python -m ctx.core.wiki.wiki_queue_worker --wiki ~/.claude/skill-wiki --limit 1
-ctx-scan-repo --repo . --recommend
-```
-
-If a persisted semantic vector index exists, that worker pass also runs a
-best-effort incremental attach into `graphify-out/entity-overlays.jsonl` and,
-when active graph packs exist, writes a small graph overlay pack for the
-changed entity. If the vector index is missing, the worker can still write a
-node-only graph overlay pack and refresh `graph-store.sqlite3`, so local
-dashboard/search/recommendation reads see the merged base+overlay graph without
-a full all-pairs semantic rebuild. Wiki readers also merge active pack pages
-with safe local-only entity files, while pack pages and tombstones shadow local
-files at the same relative path. Only legacy installs without active graph
-packs fall back to the normal incremental graph export job.
-
-## Updating the Graph and LLM Wiki
-
-Use this sequence for every accepted skill, agent, MCP server, or harness
-change. The graph and LLM-wiki are shippable artifacts, not scratch output, so
-the update is treated like a release step.
-
-1. Add or update the entity through the matching command:
-   `python -m skill_add`, `python -m agent_add`, `python -m mcp_add`, or `python -m harness_add`.
-2. If the entity already exists, read the update review. It lists changed
-   fields, likely benefits, regressions, and security findings. Do not pass
-   `--update-existing` until those findings are acceptable.
-3. Run the security/cyber check below.
-4. Keep heavyweight graph archives local while rebuilding. They are ignored by
-   Git and must never be force-added; only the content-addressed release
-   manifest is committed.
-5. Drain the wiki queue for local runtime use:
-   `python -m ctx.core.wiki.wiki_queue_worker --wiki ~/.claude/skill-wiki --limit 1`. This updates the
-   wiki index, writes wiki overlay packs, attempts incremental ANN graph attach
-   when a vector index exists, writes graph overlay packs when active packs are
-   present, and queues a graph-store refresh so local reads see the merged
-   graph/wiki view.
-6. Rebuild the curated wiki graph with `python -m ctx.core.wiki.wiki_graphify` before shipping
-   release artifacts or when you need a full graph/export reconciliation.
-7. Repack `graph/wiki-graph.tar.gz` through the artifact promotion path:
-   write a staged tarball, validate it, atomically promote it, and keep the
-   generated `*.promotion.json` metadata with the previous/current hashes.
-   Never commit local review reports or raw caches.
-8. Refresh the bulk skill index when shipping large skill updates.
-   This adds first-class `skill` nodes, skill pages under `entities/skills/`, install
-   commands, duplicate hints, and metadata-only quality/security signals:
-
-   ```bash
-   python src/import_skills_sh_catalog.py --from-api-union <raw.json> \
-     --catalog-out graph/skills-sh-catalog.json.gz \
-     --wiki-tar graph/wiki-graph.tar.gz \
-     --update-wiki-tar
-   ```
-9. Refresh published counts with `python src/update_repo_stats.py`.
-10. Verify the changed entity can be recommended through
-   `ctx-scan-repo --repo . --recommend` or `ctx__recommend_bundle`.
-11. Once the release candidate is final, publish all five graph files to a
-    draft `graph-artifacts-*` GitHub prerelease, verify their GitHub sizes and
-    digests, then publish that prerelease. Refresh and validate the tracked
-    manifest, and commit only the manifest plus the three small tracked files:
-
-    ```bash
-    python scripts/graph_release_manifest.py refresh \
-      --manifest graph/release-artifacts.json \
-      --source-release-tag graph-artifacts-<identity>
-    python scripts/graph_release_manifest.py validate \
-      --manifest graph/release-artifacts.json
-    git add graph/release-artifacts.json graph/communities.json \
-      graph/entity-overlays.jsonl graph/skills-sh-catalog.json.gz
-    ```
-
-    Never add either `wiki-graph*.tar.gz` archive to Git; CI hydrates the exact
-    prerelease bytes named by the manifest.
-
-The durable wiki worker drains `entity-upsert`, `graph-export`,
-`skill-index-refresh`, `tar-refresh`, and `artifact-promotion` jobs. Use
-`python -m ctx.core.wiki.wiki_queue_worker --wiki ~/.claude/skill-wiki --limit 1` for a controlled
-single-job drain, or omit `--limit` to drain the ready queue.
-Artifact-promotion jobs must target known `<wiki>/graphify-out/` graph outputs
-or allowlisted repo `graph/` release artifacts, and their staged path must be
-the target sibling named `<target>.staged`. The worker rejects staged/target
-symlinks and selects the JSON/JSONL/gzip/tar validator from the target file
-type before promotion.
-
-For a manual attach dry-run against an existing vector index:
-
-```bash
-python -m ctx.core.graph.incremental_attach attach \
-  --index-dir ~/.claude/skill-wiki/.embedding-cache/graph/vector-index \
-  --overlay ~/.claude/skill-wiki/graphify-out/entity-overlays.jsonl \
-  --node-id skill:fastapi-review \
-  --type skill \
-  --label fastapi-review \
-  --text-file ~/.claude/skill-wiki/entities/skills/fastapi-review.md \
-  --dry-run
-```
-
-Use `python -m ctx.core.graph.incremental_attach calibrate --graph ~/.claude/skill-wiki/graphify-out/graph.json`
-to inspect the current graph's semantic and degree distributions before
-changing attach thresholds.
-
-Validate the attach quality before relying on a new ANN backend or changed
-threshold:
-
-```bash
-python -m ctx.core.graph.incremental_shadow \
-  --index-dir ~/.claude/skill-wiki/.embedding-cache/graph/vector-index \
-  --graph ~/.claude/skill-wiki/graphify-out/graph.json \
-  --sample-size 100 \
-  --min-overlap 0.85
-```
-
-The shadow gate pretends sampled existing nodes are new, compares incremental
-attach neighbors to batch graph semantic neighbors, reports precision/recall
-for top 5/10/20, score deltas, and bad examples, then exits non-zero if
-recall at the largest top-k is below the overlap floor.
-
-## Repair Incremental Attach
-
-If the worker says `incremental attach skipped (no vector index)`, follow the
-[graph rebuild and skipped-attachment guidance](knowledge-graph.md#rebuilding).
-It covers index recovery, retry behavior, and manual attach review.
-
-## Security and Cyber Check
-
-Run this before applying `--update-existing`, before installing a harness with
-approved commands, and before shipping a refreshed graph tarball.
-
-- Inspect changed entity markdown and frontmatter for shell commands, setup
-  commands, install commands, URLs, requested permissions, and model/provider
-  access.
-- Treat these as manual-review blockers: `curl | sh`, `wget | bash`,
-  `Invoke-Expression`, broad `rm -rf`, `git reset --hard`, `chmod 777`, secret
-  upload, disabled auth/TLS/sandboxing/audit/tests, or unpinned package sources.
-- For MCP and harness updates, check network access, filesystem scope, auth
-  material, command transports, and whether setup or verify commands execute
-  remote code.
-- Prefer dry-run first: `python -m harness_install <slug> --dry-run` and
-  `python -m harness_install <slug> --update --dry-run`.
-- If a candidate is useful but risky, document the safer install path or keep it
-  as metadata instead of shipping it as an installed skill.
-
-## Updating an Existing Entity
-
-The add commands are non-destructive by default when the target skill, agent,
-MCP server, or harness already exists. The first add attempt prints an update
-review instead of replacing files. That review lists changed fields, expected
-benefits, possible regressions, security findings, and a recommendation.
-
-Use this flow for every entity type:
-
-1. Run the normal add command.
-2. If ctx prints `Existing <type> already exists`, read the benefits and risks.
-3. Keep the current entity by doing nothing, or re-run with `--skip-existing`
-   in batch jobs where you do not want reviews.
-4. Apply the replacement only after review with `--update-existing`.
-5. Drain the queue with `python -m ctx.core.wiki.wiki_queue_worker --wiki ~/.claude/skill-wiki --limit 1`
-   for immediate local recommendation use, or rebuild with `python -m ctx.core.wiki.wiki_graphify`
-   when the update should be reconciled into shipped graph artifacts.
-
-Examples:
-
-```bash
-python -m skill_add --skill-path ./SKILL.md --name fastapi-review
-python -m skill_add --skill-path ./SKILL.md --name fastapi-review --update-existing
-
-python -m agent_add --agent-path ./code-reviewer.md --name code-reviewer
-python -m agent_add --agent-path ./code-reviewer.md --name code-reviewer --update-existing
-
-python -m mcp_add --from-json ./github-mcp.json
-python -m mcp_fetch --source pulsemcp --limit 50 | python -m mcp_add --from-stdin
-python -m mcp_add --from-json ./github-mcp.json --update-existing
-
-python -m harness_add --from-json ./text-to-cad-harness.json
-python -m harness_add --from-json ./text-to-cad-harness.json --update-existing
-```
-
-`python -m harness_install --update` is different: it refreshes an installed harness
-checkout under `~/.claude/harnesses/<slug>`. Catalog entity replacement uses
-`python -m harness_add --update-existing`.
-
-## Removing or Retiring an Entity
-
-Removal has three separate meanings. First decide which one you need.
-
-- **Catalog removal** stops ctx from showing the entity in the wiki, graph, and
-  recommendations. Use the dashboard: `python -m ctx_monitor serve`, open **Manage**,
-  search for the slug and type, then choose **Delete selected**. If the entity
-  is currently loaded, Manage first attempts to unload it; if unloading fails,
-  deletion stops and the wiki page is kept. Otherwise, Manage unlinks the page
-  and queues an `entity-upsert` delete plus graph refresh. When active wiki
-  packs exist, draining the worker records a wiki tombstone so the removed
-  relative path stays hidden even if it still exists in a base pack or stale
-  local file.
-- **Runtime unload** removes a currently loaded entity from the live manifest
-  while keeping its catalog entry. Use the dashboard **Loaded** page. MCP
-  unloads call the Claude MCP removal path when available; skill and agent
-  unloads remove the manifest row.
-- **Installed-file removal** is type-specific. Use
-  `python -m harness_install <slug> --uninstall` for harness checkouts,
-  `python -m ctx.adapters.claude_code.install.mcp_install uninstall <slug>` for installed MCPs, and `python -m ctx_lifecycle archive`
-  then `python -m ctx_lifecycle purge` for stale local skills that should be deleted
-  after the configured grace period.
-
-After deleting an entity page, drain or rebuild before trusting recommendation
-results:
-
-```bash
-python -m ctx.core.wiki.wiki_queue_worker --wiki ~/.claude/skill-wiki --limit 1
-ctx-scan-repo --repo . --recommend
-```
-
-If you need an auditable manual flow without the browser, use the dashboard
-local API only from loopback with the per-process monitor token printed into
-the served page. The API route is `POST /api/entity/delete` with
-`{"slug": "...", "entity_type": "skill|agent|mcp-server|harness"}`.
-
-## Add a Skill
-
-Use this when you have a local `SKILL.md` that should be installed under
-`~/.claude/skills/<name>/SKILL.md` and mirrored into the wiki.
-
-```bash
-python -m skill_add \
-  --skill-path ./SKILL.md \
-  --name fastapi-review
-```
-
-What happens:
-
-1. The name is validated.
-2. NVIDIA SkillSpector runs in static `--no-llm` mode by default; the add
-   fails unless the scan passes. Use `--no-security-scan` only for a deliberate
-   local exception.
-3. Intake checks run against the markdown.
-4. The skill is copied into `~/.claude/skills/`.
-5. A wiki page is created under `entities/skills/`.
-6. The wiki index and log are updated.
-
-## Add an Agent
-
-Use this when you have a local Claude Code agent markdown file.
-
-```bash
-python -m agent_add \
-  --agent-path ./code-reviewer.md \
-  --name code-reviewer
-```
-
-Batch-add every top-level `.md` file in a directory:
-
-```bash
-python -m agent_add --scan-dir ./agents --skip-existing
-```
-
-Agents are copied into `~/.claude/agents/` and mirrored into
-`entities/agents/`. Re-run `python -m ctx.core.wiki.wiki_graphify` after adding agents if you want
-graph recommendations to include them.
-
-## Add an MCP Server
-
-Use this when you want the MCP server available as a recommendation before
-installing it into a host.
-
-Create `github-mcp.json`:
-
-```json
-{
-  "name": "GitHub MCP",
-  "slug": "github-mcp",
-  "description": "MCP server for GitHub repository and issue workflows.",
-  "github_url": "https://github.com/modelcontextprotocol/servers",
-  "sources": ["manual"],
-  "tags": ["github", "automation", "repository"],
-  "transports": ["stdio"]
-}
-```
-
-Add it:
-
-```bash
-python -m mcp_add --from-json ./github-mcp.json
-```
-
-MCP pages live under `entities/mcp-servers/<shard>/<slug>.md`. The add command
-accepts a single JSON object with `--from-json` or streams JSONL records from
-`--from-jsonl`/`--from-stdin` without preloading the whole batch. It detects
-existing pages by slug and, when possible, canonical GitHub URL. If a match
-exists, ctx prints the update review and skips replacement unless
-`--update-existing` is passed.
-
-Runtime install is separate from catalog add. Use
-`python -m ctx.adapters.claude_code.install.mcp_install <slug> --dry-run` to inspect the Claude MCP command without
-mutating local state. If the server is already installed, dry-run reports
-`skipped-existing` and does not reconcile `skill-manifest.json`; run without
-`--dry-run` to refresh the manifest record, or add `--force` when you need to
-reinstall the Claude MCP entry. Inline secret-looking arguments are rejected; use
-environment variables, secret-file/path flags, or `--cmd-json` placeholders
-instead of literal tokens.
-
-## Add a Harness
-
-Use this when a repo provides the runtime around a model rather than just a
-tool. Harness examples include coding-agent loops, CAD-generation runtimes,
-browser-automation runners, evaluation loops, and local-model workbenches.
-
-Example: add `earthtojake/text-to-cad` as a harness recommendation.
-
-```bash
-python -m harness_add \
-  --repo https://github.com/earthtojake/text-to-cad \
-  --name "Text to CAD" \
-  --description "Harness for turning text prompts into CAD artifacts." \
-  --tag cad --tag 3d --tag automation \
-  --model-provider openai \
-  --runtime python \
-  --capability "Generate CAD artifacts from natural language" \
-  --setup-command "pip install -e ." \
-  --verify-command "pytest"
-```
-
-Or load one JSON record:
-
-```json
-{
-  "repo_url": "https://github.com/earthtojake/text-to-cad",
-  "name": "Text to CAD",
-  "description": "Harness for turning text prompts into CAD artifacts.",
-  "tags": ["cad", "3d", "automation"],
-  "model_providers": ["openai"],
-  "runtimes": ["python"],
-  "capabilities": ["Generate CAD artifacts from natural language"],
-  "setup_commands": ["pip install -e ."],
-  "verify_commands": ["pytest"],
-  "sources": ["manual"]
-}
-```
-
-```bash
-python -m harness_add --from-json ./text-to-cad-harness.json
-```
-
-Harness pages live under `entities/harnesses/<slug>.md`. Setup and verification
-commands are documentation only; ctx records them so the user can inspect and
-decide before running anything.
-
-To inspect and install a harness:
-
-```bash
-python -m harness_install text-to-cad --dry-run
-python -m harness_install text-to-cad
-python -m harness_install text-to-cad --update --dry-run
-python -m harness_install text-to-cad --uninstall --dry-run
-```
-
-The installer clones or copies the harness into `~/.claude/harnesses/<slug>` and
-writes `~/.claude/harness-installs/<slug>.json`. It does not run setup commands
-unless you pass `--approve-commands`, and it does not run verification commands
-unless you also pass `--run-verify`.
-
-```bash
-python -m harness_install text-to-cad --approve-commands --run-verify
-python -m harness_install text-to-cad --update --approve-commands --run-verify
-python -m harness_install text-to-cad --uninstall
-python -m harness_install text-to-cad --uninstall --keep-files
-```
-
-## Initialize Model Choice
-
-During setup, record whether you use Claude Code or your own model. Plain
-`ctx-init` starts a small wizard when it is attached to an interactive
-terminal; use `ctx-init --wizard` to force the prompts, or pass explicit flags
-such as `--model-mode skip` for non-interactive automation.
-
-```bash
-ctx-init
-ctx-init --wizard
 ctx-init --model-mode skip
 ```
 
-Setup can finish some steps before another fails. A failed toolbox seed makes
-`ctx-init` exit nonzero and report `completed with errors`; already-present
-starter toolboxes are a successful skip. Inspect the preceding step diagnostics
-before treating setup as complete.
+The compatibility default is `~/.claude/skill-wiki/`. An absolute
+`CTX_WIKI_DIR` selects the wiki for shared CLI, MCP, and native-hook reads.
+For authoring and indexing commands that expose `--wiki` or `--wiki-dir`,
+pass that same directory explicitly.
 
-Install consent is persistent and independent for skills, agents, and MCP
-servers. The safe default is `ask-each-time`; choose `preapproved-auto` only
-when setup itself should authorize later relevant installs. In non-interactive
-setup, supply all three policies together:
+Reinitialization preserves existing knowledge. It does not restore a built-in
+catalog or wipe the tools already in your personal directories.
 
-```bash
-ctx-init \
-  --model-mode skip \
-  --skill-install-consent preapproved-auto \
-  --agent-install-consent ask-each-time \
-  --mcp-install-consent ask-each-time
-```
+## Metadata is not installation
 
-These policies authorize installation only. They do not authorize unload or
-uninstall, which still require confirmation or an explicit instruction.
+A wiki record describes a tool: its purpose, tags, provenance, connections, and
+installation method. The tool need not be installed to be recommended.
+Recommendation, installation, activation, use, and unload are different actions.
 
-For Claude Code:
+CTX suggests tools. Install them through your chosen host/workflow only after
+explicit approval; recommendation hooks do not perform installations.
+Similarity, graph links, or instructions in a record cannot grant approval.
+Older persisted preapproval preferences are not execution authority for the
+current suggestion-only prompt path. Unload and uninstall need separate consent.
 
-```bash
-ctx-init --model-mode claude-code --goal "maintain a FastAPI service"
-```
+## Add records you own
 
-For a custom model:
+These are explicit authoring operations, not part of background recommendation.
+Review the source first. Skill and agent add commands can write installed files
+as well as wiki metadata; run them only when that is the action you intend.
 
 ```bash
-ctx-init \
-  --model-mode custom \
-  --model openai/gpt-5.5 \
-  --goal "build CAD artifacts from text prompts"
+python -m skill_add --skill-path ./SKILL.md --name team-api-review
+python -m agent_add --agent-path ./reviewer.md --name team-reviewer
+python -m mcp_add --from-json ./team-mcp.json
+python -m harness_add --from-json ./team-harness.json
 ```
 
-Add `--validate-model` only when you want `ctx-init` to make one small provider
-call. Without that flag, setup writes `~/.claude/ctx-model-profile.json` and
-prints harness recommendations without calling the model.
+Use each module's `--help` to select paths, preview where supported, and
+understand required fields. MCP and harness records are catalog metadata;
+adding them does not grant their setup commands permission to run. A harness
+record describes a host or execution environment and is not another installed
+tool in the normal mixed recommendation list.
+
+For metadata-only authoring in a flat-file workspace, place a reviewed Markdown
+entity in the matching wiki entity directory rather than using an installer. Use a stable `name`,
+the correct `type`, a useful description, and specific tags. Do not include
+credentials, private access tokens, or executable instructions disguised as
+descriptions. The graph builder reads your records, not a remote catalog.
+
+After an import or rebuild creates active `wiki-packs`, those validated packs
+and their overlays are authoritative. Loose copies no longer override them.
+Use the pack-aware add/update commands, or append a metadata-only overlay from
+a reviewed page without installing the tool:
+
+```python
+from pathlib import Path
+from ctx.core.wiki.wiki_packs import write_active_wiki_overlay_pack
+
+wiki = Path("/absolute/path/to/wiki")
+page = Path("/absolute/path/to/reviewed-record.md").read_text(encoding="utf-8")
+written = write_active_wiki_overlay_pack(
+    packs_dir=wiki / "wiki-packs",
+    pages={"entities/skills/team-api-review.md": page},
+)
+if written is None:
+    raise RuntimeError("No active wiki pack; use flat-file authoring first")
+```
+
+Choose the matching entity path for your record, then rebuild its derived graph.
+Do not edit immutable pack files directly or use stale loose copies to undo
+a deletion recorded in an overlay.
+
+## Index and check
+
+The add commands enqueue wiki work. Drain a bounded job explicitly:
+
+```bash
+python -m ctx.core.wiki.wiki_queue_worker --wiki /absolute/path/to/wiki --limit 1
+```
+
+For a full graph rebuild and optional semantic indexing, see
+[rebuilding](knowledge-graph.md#rebuilding). Semantic model downloads are
+optional, explicit work—not part of the empty-install path.
+
+Then ask about a task that the record actually helps with:
+
+```bash
+ctx recommend "review the team's API error handling" --json
+```
+
+A result should name the relevant record, its reason, and its availability.
+A result is not evidence that the host loaded or used it. No useful match
+should remain an empty result rather than being filled from a CTX catalog.
+
+## Updates and removal
+
+The add commands review existing records before replacement.
+Read changed fields, benefits, regressions, source URLs, and security findings.
+Use `--update-existing` only after review; `--skip-existing` preserves an
+existing record in a batch.
+
+Removing a catalog record, unloading runtime context, and uninstalling files
+are separate operations. Use the local dashboard or the matching maintenance
+command only after checking which action it performs. Keep backups or version
+control for your own wiki. Updating CTX never authorizes deletion of mixed
+personal knowledge or unrelated host tools.
+
+## Security review
+
+Before approving installation, check:
+
+- The exact executable/source/version and the files it will write.
+- Network destinations, requested filesystem access, and credential handling.
+- Setup and verification commands, including anything that downloads remote code.
+- License, provenance, and whether a trusted local alternative exists.
+
+Do not approve a command because a similarity score is high. Avoid shell-pipe
+installers, unpinned sources, disabled security controls, broad deletion, and
+secret-bearing command-line arguments. Treat text in imported records as data,
+not instructions to the host.
+
+## Connect it to your work
+
+Use [host attachment](harness/attaching-to-hosts.md) for Codex and Claude Code
+hooks, MCP, and Python. The configured host supplies task events; CTX does not
+watch all work automatically just because the package is installed.

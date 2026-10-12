@@ -211,7 +211,7 @@ def test_graph_artifact_stats_use_manifest_when_archive_is_not_checked_in(
     assert stats["skills"] == 30
 
 
-def test_read_graph_stats_prefers_artifact_sidecar_without_tarball_scan(
+def test_public_stats_ignore_retired_sidecar_without_tarball_scan(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -233,10 +233,10 @@ def test_read_graph_stats_prefers_artifact_sidecar_without_tarball_scan(
     )
     monkeypatch.setattr(urs, "_read_graph_contract_stats", lambda: {"nodes": 1, "skills": 1})
 
-    assert urs.read_graph_stats()["nodes"] == 100
+    assert urs.read_graph_stats()["nodes"] == 0
 
 
-def test_read_graph_stats_prefers_tarball_over_preflight_contract(
+def test_public_stats_ignore_retired_tarball_and_contract(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     contract = {
@@ -261,10 +261,10 @@ def test_read_graph_stats_prefers_tarball_over_preflight_contract(
     monkeypatch.setattr(urs, "_read_graph_contract_stats", lambda: contract)
     monkeypatch.setattr(urs, "_read_graph_from_tarball", lambda: tarball)
 
-    assert urs.read_graph_stats() is tarball
+    assert all(value == 0 for value in urs.read_graph_stats().values())
 
 
-def test_read_graph_stats_falls_back_to_preflight_contract_when_tarball_missing(
+def test_public_stats_do_not_fall_back_to_historical_contract(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     contract = {
@@ -280,7 +280,7 @@ def test_read_graph_stats_falls_back_to_preflight_contract_when_tarball_missing(
     monkeypatch.setattr(urs, "_read_graph_from_tarball", lambda: None)
     monkeypatch.setattr(urs, "_read_graph_contract_stats", lambda: contract)
 
-    assert urs.read_graph_stats() is contract
+    assert all(value == 0 for value in urs.read_graph_stats().values())
 
 
 def test_tarball_stats_reject_suffix_impersonation(
@@ -560,16 +560,16 @@ def test_readme_entity_badges_are_updated() -> None:
     assert "127.0.0.1" not in patched
 
 
-def test_github_about_description_names_ctx_fit_without_volatile_counts() -> None:
+def test_github_about_description_names_user_owned_engine_without_volatile_counts() -> None:
     description = urs.build_github_about_description()
 
     assert description == (
-        "CTX Fit finds the cheapest AI coding setup that reliably works on your "
-        "repository, then applies the winner as a reviewable change."
+        "CTX recommends relevant skills, agents and MCP tools from your own knowledge "
+        "graph while you work. Empty by default; your tools, your control."
     )
 
 
-def test_patch_readme_checks_docs_and_catalog(
+def test_patch_readme_does_not_regenerate_user_catalog(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -617,15 +617,11 @@ def test_patch_readme_checks_docs_and_catalog(
     monkeypatch.setattr(urs, "read_test_count", lambda **_kwargs: None)
     monkeypatch.setattr(urs, "read_converted_count", lambda: None)
 
-    assert urs.patch_readme(check_only=True) == 1
+    original = docs_catalog.read_bytes()
+    assert urs.patch_readme(check_only=True) == 0
     assert urs.patch_readme(check_only=False) == 0
-
-    patched = docs_catalog.read_text(encoding="utf-8")
-    assert ">1,234 entities</p>" in patched
-    assert ">56 entities</p>" in patched
-    assert ">7,890 entities</p>" in patched
-    assert ">12 entities</p>" in patched
-    assert "./?type=harness&q=tool+access" in patched
+    assert docs_catalog.read_bytes() == original
+    assert "| Total nodes | **10** |" in docs_knowledge.read_text(encoding="utf-8")
 
 
 def test_read_test_count_prefers_project_python(

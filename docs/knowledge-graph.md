@@ -1,516 +1,146 @@
-# Knowledge graph
+# Your knowledge graph and LLM wiki
 
-!!! info "Part of the recommendation surface, not CTX Fit"
+CTX provides the graph/wiki infrastructure. **You provide the knowledge.**
+A fresh installation has no skill, agent, MCP, or harness records and downloads
+no CTX corpus. Existing local records are not deleted or replaced during setup.
+The optional `ctx fit` evaluator consumes configuration evidence separately;
+it is not required to build or query your graph.
 
-    This page documents the shipped legacy recommendation graph. For CTX Fit
-    product usage, see the [home page](index.md).
+## Structure
 
+The compatibility default is `~/.claude/skill-wiki/`. Select a private location
+with an absolute `CTX_WIKI_DIR` for shared CLI, MCP, and hook reads.
+Keep that environment variable consistent in your shell and host configuration.
 
-A pre-built weighted graph of skills, agents, MCP servers, and harnesses in the
-ctx ecosystem, shipped as content-addressed GitHub release assets. The tracked
-`graph/release-artifacts.json` manifest binds the release source, names, sizes,
-and SHA-256 digests; the large archives themselves are not stored in Git.
-The on-disk JSON and `resolve_graph` Python API are harness-aware, including
-plain-slug graph walks from `harness:<slug>` nodes. `python -m ctx_monitor`
-exposes skill/agent/MCP/harness wiki and graph views. Harness installation,
-update, and uninstall are handled by `python -m harness_install`; dashboard
-load/unload POSTs deliberately reject harnesses and return the dry-run CLI
-command to use instead. Quality scoring is exposed for sidecar-backed skills,
-agents, and MCP servers.
-
-## What's in it
-
-Authoritative numbers from the shipped tarball. The curated-core snapshot
-is **12,934 nodes** (1,470 curated skills + 467 agents + 10,790 MCP servers + 207 harnesses). Harness pages under `entities/harnesses/` are ingested into
-local rebuilds and the separate harness recommendation path. The
-tarball also carries **68,494 skill pages**; **67,024**
-skill bodies are hydrated as installable `SKILL.md` files in the wiki-pack
-base under `converted/`; the **28,612** entries over the configured line limit
-were converted to gated micro-skill orchestrators. Full original bodies are
-used during graph rebuilds for semantic similarity, but
-`SKILL.md.original` backups, transient `.lock` files, `.ctx/` queue state,
-local generated markdown catalogs, and host-user paths are omitted from the
-shipped tarball.
-
-| | Count |
-|---|---:|
-| Total nodes | **79,958** |
-| Curated core nodes | **12,934** (1,470 skills + 467 agents + 10,790 MCP servers + 207 harnesses) |
-| Body-backed skill nodes | **67,024** hydrated installable skill entries |
-| Total edges | **1,778,069** |
-| Hydrated skill incident edges | **1,516,298** |
-| Hydrated skill semantic incident edges | **911,922** |
-| Communities | **52** (Louvain) |
-| Edge sources (overlap-deduped) | semantic 1,088,763 - tag 474,837 - token 280,275 |
-| Cross-type edges (skill <-> agent) | ~52,382 |
-| Cross-type edges (skill <-> MCP) | ~30,295 |
-| Cross-type edges (agent <-> MCP) | ~229 |
-| Harness edges | **5,063** |
-| Shipped skill index | **67,024** observed body-backed skill entries |
-
-## Install
-
-Use `ctx-init --graph` to install the fast runtime graph. Source checkouts use a
-verified local cache when present or hydrate the manifest-declared release
-asset; pip installs download the matching GitHub release asset for the installed
-package version. This installs
-`graphify-out/*`, the skill index used by recommendations, and
-the harness pages used by `python -m harness_install`:
-
-```bash
-ctx-init --graph
+```text
+skill-wiki/
+  entities/
+    skills/
+    agents/
+    mcp-servers/
+    harnesses/
+  concepts/
+  graphify-out/
 ```
 
-The runtime install includes a small actionable fallback set that does not
-depend on an external catalog or API key:
+This is a structure, not a shipped dataset. Entity Markdown frontmatter carries
+a stable name/type, description, tags, source/provenance, and reviewed
+installation metadata where relevant. Bodies contain your explanation or
+instructions; wikilinks can describe relationships. Generated graph/index
+files are derived views of your records. Do not put credentials into either.
 
-- skills: `ctx-python-testing`, `ctx-python-state-protocols`,
-  `ctx-python-input-boundaries`, `ctx-python-api-compatibility`,
-  `ctx-javascript-testing`, `ctx-rust-patterns`, and `ctx-typescript`;
-- agent: `ctx-python-reviewer`;
-- MCP server: `ctx-core`, installed only as the exact bare
-  `ctx-mcp-server` command.
+Tools can be known without being installed. CTX distinguishes a catalog
+candidate from local availability; a useful similarity match is not permission
+to fetch or execute the candidate.
 
-These nine project-owned entities are MIT licensed and use reserved `ctx-*`
-identities. Installation preserves unrelated skill, agent, MCP, and
-converted-skill content; runtime-managed harness pages are refreshed from the
-installed artifact. Installation fails closed on identity or overlay
-collisions, changed reserved bodies, symlinked ancestors, command arguments,
-or substituted executable paths.
-
-To install the full shipped wiki, including the wiki-pack base for
-skill/agent/MCP entity pages, skill pages, concept pages, converted
-micro-skill pipelines, direct harness pages, and Obsidian vault metadata,
-request the full wiki artifact explicitly:
+## Initialize and populate
 
 ```bash
-ctx-init --graph --graph-install-mode full
+ctx-init --model-mode skip
 ```
 
-Manual extraction is still supported after hydrating the manifest. Extract the
-full tarball into your `~/.claude/skill-wiki/` when you want local wiki browsing
-through ctx's merged pack/local view:
+Initialization creates the empty structure locally and offline. `--graph`
+remains a compatibility setup option; it does not download an old release
+catalog. Only import an archive when you explicitly choose a user-owned source.
+
+For an explicit, digest-pinned archive import into an empty or untouched
+initialized wiki:
 
 ```bash
-python scripts/graph_release_manifest.py hydrate --manifest graph/release-artifacts.json
-mkdir -p ~/.claude/skill-wiki
-tar xzf graph/wiki-graph.tar.gz -C ~/.claude/skill-wiki/
+ctx-init --graph --graph-url https://your-organization.example/wiki.tar.gz \
+  --graph-sha256 <64-character-sha256> --graph-install-mode full --model-mode skip
 ```
 
-The extracted tree also opens directly as an Obsidian vault — the
-`.obsidian/` config ships inside the tarball — so you can use
-Obsidian's native graph view if you prefer it to the web dashboard.
+Replace the example URL and digest with the exact source you reviewed.
+This explicit import can use the network; normal initialization does not.
+
+Use [entity onboarding](entity-onboarding.md) to author or add a record.
+Reinitializing an existing wiki preserves its content. Legacy downloaded content
+already in your personal wiki is your data: upgrading CTX does not bulk-delete it.
 
 ## How edges are built
 
-Edges are built and explained by the
-`python -m ctx.core.wiki.wiki_graphify` module invocation. A pair must first
-have at least one base
-signal:
+`python -m ctx.core.wiki.wiki_graphify` derives relationships from the records
+you supplied:
 
-1. **Semantic cosine** — when the embedding backend is available, entity
-   text is embedded and semantic neighbors above the configured build floor
-   contribute weighted edges.
-   The default backend is `sentence-transformers`. Setting
-   `intake.embedding.backend` to `ollama` uses
-   `intake.embedding.base_url`, then `OLLAMA_URL` when set, then
-   `http://localhost:11434`; non-local hosts require
-   `intake.embedding.allow_remote: true`, and empty or malformed values fail
-   closed.
-2. **Explicit frontmatter tags** — each entity page's YAML `tags:`
-   list contributes edges between every pair of entities that share
-   a tag. Popular tags capped at 500 nodes to avoid noise-floor
-   "everything connects to everything" mega-buckets like `typescript`
-   or `frontend`.
-3. **Slug-token pseudo-tags** — each hyphenated slug contributes its
-   tokens as implicit tags. `fastapi-pro` contributes `fastapi`;
-   `python-patterns` contributes `python` and `patterns`. A stop-word
-   filter drops generic tokens like `skill`, `agent`, `pro`, `expert`,
-   `core` so they don't over-connect the graph.
-4. **Source overlap** — pages with the same high-specificity source URL,
-   repository URL, homepage, detail URL, or package URL can connect even
-   when their tags differ. Dense source buckets are skipped.
-5. **Direct wikilinks** — explicit entity links such as
-   `[[entities/agents/code-reviewer]]` create a direct graph edge.
+- Semantic cosine similarity when you explicitly use an available embedding backend.
+- Shared frontmatter tags and meaningful slug tokens.
+- Shared specific source URLs.
+- Direct wikilinks between entities.
 
-Edge `weight` is the final blended strength. Semantic, tag, and token
-weights form the base blend from `config.json`; source overlap and direct
-links add configured boosts. Existing edges can also receive explainable
-ranking boosts from Adamic-Adar shared-neighbor structure, type affinity,
-usage telemetry, and quality scores. Those boost-only signals do not create
-edges by themselves. The shipped default `graph.min_edge_weight` is `0.03`;
-calibration against the 2026-05 shipped graph showed this is the highest
-floor with zero edge loss, while `0.05` would remove roughly 29.7% of edges.
+Configured weights and thresholds combine those signals. Usage, quality,
+type affinity, and shared-neighbor information can adjust existing edges.
+They do not turn a graph connection into installation authority. Community
+pages summarize clusters in your own graph; their number depends on your data.
 
-Edge metadata keeps the ingredients explainable: `semantic_sim`,
-`shared_tags`, `shared_tokens`, `shared_sources`, `direct_link`,
-`adamic_adar`, `type_affinity`, `usage_score`, `quality_score`,
-`edge_reasons`, and `score_components`. Hydrated skill records use their
-full source bodies during graph rebuilds, so long converted entries keep
-full-body similarity even though the shipped installable `SKILL.md` files are
-short gated loaders. The raw `SKILL.md.original` backups are build inputs, not
-tarball members.
-
-## Communities
-
-After edges are built, `wiki_graphify` runs NetworkX's Louvain
-community detection (`resolution=1.2`, `seed=42` for determinism).
-The result is **52 communities** ranging from single-member isolated
-specialists to several thousand members in broad clusters like
-`Community + Official + AI`. Each community also gets an auto-generated
-`concepts/<community>.md` wiki page summarizing its members and top
-shared tags.
-
-The legacy CNM ("greedy modularity") algorithm is still available
-behind `CTX_GRAPH_COMMUNITY=cnm` — it's deterministic but O(n²) on
-dense graphs and hung on the historical 12,934-node curated-core snapshot
-(a ~50min run was killed on 2026-04-27 inside the priority-queue siftup).
-Louvain is
-the default because it finishes in seconds and produces equivalent
-quality clusters for the recommendation use case.
-
-## Querying the graph
-
-### Via the dashboard
-
-```bash
-python -m ctx_monitor serve              # http://127.0.0.1:8765
-```
-
-Then open `/graph?slug=<entity-slug>&type=<entity-type>` for the
-dashboard's interactive SVG neighborhood view, or
-`/api/graph/<slug>.json?type=<entity-type>&hops=1&limit=40` for the
-dashboard-shaped JSON. The `type` query is optional for unique slugs and
-recommended for duplicate slugs such as `langgraph`. See the
-[dashboard reference](dashboard.md) for the full route catalogue.
-
-### Via Python
-
-```python
-import json
-from pathlib import Path
-from networkx.readwrite import node_link_graph
-
-raw = json.loads(
-    Path("~/.claude/skill-wiki/graphify-out/graph.json").expanduser().read_text()
-)
-edges_key = "links" if "links" in raw else "edges"
-G = node_link_graph(raw, edges=edges_key)
-
-# 79,958 nodes, 1,778,069 edges
-print(G.number_of_nodes(), G.number_of_edges())
-
-# Find entities related to 'fastapi-pro' by edge weight
-seed = "skill:fastapi-pro"
-neighbors = sorted(
-    G.neighbors(seed),
-    key=lambda n: G[seed][n]["weight"],
-    reverse=True,
-)[:10]
-for n in neighbors:
-    shared = G[seed][n].get("shared_tags", [])
-    print(f"  w={G[seed][n]['weight']:>2}  {G.nodes[n]['label']:<40}  {shared[:3]}")
-```
-
-The node-link JSON schema's edges key is auto-detected (legacy
-NetworkX 2.x used `"links"`; current versions default to `"edges"`).
-The helper `resolve_graph.load_graph()` does this for you.
-
-### Via recommendation paths
-
-The graph backs these recommendation paths:
-
-- Bundle recommendation surfaces (`ctx.recommend_bundle`,
-  MCP `ctx__recommend_bundle`, generic harness bundle tools, LoopFlow/agent-loop
-  adapter capability recommendations, Claude Code hook suggestions, and
-  repo-scan advisory output) share
-  `ctx.core.resolve.recommendations.recommend_by_tags` for skills,
-  agents, and MCP servers. That engine ranks candidates by
-  slug-token matches, tag overlap, graph degree, and semantic-cache
-  signals when available. Imported skill results are normal `skill` nodes with
-  detail URLs, install commands, duplicate
-  hints, gated micro-skill loaders when over the line threshold, and
-  quality/security metadata. Recommendation contracts also carry each row's
-  full tags plus wiki availability fields (`installable`, `load_status`, and
-  `source_path`), suppress selected/rejected/active/default-baseline context,
-  and can filter unavailable, external-service, generic-planning, or
-  wrong-language rows for local/no-key coding loops. If an older
-  extracted wiki has the skill index JSON but no graph nodes for
-  those records, the same recommender falls back to the index file.
-- Related recommendations walk graph neighbors of selected IDs. See the
-  [host integration guide](harness/attaching-to-hosts.md#2-python-library-path)
-  for their availability and exclusion rules.
-- Harness recommendations are a separate path for custom/API/local
-  model onboarding (`ctx-init --model-mode custom ...`),
-  `python -m harness_install`, and LoopFlow/agent-loop adapter calls that pass
-  explicit user-owned/API/local model consent. Model/provider fields can
-  improve ranking, but the LoopFlow adapter does not treat them as consent by
-  themselves. Harness paths use the same graph filtered to `harness` nodes and
-  the higher harness match floor from `config.json`.
-- Repository scans still start from stack detections, then turn that profile
-  into the same tag/query bundle used by the execution recommender. If a
-  shipped graph is unavailable, scan output falls back to the legacy installed
-  skill resolver so a plain profile scan remains useful. Harnesses are
-  intentionally not emitted from repo scans or Claude Code hook bundles.
-
-This split is intentional: execution surfaces need identical ranking and a
-small top-K, while harness choice changes the model runtime itself and belongs
-in an explicit onboarding/install flow.
-
-## Modular graph and wiki packs
-
-ctx is moving the graph and LLM-wiki from "one huge tarball is the mutable
-truth" to this operational model:
-
-```text
-immutable base graph pack
-  + small graph overlay packs
-  + tombstones for deletes
-  + immutable base wiki pack
-  + small wiki overlay packs
-  -> merged reader for dashboard, search, recommendations, and repair tools
-```
-
-The user-facing behavior is intended to stay the same: recommendations,
-dashboard graph views, wiki pages, and harness setup still read the merged
-graph/wiki as one catalog. The difference is how updates are stored. Adding or
-updating one skill, agent, MCP server, or harness can write a small overlay pack
-instead of forcing a full graph and wiki rebuild. For local dashboard/search
-reads, wiki-pack pages override physical files at the same relative path,
-active wiki tombstones hide deleted paths, and safe local-only entity files that
-are not present in a pack or tombstone still participate in the catalog.
-
-This makes normal updates faster and safer:
-
-- **Faster adds/updates** - the worker writes a page overlay and, when the
-  vector index exists, attaches ANN-based graph edges for the changed entity.
-- **Efficient deletes** - deletes become tombstones in graph/wiki overlays, so
-  removed entities disappear from merged reads without rewriting the base pack.
-- **Crash isolation** - overlay packs and compaction manifests are written
-  atomically; a failed update does not corrupt the base snapshot.
-- **Same recommendation contract** - merged graph reads preserve edge metadata,
-  scores, provenance, and tombstones before resolver/dashboard code sees the
-  graph.
-
-Pack directories live inside the installed wiki:
-
-```text
-~/.claude/skill-wiki/
-  graphify-out/packs/base-<export-id>/
-  graphify-out/packs/overlay-<id>/
-  wiki-packs/base-<export-id>/
-  wiki-packs/overlay-<id>/
-```
-
-Pack manifests require every checksum value to be a lowercase 64-character
-SHA-256 hex digest. Non-hex placeholders are rejected before merged graph/wiki
-readers can trust the pack contents.
-
-Overlay packs are the normal local-update path. Full rebuilds are still needed
-when you intentionally refresh the release artifact, change global scoring
-configuration, rebuild communities, or compact a long chain of overlays into a
-new base snapshot.
-
-To stage a coordinated graph+wiki compaction without mutating the active wiki:
-
-```bash
-python -m ctx.core.wiki.pack_compaction compact \
-  --wiki-path ~/.claude/skill-wiki \
-  --base-export-id <new-export-id> \
-  --staging-dir /tmp/ctx-pack-stage \
-  --json
-```
-
-The staging directory contains a top-level `pack-compaction-manifest.json` plus
-staged graph and wiki base packs. Promotion validates the top-level manifest,
-graph pack manifest, wiki pack manifest, checksums, matching export IDs, and
-graph/wiki entity consistency before replacing active packs:
-
-```bash
-python -m ctx.core.wiki.pack_compaction validate \
-  --staged-graph-packs-dir /tmp/ctx-pack-stage/graph-packs \
-  --staged-wiki-packs-dir /tmp/ctx-pack-stage/wiki-packs \
-  --require-compaction-manifest \
-  --json
-```
-
-```bash
-python -m ctx.core.wiki.pack_compaction promote \
-  --wiki-path ~/.claude/skill-wiki \
-  --staged-graph-packs-dir /tmp/ctx-pack-stage/graph-packs \
-  --staged-wiki-packs-dir /tmp/ctx-pack-stage/wiki-packs \
-  --json
-```
-
-Promotion refreshes the SQLite dashboard/recommendation graph store by default.
-Use `--graph-store-db <path>` to refresh a non-default store, or
-`--no-graph-store-refresh` only when you plan to rebuild it separately:
-
-```bash
-python -m ctx.core.wiki.pack_compaction validate \
-  --wiki-path ~/.claude/skill-wiki \
-  --json
-
-python -m ctx.core.graph.graph_store build \
-  --graph-dir ~/.claude/skill-wiki/graphify-out \
-  --db ~/.claude/skill-wiki/graphify-out/graph-store.sqlite3
-
-python -m ctx.core.graph.graph_store validate \
-  --db ~/.claude/skill-wiki/graphify-out/graph-store.sqlite3
-```
-
-### LLM-wiki design references
-
-ctx follows Karpathy's LLM-wiki pattern. We also reviewed
-[`nashsu/llm_wiki`](https://github.com/nashsu/llm_wiki) as a design reference
-for source traceability, persistent ingest queues, graph insights, and
-budgeted token/vector/graph retrieval. That repository is GPLv3, while ctx is
-MIT, so ctx can use those ideas as product inspiration but must not copy or
-vendor its code or assets.
+Optional embedding backends can require model downloads or a running service.
+Those are not part of default initialization. Review your embedding configuration
+before starting a graph build; the vector-index option does not disable embedding.
 
 ## Rebuilding
 
-After you add a skill, agent, MCP server, or harness entity page:
-
 ```bash
-python -m ctx.core.wiki.wiki_queue_worker --wiki ~/.claude/skill-wiki --limit 1
+python -m ctx.core.wiki.wiki_graphify --help
+python -m ctx.core.wiki.wiki_graphify --wiki-dir /absolute/path/to/wiki --graph-only
 ```
 
-The `entity-upsert` worker path validates the queued page hash, updates the
-wiki index, and, when a persisted semantic vector index exists, runs a
-best-effort ANN attach into `graphify-out/entity-overlays.jsonl`. That overlay
-lets the runtime resolver connect a new or updated entity to existing graph
-neighbors without recomputing global all-pairs similarity. When modular wiki
-packs exist, the same write is mirrored into a wiki overlay pack; deletes are
-mirrored as wiki tombstones. The worker also queues a graph-store refresh so
-dashboard and resolver reads see the merged view. The active wiki page is the
-pack page when one exists, otherwise the local entity markdown file unless a
-pack tombstone hides that relative path.
+Select the wiki explicitly with `--wiki-dir` when building a non-default
+location. The graph builder's help lists embedding and output options;
+review them before enabling model-backed work. Indexing writes derived graph
+files; it does not install the tools described by the input pages.
 
-For manual review or debugging:
+The entity add commands enqueue local wiki work. To drain one queued job:
 
 ```bash
-python -m ctx.core.graph.incremental_attach calibrate \
-  --graph ~/.claude/skill-wiki/graphify-out/graph.json
-
-python -m ctx.core.graph.incremental_attach attach \
-  --index-dir ~/.claude/skill-wiki/.embedding-cache/graph/vector-index \
-  --overlay ~/.claude/skill-wiki/graphify-out/entity-overlays.jsonl \
-  --node-id skill:fastapi-review \
-  --type skill \
-  --label fastapi-review \
-  --text-file ~/.claude/skill-wiki/entities/skills/fastapi-review.md \
-  --dry-run
+python -m ctx.core.wiki.wiki_queue_worker --wiki /absolute/path/to/wiki --limit 1
 ```
 
-Shadow-gate a persisted index before trusting a new ANN backend, changed
-thresholds, or a large attach workflow:
+The worker can refresh wiki indexes and graph overlays. If no semantic vector
+index exists, incremental semantic attachment is skipped; that is not an
+instruction to download the retired CTX catalog. A full local rebuild can
+reconcile your records after you configure the desired backend.
+
+When active wiki packs exist, rebuilds use their validated merged view,
+including overlays and deletions. Stale loose Markdown files do not override
+that view. Use [pack-aware authoring](entity-onboarding.md#add-records-you-own)
+to update metadata; corrupt or incomplete active packs stop the rebuild rather
+than replacing your knowledge with an empty graph.
+
+## Querying
 
 ```bash
-python -m ctx.core.graph.incremental_shadow \
-  --index-dir ~/.claude/skill-wiki/.embedding-cache/graph/vector-index \
-  --graph ~/.claude/skill-wiki/graphify-out/graph.json \
-  --sample-size 100 \
-  --min-overlap 0.85
+ctx recommend "review a Python API" --json
+ctx-scan-repo --repo . --recommend
+python -m ctx_monitor serve
 ```
 
-The shadow command pretends sampled existing nodes are new, compares the
-incremental attach result to batch graph semantic neighbors, and reports
-precision, recall, top-5/top-10/top-20 agreement, score deltas, and bad
-examples. A failing gate means either tune thresholds or use a full graph
-rebuild before shipping.
+The CLI, `ctx__recommend_bundle` MCP tool, and native prompt adapters share
+the recommendation engine. Results are capped at five across skills, agents,
+and MCPs—not five of each. An empty wiki or an unrelated task can return no
+recommendations. Hosts may provide selected/rejected/active context to suppress
+items already considered.
 
-If the vector index is missing, rebuild it without repacking artifacts:
+For direct Python use, see
+[the library path](harness/attaching-to-hosts.md#2-python-library-path).
 
-```bash
-python -m ctx.core.wiki.wiki_graphify \
-  --wiki-dir ~/.claude/skill-wiki \
-  --incremental \
-  --graph-only \
-  --semantic-vector-index numpy-flat
-```
+## Import and trust boundaries
 
-`numpy-flat` is exact and portable. `--semantic-vector-index auto` uses the
-portable exact backend below the configured node threshold and can select the
-optional `hnswlib` ANN backend at or above it when installed. Shadow-gate that
-backend before release use.
+Use sources you control or have explicitly reviewed. Archive extraction rejects
+unsafe members; it is still your responsibility to review content and licenses.
+Never follow an installation string solely because it appears in a wiki page.
+The current product suggests tools; installing a selected tool requires explicit
+approval. Unload and uninstall are separate actions with separate approval.
 
-That graphify run reconciles the current entity set while it builds the index.
-A failed `entity-upsert` follows the queue retry policy. A job whose earlier
-attach was skipped is recorded as successful, so it is not left pending for a
-later worker run. Future entity updates use the new index automatically; to
-revisit an older entity, update it again (which queues a new `entity-upsert`)
-or run the manual attach command above after reviewing its dry-run. The wiki
-queue worker can still drain other ready maintenance work afterward.
+Graph outputs, embeddings, wiki packs, and backups remain user-owned artifacts.
+CTX no longer publishes or hydrates its old corpus by default. Historical GitHub
+releases and dataset snapshots are not the current installation contract.
 
-Before publishing graph artifacts, run the full rebuild/export path:
+## Sharing within an organization
 
-```bash
-python -m ctx.core.wiki.wiki_graphify          # rebuild entity graph + communities
-```
+Keep private records in a repository or storage location your team controls.
+Review changes to descriptions, source URLs, installation instructions, and
+permissions before importing them. Retain provenance and versions so a
+recommendation can be traced back to the record that produced it.
 
-The pre-commit hook (`.githooks/pre-commit`) does **not** rebuild or
-repack graph artifacts from `~/.claude/skill-wiki/`; that local wiki can
-contain private entities. It refreshes cheap README stats when relevant
-checked-in files are staged and warns when entity sources changed. Run
-`python -m ctx.core.wiki.wiki_graphify`, validate, repack, and stage the artifacts explicitly
-for skill, agent, MCP server, or harness releases.
-
-Graphify exports stage and validate each generated artifact before atomic
-promotion. `graph.json`, `graph-delta.json`, `communities.json`,
-`graph-report.md`, and `graph-export-manifest.json` each get a sibling
-`*.promotion.json` file with candidate, current, and `last_good` hashes plus
-rollback metadata. Queue-driven promotion accepts only graphify artifacts named
-`graph.json`, `graph-delta.json`, `communities.json`, `graph-report.md`, or
-`graph-export-manifest.json` under `<wiki>/graphify-out/`, plus the release
-artifacts allowlisted under repo `graph/`, and always from sibling
-`<target>.staged` files. Staged and target symlinks are rejected. Validators are
-selected from the target suffix: JSON, JSONL, gzip JSON, gzip JSONL, full wiki
-tar, and runtime graph tar each get the matching structural check before
-promotion. The manifest is promoted last, so a crash between artifact promotion
-and manifest promotion is detected as an incomplete export and the next run
-rebuilds instead of trusting mixed graph files.
-
-Artifact validation also treats privacy and fanout as release contracts: archive
-JSON, graph-pack node/edge metadata, markdown members, and merged wiki-pack
-markdown must not contain host-user paths; markdown members are capped at
-10 MiB; local generated markdown such as `catalog.md`, `converted-index.md`,
-`log.md`, and `versions-catalog.md` must stay out of the full archive.
-When a shipped root artifact has sibling promotion metadata, validation also
-checks the `current` snapshot against the actual artifact size and SHA-256 so
-stale promotion records cannot describe a different file.
-
-## Current artifact record
-
-This page is intentionally current-state only. Older graph sizes made the public
-page look stale even when the headline table was correct, so historical refresh
-notes live in `CHANGELOG.md` instead of being repeated here.
-
-The shipped artifact currently records **79,958 nodes**, **1,778,069 edges**,
-**52 Louvain communities**, **1,088,763 semantic edges**, **474,837 tag edges**,
-and **280,275 slug-token edges**. The current build is fully reproducible from
-the wiki content and the checked-in graph build configuration.
-
-## Pre-ship gates
-
-Three advisory gates run before the tarball is repackaged. All three produce
-review reports and never auto-modify the inventory.
-
-- **`python -m ctx.core.quality.dedup_check`** — flags entity pairs (skill ↔ skill, skill ↔
-  agent, skill ↔ MCP, agent ↔ agent, agent ↔ MCP, MCP ↔ MCP) at or
-  above 0.85 cosine similarity. Incremental: keeps a `dedup-state.json`
-  next to the embedding cache, so follow-up runs only re-check pairs
-  involving entities whose content changed. Allowlist support via
-  `.dedup-allowlist.txt`. The current snapshot has 15,976 findings,
-  most of which are within-MCP near-duplicates (multiple wrappers
-  around the same upstream service).
-- **`python -m ctx.core.quality.tag_backfill`** — finds installed skills/agents with empty `tags:`
-  frontmatter and proposes a backfill from slug tokens and an allowlist of
-  body keywords. Existing tag frequency breaks keyword ties. Report-only by
-  default; pass `--apply` to write. Backfills are additive only.
-- **`python -m ctx.core.quality.skillspector_audit`** — runs a static `--no-llm` check over
-  shipped skill bodies with
-  [NVIDIA SkillSpector](https://github.com/NVIDIA/SkillSpector), writes
-  `graph/skillspector-audit.jsonl.gz`, and stamps skill entity pages in the
-  full wiki artifact. This is a ctx-run check, not NVIDIA endorsement or
-  certification.
+Do not infer measured savings from similarity. The graph ranks potentially useful
+tools; real task quality, time, and cost require independent measurements.

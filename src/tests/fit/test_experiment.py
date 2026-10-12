@@ -33,6 +33,8 @@ from ctx.fit.profile import build_fit_profile
 from ctx.fit.release_catalog import open_release_candidate_source
 from ctx.fit.tasks import FitTask
 
+pytestmark = pytest.mark.usefixtures("historical_fit_catalog")
+
 PRICE = ModelPrice(model="test-model", usd_per_million_input=3.0, usd_per_million_output=15.0)
 
 

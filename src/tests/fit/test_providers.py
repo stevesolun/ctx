@@ -795,6 +795,7 @@ def test_the_agent_receives_exact_bound_repository_instructions_and_controlled_m
     assert invocation.instruction_materials[0].content_sha256 in task
 
 
+@pytest.mark.usefixtures("historical_fit_catalog")
 def test_candidates_from_the_real_generator_run_different_commands(tmp_path: Path) -> None:
     """The experiment's entire claim rests on this.
 

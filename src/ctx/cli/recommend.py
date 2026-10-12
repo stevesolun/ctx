@@ -22,6 +22,19 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="python -m ctx.cli.recommend",
         description="Recommend up to five skills, agents, or MCPs for an intent.",
     )
+    _add_arguments(parser)
+    return parser
+
+
+def register(subparsers: Any) -> None:
+    parser = subparsers.add_parser(
+        "recommend",
+        help="Suggest up to five tools from your own knowledge graph.",
+    )
+    _add_arguments(parser)
+
+
+def _add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "query",
         nargs="+",
@@ -82,7 +95,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--show-unavailable",
         action="store_true",
-        help="Include non-local or non-loadable recommendations.",
+        help="Compatibility option; advisory suggestions already include tools not installed.",
     )
     parser.add_argument(
         "--local-code-task",
@@ -101,7 +114,6 @@ def _build_parser() -> argparse.ArgumentParser:
         default=cfg.recommendation_top_k,
         help=f"Maximum related results to show (default {cfg.recommendation_top_k}, max 5).",
     )
-    return parser
 
 
 def _split_selection_values(values: list[str] | None) -> list[str]:
@@ -170,27 +182,37 @@ def _related_fetch_top_n(
     return min(50, top_n + excluded_count + 25)
 
 
+def _terminal_text(value: object, *, limit: int = 240) -> str:
+    """Keep catalog data single-line and inert in a human terminal."""
+    printable = "".join(char if char.isprintable() else " " for char in str(value)[: limit * 2])
+    return " ".join(printable.split())[:limit]
+
+
 def _render_row(row: dict[str, Any], *, index: int | None = None) -> str:
-    name = str(row.get("name") or row.get("slug") or "")
-    entity_type = str(row.get("type") or row.get("entity_type") or "skill")
+    name = _terminal_text(row.get("name") or row.get("slug") or "", limit=128)
+    entity_type = _terminal_text(row.get("type") or row.get("entity_type") or "skill", limit=32)
     score = row.get("normalized_score", row.get("score", 0.0))
     try:
         score_text = f"{float(score):.3f}"
     except (TypeError, ValueError):
-        score_text = str(score)
+        score_text = _terminal_text(score, limit=32)
     tags = row.get("matching_tags") or row.get("shared_tags") or []
-    tag_text = ", ".join(str(t) for t in tags[:5]) if isinstance(tags, list) else ""
+    tag_text = (
+        ", ".join(_terminal_text(t, limit=64) for t in tags[:5]) if isinstance(tags, list) else ""
+    )
     suffix = f"  [{tag_text}]" if tag_text else ""
     action = row.get("invoke_command")
-    action_text = f"  run={action}" if action else ""
+    action_text = (
+        f"  untrusted_recipe (approval required)={_terminal_text(action)}" if action else ""
+    )
     category = row.get("category")
-    category_text = f"  category={category}" if category else ""
+    category_text = f"  category={_terminal_text(category)}" if category else ""
     row_id = row.get("id")
-    row_id_text = f"  id={row_id}" if row_id else ""
+    row_id_text = f"  id={_terminal_text(row_id)}" if row_id else ""
     state = row.get("selection_state")
-    state_text = f"  state={state}" if state else ""
+    state_text = f"  state={_terminal_text(state)}" if state else ""
     related_to = row.get("related_to")
-    related_text = f"  related_to={related_to}" if related_to else ""
+    related_text = f"  related_to={_terminal_text(related_to)}" if related_to else ""
     prefix = f"{index:>2}. " if index is not None else ""
     lines = [
         (
@@ -201,16 +223,20 @@ def _render_row(row: dict[str, Any], *, index: int | None = None) -> str:
     ]
     tldr = row.get("tldr")
     if tldr:
-        lines.append(f"    {tldr}")
+        lines.append(f"    {_terminal_text(tldr)}")
     reason = row.get("reason")
     if reason:
-        lines.append(f"    reason={reason}")
+        lines.append(f"    reason={_terminal_text(reason)}")
     return "\n".join(lines)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
+    return cmd_recommend(args, parser=parser)
+
+
+def cmd_recommend(args: argparse.Namespace, *, parser: argparse.ArgumentParser) -> int:
     if args.rejection_mode != "use" and not args.session_id:
         parser.error("--rejection-mode requires --session-id")
     query = " ".join(args.query).strip()
@@ -252,6 +278,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.language:
         bundle_kwargs["language"] = args.language
     results = recommend_bundle(query, **bundle_kwargs)
+    results = results[:5]
+    related_top_n = min(related_top_n, 5 - len(results))
     related_baseline_context = _effective_baseline_context(
         baseline_context,
         include_baseline_context=args.include_baseline_context,
@@ -270,7 +298,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.session_id:
         related_kwargs["session_id"] = args.session_id
         related_kwargs["rejection_mode"] = "ignore"
-    raw_related_results = recommend_related(selected, **related_kwargs) if selected else []
+    raw_related_results = (
+        recommend_related(selected, **related_kwargs) if selected and related_top_n else []
+    )
     related_results = _filter_related_results(
         raw_related_results,
         context=related_context,

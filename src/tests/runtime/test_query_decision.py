@@ -464,6 +464,7 @@ def test_failure_is_separate_bounded_and_contains_no_decision_receipt() -> None:
     ],
     ids=lambda host: host.host_context_id,
 )
+@pytest.mark.usefixtures("historical_release_catalog")
 def test_production_factory_commits_the_same_closed_abstention_for_each_host(
     host: QueryHostDescriptor,
     tmp_path: Path,
@@ -498,6 +499,7 @@ def test_production_factory_commits_the_same_closed_abstention_for_each_host(
     assert str(tmp_path).encode() not in journal_bytes
 
 
+@pytest.mark.usefixtures("historical_release_catalog")
 def test_host_brand_does_not_perturb_the_semantic_plan_or_presentation(
     tmp_path: Path,
 ) -> None:

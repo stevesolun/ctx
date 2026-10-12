@@ -45,12 +45,16 @@ from ctx.runtime.query_delivery import (
     SensitiveQueryInput,
     _SQLiteQueryDeliveryLedger,
 )
+from tests.release_catalog_fixture import historical_catalog_resources
 
 
-pytestmark = pytest.mark.skipif(
-    not attempt_storage.query_attempt_pool_supported(),
-    reason="POSIX descriptor-relative query attempt contracts",
-)
+pytestmark = [
+    pytest.mark.skipif(
+        not attempt_storage.query_attempt_pool_supported(),
+        reason="POSIX descriptor-relative query attempt contracts",
+    ),
+    pytest.mark.usefixtures("historical_release_catalog"),
+]
 
 
 def _digest(value: str) -> str:
@@ -239,6 +243,7 @@ def _process_request(workspace: Path) -> SensitiveQueryInput:
     )
 
 
+@historical_catalog_resources()
 def _multiprocess_abstention_worker(
     state_root: str,
     workspace: str,
@@ -272,6 +277,7 @@ def _crash_after_production_decision_factory(**kwargs: Any) -> CommittedQueryDec
     os._exit(76)
 
 
+@historical_catalog_resources()
 def _production_crash_worker(state_root: str, workspace: str) -> None:
     controller = QueryDeliveryController._for_testing(
         host=QueryHostDescriptor.codex(),

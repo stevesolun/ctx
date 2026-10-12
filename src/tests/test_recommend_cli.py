@@ -59,7 +59,37 @@ def test_recommend_cli_text_shows_workflow_action(monkeypatch, capsys) -> None:
     assert exit_code == 0
     assert "no-mistakes" in captured.out
     assert "category=workflow" in captured.out
-    assert 'run=no-mistakes axi run --intent "<intent>"' in captured.out
+    assert (
+        'untrusted_recipe (approval required)=no-mistakes axi run --intent "<intent>"'
+        in captured.out
+    )
+
+
+def test_human_rows_escape_control_sequences_and_bound_catalog_text() -> None:
+    malicious = "\x1b[31mRED\r\nforged\u202e" + "x" * 1000
+    rendered = recommend_cli._render_row(
+        {
+            key: malicious
+            for key in (
+                "name",
+                "type",
+                "normalized_score",
+                "invoke_command",
+                "category",
+                "id",
+                "selection_state",
+                "related_to",
+                "tldr",
+                "reason",
+            )
+        }
+        | {"matching_tags": [malicious]},
+        index=1,
+    )
+    assert "\x1b" not in rendered and "\r" not in rendered and "\u202e" not in rendered
+    assert len(rendered.splitlines()) == 3
+    assert "x" * 1000 not in rendered
+    assert "untrusted_recipe (approval required)=" in rendered
 
 
 def test_recommend_cli_json(monkeypatch, capsys) -> None:
@@ -165,7 +195,7 @@ def test_recommend_cli_related_excludes_session_context(monkeypatch, capsys) -> 
         (
             ["skill:fastapi-pro"],
             ["skill:skip", "mcp-server:codex-cli", "skill:baseline-helper"],
-            5,
+            4,
         )
     ]
     assert payload["selection"]["related_results"] == []
@@ -345,7 +375,7 @@ def test_recommend_cli_filters_related_with_context_policy(monkeypatch, capsys) 
             "status": "available",
             "source_catalog": "skill-index",
             "install_command": "ctx-skill-install remote-api",
-            "matching_tags": ["python", "api"],
+            "matching_tags": ["python", "api", "openai"],
         },
         {
             "id": "skill:go-api",

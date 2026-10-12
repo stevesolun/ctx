@@ -99,6 +99,7 @@ Plan 001 Phase H9.
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -529,12 +530,16 @@ def default_wiki_dir() -> Path | None:
     so callers can give a clean error instead of walking a nonexistent
     tree.
     """
+    configured = os.environ.get("CTX_WIKI_DIR", "")
+    if configured:
+        wiki = Path(configured)
+        if not wiki.is_absolute() or wiki.is_symlink():
+            raise ValueError("CTX_WIKI_DIR must be an absolute non-symlink directory")
+        return wiki if wiki.exists() else None
     try:
         from ctx_config import cfg  # noqa: PLC0415
 
         wiki = Path(cfg.wiki_dir)
     except Exception:  # noqa: BLE001
-        import os
-
         wiki = Path(os.path.expanduser("~/.claude/skill-wiki"))
     return wiki if wiki.exists() else None

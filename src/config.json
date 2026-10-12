@@ -16,8 +16,8 @@
   },
 
   "knowledge": {
-    "_comment": "User knowledge-source policy. shipped = use ctx's shipped graph/wiki; local = private/local wiki only; enriched = start from shipped ctx knowledge and add user/project content.",
-    "mode": "shipped"
+    "_comment": "Knowledge is supplied and controlled by the user or organization. CTX ships no tool catalog.",
+    "mode": "local"
   },
 
   "resolver": {
@@ -28,7 +28,7 @@
     "intent_boost_per_signal": 5,
     "intent_boost_max": 15,
     "staleness_penalty": -8,
-    "meta_skills": ["skill-router", "file-reading"]
+    "meta_skills": []
   },
 
   "context_monitor": {

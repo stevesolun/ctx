@@ -1,4 +1,8 @@
 prune src/tests
+prune imported-skills
+prune graph
+prune benchmarks
+prune .agents
 prune .a5c
 prune .claude
 global-exclude __pycache__ *.py[cod]

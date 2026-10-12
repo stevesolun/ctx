@@ -44,6 +44,41 @@ class RecordedRun:
     timeout_seconds: float | None
 
 
+def _suggestion_envelope() -> str:
+    rows = [
+        {"id": f"{kind}:user-python-{kind}", "matching_tags": ["python"]}
+        for kind in ("skill", "agent", "mcp-server")
+    ]
+    return json.dumps(
+        {
+            "systemMessage": "CTX suggestions (approval required)",
+            "hookSpecificOutput": {
+                "hookEventName": "UserPromptSubmit",
+                "additionalContext": "CTX suggestions only\n" + json.dumps(rows),
+            },
+        }
+    )
+
+
+def test_empty_knowledge_assertion_rejects_seeded_graph(tmp_path: Path) -> None:
+    graph = tmp_path / "graphify-out"
+    graph.mkdir()
+    (tmp_path / "SCHEMA.md").write_text("schema")
+    (graph / "graph.json").write_text(json.dumps({"nodes": [], "edges": []}))
+    clean_host_contract._assert_empty_knowledge(tmp_path)
+    (graph / "graph.json").write_text(json.dumps({"nodes": [{"id": "seed"}], "edges": []}))
+    with pytest.raises(AssertionError, match="empty"):
+        clean_host_contract._assert_empty_knowledge(tmp_path)
+
+
+def test_prompt_context_accepts_metadata_and_rejects_old_body() -> None:
+    valid = {"commands": [{"stdout": _suggestion_envelope()}]}
+    clean_host_contract._assert_prompt_context_output(valid, host="test")
+    old = {"commands": [{"stdout": '# ctx Python Testing\n{"hookEventName":"UserPromptSubmit"}'}]}
+    with pytest.raises(AssertionError):
+        clean_host_contract._assert_prompt_context_output(old, host="test")
+
+
 class RecordingRunner(CommandRunner):
     def __init__(self, venv: Path) -> None:
         self.calls: list[tuple[str, ...]] = []
@@ -89,6 +124,12 @@ class RecordingRunner(CommandRunner):
                 codex_hooks = home / ".codex" / "hooks.json"
                 codex_hooks.parent.mkdir(parents=True, exist_ok=True)
                 codex_hooks.write_text("{}", encoding="utf-8")
+                wiki = home / ".claude" / "skill-wiki"
+                (wiki / "graphify-out").mkdir(parents=True)
+                (wiki / "SCHEMA.md").write_text("schema")
+                (wiki / "graphify-out" / "graph.json").write_text(
+                    json.dumps({"nodes": [], "edges": []})
+                )
         elif call and Path(call[0]).name.startswith("ctx-scan-repo"):
             output = Path(call[call.index("--output") + 1])
             output.write_text("{}", encoding="utf-8")
@@ -98,16 +139,14 @@ class RecordingRunner(CommandRunner):
                     "hook_commands": 6,
                     "failed": 0,
                     "commands": [
-                        {"command": "ctx.adapters.claude_code.hooks.context_monitor"},
+                        {"command": "ctx.adapters.claude_code.query_handler"},
                         {"command": "skill_add_detector"},
-                        {"command": "ctx.adapters.claude_code.hooks.bundle_orchestrator"},
+                        {"command": "ctx.adapters.claude_code.hooks.lifecycle_hooks"},
                         {"command": "usage_tracker"},
                         {"command": "ctx.adapters.claude_code.hooks.lifecycle_hooks"},
                         {
                             "command": "ctx.adapters.claude_code.query_handler",
-                            "stdout": (
-                                '# ctx Python Testing\n{"hookEventName":"UserPromptSubmit"}'
-                            ),
+                            "stdout": _suggestion_envelope(),
                         },
                     ],
                 }
@@ -121,9 +160,7 @@ class RecordingRunner(CommandRunner):
                     "commands": [
                         {
                             "command": "ctx.adapters.codex.hook_handler",
-                            "stdout": (
-                                '# ctx Python Testing\n{"hookEventName":"UserPromptSubmit"}'
-                            ),
+                            "stdout": _suggestion_envelope(),
                         }
                     ],
                 }
@@ -154,6 +191,13 @@ class RecordingRunner(CommandRunner):
                     encoding="utf-8",
                 )
             return CompletedCommand(call, cwd, 0, "claude preflight\n", "")
+        elif call and len(call) > 1 and call[1] == "recommend":
+            rows = (
+                [{"id": f"{kind}:user-python-{kind}"} for kind in ("skill", "agent", "mcp-server")]
+                if env.get("CTX_WIKI_DIR")
+                else []
+            )
+            return CompletedCommand(call, cwd, 0, json.dumps({"results": rows}), "")
         elif (
             call
             and Path(call[0]).name.startswith("ctx")
@@ -170,6 +214,8 @@ class RecordingRunner(CommandRunner):
                 return CompletedCommand(
                     call, cwd, 0, "CTX Fit diagnostics\nprovider ...\ncatalog ...\n", ""
                 )
+            if len(call) == 1:
+                return CompletedCommand(call, cwd, 0, "Start empty; use ctx recommend", "")
             return CompletedCommand(
                 call, cwd, 0, "Repository: /tmp/tiny\n\nAI agent readiness\n  7/100\n", ""
             )
@@ -280,14 +326,14 @@ def test_fake_claude_hook_output_requires_all_generated_hooks() -> None:
             "hook_commands": 6,
             "failed": 0,
             "commands": [
-                {"command": "ctx.adapters.claude_code.hooks.context_monitor"},
+                {"command": "ctx.adapters.claude_code.query_handler"},
                 {"command": "skill_add_detector"},
-                {"command": "ctx.adapters.claude_code.hooks.bundle_orchestrator"},
+                {"command": "ctx.adapters.claude_code.hooks.lifecycle_hooks"},
                 {"command": "usage_tracker"},
                 {"command": "ctx.adapters.claude_code.hooks.lifecycle_hooks"},
                 {
                     "command": "ctx.adapters.claude_code.query_handler",
-                    "stdout": ('# ctx Python Testing\n{"hookEventName":"UserPromptSubmit"}'),
+                    "stdout": _suggestion_envelope(),
                 },
             ],
         }
@@ -305,7 +351,7 @@ def test_fake_claude_hook_output_requires_all_generated_hooks() -> None:
         _assert_fake_claude_hook_output(missing)
 
 
-def test_fake_codex_hook_output_requires_registered_canary_context() -> None:
+def test_fake_codex_hook_output_requires_registered_user_suggestions() -> None:
     good = json.dumps(
         {
             "hook_commands": 1,
@@ -313,7 +359,7 @@ def test_fake_codex_hook_output_requires_registered_canary_context() -> None:
             "commands": [
                 {
                     "command": "ctx.adapters.codex.hook_handler",
-                    "stdout": ('# ctx Python Testing\n{"hookEventName":"UserPromptSubmit"}'),
+                    "stdout": _suggestion_envelope(),
                 }
             ],
         }

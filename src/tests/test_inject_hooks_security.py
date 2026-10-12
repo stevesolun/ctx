@@ -109,15 +109,16 @@ class TestNoShellInjectionVars:
         post_tool_entries = hooks.get("PostToolUse", [])
         assert post_tool_entries, "PostToolUse block must not be empty"
 
-        # context_monitor and skill_add_detector commands must carry --from-stdin
+        # The retained skill detector requires its explicit stdin flag; the
+        # unified query handler always reads bounded stdin and takes no args.
         sub_hooks = post_tool_entries[0].get("hooks", [])
         cmds_with_stdin = [
             h["command"]
             for h in sub_hooks
             if isinstance(h, dict) and "--from-stdin" in h.get("command", "")
         ]
-        assert len(cmds_with_stdin) >= 2, (
-            f"Expected at least 2 --from-stdin commands; found {len(cmds_with_stdin)}: "
+        assert len(cmds_with_stdin) == 1, (
+            f"Expected one skill-detector --from-stdin command; found {len(cmds_with_stdin)}: "
             f"{cmds_with_stdin}"
         )
 
@@ -140,9 +141,11 @@ class TestNoShellInjectionVars:
         merged = merge_hooks(existing, new_hooks)
 
         commands = _all_commands({"PostToolUse": merged["hooks"]["PostToolUse"]})
-        assert any("context_monitor" in command for command in commands)
+        assert any("ctx.adapters.claude_code.query_handler" in command for command in commands)
         assert any("skill_add_detector" in command for command in commands)
-        assert any("bundle_orchestrator" in command for command in commands)
+        assert not any(
+            "context_monitor" in command or "bundle_orchestrator" in command for command in commands
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -272,9 +275,7 @@ class TestPackagedHookCommands:
         modules = _all_modules(hooks)
         assert {
             "ctx.adapters.claude_code.query_handler",
-            "ctx.adapters.claude_code.hooks.context_monitor",
             "skill_add_detector",
-            "ctx.adapters.claude_code.hooks.bundle_orchestrator",
             "usage_tracker",
             "ctx.adapters.claude_code.hooks.lifecycle_hooks",
         } <= set(modules)

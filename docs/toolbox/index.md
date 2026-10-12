@@ -1,9 +1,10 @@
 # Toolbox overview
 
-!!! info "Part of the recommendation surface, not CTX Fit"
+!!! info "Optional plans over tools you supply"
 
-    This page documents the shipped legacy toolbox planner. For CTX Fit
-    product usage, see the [home page](../index.md).
+    Toolbox plans do not provide or install the skills/agents they reference.
+    CTX ships empty knowledge infrastructure; you choose the records and tools.
+    The optional `ctx fit` evaluator is separate. See the [home page](../index.md).
 
 
 A **toolbox** is a named declaration of skills and agents for a defined
@@ -80,6 +81,6 @@ Or let the `pre-commit` hook fire it automatically — see
 ## Related
 
 - [Configuration schema](configuration.md) — full field reference.
-- [Starter toolboxes](starters.md) — 5 shipping presets.
-- [Intent interview](intent-interview.md) — select and activate starters.
+- [Starter toolboxes](starters.md) — optional configuration examples, not supplied tools.
+- [Intent interview](intent-interview.md) — historical named presets over your definitions.
 - [Verdicts & guardrails](verdicts.md) — how blocking works.

@@ -1,27 +1,76 @@
-# Attaching ctx to any LLM host
+# Connect CTX to your host
 
-`ctx` ships four integration surfaces. Pick based on what your host
-already supports:
+CTX is a recommendation engine over your own knowledge graph and wiki.
+A fresh setup is empty. The same engine serves the CLI, MCP, Python, and native
+host hooks; CTX does not download a tool catalog or run a separate paid LLM to
+make suggestions.
 
-| Your host | Use |
-|---|---|
-| A host whose current version accepts a stdio MCP server | **MCP server** — no Python integration code; install the Python package, then verify the host-specific configuration and `ctx-mcp-server` handshake below |
-| Anything that isn't MCP-native but runs Python | **Python library** — `from ctx import recommend_bundle, ...` |
-| "I just want to run an agent and get recommendations" | **`ctx run` CLI** — our built-in harness |
-| LoopFlow or another loop that already owns plan/act/observe | **LoopFlow adapter** — `python -m ctx.adapters.loopflow` before planning |
+| Host integration | Use |
+| --- | --- |
+| Codex or Claude Code with compatible hook support | Native event hooks for advisory prompt context |
+| A host that accepts a stdio MCP server | `ctx-mcp-server` with a read-only tool allowlist |
+| Custom Python loop | `from ctx import recommend_bundle` |
+| Any host that can call a local process | `ctx recommend "current task" --json` |
+| Existing plan/act/observe loop | `python -m ctx.adapters.loopflow` |
 
-All four paths consume the **same** knowledge graph, llm-wiki, and
-quality scoring inputs. Output shape and grouping can differ by host
-surface; the transport and permission contract decide what each loop sees.
+Use an absolute `CTX_WIKI_DIR` consistently in the host's environment and your
+shell to select private knowledge. The compatibility default remains
+`~/.claude/skill-wiki/`. The name of that directory does not restrict the engine
+to Claude Code.
+
+## Native prompt hooks
+
+Initialize only the adapter you intend to use:
+
+```bash
+ctx-init --hooks --model-mode skip
+ctx-init --codex-hooks --model-mode skip
+```
+
+The first configures Claude Code hooks; the second configures Codex hooks.
+They modify host configuration, so inspect the generated settings and complete
+the host's trust approval or restart where required. The Python package alone
+does not start monitoring every task.
+
+Supported prompt events supply the current task to the shared engine. Hooks
+return at most five mixed suggestions, and empty knowledge or no useful match
+produces no injected recommendation. There is no paid model call or polling
+daemon in this path. Do not assume every host/version supplies the same events.
+
+Prompt hooks emit a short `systemMessage` for visible suggestions and
+`additionalContext` telling the agent to offer tools for explicit approval.
+Claude Code's `additionalContext` alone is model-facing, not a user message.
+The host still controls rendering and whether an agent acts on a suggestion.
+Verify the current host behavior in
+an isolated profile using its [Codex](https://learn.chatgpt.com/docs/hooks) or
+[Claude Code](https://code.claude.com/docs/en/hooks) hook documentation.
+
+The product suggests tools; **installation requires explicit approval**.
+Native recommendation hooks do not install, activate, or unload them. Previously
+saved automatic-install preferences do not authorize execution through this
+suggestion-only path. Actual host loading and usage must be observed separately;
+delivery alone is not proof of use.
+
+Local hook subprocess tests prove CTX's adapter behavior, not actual acceptance
+by an installed Codex or Claude Code release. Record that host's version,
+registered configuration, delivered event, visible/model context, and absence of
+unexpected writes before claiming live integration.
+
+PostToolUse events can trigger a language-specific suggestion when the host
+supplies an explicit `file_path`, `path`, or `filename`. CTX reads the filename
+suffix, not source bodies, transcripts, tool output, or shell commands. A bounded
+local digest-only cache suppresses repeated identical shortlists. Shell or patch
+events without file-path metadata do not provide this signal; this is not
+universal observation of every tool call.
 
 ---
 
 ## 1. MCP server path
 
-Install ctx with the harness extras:
+Install the base package (MCP recommendations do not need a model provider):
 
 ```bash
-pip install "claude-ctx[harness]"
+pip install claude-ctx
 ```
 
 This puts `ctx-mcp-server` on your PATH. Then wire it into your host:
@@ -274,6 +323,13 @@ for td in toolbox.tool_definitions():
 
 ## 3. `ctx run` CLI path
 
+This optional harness is exposed as `ctx advanced run`; the older `ctx run`
+spelling remains a compatibility alias. Its default toolbox queries user-owned
+knowledge. The historical `--ctx-engine-mode shadow` and `recommend` modes
+use a retired authenticated release-catalog path and fail closed without those
+assets; they are not the current recommendation product or a reason to restore
+the old corpus.
+
 If you don't have your own loop yet:
 
 ```bash
@@ -509,9 +565,9 @@ python -m harness_install --recommend \
 | You're building an IDE extension | 1 if the IDE speaks MCP (most do), else 2 |
 | You're building a DSL runner or agent loop | 4 (LoopFlow adapter) |
 
-All four paths share `~/.claude/skill-wiki/` as the source-of-truth
-corpus, so your recommendations are consistent regardless of the
-integration you pick.
+All integrations select the same user-owned wiki via `CTX_WIKI_DIR` or the
+compatibility default. They share ranking policy, not execution authority.
+There is no shipped corpus to use as a fallback.
 
 ---
 

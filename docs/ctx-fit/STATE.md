@@ -1,6 +1,6 @@
-# CTX Fit — Live Working State
+# CTX — Live Working State
 
-> **This is the canonical operational checkpoint for current CTX Fit work.**
+> **This is the canonical operational checkpoint for current CTX work.**
 >
 > Read `AGENTS.md` and `docs/ctx-fit/DECISIONS.md` first. Then read this file
 > before resuming a long-running task. The root `STATE.md` is frozen history
@@ -19,12 +19,15 @@
 - Working branch: `codex/bring-your-own-knowledge`, based on complete audit
   delivery `0afdac155083db28935da2c4a9d4ef64bb21b621`, in the attached delivery
   worktree. Original checkout's dirty checkpoint and `.scratch/` untouched.
-- Status: discovery complete; implementation planning recorded; NOT shipped.
+- Status: six implementation lanes and independent review repairs frozen;
+  NOT shipped. Plan committed as `b1b86c26` before product-data deletion.
 - Three independent read-only investigations completed: corpus/bootstrap,
   native/shared engine, CI/release. They found two distinct production
   recommenders plus several implicit corpus-download/injection paths.
-- BYO-1 recorded. BYO-2/3/4 ready for parallel implementation with disjoint
-  ownership. BYO-5/6/7 pending; no new behavior has passed acceptance yet.
+- BYO-1 recorded. BYO-2/3/4/5 implemented, with review repairs accepted.
+  BYO-6 focused evidence exists; combined/gated verification not yet complete.
+  BYO-7 pending. Do not treat the previous release or audit checks as this
+  product's acceptance evidence.
 - PR286 remains draft/unmerged at0afdac15; main remains11b582a7. The old AXI
   monitor now reports terminal `failed: daemon shutting down` after prior
   successful checks; no active pipeline owns this new branch.
@@ -33,9 +36,44 @@
   the old objective complete or treat its previous evidence as new-code proof.
 - Deletion boundary: tracked downloaded corpus and default package seeds only.
   Personal mixed wiki/skills, secrets, history and remote releases preserved.
-- Open nonblocking owner question: suggestions/explicit install versus general
-  automatic install under per-kind preapproval. Preserve consent, and do not
-  enable new automatic execution by inference.
+- Owner resolved approval policy: "Suggest tools; install only after explicit
+  approval." No automatic install/unload in the new recommendation path.
+- Removed 477 tracked imported-corpus files and 11 populated graph outputs/
+  release manifest from this branch only, recoverable from committed history.
+  Removed three tests for the deleted vendor-specific corpus manifest builders;
+  generic ingestion/provenance/security tests remain. Empty graph template and
+  structure documentation retained. No personal tools or remote assets deleted.
+- Coordinator clean-host contract now requires an empty installed workspace,
+  then three synthetic user-owned kinds via CLI and identical native prompt
+  envelopes. Old bundled-body canary removed. Two expected red tests preceded
+  repair; all 20 runner tests pass. Actual installed-wheel execution pending.
+- Independent replay accepts repaired missing-tool discovery and memory/SQLite
+  export-authority cache invalidation across CLI/MCP/native adapters. It also
+  accepts the clean-host runner migration (20 tests); live hosts not certified.
+- A separate reviewer reproduced packed user import followed by rebuild losing
+  active records. Independent replay accepts the pack-aware repair: four actual
+  mixed-kind rebuilds preserve records, schema, overlays and tombstones; corrupt
+  or absent base manifests abort with existing file hashes unchanged. Metadata-only
+  pack-aware authoring and immutable-pack authority are documented.
+- Initial exploratory combined unit run was stopped at roughly 85% after
+  identifying migration failures: 134 failed, 7,958 passed, one skipped,
+  four worker collection errors in 425.61s, exit 2 (interrupted). This is NOT
+  final acceptance. Most failures are historical benchmark helpers still reading
+  removed production assets; explicit synthetic/test-owned fixtures assigned.
+  Remaining config/Fit expectations and import-time source lookup are repaired.
+  Indexed fast path reproduces passing without a source change; adjacent legacy
+  exclusions now test credential policy rather than material availability.
+- First global mypy found five wrapper-typing errors in one test file; corrected
+  without suppression and the file plus 69 installer tests now pass. Final
+  committed gates are next; no pipeline run or publication yet.
+- Coordinator replay on the frozen working tree: 54 new-product/bootstrap/
+  native-parity/empty-catalog/pack-preservation/clean-host tests pass in 9.89s;
+  global mypy passes all 602 Python files; Ruff lint/format and diff checks pass;
+  final strict documentation build passes in 1.14s. No model calls or personal
+  host configuration changes made. Actual distribution/hosted checks still pending.
+- Historical benchmark representative replay: 11 pass in 39.14s, including
+  three previously drift-sensitive cases; source hashes unchanged before/after.
+  The full parameterized suite remains for the committed gate, not assumed green.
 
 ### Previous audit checkpoint (historical)
 

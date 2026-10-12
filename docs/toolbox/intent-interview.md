@@ -1,5 +1,9 @@
 # Intent interview
 
+This optional compatibility utility has historical named presets. CTX no longer
+seeds their definitions or supplies their agents/skills: initialize and import
+your own toolbox definitions first. A preset name is not an installed tool.
+
 [`src/intent_interview.py`](https://github.com/stevesolun/ctx/blob/main/src/intent_interview.py)
 bootstraps your toolbox set via a short, skippable interview.
 
@@ -90,5 +94,5 @@ python -m intent_interview init \
 
 ## Related
 
-- [Starter toolboxes](starters.md) — the five bundles the interview can activate.
+- [Starter toolboxes](starters.md) — optional examples for your own definitions.
 - [Behavior miner](behavior-miner.md) — source of the suggestions the interview offers.

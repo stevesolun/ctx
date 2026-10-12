@@ -1,11 +1,10 @@
 # Skill router
 
-!!! info "Part of the recommendation surface, not CTX Fit"
+!!! info "Recommendations from your own knowledge"
 
-    The product is **CTX Fit** (`ctx fit`): it finds the cheapest AI coding
-    setup that reliably works on a repository. See the [home page](../index.md).
-    This page documents the older graph-backed recommendation layer, which
-    still ships alongside CTX Fit in the published PyPI distribution.
+    CTX ships the engine and empty wiki/graph structure, not a tool catalog.
+    This page describes repository routing over user-supplied records.
+    The optional `ctx fit` evaluator is separate. See the [home page](../index.md).
 
 
 The skill router decides which skills, agents, and MCP servers are useful for

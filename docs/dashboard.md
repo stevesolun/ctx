@@ -1,12 +1,11 @@
 # Dashboard (`python -m ctx_monitor`)
 
-!!! info "This is the recommendation surface, not CTX Fit"
+!!! info "Your local knowledge and activity"
 
-    The product is **CTX Fit** (`ctx fit`) — see the [home page](index.md).
-    This dashboard predates it and shows none of it: `ctx fit` writes nothing
-    under `~/.claude` and reports its results on stdout. Everything below is
-    the local skill/agent/MCP wiki, the knowledge graph, and this machine's
-    session history.
+    CTX starts empty; this dashboard displays your own skill/agent/MCP wiki,
+    knowledge graph, and this machine's session history. It shows no CTX Fit
+    results: the optional `ctx fit` utility reports on stdout and writes nothing
+    under `~/.claude` on a plain profile run. See the [home page](index.md).
 
 Local HTTP dashboard for ctx's currently supported live observables:
 loaded skills, agents, MCP servers, and installed harness records; session timelines; the

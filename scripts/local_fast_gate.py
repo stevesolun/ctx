@@ -2,7 +2,7 @@
 
 The regular CI preflight stays the serial source of truth. This runner is a
 fast local front door: it selects the same checks, groups independent work into
-lanes, and runs each lane in a temporary git worktree so caches, graph hydration,
+lanes, and runs each lane in a temporary git worktree so caches, graph fixtures,
 and package builds do not contend with each other.
 """
 
@@ -55,15 +55,13 @@ CHECK_LANES = {
     "ruff": "static",
     "mypy": "static",
     "pip check": "static",
-    "hydrate benchmark catalog": "unit",
     "unit-linux equivalent": "unit",
     "A-Z canary": "canary",
     "contract compatibility local": "contract",
     "clean host contract": "clean-host",
     "public docs tracker": "docs",
     "docs strict build": "docs",
-    "hydrate graph release assets": "graph",
-    "graph artifact validation": "graph",
+    "graph infrastructure contract": "graph",
     "telemetry enterprise": "telemetry",
     "similarity precision/recall": "similarity",
     "browser monitor security": "browser",

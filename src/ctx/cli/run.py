@@ -1831,7 +1831,7 @@ def _loop_result_outcome(result: Any) -> tuple[str, str | None]:
 #: not advertised, so this tuple drives the metavar AND the invalid-choice
 #: error -- hiding a command in one place and not the other is what leaked the
 #: harness commands back out.
-_ADVERTISED_COMMANDS: tuple[str, ...] = ("fit", "doctor", "advanced")
+_ADVERTISED_COMMANDS: tuple[str, ...] = ("recommend", "fit", "doctor", "advanced")
 _SUBCOMMAND_METAVAR = "{" + ",".join(_ADVERTISED_COMMANDS) + "}"
 
 #: What `ctx advanced` offers. Listed in its own help and in its own errors.
@@ -1882,11 +1882,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     if getattr(args, "command", None) is None:
-        # Bare `ctx` means "look at this repository" — the product's default
-        # path, which is read-only, free, and spends nothing.
-        from ctx.cli.fit import cmd_fit, default_namespace
-
-        return cmd_fit(default_namespace())
+        parser.print_help()
+        print("\nStart empty with ctx-init; add your own graph/wiki knowledge.")
+        print("Then use ctx recommend 'your current task' or connect the native host hooks.")
+        return 0
     if args.command == "advanced":
         rest = [item for item in (args.rest or []) if item != "--"]
         advanced = _subcommand_parser(parser, "advanced")
@@ -1909,6 +1908,10 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         return main(rest)
     try:
+        if args.command == "recommend":
+            from ctx.cli.recommend import cmd_recommend
+
+            return cmd_recommend(args, parser=_subcommand_parser(parser, "recommend"))
         if args.command == "doctor":
             from ctx.cli.doctor import cmd_doctor
 
@@ -1941,11 +1944,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p = _ProductParser(
         prog="ctx",
         description=(
-            "ctx — find the cheapest AI coding setup that actually works on "
-            "your repo. Run `ctx` in a repository to see how ready it is for "
-            "AI coding agents and what to improve, then `ctx fit --test "
-            "--budget N` to evaluate alternatives. Lower-level harness "
-            "commands live under `ctx advanced`."
+            "ctx — relevant skills, agents and MCP suggestions from your own "
+            "knowledge graph. Setup is empty, local and offline. Use recommend "
+            "or connect host hooks; optional evaluations live under ctx fit "
+            "and lower-level harness commands under ctx advanced."
         ),
     )
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -1959,7 +1961,9 @@ def _build_parser() -> argparse.ArgumentParser:
     # own module so the Fit product layer stays out of the harness CLI.
     from ctx.cli.doctor import register as _register_doctor
     from ctx.cli.fit import register as _register_fit
+    from ctx.cli.recommend import register as _register_recommend
 
+    _register_recommend(sub)
     _register_fit(sub)
     _register_doctor(sub)
 
@@ -2052,7 +2056,9 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=_CTX_ENGINE_MODES,
         default=None,
         help=(
-            "New-session CTX engine rollout mode. Default: CTX_ENGINE_MODE when "
+            "Deprecated release-catalog rollout compatibility mode; shipped catalogs "
+            "have been retired and unavailable catalogs fail closed. Use ctx recommend "
+            "or native hooks for user-owned knowledge. Default: CTX_ENGINE_MODE when "
             "valid, otherwise legacy. CTX_FORCE_LEGACY is the emergency override."
         ),
     )

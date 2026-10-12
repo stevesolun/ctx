@@ -89,11 +89,6 @@ def test_preflight_runs_source_gates_for_source_changes() -> None:
         for check in _checks_for(["src/ctx/adapters/generic/loop.py"])
         if check.name == "unit-linux equivalent"
     )
-    unit_hydrate = next(
-        check
-        for check in _checks_for(["src/ctx/adapters/generic/loop.py"])
-        if check.name == "hydrate benchmark catalog"
-    )
     lanes = local_fast_gate.group_checks(_checks_for(["src/ctx/adapters/generic/loop.py"]))
     lanes_by_name = {
         lane.name: [check.name for check in lane.checks]
@@ -109,7 +104,7 @@ def test_preflight_runs_source_gates_for_source_changes() -> None:
     assert "A-Z canary" in names
     assert "clean host contract" in names
     assert lanes_by_name == {
-        "unit": ["hydrate benchmark catalog", "unit-linux equivalent"],
+        "unit": ["unit-linux equivalent"],
         "canary": ["A-Z canary"],
         "contract": ["contract compatibility local"],
         "clean-host": ["clean host contract"],
@@ -121,26 +116,17 @@ def test_preflight_runs_source_gates_for_source_changes() -> None:
         "--max-worker-restart=0",
     )
     assert workflow_unit_command[-4:] == list(unit_check.argv[-4:])
-    assert unit_hydrate.argv == (
-        "python",
-        "scripts/graph_release_manifest.py",
-        "hydrate",
-        "--manifest",
-        "graph/release-artifacts.json",
-        "--repo-root",
-        ".",
-        "--artifact",
-        "graph/wiki-graph-runtime.tar.gz",
-    )
+    assert not any("hydrate" in name for name in names)
 
 
 @pytest.mark.parametrize("job", ["unit-linux", "test"])
-def test_clean_checkout_test_jobs_hydrate_runtime_catalog_before_pytest(job: str) -> None:
+def test_clean_checkout_test_jobs_do_not_hydrate_runtime_catalog(job: str) -> None:
     names = _workflow_step_names(job)
 
-    assert names.index("Resolve benchmark catalog from exact release manifest") < names.index(
+    assert "Resolve benchmark catalog from exact release manifest" not in names
+    assert (
         "Run tests with coverage gate" if job == "unit-linux" else "Run tests without coverage"
-    )
+    ) in names
 
 
 def test_xdist_auto_worker_count_is_resource_capped(monkeypatch) -> None:
@@ -182,20 +168,12 @@ def test_preflight_runs_graph_validation_for_graph_artifacts() -> None:
     graph_lane = next(lane for lane in lanes if lane.name == "graph")
     graph_names = [check.name for check in graph_lane.checks]
 
-    assert names.index("hydrate graph release assets") < names.index("graph artifact validation")
-    assert "graph artifact validation" in names
+    assert "graph infrastructure contract" in names
     assert "no-test policy" not in names
     assert "unit-linux equivalent" not in names
-    assert graph_names == ["hydrate graph release assets", "graph artifact validation"]
-    assert graph_lane.checks[0].argv == (
-        "python",
-        "scripts/graph_release_manifest.py",
-        "hydrate",
-        "--manifest",
-        "graph/release-artifacts.json",
-        "--repo-root",
-        ".",
-    )
+    assert graph_names == ["graph infrastructure contract"]
+    assert graph_lane.checks[0].argv[:5] == ("python", "-m", "pytest", "-q", "--no-cov")
+    assert "src/tests/test_validate_graph_artifacts.py" in graph_lane.checks[0].argv
 
 
 def test_local_fast_whitespace_check_runs_against_base() -> None:
@@ -685,10 +663,10 @@ def test_preflight_runs_browser_and_similarity_when_classified() -> None:
     lane_names = [lane.name for lane in lanes]
     workflow = yaml.safe_load(Path(".github/workflows/test.yml").read_text(encoding="utf-8"))
     graph_steps = workflow["jobs"]["graph-check"]["steps"]
-    graph_resolver_script = next(
+    graph_contract_script = next(
         step["run"]
         for step in graph_steps
-        if "graph_release_manifest.py hydrate" in str(step.get("run", ""))
+        if step.get("name") == "Validate graph infrastructure with synthetic fixtures"
     )
 
     assert "browser monitor security" in names
@@ -703,8 +681,9 @@ def test_preflight_runs_browser_and_similarity_when_classified() -> None:
     assert "similarity" in lane_names
     assert "browser" in lane_names
     assert "package" in lane_names
-    assert "--manifest graph/release-artifacts.json" in graph_resolver_script
-    assert "git lfs" not in graph_resolver_script.lower()
+    assert "src/tests/test_validate_graph_artifacts.py" in graph_contract_script
+    assert "hydrate" not in graph_contract_script
+    assert "git lfs" not in graph_contract_script.lower()
 
 
 def test_every_workflow_parses_under_the_strict_loader() -> None:

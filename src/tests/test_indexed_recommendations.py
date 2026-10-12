@@ -260,6 +260,27 @@ def test_indexed_ranker_matches_networkx_contract(
 
 
 @pytest.mark.parametrize("backend", ["indexed", "graph"])
+def test_local_advisory_keeps_uninstalled_tools(tmp_path: Path, backend: str) -> None:
+    graph = nx.Graph()
+    graph.add_node(
+        "skill:python-testing",
+        label="python-testing",
+        type="skill",
+        tags=["python", "testing"],
+        status="available",
+        install_command="user-provided-recipe",
+    )
+    payload, _ = _dispatch_policy_fixture(
+        tmp_path,
+        backend=backend,
+        graph=graph,
+        arguments={"query": "python testing in this local repo", "no_api_keys": True},
+    )
+    assert [row["id"] for row in payload["results"]] == ["skill:python-testing"]
+    assert payload["context_policy"]["manual"] == ["skill:python-testing"]
+
+
+@pytest.mark.parametrize("backend", ["indexed", "graph"])
 def test_policy_filters_before_normalized_score_threshold(
     tmp_path: Path,
     backend: str,
@@ -269,7 +290,7 @@ def test_policy_filters_before_normalized_score_threshold(
         "skill:python-testing",
         label="python-testing",
         type="skill",
-        tags=["python", "testing"],
+        tags=["python", "testing", "openai"],
         status="available",
         source_catalog="skill-index",
         install_command="ctx-skill-install python-testing",
@@ -373,7 +394,7 @@ def test_selection_policy_backfills_without_fixed_candidate_cap(
 
 
 @pytest.mark.parametrize("backend", ["indexed", "graph"])
-def test_natural_python_testing_reaches_local_runtime_skill(
+def test_credential_filter_backfills_local_python_skill(
     tmp_path: Path,
     backend: str,
 ) -> None:
@@ -384,7 +405,7 @@ def test_natural_python_testing_reaches_local_runtime_skill(
             f"skill:{slug}",
             label=slug,
             type="skill",
-            tags=["python", "testing"],
+            tags=["python", "testing", "openai"],
             status="available",
             source_catalog="skill-index",
             install_command=f"ctx-skill-install {slug}",

@@ -82,6 +82,9 @@ PRODUCTION_CATALOG_ENGINE = "codex-production-catalog"
 BENCHMARK_ENGINES = ("codex-controlled", "production-ctx-run", PRODUCTION_CATALOG_ENGINE)
 PRODUCTION_CATALOG_ARCHIVE = ROOT / "graph" / "wiki-graph-runtime.tar.gz"
 PRODUCTION_RUNTIME_AVAILABILITY = ROOT / "src" / "ctx" / "assets" / "runtime-availability.json"
+# Retired release-bound experiments fail closed in the corpus-free package.
+# Historical tests inject their own fixture directory explicitly, never a fallback.
+_RELEASE_CATALOG_ASSET_ROOT = ROOT / "src" / "ctx" / "assets"
 PRODUCTION_PRIVATE_RUN_ROOT = ROOT / ".gate" / "ctx-ab-runs"
 PRODUCTION_PRIVATE_SCENARIO_ROOT = ROOT / ".gate" / "ctx-ab-private"
 OFFICIAL_CAMPAIGN_STATE_BASE = Path.home() / ".ctx" / "benchmark-state"
@@ -5225,7 +5228,7 @@ def deterministic_bridge_pair_contract(
             "litellm_version": litellm_version,
             "litellm_package_sha256": _installed_python_package_sha256("litellm"),
             "release_catalog_assets": {
-                name: _stable_regular_file_sha256(ROOT / "src" / "ctx" / "assets" / name)
+                name: _stable_regular_file_sha256(_RELEASE_CATALOG_ASSET_ROOT / name)
                 for name in RELEASE_CATALOG_EVIDENCE_ASSETS
             },
             "engine_factory": "ctx.runtime.query_session.prepare_query_delivery",
@@ -5480,7 +5483,7 @@ def live_coding_pair_contract(
             "platform_release": platform.release(),
             "platform_machine": platform.machine(),
             "release_catalog_assets": {
-                name: _stable_regular_file_sha256(ROOT / "src" / "ctx" / "assets" / name)
+                name: _stable_regular_file_sha256(_RELEASE_CATALOG_ASSET_ROOT / name)
                 for name in RELEASE_CATALOG_EVIDENCE_ASSETS
             },
             "release_catalog_authentication": "open_release_pinned_query_catalog",

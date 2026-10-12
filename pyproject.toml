@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "claude-ctx"
 version = "1.0.21"
-description = "CTX Fit: find the cheapest AI coding setup that reliably works on your repository, then apply the winner as a reviewable change"
+description = "CTX recommends relevant skills, agents and MCP tools from your own knowledge graph while you work. Empty by default; your tools, your control."
 authors = [{ name = "Steve Solun" }]
 license = "MIT"
 readme = "README.md"
@@ -221,7 +221,7 @@ packages = [
 ]
 
 [tool.setuptools.package-data]
-ctx = ["config.json", "skill-registry.json", "assets/*.js", "assets/*.css", "assets/*.json"]
+ctx = ["config.json", "skill-registry.json", "assets/*.js", "assets/*.css"]
 
 [tool.pytest.ini_options]
 testpaths = ["src/tests"]

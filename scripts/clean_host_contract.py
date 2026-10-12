@@ -295,8 +295,9 @@ def write_fake_claude_cli(fake_modules: Path) -> Path:
         "    },\n"
         "    'PostToolUse': {\n"
         "        'hook_event_name': 'PostToolUse',\n"
-        "        'tool_name': 'Bash',\n"
-        "        'tool_input': {'command': 'pip install fastapi pytest'},\n"
+        "        'session_id': 'clean-host-fake-claude',\n"
+        "        'tool_name': 'Write',\n"
+        "        'tool_input': {'file_path': 'app/main.py'},\n"
         "    },\n"
         "    'Stop': {\n"
         "        'hook_event_name': 'Stop',\n"
@@ -579,9 +580,7 @@ def _assert_fake_claude_hook_output(stdout: str) -> str:
     )
     for expected in (
         "ctx.adapters.claude_code.query_handler",
-        "ctx.adapters.claude_code.hooks.context_monitor",
         "skill_add_detector",
-        "ctx.adapters.claude_code.hooks.bundle_orchestrator",
         "usage_tracker",
         "ctx.adapters.claude_code.hooks.lifecycle_hooks",
     ):
@@ -612,15 +611,77 @@ def _assert_prompt_context_output(result: object, *, host: str) -> str:
     outputs = [
         str(row.get("stdout", "")) for row in result.get("commands", []) if isinstance(row, dict)
     ]
-    context_outputs = [output for output in outputs if "# ctx Python Testing" in output]
+    context_outputs = []
+    for output in outputs:
+        try:
+            envelope = json.loads(output)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(envelope, dict):
+            continue
+        specific = envelope.get("hookSpecificOutput")
+        if not isinstance(specific, dict) or specific.get("hookEventName") != "UserPromptSubmit":
+            continue
+        context = specific.get("additionalContext")
+        if not isinstance(context, str) or "CTX suggestions only" not in context:
+            continue
+        if "approval required" not in str(envelope.get("systemMessage")):
+            raise AssertionError(f"fake {host} suggestions omitted approval notice")
+        try:
+            rows = json.loads(context.rsplit("\n", 1)[1])
+        except (json.JSONDecodeError, IndexError) as exc:
+            raise AssertionError(f"fake {host} suggestions are not bounded metadata") from exc
+        _assert_user_recommendations(rows, host=host)
+        context_outputs.append(output)
     if len(context_outputs) != 1:
         raise AssertionError(
-            f"fake {host} hook smoke expected one authenticated canary context, "
+            f"fake {host} hook smoke expected one user-graph suggestion envelope, "
             f"got {len(context_outputs)}"
         )
-    if '"hookEventName":"UserPromptSubmit"' not in context_outputs[0]:
-        raise AssertionError(f"fake {host} canary output is not a prompt-hook envelope")
     return context_outputs[0]
+
+
+def _assert_user_recommendations(rows: object, *, host: str) -> None:
+    expected = {f"{kind}:user-python-{kind}" for kind in ("skill", "agent", "mcp-server")}
+    if (
+        not isinstance(rows, list)
+        or len(rows) != 3
+        or any(not isinstance(row, dict) for row in rows)
+        or {row.get("id") for row in rows} != expected
+    ):
+        raise AssertionError(f"{host} did not recommend the three user-owned tools: {rows!r}")
+
+
+def _assert_empty_knowledge(wiki: Path) -> None:
+    if not (wiki / "SCHEMA.md").is_file():
+        raise AssertionError("fresh knowledge workspace lacks its schema")
+    graph = json.loads((wiki / "graphify-out" / "graph.json").read_text(encoding="utf-8"))
+    if graph.get("nodes") != [] or graph.get("edges") != []:
+        raise AssertionError("fresh knowledge graph is not empty")
+    if any((wiki / "entities").rglob("*.md")):
+        raise AssertionError("fresh knowledge workspace contains seeded tools")
+
+
+def _write_user_graph(wiki: Path) -> None:
+    """Synthetic customer metadata for isolated tests, never a packaged catalog."""
+    directory = wiki / "graphify-out"
+    directory.mkdir(parents=True)
+    nodes = [
+        {
+            "id": f"{kind}:user-python-{kind}",
+            "label": f"user-python-{kind}",
+            "type": kind,
+            "tags": ["python", "tests"],
+            "status": "available",
+        }
+        for kind in ("skill", "agent", "mcp-server")
+    ]
+    (directory / "graph.json").write_text(
+        json.dumps(
+            {"directed": False, "multigraph": False, "graph": {}, "nodes": nodes, "edges": []}
+        ),
+        encoding="utf-8",
+    )
 
 
 def _quote_command(parts: Sequence[str | Path]) -> str:
@@ -902,13 +963,29 @@ def run_contract(
         raise AssertionError("ctx-init --hooks did not write isolated settings.json")
     if not codex_hooks.exists():
         raise AssertionError("ctx-init --codex-hooks did not write isolated hooks.json")
+    _assert_empty_knowledge(claude_dir / "skill-wiki")
+    empty_result = runner.run(
+        [str(ctx), "recommend", "Fix the Python tests", "--json"],
+        cwd=paths.tiny_repo,
+        env=run_env,
+    )
+    if json.loads(empty_result.stdout).get("results") != []:
+        raise AssertionError("empty installed workspace returned recommendations")
+    user_wiki = paths.root / "user-wiki"
+    _write_user_graph(user_wiki)
     hook_env = dict(run_env)
     hook_env.update(
         {
-            "CTX_ENGINE_MODE": "activate",
+            "CTX_WIKI_DIR": str(user_wiki),
             "CTX_QUERY_DELIVERY_ROOT": str(paths.root / "query-delivery"),
         }
     )
+    user_result = runner.run(
+        [str(ctx), "recommend", "Fix the Python tests", "--json"],
+        cwd=paths.tiny_repo,
+        env=hook_env,
+    )
+    _assert_user_recommendations(json.loads(user_result.stdout).get("results"), host="CLI")
     fake_claude_result = runner.run(
         [
             str(py),
@@ -970,7 +1047,7 @@ def run_contract(
     # ModuleNotFoundError, so an exit-code check alone proved nothing. This
     # block is what would have caught ctx.fit being absent from the wheel.
     for surface, surface_argv, needle in (
-        ("bare ctx", [str(ctx)], "AI agent readiness"),
+        ("bare ctx", [str(ctx)], "ctx recommend"),
         ("ctx fit", [str(ctx), "fit", str(paths.tiny_repo)], "Repository:"),
         ("ctx doctor", [str(ctx), "doctor"], "CTX Fit diagnostics"),
     ):

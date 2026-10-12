@@ -165,6 +165,7 @@ def test_live_selection_uses_the_applied_model_resolved_for_the_experiment(
     assert _provider_available(experiment.model) is True
 
 
+@pytest.mark.usefixtures("historical_fit_catalog")
 def test_cli_binds_live_selection_to_the_resolved_applied_model(
     monkeypatch: pytest.MonkeyPatch,
     repo_with_history,
@@ -243,6 +244,7 @@ def test_a_blocked_plan_emits_the_same_json_keys_as_a_planned_one(
     assert planned == blocked
 
 
+@pytest.mark.usefixtures("historical_fit_catalog")
 def test_an_unusable_harness_is_a_refusal_rather_than_a_traceback(
     monkeypatch: pytest.MonkeyPatch, repo_with_history, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -266,6 +268,7 @@ def test_an_unusable_harness_is_a_refusal_rather_than_a_traceback(
     assert "nothing was spent" in err.lower()
 
 
+@pytest.mark.usefixtures("historical_fit_catalog")
 def test_the_budget_gate_prices_the_whole_agent_loop_not_one_exchange(repo_with_history) -> None:
     """One execution is a bounded agent loop, and the gate has to cover all of it.
 
@@ -292,6 +295,7 @@ def test_the_budget_gate_prices_the_whole_agent_loop_not_one_exchange(repo_with_
     )
 
 
+@pytest.mark.usefixtures("historical_fit_catalog")
 def test_noninteractive_evaluation_previews_the_exact_plan_before_refusing_without_yes(
     monkeypatch: pytest.MonkeyPatch,
     repo_with_history,
@@ -322,6 +326,7 @@ def test_noninteractive_evaluation_previews_the_exact_plan_before_refusing_witho
     assert "Nothing was run and nothing was spent" in output
 
 
+@pytest.mark.usefixtures("historical_fit_catalog")
 def test_json_evaluation_never_prompts_and_requires_yes_before_execution(
     monkeypatch: pytest.MonkeyPatch,
     repo_with_history,
@@ -351,6 +356,7 @@ def test_json_evaluation_never_prompts_and_requires_yes_before_execution(
     )
 
 
+@pytest.mark.usefixtures("historical_fit_catalog")
 def test_yes_authorizes_the_displayed_plan_but_does_not_request_apply(
     monkeypatch: pytest.MonkeyPatch,
     repo_with_history,
@@ -380,6 +386,7 @@ def test_yes_authorizes_the_displayed_plan_but_does_not_request_apply(
     assert not (repo / "AGENTS.md").exists()
 
 
+@pytest.mark.usefixtures("historical_fit_catalog")
 def test_json_yes_still_emits_only_a_zero_spend_plan(
     monkeypatch: pytest.MonkeyPatch,
     repo_with_history,
@@ -710,6 +717,7 @@ def test_asking_for_both_apply_and_pr_says_which_one_ran(
     assert "--apply adds nothing here" in capsys.readouterr().out
 
 
+@pytest.mark.usefixtures("historical_fit_catalog")
 def test_a_real_run_does_not_announce_itself_as_a_simulation(
     stubbed_evaluation: None,
     monkeypatch: pytest.MonkeyPatch,
@@ -739,6 +747,7 @@ def test_a_real_run_does_not_announce_itself_as_a_simulation(
     assert "$0.14" in banner
 
 
+@pytest.mark.usefixtures("historical_fit_catalog")
 def test_recommendation_receives_the_full_declared_task_field(
     stubbed_evaluation: None, monkeypatch: pytest.MonkeyPatch, repo_with_history
 ) -> None:
@@ -783,6 +792,7 @@ def test_recommendation_receives_the_full_declared_task_field(
     assert recorded["task_count"] == 3
 
 
+@pytest.mark.usefixtures("historical_fit_catalog")
 def test_a_test_run_derives_its_tasks_once(
     monkeypatch: pytest.MonkeyPatch, repo_with_history
 ) -> None:
@@ -803,7 +813,7 @@ def test_a_test_run_derives_its_tasks_once(
         return real_derive(repo_path, **kwargs)
 
     monkeypatch.setattr(tasks_module, "derive_tasks", counting)
-    # Simulated, so the real catalog can supply candidates and the plan can
+    # Simulated, so the explicit test catalog can supply candidates and the plan can
     # reach "ready" without any provider stack being involved.
     monkeypatch.setattr("ctx.cli.fit._provider_available", lambda _model: False)
     monkeypatch.setattr(execution_module, "execute_trials", lambda *a, **k: ExecutionReport())

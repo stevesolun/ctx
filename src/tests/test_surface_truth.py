@@ -126,12 +126,12 @@ def test_pypi_description_names_the_shipped_product() -> None:
 
     description = _pyproject()["project"]["description"]
 
-    assert "CTX Fit" in description, (
+    assert "CTX" in description and "your own knowledge graph" in description, (
         "the PyPI summary does not name the product; it is the one line most "
         f"users will ever read about this project. Got: {description!r}"
     )
     assert "Amazon-style catalog" not in description
-    assert "recommendation layer" not in description
+    assert "Empty by default" in description
 
 
 def test_mkdocs_site_description_names_the_shipped_product() -> None:
@@ -140,8 +140,9 @@ def test_mkdocs_site_description_names_the_shipped_product() -> None:
     config = yaml.load(MKDOCS.read_text(encoding="utf-8"), Loader=_NavLoader)
     description = config["site_description"]
 
-    assert "CTX Fit" in description, f"docs site description omits the product: {description!r}"
-    assert "recommendation layer" not in description
+    assert "CTX" in description, f"docs site description omits the product: {description!r}"
+    assert "your own knowledge graph" in _flat(description)
+    assert "Empty by default" in description
 
 
 # ---------------------------------------------------------------------------
@@ -149,16 +150,17 @@ def test_mkdocs_site_description_names_the_shipped_product() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_docs_front_door_leads_with_ctx_fit() -> None:
-    """docs/index.md is the site's home page and led with the old product."""
+def test_docs_front_door_leads_with_user_owned_knowledge() -> None:
+    """The default product is empty knowledge infrastructure, not Fit."""
 
     text = (DOCS / "index.md").read_text(encoding="utf-8")
     heading = next(line for line in text.splitlines() if line.startswith("# "))
 
-    assert "CTX Fit" in heading, f"docs home page headline is not about the product: {heading!r}"
+    assert "CTX" in heading and "user-owned knowledge" in heading
 
     lead = text.split("## ", 1)[0]
-    assert "ctx fit" in lead.lower(), "the docs home page never names the command"
+    assert "empty, local, and offline" in lead
+    assert "ctx recommend" in lead
     assert "bundled filesystem MCP" in _flat(text)
     assert "Node.js with `npx` for the workspace-filesystem MCP" not in _flat(text)
     assert "Every council run honors" not in text
@@ -603,22 +605,32 @@ def test_readme_does_not_promise_a_harness_dry_run_without_a_slug() -> None:
     )
 
 
-def test_readme_cli_table_does_not_file_bare_ctx_under_recommendations() -> None:
-    """Bare `ctx` runs the Fit profile, not the recommendation surface."""
+def test_readme_cli_table_distinguishes_guidance_recommendations_and_fit() -> None:
+    """Bare ctx offers guidance; recommendations and Fit are explicit."""
 
     readme = README.read_text(encoding="utf-8")
     assert "## CLI Reference" in readme
     table = readme[readme.index("## CLI Reference") :]
-    row = next(
-        (line for line in table.splitlines() if line.startswith("| Profile a repository")),
-        "",
-    )
+    rows = table.splitlines()
+    assert any("Show setup and command guidance" in row and "`ctx`" in row for row in rows)
+    assert any("Suggest tools" in row and "ctx recommend" in row for row in rows)
+    assert any("optional evaluator" in row and "ctx fit" in row for row in rows)
 
-    assert row, (
-        "the CLI table has no row for profiling a repository. Bare `ctx` runs "
-        "`ctx fit`; the table used to file it under the recommendation surface "
-        "and send readers to the entity-onboarding guide."
-    )
-    assert "`ctx`" in row and "ctx fit" in row, (
-        f"the CLI table no longer says that bare `ctx` is `ctx fit`: {row!r}"
-    )
+
+@pytest.mark.parametrize(
+    "surface",
+    (
+        "README.md",
+        "docs/index.md",
+        "docs/entity-onboarding.md",
+        "docs/knowledge-graph.md",
+        "docs/harness/attaching-to-hosts.md",
+    ),
+)
+def test_user_owned_front_doors_do_not_promise_a_bundled_corpus(surface: str) -> None:
+    text = _flat((REPO_ROOT / surface).read_text(encoding="utf-8")).lower()
+    assert "empty" in text
+    assert "explicit approval" in text
+    assert "68,494" not in text
+    assert "79,958" not in text
+    assert "ctx-python-testing" not in text

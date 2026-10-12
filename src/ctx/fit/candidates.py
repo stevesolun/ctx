@@ -34,7 +34,6 @@ import re
 import stat
 from dataclasses import dataclass, field
 from functools import lru_cache
-from importlib import resources
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
@@ -469,36 +468,8 @@ def _canonical_catalog_entry_digest(entry: dict[str, object]) -> str:
 
 @lru_cache(maxsize=1)
 def _packaged_capability_content() -> dict[str, tuple[str, str]]:
-    """Exact skill bodies shipped in the release candidate catalog."""
-
-    try:
-        raw = (resources.files("ctx.assets") / CATALOG_RESOURCE).read_text(encoding="utf-8")
-        entries = json.loads(raw).get("entries")
-    except (OSError, ModuleNotFoundError, json.JSONDecodeError, AttributeError):
-        return {}
-    if not isinstance(entries, list):
-        return {}
-
-    content: dict[str, tuple[str, str]] = {}
-    for entry in entries:
-        if not isinstance(entry, dict) or entry.get("type") != "skill":
-            continue
-        capability_id = entry.get("id")
-        files = entry.get("files")
-        if not isinstance(capability_id, str) or not isinstance(files, list):
-            continue
-        # This is the exact normalization the trial historically used: each
-        # shipped file was stripped and multiple files were separated by one
-        # blank line.  Capturing the result here makes that normalization part
-        # of the candidate rather than an implicit provider behavior.
-        body = "\n\n".join(
-            item["content"].strip()
-            for item in files
-            if isinstance(item, dict) and isinstance(item.get("content"), str)
-        ).strip()
-        if body:
-            content[capability_id] = (body, _canonical_catalog_entry_digest(entry))
-    return content
+    """No capability bodies ship with CTX; callers must bind their own material."""
+    return {}
 
 
 def _material_for(selection: object) -> CapabilityMaterial | None:

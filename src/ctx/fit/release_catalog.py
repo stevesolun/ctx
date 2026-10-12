@@ -1,72 +1,34 @@
-"""The shipped capability catalog, as a candidate source.
+"""Compatibility candidate adapter for the secondary Fit evaluator.
 
-CTX Fit needs somewhere to draw candidates from before it can propose an
-experiment. The shipped ``runtime-availability`` asset is the smallest honest
-source: a handful of project-owned, MIT-licensed capabilities that need no API
-key, each with its content already present in the package.
-
-Scoring here is deliberately simple and explainable — token overlap between the
-repository's normalized signals and the capability's own declared signals. It
-is not a ranking model. Its only job is to answer "which of these is plausibly
-relevant to this repository?" so that the bounded planner can cut the list to a
-handful. A more capable retrieval layer can replace this without changing
-anything downstream, because the planner only depends on the
-:class:`~ctx.engine.planner.CandidateSource` protocol.
+CTX no longer ships a capability catalog (ADR-017). The default source is
+absent and evaluation must honestly abstain; user/organization recommendation
+is provided by the shared engine, not a fallback set of packaged tools.
+The value adapter remains useful for explicitly supplied candidate entries.
 """
 
 from __future__ import annotations
 
 import hashlib
-import json
 from dataclasses import dataclass
-from functools import lru_cache
-from importlib import resources
 from typing import Any
 
 from ctx.engine.planner import CapabilityCandidate, WorkObservation
 
 CATALOG_RESOURCE = "runtime-availability.json"
 
-#: Signals a capability serves, derived from its identity. The catalog does not
-#: carry tags, so they are declared here rather than inferred from prose — an
-#: inferred tag would be a guess presented as a fact.
-_CAPABILITY_SIGNALS: dict[str, tuple[str, ...]] = {
-    "skill:ctx-python-testing": ("python", "pytest", "test"),
-    "skill:ctx-python-state-protocols": ("python",),
-    "skill:ctx-python-input-boundaries": ("python",),
-    "skill:ctx-python-api-compatibility": ("python",),
-    "skill:ctx-javascript-testing": ("javascript", "jest", "vitest", "test"),
-    "skill:ctx-rust-patterns": ("rust", "cargo"),
-    "skill:ctx-typescript": ("typescript", "javascript"),
-    "agent:ctx-python-reviewer": ("python", "lint", "typecheck"),
-    "mcp-server:ctx-core": (),
-}
-
 
 def _digest(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-@lru_cache(maxsize=1)
 def _load_catalog() -> tuple[dict[str, Any], ...]:
-    try:
-        package = resources.files("ctx.assets")
-        raw = (package / CATALOG_RESOURCE).read_text(encoding="utf-8")
-    except (FileNotFoundError, ModuleNotFoundError, OSError):
-        return ()
-    try:
-        loaded = json.loads(raw)
-    except json.JSONDecodeError:
-        return ()
-    entries = loaded.get("entries")
-    if not isinstance(entries, list):
-        return ()
-    return tuple(entry for entry in entries if isinstance(entry, dict) and entry.get("id"))
+    """There is no distributed candidate catalog (ADR-017)."""
+    return ()
 
 
 @dataclass(frozen=True, slots=True)
 class ReleaseCandidateSource:
-    """Candidate retrieval over the shipped, no-API-key capability catalog."""
+    """Candidate retrieval over explicitly supplied capability entries."""
 
     entries: tuple[dict[str, Any], ...]
 
@@ -86,7 +48,7 @@ class ReleaseCandidateSource:
                 continue
             name = capability_id.split(":", 1)[1]
 
-            declared = _CAPABILITY_SIGNALS.get(capability_id, ())
+            declared = tuple(str(signal).lower() for signal in entry.get("signals", ()))
             matched = tuple(sorted(token for token in declared if token in wanted))
             if declared and not matched:
                 # Nothing about this repository suggests the capability. Offering
@@ -116,12 +78,7 @@ class ReleaseCandidateSource:
 
 
 def open_release_candidate_source() -> ReleaseCandidateSource | None:
-    """Open the shipped catalog, or return None when it is unavailable.
-
-    An absent catalog degrades the product rather than breaking it: readiness
-    analysis still works, and the caller reports that no candidate could be
-    proposed.
-    """
+    """Return no default catalog; empty knowledge is a normal successful state."""
 
     entries = _load_catalog()
     if not entries:

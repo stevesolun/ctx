@@ -19,8 +19,10 @@ state their relevance and availability without claiming measured savings.
 Similarity and graph content never authorize execution. Preserve per-kind
 installation preferences, explicit trust boundaries and approval requirements.
 Do not equate an advisory load/unload request with an actual host action.
-Automatic all-kind provisioning remains a distinct acceptance condition until
-it has real end-to-end proof. Unload requires separate permission.
+The owner explicitly chose suggestions with installation only after explicit
+approval on 2026-10-12. Automatic provisioning is not part of this release;
+older preapproval preferences must not authorize the new recommendation path
+to execute anything. Unload requires separate permission.
 
 ## Scope and deletion boundary
 
@@ -83,9 +85,7 @@ into custom imports. CI/release/Hugging Face jobs hydrate or publish old data.
 The tracked downloaded skill corpus contains 477 files; graph outputs occupy
 about 21 MB. Personal wiki data may be mixed and is outside bulk deletion.
 
-## Open boundary
+## Resolved boundary
 
-Owner was asked whether this release requires automatic provisioning under
-per-kind preapproval in addition to suggestions and explicit installation.
-Work on empty infrastructure, shared recommendations and corpus removal does
-not depend on that answer; no automatic execution is enabled by inference.
+Owner answer, 2026-10-12: "Suggest tools; install only after explicit approval."
+No automatic installation or unload is enabled by this release.

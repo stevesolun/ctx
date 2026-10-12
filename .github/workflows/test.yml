@@ -117,9 +117,6 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install ".[dev]"
 
-      - name: Resolve benchmark catalog from exact release manifest
-        run: python scripts/graph_release_manifest.py hydrate --manifest graph/release-artifacts.json --artifact graph/wiki-graph-runtime.tar.gz
-
       - name: Run tests with coverage gate
         # Bump this number as the coverage sprint ships - never lower it.
         run: pytest -q -m "not browser and not integration" --cov=src --cov-report=term-missing --cov-fail-under=40 -n auto --dist=loadfile --max-worker-restart=0
@@ -389,9 +386,6 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install ".[dev]"
 
-      - name: Resolve benchmark catalog from exact release manifest
-        run: python scripts/graph_release_manifest.py hydrate --manifest graph/release-artifacts.json --artifact graph/wiki-graph-runtime.tar.gz
-
       - name: Run tests without coverage
         run: pytest -q -m "not browser and not integration" --no-cov
 
@@ -517,32 +511,14 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install ".[dev]"
 
-      - name: Resolve graph artifacts from exact release manifest
+      - name: Validate graph infrastructure with synthetic fixtures
         run: |
-          python scripts/graph_release_manifest.py hydrate --manifest graph/release-artifacts.json
-
-      - name: Validate shipped graph artifacts
-        run: |
-          python src/validate_graph_artifacts.py \
-            --graph-dir graph \
-            --deep \
-            --min-nodes 79000 \
-            --min-edges 1700000 \
-            --min-skills-sh-nodes 67000 \
-            --min-semantic-edges 1000000 \
-            --expected-nodes 79958 \
-            --expected-edges 1778069 \
-            --expected-semantic-edges 1088763 \
-            --expected-harness-nodes 207 \
-            --expected-skills-sh-nodes 67028 \
-            --expected-skills-sh-catalog-entries 67024 \
-            --expected-skills-sh-converted 67024 \
-            --expected-skill-pages 68494 \
-            --expected-agent-pages 467 \
-            --expected-mcp-pages 10790 \
-            --expected-harness-pages 207 \
-            --line-threshold 180 \
-            --max-stage-lines 40
+          python -m pytest -q --no-cov \
+            src/tests/test_graph_release_manifest.py \
+            src/tests/test_validate_graph_artifacts.py \
+            src/tests/test_graph_packs.py \
+            src/tests/test_graph_json_integrity.py \
+            src/tests/test_byo_distribution.py
 
       - name: Validate README and docs stats
         run: python src/update_repo_stats.py --check

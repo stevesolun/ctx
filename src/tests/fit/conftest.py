@@ -9,10 +9,42 @@ things.
 from __future__ import annotations
 
 import subprocess
+import json
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+from tests.release_catalog_fixture import RELEASE_CATALOG_FIXTURE_ROOT
+
+
+@pytest.fixture
+def historical_fit_catalog(monkeypatch):
+    """Opt-in candidate/material fixture for the secondary evaluator, not production."""
+    from ctx.fit import candidates, release_catalog
+
+    payload = json.loads((RELEASE_CATALOG_FIXTURE_ROOT / "runtime-availability.json").read_text())
+    entries = tuple(payload["entries"])
+    signals = {
+        "skill:ctx-python-testing": ("python", "pytest", "test"),
+        "skill:ctx-python-state-protocols": ("python",),
+        "skill:ctx-python-input-boundaries": ("python",),
+        "skill:ctx-python-api-compatibility": ("python",),
+        "skill:ctx-javascript-testing": ("javascript", "jest", "vitest", "test"),
+        "skill:ctx-rust-patterns": ("rust", "cargo"),
+        "skill:ctx-typescript": ("typescript", "javascript"),
+        "agent:ctx-python-reviewer": ("python", "lint", "typecheck"),
+    }
+    material = {}
+    for entry in entries:
+        if entry["type"] == "skill":
+            body = "\n\n".join(row["content"].strip() for row in entry["files"]).strip()
+            material[entry["id"]] = (body, candidates._canonical_catalog_entry_digest(entry))
+    monkeypatch.setattr(
+        release_catalog,
+        "_load_catalog",
+        lambda: tuple({**entry, "signals": signals.get(entry["id"], ())} for entry in entries),
+    )
+    monkeypatch.setattr(candidates, "_packaged_capability_content", lambda: material)
 
 
 def _git(repo: Path, *args: str) -> None:

@@ -25,6 +25,11 @@ belongs in the default distribution. Preserve schema, authoring, import,
 indexing, query and consent infrastructure. Graph metadata is untrusted data,
 not installation or execution permission. Savings require measured evidence.
 
+**Approval policy.** The owner explicitly chose "Suggest tools; install only
+after explicit approval" in the same turn. The default recommendation path
+must not execute installation or unload, even if an older configuration
+contains a per-kind automatic-install preference.
+
 **Supersession.** This supersedes ADR-001's Fit-primary product choice,
 ADR-006's exclusion of user graph production/curation, and ADR-010's exclusion
 of the lifecycle from the primary product. ADR-014 still defines the optional

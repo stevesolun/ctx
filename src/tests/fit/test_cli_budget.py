@@ -35,6 +35,8 @@ from ctx.fit.experiment import (
 from ctx.fit.profile import build_fit_profile
 from ctx.fit.recommend import Recommendation
 
+pytestmark = pytest.mark.usefixtures("historical_fit_catalog")
+
 
 def _experiment(repo: Path, budget: float | None) -> ResolvedExperiment:
     return resolve_experiment(build_fit_profile(repo), budget_usd=budget)

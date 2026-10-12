@@ -47,8 +47,11 @@ CANONICAL_STATUSES = {
 }
 VERIFICATION_MODES = {"argv", "checklist", "manual", "deprecated"}
 PRODUCT_STORIES = {
+    "BYO-001": "ctx; ctx-init; ctx recommend; ctx-mcp-server",
+    "BYO-002": "ctx recommend; ctx__recommend_bundle; native prompt hooks",
+    "BYO-003": "wheel and sdist; software release workflow",
     "FIT-001": "ctx fit",
-    "FIT-002": "ctx; ctx fit; ctx fit --json",
+    "FIT-002": "ctx fit; ctx fit --json",
     "FIT-003": "ctx doctor",
     "FIT-004": "ctx advanced run|resume|sessions",
     "FIT-005": "ctx fit --dry-run; ctx fit --test --budget USD [--yes]",
@@ -314,8 +317,12 @@ def test_current_product_stories_and_cli_truth_are_explicit() -> None:
     } == PRODUCT_STORIES
     assert rows["CLI-001"]["parent_feature_id"] == "FIT-004"
     assert rows["CLI-001"]["entrypoint_or_route"] == "ctx run|resume|sessions compatibility aliases"
-    assert rows["META-001"]["parent_feature_id"] == "FIT-002"
-    assert "Fit doctor and advanced" in rows["META-001"]["expected_behavior"]
+    assert rows["META-001"]["parent_feature_id"] == "BYO-001"
+    assert "recommend Fit doctor and advanced" in rows["META-001"]["expected_behavior"]
+    assert "Bare ctx shows setup guidance" in rows["CLI-002"]["expected_behavior"]
+    for feature_id in ("DIST-004", "SEC-001", "MAINT-013", "LANE-D-023", "LANE-D-024"):
+        assert rows[feature_id]["status"] == "Deprecated"
+        assert "ADR-017" in rows[feature_id]["expected_behavior"]
     for feature_id in LEGACY_INTERNAL_IDS:
         assert rows[feature_id]["surface"] == "Legacy/Internal"
         assert rows[feature_id]["status"] == "Deprecated"

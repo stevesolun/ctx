@@ -176,50 +176,19 @@ def test_hf_metadata_replaces_existing_leading_frontmatter() -> None:
     assert rendered.endswith("# ctx\n")
 
 
-def test_hf_publish_docs_use_hardened_sync_script_without_inline_token() -> None:
+def test_hf_publish_docs_explain_retirement_without_token_recipe() -> None:
     docs = Path(__file__).resolve().parents[2] / "docs" / "huggingface-publish.md"
     text = docs.read_text(encoding="utf-8")
 
-    assert "scripts/sync_huggingface.py" in text
+    assert "retired" in text.lower()
     assert '$env:HF_TOKEN = "<' not in text
     assert "api.upload_folder" not in text
-    assert 'read -rsp "HF write token: " HF_TOKEN' in text
-    assert "trap 'unset HF_TOKEN' EXIT" in text
+    assert 'read -rsp "HF write token: " HF_TOKEN' not in text
 
 
-def test_hf_sync_workflow_uses_secret_and_hardened_script() -> None:
-    workflow = (
-        Path(__file__).resolve().parents[2] / ".github" / "workflows" / "huggingface-sync.yml"
-    )
-    text = workflow.read_text(encoding="utf-8")
-
-    assert "HF_TOKEN: ${{ secrets.HF_TOKEN }}" in text
-    assert "lfs: false" in text
-    assert "Hydrate required graph artifacts from exact release manifest" in text
-    assert (
-        "python scripts/graph_release_manifest.py hydrate --manifest graph/release-artifacts.json"
-    ) in text
-    assert "git lfs" not in text.lower()
-    assert "GIT_LFS_" not in text
-    assert "scripts/sync_huggingface.py" in text
-    assert "--repo-type dataset" in text
-    assert "--repo-type model" not in text
-    assert "Classify sync scope" in text
-    assert 'card_only_prefixes = ("docs/",)' in text
-    assert 'card_only_prefixes = (".github/", "docs/", "src/tests/")' not in text
-    assert "card_only_files" in text
-    assert 'SYNC_MODE" == "card"' in text
-    assert "--card-only" in text
-    assert "timeout-minutes: 60" in text
-    assert "Require HF_TOKEN on canonical repository" in text
-    assert "env.HF_TOKEN == '' && github.repository == 'stevesolun/ctx'" in text
-    assert "Missing HF_TOKEN" in text
-    assert "Canonical Hugging Face sync must fail closed" in text
-    assert "Skip non-canonical repository" in text
-    assert "github.repository != 'stevesolun/ctx'" in text
-    assert "Hugging Face sync skipped" in text
-    assert "Only stevesolun/ctx is trusted to publish Stevesolun/ctx." in text
-    assert "hf_" not in text
+def test_owned_dataset_sync_workflow_is_retired() -> None:
+    workflow = Path(__file__).resolve().parents[2] / ".github/workflows/huggingface-sync.yml"
+    assert not workflow.exists()
 
 
 def test_hf_sync_skips_repo_create_when_repo_exists() -> None:

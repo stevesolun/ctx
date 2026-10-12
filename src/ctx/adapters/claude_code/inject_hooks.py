@@ -40,7 +40,6 @@ def make_hooks(ctx_dir: str) -> dict:
     # Tool input is delivered by Claude Code on stdin as JSON; --from-stdin reads it
     # from there instead of interpolating $CLAUDE_TOOL_INPUT into argv (which would
     # allow shell injection via malicious tool-input blobs).
-    monitor_cmd = _module_cmd("ctx.adapters.claude_code.hooks.context_monitor", "--from-stdin")
     tracker_cmd = _module_cmd("usage_tracker", "--sync")
     quality_cmd = _module_cmd(
         "ctx.adapters.claude_code.hooks.lifecycle_hooks",
@@ -49,8 +48,6 @@ def make_hooks(ctx_dir: str) -> dict:
     # Skill-add detection: a Write/Edit to an installed SKILL.md refreshes
     # its catalog row.
     skill_add_cmd = _module_cmd("skill_add_detector", "--from-stdin")
-    # Graph-based skill suggestion: surfaces pending-skills.json to Claude for user approval
-    suggest_cmd = _module_cmd("ctx.adapters.claude_code.hooks.bundle_orchestrator")
     query_cmd = _module_cmd("ctx.adapters.claude_code.query_handler")
     # Change-triggered backup: fires on every Edit/Write/MultiEdit, takes a
     # snapshot into ~/.claude/backups/ ONLY when tracked files actually
@@ -80,15 +77,12 @@ def make_hooks(ctx_dir: str) -> dict:
                 "hooks": [
                     {
                         "type": "command",
-                        "command": monitor_cmd,
-                    },
-                    {
-                        "type": "command",
                         "command": skill_add_cmd,
                     },
                     {
                         "type": "command",
-                        "command": suggest_cmd,
+                        "command": query_cmd,
+                        "timeout": 10,
                     },
                 ],
             },
@@ -273,11 +267,17 @@ def install_hooks_file(settings_path: Path, ctx_dir: str) -> dict:
     """Install all CTX Claude hooks under one locked read-modify-write."""
 
     def update(settings: dict[str, object]) -> dict[str, object]:
-        remove_python_module_handlers(
-            settings,
-            event_name="UserPromptSubmit",
-            module="ctx.adapters.claude_code.query_handler",
-        )
+        for event in ("UserPromptSubmit", "PostToolUse"):
+            remove_python_module_handlers(
+                settings,
+                event_name=event,
+                module="ctx.adapters.claude_code.query_handler",
+            )
+        for module in (
+            "ctx.adapters.claude_code.hooks.context_monitor",
+            "ctx.adapters.claude_code.hooks.bundle_orchestrator",
+        ):
+            remove_python_module_handlers(settings, event_name="PostToolUse", module=module)
         _validate_claude_settings(settings)
         cleaned = _remove_stale_hooks(settings)
         return merge_hooks(cleaned, make_hooks(ctx_dir))
@@ -298,7 +298,7 @@ def main() -> None:
 
     print(f"Hooks injected into {settings_path}")
     print("  UserPromptSubmit: CTX capability engine")
-    print("  PostToolUse: context_monitor + skill-add-detector + skill-suggest + backup_on_change")
+    print("  PostToolUse: user-knowledge suggestions + skill-add-detector + backup_on_change")
     print("  Stop: usage_tracker + quality_on_session_end")
 
 

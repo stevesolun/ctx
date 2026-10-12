@@ -78,14 +78,11 @@ def _write_entity_page(
 
 
 def _write_runtime_availability_page(wiki: Path, entity_id: str) -> Path:
-    spec = next(
-        spec
-        for spec in wq._runtime_availability_page_specs()
-        if f"{spec.entity_type}:{spec.slug}" == entity_id
-    )
-    path = wiki.joinpath(*spec.source_relpath.split("/"))
+    # Synthetic stale material from an older installation must not be injected.
+    slug = entity_id.split(":", 1)[1]
+    path = wiki / "converted" / slug / "SKILL.md"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(spec.content, encoding="utf-8")
+    path.write_text(f"---\nname: {slug}\n---\nHistorical fixture content\n", encoding="utf-8")
     return path
 
 
@@ -206,7 +203,7 @@ class TestQueryKeywordMatch:
         assert set(by_name) == {"reviewer"}
         assert by_name["reviewer"].entity_type == "agent"
 
-    def test_pack_mode_merges_only_attested_runtime_availability_pages(
+    def test_pack_mode_does_not_inject_retired_runtime_availability_pages(
         self,
         tmp_path: Path,
     ) -> None:
@@ -260,21 +257,13 @@ class TestQueryKeywordMatch:
         pages = wq.load_all_pages(wiki)
         by_key = {(page.entity_type, page.name): page for page in pages}
 
-        assert ("skill", "ctx-typescript") in by_key
-        assert ("agent", "ctx-python-reviewer") in by_key
-        assert ("mcp-server", "ctx-core") in by_key
+        assert ("skill", "ctx-typescript") not in by_key
+        assert ("agent", "ctx-python-reviewer") not in by_key
+        assert ("mcp-server", "ctx-core") not in by_key
         assert ("agent", "spoofed-runtime") not in by_key
         assert by_key[("skill", "ctx-python-testing")].title == "Packed Python Authority"
         assert sum(page.name == "ctx-python-testing" for page in pages) == 1
-        assert [page.name for page in wq.search_by_query(pages, "nullable", top_n=10)] == [
-            "ctx-typescript"
-        ]
-        assert "ctx-python-reviewer" in {
-            page.name for page in wq.search_by_query(pages, "reviewer", top_n=10)
-        }
-        assert "ctx-core" in {
-            page.name for page in wq.search_by_query(pages, "lifecycle telemetry", top_n=10)
-        }
+        assert set(by_key) == {("skill", "ctx-python-testing"), ("skill", "pack-only")}
 
     def test_pack_mode_rejects_symlinked_runtime_availability_page(
         self,
@@ -287,8 +276,12 @@ class TestQueryKeywordMatch:
             base_export_id="wiki-export-1",
             pages={"entities/skills/pack-only.md": "# Pack only\n"},
         )
-        spec = next(
-            spec for spec in wq._runtime_availability_page_specs() if spec.entity_type == "skill"
+        spec = wq._RuntimeAvailabilityPage(
+            entity_type="skill",
+            slug="fixture",
+            source_relpath="converted/fixture/SKILL.md",
+            logical_relpath="entities/skills/fixture.md",
+            content="Synthetic fixture\n",
         )
         outside = tmp_path / "outside-skill.md"
         outside.write_text(spec.content, encoding="utf-8")

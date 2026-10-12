@@ -33,6 +33,9 @@ from ctx.runtime.release_skill_dispatcher import (
 )
 import ctx.runtime.release_skill_lifecycle as lifecycle_module
 
+
+pytestmark = pytest.mark.usefixtures("historical_release_catalog")
+
 TARGET_SHA256 = "c87c65b5b09f48e27c683fb5ada9d8bc377d6d72d7742ce7aac3c2d3d97ac441"
 NOW = datetime(2026, 8, 2, 12, 30, tzinfo=UTC)
 AFTER_EXPIRY = datetime(2026, 8, 2, 13, 31, tzinfo=UTC)

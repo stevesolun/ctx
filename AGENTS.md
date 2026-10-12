@@ -19,8 +19,9 @@ The winner is chosen by a lexicographic rule, not a score: filter candidates on
 a reliability floor, then minimize attributable cost, then tie-break toward
 simplicity. "Keep your current setup" is a valid and expected answer.
 
-`ctx` is the human command and `ctx fit` is the product; older harness commands
-live under `ctx advanced`. `ctx-mcp-server` is the machine contract name. A few
+`ctx` is the human command; `ctx recommend` is the advisory entry point and
+`ctx fit` is the optional evaluator. Older harness commands live under
+`ctx advanced`. `ctx-mcp-server` is the machine contract name. A few
 maintenance console scripts (`ctx-init`, `ctx-scan-repo`, `ctx-source-registry`,
 `ctx-telemetry-*`) still ship — ADR-001's collapse to two entry points is the
 destination, not yet the state.
@@ -36,6 +37,11 @@ For evaluation-and-write commands, confirmation, and recovery, see the
 
 ## Where the code lives
 
+- `src/ctx/adapters/generic/ctx_core_tools.py` — shared user graph/wiki
+  recommendation policy, used by API, CLI, MCP and native hook projections.
+- `src/ctx/runtime/user_recommendations.py` and `src/ctx/adapters/query_hook_io.py`
+  — bounded advisory host-event projection; never install, execute or unload.
+- `src/ctx_init.py` — empty/offline bootstrap and explicit user archive import.
 - `src/ctx/cli/fit.py` — the `ctx fit` subcommand: argument surface, human and
   `--json` rendering, apply/PR handling. Registered from `src/ctx/cli/run.py`,
   which is the `ctx` console-script entry point (`ctx = "ctx.cli.run:main"`).
@@ -106,8 +112,8 @@ most often get argued from first principles again:
   comparison is out of scope and the report must say so.
 - **ADR-010** — the event-sourced consent/activation lifecycle is out of scope
   for CTX Fit. It still exists under `src/ctx/runtime/`; it is not the product.
-- **ADR-009** — the PyPI distribution stays `claude-ctx`. The product is named
-  CTX Fit; users type `ctx`.
+- **ADR-009** — the PyPI distribution stays `claude-ctx`; users type `ctx`.
+  ADR-017 supersedes Fit as the primary product name and experience.
 
 Where a planning document under `docs/ctx-fit/` and the code disagree, the code
 and its tests are the ground truth.
@@ -115,7 +121,7 @@ and its tests are the ground truth.
 ## Live working state
 
 `docs/ctx-fit/STATE.md` is the canonical operational checkpoint for active,
-long-running CTX Fit work. At the start of each resumed run, read it after this
+long-running CTX work, including ADR-017. At the start of each resumed run, read it after this
 file and the decision log, then reconcile it with the actual branch, working
 tree, tests, and active agents. Update it after a meaningful repair, new
 blocker, verification result, handoff, commit, merge, or release action. Never

@@ -449,14 +449,12 @@ def test_ci_workflows_default_to_read_only_token_permissions() -> None:
         assert "\npermissions:\n  contents: read\n" in workflow
 
 
-def test_graph_artifact_job_uses_exact_release_manifest() -> None:
+def test_graph_artifact_job_validates_infrastructure_offline() -> None:
     workflow = Path(".github/workflows/test.yml").read_text(encoding="utf-8")
 
-    assert "Resolve graph artifacts from exact release manifest" in workflow
-    assert (
-        "python scripts/graph_release_manifest.py hydrate --manifest graph/release-artifacts.json"
-    ) in workflow
-    assert "python src/validate_graph_artifacts.py" in workflow
+    assert "Validate graph infrastructure with synthetic fixtures" in workflow
+    assert "graph_release_manifest.py hydrate" not in workflow
+    assert "src/tests/test_validate_graph_artifacts.py" in workflow
     assert "git lfs" not in workflow.lower()
     assert "validating pointer metadata only" not in workflow
 
@@ -507,18 +505,15 @@ def test_publish_static_gate_uses_canonical_python_target() -> None:
     assert "python -m mypy src" in workflow
 
 
-def test_publish_workflow_validates_and_uploads_graph_assets() -> None:
+def test_publish_workflow_validates_infrastructure_and_uploads_software_sbom() -> None:
     workflow = Path(".github/workflows/publish.yml").read_text(encoding="utf-8")
 
-    assert "Resolve release graph artifacts from exact release manifest" in workflow
-    assert (
-        "python scripts/graph_release_manifest.py hydrate --manifest graph/release-artifacts.json"
-    ) in workflow
-    assert "git lfs" not in workflow.lower()
-    assert "Validate release graph artifacts" in workflow
-    assert "python src/validate_graph_artifacts.py" in workflow
+    assert "Validate graph infrastructure with synthetic fixtures" in workflow
+    assert "graph_release_manifest.py hydrate" not in workflow
+    assert "src/tests/test_validate_graph_artifacts.py" in workflow
     assert "python src/update_repo_stats.py --check" in workflow
-    assert "graph-release-assets" in workflow
+    assert "graph-release-assets" not in workflow
+    assert "release-sbom/claude-ctx.cdx.json" in workflow
     assert "gh release upload" in workflow
     assert '--repo "$GITHUB_REPOSITORY"' in workflow
     assert "needs.release-assets.result == 'success'" in workflow
@@ -529,7 +524,7 @@ def test_publish_workflow_validates_and_uploads_graph_assets() -> None:
     assert "continue-on-error: true" not in workflow
     assert "needs.release-assets.result == 'skipped'" not in workflow
     assert "PyPI publish will continue without release asset upload" not in workflow
-    assert "graph_assets_available" in workflow
+    assert "graph_assets_available" not in workflow
 
 
 def test_publish_workflow_runs_installed_wheel_telemetry_smoke() -> None:
@@ -588,7 +583,8 @@ def test_changelog_tracks_current_version_or_unreleased_changes() -> None:
 def test_pre_commit_refreshes_all_repo_stats_outputs() -> None:
     hook = Path(".githooks/pre-commit").read_text(encoding="utf-8")
 
-    assert "skills-sh-catalog\\.json\\.gz" in hook
+    assert "skills-sh-catalog\\.json\\.gz" not in hook
+    assert "graph/release-artifacts.json" not in hook
     assert "docs/(index|knowledge-graph|catalog)\\.md" in hook
     assert '"$REPO_ROOT/.venv/bin/python"' in hook
     assert '"python3.12"' in hook

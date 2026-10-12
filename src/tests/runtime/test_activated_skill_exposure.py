@@ -49,6 +49,9 @@ from ctx.runtime.release_skill_dispatcher import (
 from ctx.runtime.release_skill_lifecycle import activate_installed_release_skill
 
 
+pytestmark = pytest.mark.usefixtures("historical_release_catalog")
+
+
 NOW = "2026-08-02T12:30:00Z"
 TRUSTED_NOW = datetime(2026, 8, 2, 12, 30, tzinfo=UTC)
 

@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import copy
+import io
 import json
 import os
 from pathlib import Path
 import subprocess
+import sys
+import tarfile
 import tomllib
 from typing import Any
+import zipfile
 
 from packaging.markers import default_environment
 from packaging.requirements import Requirement
@@ -608,24 +612,14 @@ def test_attestation_covers_every_published_artifact_and_blocks_publish() -> Non
     ):
         assert path in provenance["with"]["subject-path"]
 
-    graph_download = attest_steps["Download graph artifact bundle"]
-    graph_attest = attest_steps["Attest graph release provenance"]
-    assert graph_download["if"] == "needs.build.outputs.graph_assets_available == 'true'"
-    assert graph_download["with"]["name"] == "graph-release-assets"
-    assert graph_attest["if"] == "needs.build.outputs.graph_assets_available == 'true'"
-    published_graph_paths = {
-        "release-artifacts.json",
-        "wiki-graph.tar.gz",
-        "wiki-graph-runtime.tar.gz",
-        "skills-sh-catalog.json.gz",
-        "communities.json",
-        "entity-overlays.jsonl",
-    }
-    for name in published_graph_paths:
-        assert f"graph-release-assets/{name}" in graph_attest["with"]["subject-path"]
-        assert (
-            name in _steps(release_assets)["Upload graph assets and SBOM to GitHub release"]["run"]
-        )
+    assert "Download graph artifact bundle" not in attest_steps
+    assert "Attest graph release provenance" not in attest_steps
+    assert "graph-release-assets" not in workflow_text
+    assert release_assets["if"] == "github.event_name == 'push'"
+    assert (
+        "release-sbom/claude-ctx.cdx.json"
+        in _steps(release_assets)["Upload SBOM to GitHub release"]["run"]
+    )
 
     sbom = attest_steps["Attest release SBOM"]
     assert sbom["uses"] == "actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6"
@@ -797,7 +791,7 @@ def test_github_release_uses_exact_tagged_changelog_section(tmp_path: Path) -> N
     assert notes.startswith("## [1.2.3] - 2026-08-14")
     assert "Useful shipped behavior." in notes
     assert "Previous behavior." not in notes
-    upload = release_steps["Upload graph assets and SBOM to GitHub release"]["run"]
+    upload = release_steps["Upload SBOM to GitHub release"]["run"]
     assert "--verify-tag" in upload
     assert upload.count("--notes-file release-notes.md") == 2
     assert '--notes "ctx $TAG_NAME"' not in upload
@@ -845,8 +839,7 @@ def test_release_keeps_existing_publish_gates_and_exposes_sbom() -> None:
     assert required_build_gates <= build_steps.keys()
     assert "Telemetry release smoke" in build_steps["Smoke install wheel"]["run"]
     assert (
-        "release-sbom/claude-ctx.cdx.json"
-        in release_steps["Upload graph assets and SBOM to GitHub release"]["run"]
+        "release-sbom/claude-ctx.cdx.json" in release_steps["Upload SBOM to GitHub release"]["run"]
     )
     immutable_publish_action = (
         "pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247"
@@ -854,3 +847,55 @@ def test_release_keeps_existing_publish_gates_and_exposes_sbom() -> None:
     assert publish_steps["Publish to PyPI"]["uses"] == immutable_publish_action
     assert publish_steps["Publish to TestPyPI"]["uses"] == (immutable_publish_action)
     assert "password" not in json.dumps(publish_steps).lower()
+
+
+@pytest.mark.parametrize("archive_kind", ["wheel", "sdist"])
+@pytest.mark.parametrize(
+    "contaminant",
+    [
+        None,
+        "src/tests/fixtures/release_catalog/tool.json",
+        "imported-skills/tool/SKILL.md",
+        "ctx/assets/runtime-availability.json",
+        "ctx/assets/release-install-skill-material-v1.json",
+        "ctx/assets/release-load-skill-material-v1.json",
+        "ctx/assets/reviewed-net-benefit-policy-v1.json",
+        "graph/wiki-graph-runtime.tar.gz",
+        "graph/wiki-graph.tar.gz",
+        "graph/skills-sh-catalog.json.gz",
+    ],
+)
+def test_release_inspects_real_archives_for_tool_corpus(
+    tmp_path: Path, archive_kind: str, contaminant: str | None
+) -> None:
+    wheel = tmp_path / "ctx.whl"
+    sdist = tmp_path / "ctx.tar.gz"
+    defaults = {"ctx/config.json", "ctx/skill-registry.json"}
+    wheel_names = defaults | ({contaminant} if archive_kind == "wheel" and contaminant else set())
+    sdist_names = defaults | ({contaminant} if archive_kind == "sdist" and contaminant else set())
+    with zipfile.ZipFile(wheel, "w") as archive:
+        for name in wheel_names:
+            archive.writestr(name, "{}")
+    with tarfile.open(sdist, "w:gz") as archive:
+        for name in sdist_names:
+            member = tarfile.TarInfo("ctx-1.0/" + name)
+            member.size = 2
+            archive.addfile(member, io.BytesIO(b"{}"))
+    script = _steps(_workflow()["jobs"]["build"])["Check distribution contents"]["run"]
+    # Execute the same Python used by the release workflow, not a reimplementation.
+    python_script = script.split("python - <<'PY'\n", 1)[1].rsplit("\nPY", 1)[0]
+    result = subprocess.run(
+        [sys.executable, "-c", python_script],
+        cwd=tmp_path,
+        env={**os.environ, "CTX_WHEEL": str(wheel), "CTX_SDIST": str(sdist)},
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    if contaminant:
+        assert result.returncode != 0, result.stdout
+        assert "forbidden" in result.stderr.lower()
+        assert contaminant in result.stderr
+    else:
+        assert result.returncode == 0, result.stderr

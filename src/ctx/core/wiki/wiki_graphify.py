@@ -55,7 +55,10 @@ from ctx.core.wiki.artifact_promotion import (
 )
 from ctx.core.wiki.wiki_packs import (
     WikiPackManifestError,
+    discover_wiki_pack_manifests,
+    load_merged_wiki_pages,
     promote_wiki_pack_set,
+    write_active_wiki_overlay_pack,
     write_wiki_base_pack,
 )
 from ctx.core.wiki.wiki_utils import parse_frontmatter as _parse_fm
@@ -124,9 +127,25 @@ def configure_wiki_dir(wiki_dir: Path) -> None:
 def parse_frontmatter(filepath: Path) -> dict:
     """Parse YAML frontmatter from a markdown file, adding path metadata."""
     content = filepath.read_text(encoding="utf-8", errors="replace")
+    return _page_metadata(filepath, content)
+
+
+def _page_metadata(filepath: Path, content: str) -> dict:
     result: dict = {"_path": str(filepath), "_stem": filepath.stem, "_content": content}
     result.update(_parse_fm(content))
     return result
+
+
+def _active_wiki_pages() -> dict[str, str] | None:
+    """Read validated active packs; never fall back to loose pages on corruption."""
+    packs_dir = WIKI_DIR / "wiki-packs"
+    if packs_dir.is_symlink() or (packs_dir.exists() and not packs_dir.is_dir()):
+        raise WikiPackManifestError("active wiki packs must be a real directory")
+    if packs_dir.is_dir():
+        if not discover_wiki_pack_manifests(packs_dir):
+            raise WikiPackManifestError("active wiki packs must contain a valid base pack")
+        return load_merged_wiki_pages(packs_dir)
+    return None
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -199,7 +218,7 @@ def _load_full_body(meta: dict, slug: str, entity_type: str) -> str:
     entity_body = _strip_frontmatter(meta.get("_content", ""))
 
     rich_body = ""
-    if entity_type == "skill":
+    if entity_type == "skill" and not meta.get("_packed"):
         converted_dir = WIKI_DIR / "converted" / slug
         original_md = converted_dir / "SKILL.md.original"
         skill_md = converted_dir / "SKILL.md"
@@ -222,7 +241,7 @@ def _load_full_body(meta: dict, slug: str, entity_type: str) -> str:
                     except OSError:
                         continue
                 rich_body = "\n\n".join(p for p in parts if p.strip())
-    elif entity_type == "agent":
+    elif entity_type == "agent" and not meta.get("_packed"):
         agent_md = WIKI_DIR / "converted-agents" / f"{slug}.md"
         if agent_md.is_file():
             try:
@@ -489,15 +508,28 @@ def build_graph(
 
     # ── Phase 1: discover nodes + collect embedding texts ─────────────
     embed_nodes: list[_sem.SemanticNode] = []
+    packed_pages = _active_wiki_pages()
     for entity_dir, entity_type, glob_pattern in sources:
-        if not entity_dir.exists():
+        if packed_pages is not None:
+            prefix = entity_dir.relative_to(WIKI_DIR).as_posix() + "/"
+            pages = [
+                WIKI_DIR / relpath
+                for relpath in sorted(packed_pages)
+                if relpath.startswith(prefix)
+                and ("**" in glob_pattern or "/" not in relpath[len(prefix) :])
+            ]
+        elif not entity_dir.exists():
             continue
-        if "**" in glob_pattern:
+        elif "**" in glob_pattern:
             pages = sorted(entity_dir.rglob("*.md"))
         else:
             pages = sorted(entity_dir.glob(glob_pattern))
         for page in pages:
-            meta = parse_frontmatter(page)
+            if packed_pages is None:
+                meta = parse_frontmatter(page)
+            else:
+                meta = _page_metadata(page, packed_pages[page.relative_to(WIKI_DIR).as_posix()])
+                meta["_packed"] = True
             tags = meta.get("tags", [])
             if isinstance(tags, str):
                 tags = [t.strip() for t in tags.split(",") if t.strip()]
@@ -1018,7 +1050,8 @@ def _write_export_base_pack(G: nx.Graph, export_id: str) -> None:
 
 
 def _write_export_wiki_base_pack(export_id: str) -> None:
-    """Write the current wiki markdown tree as the active immutable base pack."""
+    """Rebase the authoritative wiki page view without losing packed-only records."""
+    pages = _collect_wiki_markdown_pages()
     pack_id = f"base-{export_id}"
     staged_packs_dir = WIKI_DIR / "wiki-packs.staged"
     active_packs_dir = WIKI_DIR / "wiki-packs"
@@ -1030,7 +1063,7 @@ def _write_export_wiki_base_pack(export_id: str) -> None:
             pack_dir=staged_packs_dir / pack_id,
             pack_id=pack_id,
             base_export_id=export_id,
-            pages=_collect_wiki_markdown_pages(),
+            pages=pages,
             created_at=datetime.now(timezone.utc).isoformat(),
         )
         promote_wiki_pack_set(
@@ -1045,6 +1078,9 @@ def _write_export_wiki_base_pack(export_id: str) -> None:
 
 
 def _collect_wiki_markdown_pages() -> dict[str, str]:
+    packed_pages = _active_wiki_pages()
+    if packed_pages is not None:
+        return packed_pages
     if not WIKI_DIR.is_dir():
         return {}
     pages: dict[str, str] = {}
@@ -1417,14 +1453,28 @@ def _reconcile_generated_concept_pages(
     *,
     dry_run: bool,
 ) -> int:
-    if not CONCEPTS_DIR.is_dir():
+    packed_pages = _active_wiki_pages()
+    if packed_pages is None and not CONCEPTS_DIR.is_dir():
         return 0
     removed = 0
-    for page in CONCEPTS_DIR.glob("community-*.md"):
+    tombstones: list[str] = []
+    if packed_pages is None:
+        pages = list(CONCEPTS_DIR.glob("community-*.md"))
+    else:
+        pages = [
+            WIKI_DIR / path
+            for path in packed_pages
+            if Path(path).parent == Path("concepts") and Path(path).name.startswith("community-")
+        ]
+    for page in pages:
         if page.name in wanted_filenames:
             continue
         try:
-            content = page.read_text(encoding="utf-8", errors="replace")
+            content = (
+                packed_pages[page.relative_to(WIKI_DIR).as_posix()]
+                if packed_pages is not None
+                else page.read_text(encoding="utf-8", errors="replace")
+            )
         except OSError:
             continue
         generated = (
@@ -1434,9 +1484,13 @@ def _reconcile_generated_concept_pages(
             continue
         if dry_run:
             print(f"  [DRY RUN] Would remove stale: concepts/{page.name}")
-        else:
+        elif packed_pages is None:
             page.unlink()
+        else:
+            tombstones.append(page.relative_to(WIKI_DIR).as_posix())
         removed += 1
+    if tombstones:
+        write_active_wiki_overlay_pack(packs_dir=WIKI_DIR / "wiki-packs", tombstones=tombstones)
     return removed
 
 
@@ -1446,6 +1500,8 @@ def generate_concept_pages(
     dry_run: bool = False,
 ) -> list[str]:
     """Generate concept pages for each community."""
+    packed_pages = _active_wiki_pages()
+    page_updates: dict[str, str] = {}
     if not dry_run:
         CONCEPTS_DIR.mkdir(parents=True, exist_ok=True)
     created: list[str] = []
@@ -1535,11 +1591,15 @@ tags: [{", ".join(tags)}]
 """
         if dry_run:
             print(f"  [DRY RUN] Would create: concepts/{filename}")
-        else:
+        elif packed_pages is None:
             safe_atomic_write_text(CONCEPTS_DIR / filename, page, encoding="utf-8")
+        else:
+            page_updates[f"concepts/{filename}"] = page
         created.append(filename)
 
     removed = _reconcile_generated_concept_pages(wanted_filenames, dry_run=dry_run)
+    if page_updates:
+        write_active_wiki_overlay_pack(packs_dir=WIKI_DIR / "wiki-packs", pages=page_updates)
     action = "would create" if dry_run else "created"
     print(f"Concept pages: {len(created)} {action}, {removed} stale removed")
     return created
@@ -1561,6 +1621,8 @@ def inject_community_links(
 ) -> int:
     """Refresh graph-generated top-N neighbor wikilinks on entity pages."""
     updated = 0
+    packed_pages = _active_wiki_pages()
+    page_updates: dict[str, str] = {}
 
     # Build node->community mapping
     node_community: dict[str, int] = {}
@@ -1573,10 +1635,17 @@ def inject_community_links(
         name = data.get("label", nid.split(":", 1)[-1])
         page_path = _entity_page_path(entity_type, name)
 
-        if page_path is None or not page_path.exists():
+        if page_path is None:
             continue
-
-        original_content = page_path.read_text(encoding="utf-8", errors="replace")
+        if packed_pages is None:
+            if not page_path.exists():
+                continue
+            original_content = page_path.read_text(encoding="utf-8", errors="replace")
+        else:
+            relpath = page_path.relative_to(WIKI_DIR).as_posix()
+            if relpath not in packed_pages:
+                continue
+            original_content = packed_pages[relpath]
         content, had_generated_block = _remove_graph_related_block(original_content)
 
         # Find top neighbors by edge weight
@@ -1615,9 +1684,14 @@ def inject_community_links(
             continue
 
         if not dry_run:
-            safe_atomic_write_text(page_path, content, encoding="utf-8")
+            if packed_pages is None:
+                safe_atomic_write_text(page_path, content, encoding="utf-8")
+            else:
+                page_updates[page_path.relative_to(WIKI_DIR).as_posix()] = content
         updated += 1
 
+    if page_updates:
+        write_active_wiki_overlay_pack(packs_dir=WIKI_DIR / "wiki-packs", pages=page_updates)
     print(f"Entity pages updated with graph-based wikilinks: {updated}")
     return updated
 

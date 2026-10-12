@@ -10,12 +10,29 @@ from typing import Any
 import pytest
 
 from scripts import ctx_ab_benchmark as benchmark
+from tests.release_catalog_fixture import (
+    RELEASE_CATALOG_FIXTURE_ROOT,
+    historical_release_catalog as historical_release_catalog,
+)
 
 # Same constraint as the deterministic pair: this drives the LiteLLM runtime
 # through a loopback, so it cannot run without it. litellm is in the `harness`
 # extra, not `[dev]`, and CI's unit lane installs only `[dev]`. Guarded at the
 # module so an absent optional dependency reads as a skip, not 16 failures.
 pytest.importorskip("litellm")
+
+
+pytestmark = pytest.mark.usefixtures("historical_benchmark_catalog")
+
+
+@pytest.fixture
+def historical_benchmark_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+    historical_release_catalog: None,
+) -> None:
+    """Keep the legacy benchmark evidence bound to explicit test-owned bytes."""
+
+    monkeypatch.setattr(benchmark, "_RELEASE_CATALOG_ASSET_ROOT", RELEASE_CATALOG_FIXTURE_ROOT)
 
 
 ROOT = Path(__file__).resolve().parents[2]

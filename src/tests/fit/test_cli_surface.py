@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
-ADVERTISED = ("fit", "doctor", "advanced")
+ADVERTISED = ("recommend", "fit", "doctor", "advanced")
 HIDDEN_BUT_WORKING = ("run", "resume", "sessions")
 
 
@@ -130,14 +130,15 @@ def test_advanced_namespace_reaches_the_same_command(command: str) -> None:
     assert f"usage: ctx {command}" in result.stdout
 
 
-def test_bare_ctx_runs_the_product_rather_than_erroring() -> None:
-    """Typing the one command must do something useful, not print an error."""
+def test_bare_ctx_guides_user_owned_setup_without_running_fit() -> None:
+    """The default product is user-owned recommendations, not paid evaluation."""
 
     result = _ctx()
 
     assert result.returncode == 0
-    assert "Repository:" in result.stdout
-    assert "AI agent readiness" in result.stdout
+    assert "ctx recommend" in result.stdout
+    assert "Start empty with ctx-init" in result.stdout
+    assert "AI agent readiness" not in result.stdout
 
 
 def test_apply_help_distinguishes_git_tracked_files_from_untracked_files() -> None:
