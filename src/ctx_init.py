@@ -1691,6 +1691,8 @@ def _resolve_provider_key_env_name(
 ) -> str | None:
     """Resolve the environment variable's name without reading its secret value."""
     if explicit is not None:
+        if explicit and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", explicit) is None:
+            raise ValueError("--api-key-env requires an environment variable name, not a value")
         return explicit or None
     prefix = provider or (_model_provider_prefix(model) if model else "")
     env_name = _PROVIDER_KEY_ENV.get(prefix, "")
@@ -2469,9 +2471,13 @@ def run_wizard(
             args.model,
             args.model_provider,
         )
-        args.provider_key_env_name = _prompt_text(
-            "API key environment variable (blank for local/no key)",
-            default=provider_key_env_default,
+        args.provider_key_env_name = _resolve_provider_key_env_name(
+            _prompt_text(
+                "API key environment variable (blank for local/no key)",
+                default=provider_key_env_default,
+            ),
+            args.model,
+            args.model_provider,
         )
         args.base_url = (
             _prompt_text(
@@ -2509,17 +2515,12 @@ def run_model_onboarding(args: argparse.Namespace, claude: Path) -> int:
         return 1
 
     provider = args.model_provider or (_model_provider_prefix(args.model) if args.model else None)
-    provider_key_env_name = _resolve_provider_key_env_name(
-        args.provider_key_env_name, args.model, provider
-    )
-    if (
-        provider_key_env_name
-        and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", provider_key_env_name) is None
-    ):
-        print(
-            "  [warn] --api-key-env requires an environment variable name, not a value",
-            file=sys.stderr,
+    try:
+        provider_key_env_name = _resolve_provider_key_env_name(
+            args.provider_key_env_name, args.model, provider
         )
+    except ValueError as exc:
+        print(f"  [warn] {exc}", file=sys.stderr)
         return 1
     harness_requirements = _harness_requirements_from_args(args) if mode == "custom" else {}
     profile: dict[str, Any] = {
@@ -2777,7 +2778,11 @@ def main(argv: list[str] | None = None) -> int:
         print("  [error] failed to load install consent policy", file=sys.stderr)
         return 1
     if run_interactive_wizard:
-        run_wizard(args, current_install_policy)
+        try:
+            run_wizard(args, current_install_policy)
+        except ValueError as exc:
+            print(f"  [warn] {exc}", file=sys.stderr)
+            return 1
     should_persist_install_policy = run_interactive_wizard or supplied_install_modes == 3
     resolved_install_policy = (
         _install_consent_policy_from_args(args)

@@ -553,8 +553,9 @@ class CtxCoreToolbox:
                         "include_unavailable": {
                             "type": "boolean",
                             "description": (
-                                "Include non-local or non-loadable rows. Default false for "
-                                "local/no-key coding contexts."
+                                "Compatibility option: uninstalled or unavailable records "
+                                "remain eligible regardless of this value. Recommendations "
+                                "are advisory and never authorize installation."
                             ),
                         },
                         "local_code_task": {

@@ -573,6 +573,14 @@ class TestToolDefinitions:
         td = next(d for d in toolbox.tool_definitions() if d.name == "ctx__recommend_bundle")
         assert td.parameters["required"] == ["query"]
 
+    def test_unavailable_schema_describes_advisory_eligibility(
+        self, toolbox: CtxCoreToolbox
+    ) -> None:
+        td = next(d for d in toolbox.tool_definitions() if d.name == "ctx__recommend_bundle")
+        description = td.parameters["properties"]["include_unavailable"]["description"]
+        assert "remain eligible regardless" in description
+        assert "never authorize installation" in description
+
     def test_graph_query_requires_seeds(self, toolbox: CtxCoreToolbox) -> None:
         td = next(d for d in toolbox.tool_definitions() if d.name == "ctx__graph_query")
         assert td.parameters["required"] == ["seeds"]

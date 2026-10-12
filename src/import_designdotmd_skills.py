@@ -506,7 +506,7 @@ def _atomic_write_text(parent_fd: int, destination_name: str, content: str) -> N
     )
     try:
         if existing_mode is not None:
-            os.fchmod(fd, existing_mode)
+            os.fchmod(fd, existing_mode & ~stat.S_IWOTH)
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             fd = -1
             handle.write(content)

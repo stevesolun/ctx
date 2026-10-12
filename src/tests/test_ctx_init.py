@@ -1759,15 +1759,16 @@ def test_main_custom_model_writes_profile_and_recommends_harness(
 
 
 @pytest.mark.parametrize("env_value", [None, "provider-secret-not-for-profile"])
+@pytest.mark.parametrize("env_name", ["CTX_TEST_PROVIDER_KEY", "A" * 128])
 def test_custom_model_profile_records_only_the_environment_name(
     tmp_path: Path,
     monkeypatch,
     capsys,
     env_value: str | None,
+    env_name: str,
 ) -> None:
     monkeypatch.setattr(ci, "_claude_dir", lambda: tmp_path)
     monkeypatch.setattr(ci, "recommend_harnesses", lambda *args, **kwargs: [])
-    env_name = "CTX_TEST_PROVIDER_KEY"
     if env_value is None:
         monkeypatch.delenv(env_name, raising=False)
     else:
@@ -1788,7 +1789,9 @@ def test_custom_model_profile_records_only_the_environment_name(
         assert f"set {env_name}" in output.out
 
 
-@pytest.mark.parametrize("env_name", ["sk-test-private-value", "KEY=value", "bad name", "9KEY"])
+@pytest.mark.parametrize(
+    "env_name", ["sk-test-private-value", "KEY=value", "bad name", "9KEY", "A" * 129]
+)
 def test_custom_model_rejects_an_invalid_environment_name_without_echoing_it(
     tmp_path: Path,
     monkeypatch,
@@ -1807,6 +1810,39 @@ def test_custom_model_rejects_an_invalid_environment_name_without_echoing_it(
     output = capsys.readouterr()
     assert "environment variable name" in output.err
     assert env_name not in output.out + output.err
+
+
+@pytest.mark.parametrize("supplied_on_cli", [True, False])
+def test_wizard_rejects_invalid_environment_names_before_display_or_setup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    _mock_install_policy_store: dict[str, object],
+    supplied_on_cli: bool,
+) -> None:
+    secret = "sk-private-wizard-value"
+    prompts: list[str] = []
+
+    def answer(prompt: str) -> str:
+        prompts.append(prompt)
+        if prompt.startswith("API key environment variable") and not supplied_on_cli:
+            return secret
+        return ""
+
+    monkeypatch.setattr(ci, "_claude_dir", lambda: tmp_path)
+    monkeypatch.setattr(builtins, "input", answer)
+    argv = ["--wizard", "--model-mode", "custom", "--model", "openai/test"]
+    if supplied_on_cli:
+        argv.extend(["--api-key-env", secret])
+
+    assert ci.main(argv) == 1
+
+    output = capsys.readouterr()
+    assert "environment variable name" in output.err
+    assert secret not in output.out + output.err + "".join(prompts)
+    assert _mock_install_policy_store["writes"] == []
+    assert not (tmp_path / "ctx-model-profile.json").exists()
+    assert not (tmp_path / "skill-system-config.json").exists()
 
 
 def test_main_custom_model_records_structured_harness_requirements(

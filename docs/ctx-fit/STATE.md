@@ -11,6 +11,58 @@
 
 ## Checkpoint
 
+### Post-CI security and crash-coverage follow-up — 2026-10-13 (Asia/Jerusalem)
+
+- The first delivery run `01M4RYN291ENH9TCQP59GKY7KM` reached
+  `checks-passed` on `5ca2d97d0f0c8521ad1ce927a2c609fe10802a7e` for
+  [PR #288](https://github.com/stevesolun/ctx/pull/288). GitHub reported
+  **23 successful checks and one intentionally skipped matrix job**; the
+  Linux unit job passed **9,523 tests, 51 skipped, 91.36% coverage in
+  488.31 seconds**. This is baseline evidence, not verification of the
+  follow-up below. Guarded `no-mistakes axi sync` preserved all gate commits
+  before local editing resumed. No merge, tag or package publication occurred.
+- A parallel read-only review found two gaps in the CI security repair:
+  invalid credential-name input could still appear in a wizard default, and
+  replacement files could regain existing world-write permissions. Added
+  regressions reproduced both gaps, the unbounded-name case, and DOC-001's
+  stale executable MCP description: **six failed, six passed** before repair.
+- Centralized bounded environment-name validation now runs before rendering
+  wizard defaults and immediately after interactive input. Invalid wizard
+  values return before consent/profile/configuration writes without echoing
+  the input. Valid 128-character names remain supported; 129 are rejected.
+  CLI flags, saved profile keys and provider-value confidentiality are retained.
+- Atomic replacement strips only `S_IWOTH` from existing modes; safe modes
+  remain unchanged, and new files retain the CI repair's owner-only `0600`.
+  The MCP `include_unavailable` description now correctly states that uninstalled
+  or unavailable records remain eligible and suggestions never authorize
+  installation. This closes the previously disclosed DOC-001 follow-up.
+- The preceding CI phase made the 16-session crash injection sequential.
+  Retained its exact exit-73 assertion for every session, renamed it accurately,
+  and added a separate gated 16-process concurrent cold-start safety test.
+  Synchronous child messages prove crashes reached the factory; early returns
+  must be explicitly failed with no emission permit, and at least one child
+  must reach the crash. Fixed namespace/lock bounds, zero burned terminals,
+  all-session recovery, duplicate suppression, privacy and child cleanup are
+  checked. The original hosted Linux exception remains **undiagnosed**;
+  these tests do not claim that serialization fixed a production race.
+- Coordinator checks on the repaired source: **215 focused tests passed in
+  9.29 seconds** for onboarding, importer, MCP tool definitions and user graph
+  recommendations; both crash selectors independently passed **two tests in
+  6.38 seconds**. The delegated full runtime test file passed **63 tests in
+  15.94 seconds**. Independent reviewers accepted the security/schema and
+  concurrency-test changes. Ruff passed, formatting passed for all 636 files,
+  mypy passed all 606 source files, and `git diff --check` passed.
+- Original R1–R7 repairs remain intact: optional Fit uses explicit user data;
+  mixed-case safe identifiers, packed rich bodies, provenance binding and
+  efficient bulk snapshots are retained. The primary product remains empty,
+  user-owned and advisory, capped at five suggestions, with installation only
+  after explicit approval. No personal data, historical releases or remote LFS
+  were modified. Real-host UI acceptance and comparative savings remain unproven.
+- Next: freeze writers, commit this bounded follow-up, run the committed fast
+  gate and authoritative delivery pipeline, then verify the exact pushed head
+  before handing PR #288 back for human review. Do not treat the older green
+  head as approval of unverified follow-up code.
+
 ### CI-phase crash-storm test repair — 2026-10-13 (Asia/Jerusalem)
 
 - Started clean at detached `06ce578d00d76c88143a09d3bf9131c145ba7a6f`

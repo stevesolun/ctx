@@ -1281,8 +1281,10 @@ def test_symlink_beneath_resolved_target_is_rejected(
     assert not (real_skill_dir / "SKILL.md").exists()
 
 
-def test_atomic_replacement_preserves_existing_destination_mode(
+@pytest.mark.parametrize("existing_mode", [0o751, 0o640, 0o666, 0o777])
+def test_atomic_replacement_preserves_safe_destination_permissions(
     design_import: DesignImportFixture,
+    existing_mode: int,
 ) -> None:
     skill, _ = importer.deploy_entry(
         design_import.entry,
@@ -1290,7 +1292,7 @@ def test_atomic_replacement_preserves_existing_destination_mode(
         design_import.target,
         dry_run=False,
     )
-    skill.chmod(0o751)
+    skill.chmod(existing_mode)
     _write_source(
         design_import,
         SOURCE_TEXT.replace("Keep this body unchanged.", "Updated while preserving mode."),
@@ -1303,7 +1305,7 @@ def test_atomic_replacement_preserves_existing_destination_mode(
         dry_run=False,
     )
 
-    assert stat.S_IMODE(skill.stat().st_mode) == 0o751
+    assert stat.S_IMODE(skill.stat().st_mode) == existing_mode & ~stat.S_IWOTH
 
 
 @pytest.mark.parametrize("process_umask", [0o000, 0o027])
