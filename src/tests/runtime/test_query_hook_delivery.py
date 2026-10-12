@@ -737,9 +737,11 @@ def test_unique_session_crash_storm_cannot_expand_the_attempt_namespace(
         )
         for session_id in session_ids
     ]
+    # Reach every injected crash before starting the next session. Concurrent
+    # ledger access may legitimately fail closed before the crash factory runs;
+    # this test measures the namespace left by crashes, not delivery availability.
     for process in processes:
         process.start()
-    for process in processes:
         process.join(timeout=30)
         assert process.exitcode == 73
 

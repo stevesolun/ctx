@@ -11,6 +11,37 @@
 
 ## Checkpoint
 
+### CI-phase crash-storm test repair — 2026-10-13 (Asia/Jerusalem)
+
+- Started clean at detached `06ce578d00d76c88143a09d3bf9131c145ba7a6f`
+  in the outer run's worktree for `codex/bring-your-own-knowledge`, PR #288.
+  Supplied Linux evidence reported **9,522 passed, one failed, 51 skipped**,
+  with 91.35% coverage. `CI required` failed because `unit-linux` failed.
+- The unique-session crash-storm test observed child exit **72**, meaning
+  delivery returned before the injected factory's required exit **73**.
+  Concurrent delivery can fail closed before that factory; the test incorrectly
+  required every concurrent call to reach it. The exact underlying Linux
+  exception was not captured. The original selector passed locally, and
+  diagnostic runs passed twenty original schedules and twenty schedules with
+  synchronized post-initialization access; these do not reproduce the failure.
+- Start and join each crash child before starting the next, so the namespace
+  test deterministically accumulates crash residue. All sixteen unique
+  sessions, exact exit-73 assertions, fixed eight-slot/lock bounds, and complete
+  recovery assertions remain. This test no longer exercises concurrent
+  distinct-session delivery. The separate spawned-process atomicity test is
+  unchanged. No production integrity checks or retry behavior changed.
+- Coordinator verification used `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD/src"
+  python -m pytest -q --no-cov -p no:cacheprovider`: the repaired selector
+  passed **one test in 5.13s**, then the complete
+  `src/tests/runtime/test_query_hook_delivery.py` passed **62 tests in 13.01s**.
+  Independent read-only review found no material issue. Diagnostic scripts
+  and their temporary fixtures were removed; `git diff --check` passed.
+- This is focused working-tree evidence on macOS, not a verified Linux
+  production-race repair or a hosted-check result. Broad gates, static phases,
+  authoritative preflight, commits and delivery remain with the outer executor.
+  No pipeline control, push, merge, tag, publication, paid evaluation or personal
+  host change ran. Real-host acceptance and comparative savings remain unverified.
+
 ### CI-phase harness argument repair — 2026-10-13 (Asia/Jerusalem)
 
 - Started clean at detached `158cd58dbf143c6d1915f3c8f59b8122b1b2fdd7`
