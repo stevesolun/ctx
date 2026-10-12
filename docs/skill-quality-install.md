@@ -23,12 +23,17 @@ Two hard floors override the weighted sum:
   the score-to-grade mapping function alone.  A score of 0.0 maps to **D**.
 - **`never_loaded_stale`** — no load events ever → grade capped at **D**.
 
-The score is mirrored to three on-disk sinks so every consumer sees the
-same number:
+The score is persisted to a canonical sidecar and, when a matching loose wiki
+page exists, mirrored into that page:
 
 1. `~/.claude/skill-quality/<slug>.json` — canonical machine-readable form.
-2. Wiki entity frontmatter — `quality_score`, `quality_grade`, `quality_updated_at`.
-3. Wiki body — a `## Quality` block between `<!-- quality:begin -->` markers.
+2. Loose wiki entity frontmatter — `quality_score`, `quality_grade`, `quality_updated_at`.
+3. Loose wiki body — a `## Quality` block between `<!-- quality:begin -->` markers.
+
+The scorer does not publish wiki-pack overlays. With [active wiki packs](entity-onboarding.md#add-records-you-own),
+these loose-page updates do not change the authoritative packed page. The
+sidecar remains current, and the graph consumes it through the separate path
+below.
 
 The knowledge-graph node attribute is a **separate consumer path**, not a
 write path from `persist_quality`: `wiki_graphify` reads the sidecar JSON
@@ -76,7 +81,7 @@ python -m skill_quality recompute --all
 ```
 
 This walks `~/.claude/skills/*/SKILL.md` and `~/.claude/agents/*.md`,
-scores each, and writes the three on-disk sinks where a matching wiki page is
+scores each, and writes the three on-disk sinks where a matching loose wiki page is
 available. Runtime depends on corpus size, graph inputs and disk; measure it
 on the target installation rather than assuming a fixed duration.
 

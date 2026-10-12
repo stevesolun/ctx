@@ -46,7 +46,7 @@ Public functions:
         session_id=None,
         rejection_mode="use",
     )
-        Free-text → ranked skill/agent/MCP execution bundle with selection,
+        Free-text → ranked advisory skill/agent/MCP bundle with selection,
         availability, baseline-context, and local/no-key/language filters.
 
     recommend_related(
@@ -122,8 +122,8 @@ __all__ = [
 ]
 
 
-# Module-level singleton toolbox — lazy, shared across calls. Saves
-# loading the 13k-node graph on every function call.
+# Module-level singleton toolbox — lazy, shared across calls so readers and
+# their caches can be reused for the user's graph.
 _default_toolbox: CtxCoreToolbox | None = None
 _TOOL_EVENT_NAMES = {
     "ctx__recommend_bundle": "ctx.api.recommend_bundle",
@@ -296,9 +296,9 @@ def recommend_bundle(
     ``local_code_task``/``no_api_keys``/``language`` narrow results for local
     coding loops. Calls stay stateless unless ``session_id`` is supplied;
     ``rejection_mode`` controls whether session rejection memory is used,
-    replaced, or ignored. Set ``include_baseline_context`` or ``include_unavailable``
-    to opt back into those rows. Each entry uses the enriched recommendation
-    contract: ``id``, ``name``, ``type``, ``score``, ``matching_tags``,
+    replaced, or ignored. See ``docs/harness/attaching-to-hosts.md`` (Python
+    library path) for filtering and availability policy. Each entry uses the
+    enriched recommendation contract: ``id``, ``name``, ``type``, ``score``, ``matching_tags``,
     ``tags``, ``installable``, ``load_status``, ``source_path``, selection
     metadata, ``tldr``, and ``reason`` when available. Empty list on any error
     (missing graph, empty query, etc.); the CLI/MCP versions surface errors as

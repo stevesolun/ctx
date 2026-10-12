@@ -11,6 +11,9 @@ it is not required to build or query your graph.
 The compatibility default is `~/.claude/skill-wiki/`. Select a private location
 with an absolute `CTX_WIKI_DIR` for shared CLI, MCP, and hook reads.
 Keep that environment variable consistent in your shell and host configuration.
+`ctx-init` still initializes the compatibility default; `CTX_WIKI_DIR` does not
+redirect its writes. For a private wiki, pass the same absolute path to the
+authoring commands' `--wiki` and the graph builder's `--wiki-dir` options.
 
 ```text
 skill-wiki/

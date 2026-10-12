@@ -11,10 +11,8 @@ not an onboarding requirement.
 ctx-init --model-mode skip
 ```
 
-The compatibility default is `~/.claude/skill-wiki/`. An absolute
-`CTX_WIKI_DIR` selects the wiki for shared CLI, MCP, and native-hook reads.
-For authoring and indexing commands that expose `--wiki` or `--wiki-dir`,
-pass that same directory explicitly.
+For a private workspace, follow the [wiki path configuration](knowledge-graph.md#structure)
+and pass its absolute path to authoring and indexing commands explicitly.
 
 Reinitialization preserves existing knowledge. It does not restore a built-in
 catalog or wipe the tools already in your personal directories.

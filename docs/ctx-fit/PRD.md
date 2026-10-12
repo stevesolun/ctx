@@ -1,7 +1,9 @@
 # CTX Fit — Product Requirements Document
 
-Status: draft v1, 2026-08-09. Owner: coordinator. Supersedes the earlier
-"evolution, preserve the surface" framing.
+Status: requirements for the optional Fit evaluator, originally drafted
+2026-08-09. Owner: coordinator. The current primary-product mandate is owned by
+[Bring your own knowledge](BRING_YOUR_OWN_PLAN.md); [ADR-017](DECISIONS.md)
+supersedes this document's former Fit-primary framing.
 
 ## 1. One sentence
 
@@ -14,7 +16,7 @@ Headline: **Find the cheapest AI coding setup that actually works on your repo.*
 See the [user guide](../index.md) for each command's cost and write boundaries,
 including the apply and PR contract.
 
-Three words carry the whole product. *Cheapest* is the objective. *Reliably* is
+Three words carry the Fit evaluation. *Cheapest* is the objective. *Reliably* is
 the constraint that makes cheapest meaningful. *Configuration* is the
 deliverable — the product is not finished when it produces a report.
 
@@ -22,12 +24,10 @@ deliverable — the product is not finished when it produces a report.
 
 Teams adopting AI coding agents choose their setup — agent, model,
 instructions, skills, MCP servers — from generic benchmarks, blog posts, and
-opinion. None of that is evidence about *their* repository. Meanwhile CTX
-itself has become a system that requires explanation before it can be
-appreciated: 44 public commands, a 79,958-node graph, an entity taxonomy, and
-a benchmark research framework.
-
-Both problems have the same fix: put the complexity behind a single answer.
+opinion. None of that is evidence about *their* repository. The
+[original state audit](CURRENT_STATE.md) records the historical CTX surface
+that motivated Fit. The evaluator puts controlled comparison behind a
+reviewable answer.
 
 ## 3. Users
 
@@ -56,12 +56,12 @@ diagnostics, and apply/PR contract.
 - Repository profile with per-property provenance.
 - AI agent readiness assessment with dimensions, evidence, blockers, and
   prioritized fixes.
-- Bounded candidate generation (2–5) with an explicit selection reason each.
+- Bounded candidate generation with explicit selection reasons or abstention.
 - Controlled execution against a mandatory baseline, isolated per execution.
 - Repository-native verification with distinct `attempted / completed /
   verified / failed / inconclusive` states.
 - Honest cost accounting where unknown stays unknown.
-- Deterministic recommendation policy plus a Pareto view.
+- Deterministic recommendation under [ADR-003 and ADR-014](DECISIONS.md).
 - Artifact generation with preview, local apply, and explicit recovery guidance.
 
 ### Explicitly out of scope for V1
@@ -94,7 +94,9 @@ These are correctness requirements, not preferences. Each maps to a test.
 9. **Graceful degradation.** Missing credentials, network, tests, or graph
    reduce capability; they never produce a fatal error where partial value was
    possible.
-10. **The graph is invisible.** It is an internal optimizer, never the UX.
+10. **Candidate knowledge is user-supplied.** The
+    [user guide](../index.md#optional-ctx-fit) owns the catalog contract;
+    an absent catalog is a valid abstention, not a reason to download one.
 
 ## 7. The objective function
 
@@ -125,10 +127,10 @@ answer is **keep your current setup** — a success, not a failure.
 | M | Name | Outcome | Cost to user |
 | --- | --- | --- | --- |
 | M0 | Audit | Quarry classified; architecture chosen | none |
-| M1 | Product skeleton | `ctx fit` exists and owns the product surface | none |
+| M1 | Evaluator skeleton | `ctx fit` exists as an explicit evaluator | none |
 | M2 | Repository profile | Stack, verification, existing AI config | none |
 | M3 | Readiness | Scored dimensions, blockers, prioritized fixes | none |
-| M4 | Candidate selection | 2–5 explained candidates | none |
+| M4 | Candidate selection | Explained candidates, or abstention | none |
 | M5 | Experiment planning | Plan + `--dry-run` + cost estimate | none |
 | M6 | Execution | Isolated, reproducible runs with usage | money |
 | M7 | Verification | Structured evidence per candidate/task | money |
@@ -151,9 +153,10 @@ Per milestone: the four reviews in §11 all pass, including Product, which may
 reject a technically complete milestone that does not improve the outcome.
 
 V1 overall: a developer installs, runs `ctx fit` in a real repository, gets
-useful readiness output; runs `ctx fit --test --budget 10` and receives an
-honest recommendation with verified evidence and real cost; optionally adopts
-the winner through the [user guide's apply and PR contract](../index.md).
+useful readiness output; explicitly supplies candidates and authorizes an
+evaluation under the [user guide's catalog, spending, and apply/PR contracts](../index.md#optional-ctx-fit);
+and receives an honest recommendation with verified evidence and real cost.
+Adopting a winner remains optional.
 
 ## 10. Success criteria
 

@@ -2,6 +2,12 @@
 
 Status date: 2026-07-26
 
+This is a historical review of the named commit, including its former corpus
+and graph-release workflow. It is not the current product or release contract;
+see the [product guide](index.md),
+the [threat model](threat-model.md), and
+[contribution and release guidance](https://github.com/stevesolun/ctx/blob/main/CONTRIBUTING.md).
+
 Repository evidence was reviewed through commit
 `8d2a91ef65afb8bec0c8da2169fd174b444da22d`; this report is introduced by the
 subsequent documentation commit. GitHub-hosted controls are identified

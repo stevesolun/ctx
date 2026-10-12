@@ -260,9 +260,8 @@ coordinator) and keep LoopFlow in control of physical tool changes.
 The adapter fails closed:
 
 - `--permissions skills` only returns skill recommendations.
-- Goals that imply local files, `feature_implementation`, no API keys, or a
-  clear programming language overfetch and then hide non-local, credentialed,
-  generic-planning, or wrong-language capability and related rows.
+- Goal context filters capability and related rows as described in the
+  [LoopFlow integration contract](attaching-to-hosts.md#4-loopflow-and-agent-loop-adapter-path).
 - `--permissions mcps` returns MCP server recommendations and exposes only
   read-only ctx MCP tools: recommendation, graph query, and wiki lookup.
 - Lifecycle MCP tools such as load, mark-used, validation, escalation, unload,

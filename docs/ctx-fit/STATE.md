@@ -11,6 +11,93 @@
 
 ## Checkpoint
 
+### Document-phase reconciliation — 2026-10-13 (Asia/Jerusalem)
+
+- Inspected the requested `11b582a7` → `035f1098` change and the actual
+  worktree at `740ad144230154f9c8f290eb27efc360156be8f9`. The test-phase
+  acceptance replay below was already uncommitted and is preserved. Its
+  retained child-process transcript, JSON results and replay source were
+  inspected; this phase did not rerun or relabel those tests.
+- Updated current documentation owners for uninstalled-tool eligibility,
+  private wiki paths, packed-page quality persistence, explicit Fit catalogs,
+  and source-registry evidence. Stale duplicates now point to those owners;
+  prior Fit-primary planning and corpus audits are explicitly historical.
+- The BYO acceptance rows in `qa/feature_status.csv` retain `Needs Validation`
+  for their complete mapped contracts and point here for partial evidence.
+  No installed-artifact replay, real Codex/Claude UI turn, or comparative
+  savings claim is inferred from the synthetic source-tree replay.
+- One source-phase follow-up remains: the executable MCP schema description
+  for `include_unavailable` still describes filtering removed from the shared
+  policy. Documentation and doc comments are corrected; changing executable
+  schema data is outside this document phase.
+- Documentation verification: `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD/src"
+  python -m mkdocs build --strict --site-dir "$PWD/.document-phase-740ad144/site"`
+  passed, exit 0 (0.37s). HTML inspection resolved all 533 distinct local
+  link/anchor targets across nine changed rendered pages. The generated site
+  was removed afterward; no deployed-page or visual-browser acceptance is
+  claimed. A source comparison confirmed Python edits are comments/docstrings
+  only; CSV comparison confirmed only BYO notes/review status changed.
+- Independent read-only review found one stale checkpoint pointer, corrected
+  before handoff. `git diff --check` passed. No runtime tests, lint/type/format
+  phases, broad gate, pipeline control or delivery command ran here.
+- Remaining authoritative validation and GitHub delivery belong to the outer
+  executor on `codex/bring-your-own-knowledge`. Old draft PR #286 is not this
+  delivery target. No merge, version change, tag, PyPI publication, paid
+  evaluation, personal host changes or remote LFS action is authorized.
+
+### Test-phase acceptance replay — 2026-10-13 (Asia/Jerusalem)
+
+- Reconciled the clean worktree at `740ad144230154f9c8f290eb27efc360156be8f9`,
+  which already contains the local-provider timing repair below. The outer
+  executor reports `scripts/no_mistakes_run.sh test` succeeded as baseline;
+  this phase did not repeat that broad command or run static/delivery phases.
+- Coordinator focused tests passed **46 tests in 6.93s**, exit 0: both
+  `test_byo_bootstrap.py` and `test_user_knowledge_recommendations.py`, plus
+  the six selectors listed in the timing-repair checkpoint below (seven
+  cases including both production deadline boundaries). The first invocation
+  failed fixture setup because the coordinator had not created the parent of
+  the explicit `--basetemp`; creating that directory resolved the setup error.
+  The successful command used `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD/src"
+  python -m pytest -q --no-cov -p no:cacheprovider` and
+  `--basetemp="$PWD/.test-phase-validation/pytest"` with those selectors.
+- A real child-process replay initialized an isolated empty home, authored
+  nine synthetic wiki records, rebuilt their graph with documented tag/token
+  indexing (semantic weight zero), and exercised CLI, Python API, stdio MCP,
+  Codex hook and Claude hook entry points outside the repository working
+  directory. All returned the same five IDs, including uninstalled skills;
+  requesting 50 still returned five. No-match returned zero, selected/rejected/
+  active IDs were suppressed, and reinitialization preserved every wiki byte.
+  Persisted legacy `preapproved-auto` plus engine mode `manage` caused no
+  installation or existing-user-file changes. A child audit guard recorded
+  zero attempted socket connections. CLI transcripts, raw JSON responses,
+  filesystem observations and the replay script are retained as evidence.
+- The replay harness needed two corrections before its successful run:
+  initialization writes a sparse config, so optional graph/telemetry sections
+  must be added explicitly; tied candidates can fill five slots before a skill
+  appears, so the synthetic example uses seven skills, one agent and one MCP
+  to demonstrate all three kinds within the cap. No production change or
+  assertion in an existing test was needed.
+- A delegated browser lane ran the two catalog filtering cases and
+  `test_mobile_home_activity_and_wiki_keep_long_content_inside_viewport`:
+  **three passed in 4.51s**, exit 0, with no skips. Actual Chromium screenshots
+  show the example-only/zero-bundled labels, hidden-card filtering and mobile
+  dashboard wrapping. The coordinator inspected the captured catalog and
+  mobile screenshots. Catalog evidence uses the actual component HTML/CSS/JS,
+  not the complete MkDocs theme or introductory prose.
+- Evidence is retained under
+  `/var/folders/cj/j956f9v920b8wk3wvd8ms2nh0000gn/T/no-mistakes-evidence/01M4RYN291ENH9TCQP59GKY7KM/`:
+  `cli-740ad144-transcript.txt`, `cli-740ad144-state.json`,
+  `cli-740ad144-replay.py`, `advanced-740ad144-local-provider.json`, and
+  `ui-740ad144-browser-evidence.json` identify the commands and product outputs.
+  The advanced benchmark ledger records its complete selected lifecycle and
+  both fixture patches; it is separate from the advisory-only primary path.
+- No source/test repair was needed. Only this checkpoint changed after
+  verification; generated worktree fixtures and screenshot instrumentation
+  were removed. Real Codex/Claude UI turns, installed-artifact replay and
+  comparative savings were not established by these source-tree/synthetic
+  checks. Remaining authoritative gates and delivery belong to the outer
+  executor; no pipeline control, paid call or personal host change occurred.
+
 ### Test-phase local-provider timing repair — 2026-10-13 (Asia/Jerusalem)
 
 - Started clean at detached head `035f1098a615076ff53c75864e695d8dc3a99f6a`
@@ -467,7 +554,7 @@
 
 The following delivery, status, and scope records preserve earlier checkpoints.
 They do not identify the current isolated worktree or reopen the completed audit.
-See the current document phase below and the canonical CSV for present status.
+See the [current checkpoint](#checkpoint) and the canonical CSV for present status.
 
 - Delivered branch: `codex/full-feature-audit-delivery`; verified and
   delivered product/documentation head `ff0d4301885f0888dfd8e23104291141538cc4f8`
@@ -586,7 +673,7 @@ See the current document phase below and the canonical CSV for present status.
   worktree cleanup reduced the Data volume's rounded used space from 280 GiB to
   262 GiB. No remote LFS object has been purged yet.
 
-## Current isolated document phase (2026-10-04)
+## Prior isolated document phase (2026-10-04)
 
 - Removed the remaining unsupported `toolbox init` duplicate from the starter
   page's use-case description. The opening paragraph remains the owner of the
@@ -1221,17 +1308,12 @@ execution. The remaining frontier is narrower, without reducing the destination:
 
 ## Product destination
 
-CTX Fit must find the cheapest capability configuration that reliably completes
-representative work in the user's repository, using repository-native
-verification rather than an agent's self-report. It must present evidence, keep
-"current setup" as a valid result when that claim is actually supported, and
-produce a reviewable change that reproduces the winning configuration.
+The current destination and acceptance requirements are owned by
+[Bring your own knowledge](BRING_YOUR_OWN_PLAN.md). The release records below
+describe the historical 1.0.21 delivery, not authorization for another release
+or acceptance of the current branch.
 
-The current release is limited by ADR-007 to capability configuration within a
-single harness. It must not claim to compare Codex, Claude Code, or other
-harnesses when it did not run that experiment.
-
-## Definition of done for 1.0.21
+## Historical definition of done for 1.0.21
 
 All of the following must be true before tagging or publishing:
 
@@ -1254,7 +1336,7 @@ All of the following must be true before tagging or publishing:
 8. Public docs, changelog, package metadata, and GitHub release notes describe
    1.0.21 truthfully. The release tag points to the exact reviewed green commit.
 
-## Work status
+## Historical release work status
 
 | Workstream | State | Owner | Current evidence / next condition |
 | --- | --- | --- | --- |
@@ -1276,7 +1358,7 @@ All of the following must be true before tagging or publishing:
 | Retire Git LFS | Repository and Mac-local cleanup complete; remote purge pending GitHub Support | Coordinator + manifest/workflow writers + independent auditor | 45 historical objects total 12.131 GiB because each compressed archive revision is stored whole. Current useful pair is 405,434,548 bytes and is independently preserved and attested in release v1.0.21. PR #275 merged as `b62b78d7` after 19 successful checks. A clean post-merge checkout hydrated and deeply validated both release assets without Git LFS. The repository and `no-mistakes` mirror have no LFS objects or local LFS configuration; the development-root scan found no other LFS object store. Main and mirror integrity checks pass, `no-mistakes` is running, and `.scratch/` is untouched. The two cleanup passes reclaimed about 20 GiB locally; GitHub still retains and bills the historical remote objects until Support purges them. |
 | Local storage hygiene | Reproducible CTX residue removed; user history preserved | Coordinator | The superseded A/B benchmark root fell from about 16.6 GiB to 440 MiB; only the dirty 14-file evaluator worktree remains. Repository `.gate` fell from 4.6 GiB to 136 KiB after old A/B runs, caches, environments, and a redundant checkout were removed. Its two-line uncommitted change is retained as a checked recovery patch. Stale Codex plugin staging freed another 76.8 MiB. Codex task transcripts (20.3 GiB active; 3.44 GiB archived) and the live logs database were inventoried but not deleted without a retention decision. Rounded Data-volume use is now 241 GiB. |
 
-## Open release blockers
+## Historical release blockers
 
 ### P0 — release-stopping
 
@@ -1420,7 +1502,10 @@ path remains unproven. Production PyPI Trusted Publishing succeeded.
 - Expensive gates wait until focused failures are closed, so time and compute
   are not wasted proving a known-bad tree is bad.
 
-### Release loop
+### Historical release loop
+
+This records the prior tagged-release workflow. Current delivery is governed
+by the checkpoint and immediate next actions below.
 
 1. Close every P0 and resolve or truthfully de-scope every P1.
 2. Rerun focused tests, then Fit, full non-integration, Ruff, and mypy.
@@ -1433,25 +1518,18 @@ path remains unproven. Production PyPI Trusted Publishing succeeded.
 
 ## Immediate next actions
 
-1. Use the [current document-phase checkpoint](#current-isolated-document-phase-2026-10-04)
-   and canonical CSV. Earlier gates and page hashes remain evidence for their
-   named snapshots; unchanged runtime evidence remains applicable.
-2. Complete the remaining phases through this existing no-mistakes run. The
-   document phase is complete; its local rendering evidence is recorded above.
-   Retained source/prose hashes certify their named checkpoints, not later
-   documentation edits.
-3. The outer executor owns remaining validation and delivery on the existing
-   branch and draft PR #286. Issue #283 already has the AI-labeled PR update;
-   keep it open and avoid duplicate unchanged messages. No merge, release,
-   publication, or paid-provider run is authorized.
-4. GitHub Support's prepared LFS purge request is at Submit. Wait for explicit
-   action-time confirmation before sending it; no ticket or remote purge
-   exists. Preserve the repository and release assets. Recheck billed storage
-   only after Support confirms the purge.
-5. Reviewer/tag/environment protection and Codex transcript retention remain
-   owner decisions. Do not silently change settings or delete user history.
+1. Use the [current checkpoint](#checkpoint) and `qa/feature_status.csv`.
+   Earlier gates and retained evidence apply only to their named snapshots.
+2. Return this phase to the active outer executor for the remaining configured
+   validation, authoritative preflight and reviewable GitHub delivery on
+   `codex/bring-your-own-knowledge`; do not initialize another pipeline.
+3. Keep old PR #286 draft/unmerged and untouched. Do not merge the new PR,
+   publish a version tag or package, or run a paid comparison.
+4. Preserve personal tool homes, credentials, `.scratch/`, Git history,
+   repository identity, historical releases and remote LFS. The old Support
+   draft below is historical and is not an authorized action for this delivery.
 
-### GitHub Support handoff
+### Historical GitHub Support draft
 
 Support contact: `https://support.github.com/contact`
 

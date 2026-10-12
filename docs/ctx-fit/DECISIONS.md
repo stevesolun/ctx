@@ -55,7 +55,8 @@ launcher trusted, and once by reading the secret from the launcher's live frame.
 Both programs exited before the assertion and still produced `verified`.
 
 **Decision.** CTX Fit executes the selected repository command unchanged and
-uses its exit status for Python, JavaScript/TypeScript, Go, and Rust. A trial is
+uses its exit status; current discovery coverage is documented in the
+[user guide](../index.md). A trial is
 verified only after the original commit passes, reverting the source makes the
 same command fail, the agent changes only declared source paths, protected tests
 remain byte-for-byte unchanged, and the same command exits zero after the
@@ -220,9 +221,9 @@ ARCHIVE or DELETE.
 
 ## ADR-003 — Recommendation is deterministic, never LLM-selected · `ACCEPTED`
 
-**Decision.** The winner is chosen by documented policy: exclude below
-verification threshold, exclude critical failures, build the Pareto frontier,
-select the default by written rule. An LLM may *explain* a result; it may never
+**Decision.** The winner is chosen by the deterministic policy in
+[ADR-014](DECISIONS.md).
+An LLM may *explain* a result; it may never
 *decide* one.
 
 **Rationale.** The product's only asset is trustworthy evidence. A model

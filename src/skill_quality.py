@@ -9,16 +9,16 @@ Flow:
      consulting the wiki graph, and pulling router-trace counts.
   2. ``compute_quality`` aggregates those ``SignalResult`` instances via
      a weighted sum, applies hard floors, and maps to an A/B/C/D/F grade.
-  3. ``persist_quality`` mirrors the result to three on-disk sinks so every
-     downstream consumer — Obsidian, machine-readable automations, the wiki
-     UI — can see the same number.
+  3. ``persist_quality`` writes the canonical sidecar and mirrors it into
+     matching loose wiki pages. It does not publish packed-page overlays;
+     see ``docs/skill-quality-install.md`` for the packed-wiki boundary.
 
 Persistence sinks:
 
   - Sidecar JSON — ``~/.claude/skill-quality/<slug>.json`` (canonical
     machine-readable form; source of truth for the graph writer).
   - Frontmatter — ``quality_score``, ``quality_grade``,
-    ``quality_updated_at`` keys on the wiki entity page.
+    ``quality_updated_at`` keys on a matching loose wiki entity page.
   - Wiki body — a ``## Quality`` section with the grade + breakdown
     rendered in Markdown.
 

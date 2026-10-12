@@ -57,15 +57,10 @@ would be new product work, not behavior provided by this page.
 
 ## Update Rules
 
-Entity updates are intentionally explicit:
-
-- `python -m skill_add`, `python -m agent_add`, `python -m mcp_add`, and `python -m harness_add` create
-  new entities when no duplicate exists.
-- If a duplicate exists, the command emits an update review and refuses to
-  replace content unless the user passes `--update-existing`.
-- New or updated skills go through the micro-skill line-count gate from config.
-- Security/cyber checks run before entity content is promoted.
-- Graph/wiki artifacts are rebuilt, validated, packed, and atomically promoted.
+See [entity onboarding](entity-onboarding.md#updates-and-removal) for explicit
+update review, pack-aware authoring, and removal boundaries. Intake queues wiki
+work; follow its [indexing steps](entity-onboarding.md#index-and-check) to
+refresh the derived graph after approved changes.
 
 ## Security Notes
 

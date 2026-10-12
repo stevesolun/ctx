@@ -173,8 +173,8 @@ configuration and retention behavior.
 ### Graph and Catalog Metadata
 
 Graph, wiki, and catalog content can originate outside the current repository.
-The `ctx.core.source_registry` module and `ctx-source-registry` CLI can validate
-the built-in registry or an explicitly supplied registry. They record source
+The `ctx.core.source_registry` module and `ctx-source-registry` CLI validate
+explicitly supplied registries; the default registry is empty. They record source
 revisions, import modes, licenses, and permission evidence, and reject
 unapproved full-body import plans submitted to that validator.
 
@@ -188,12 +188,13 @@ trustworthy.
 For approved full-body manifests, the registry binds the complete canonical
 manifest, including importer-consumed metadata, entry order, source paths, and
 body digests. Permission evidence must be a digest-verified checked-in file.
-Installed wheels use a packaged copy of those evidence bytes when repository
-files are unavailable. Portable source paths reject traversal, ambiguous
+The distribution no longer supplies evidence bytes for the retired corpus;
+missing evidence fails closed. Portable source paths reject traversal, ambiguous
 Unicode normalization, control/format characters, Windows device names,
 alternate-stream syntax, and case-insensitive collisions.
-The inherited Design.md corpus remains blocked until it has legal evidence,
-body digests, and a registered full-manifest binding.
+The retained Design.md maintenance importer requires an explicitly reviewed
+source record, legal evidence, body digests, and a registered full-manifest
+binding. Its former source record and corpus are no longer distributed.
 
 Metadata can affect ranking, explanations, availability labels, displayed
 links, and later operator decisions. Malicious or inaccurate metadata can

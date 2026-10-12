@@ -37,9 +37,9 @@ load/unload POSTs reject harnesses with the exact dry-run command to use.
 Quality scoring is shown for sidecar-backed skills, agents, and MCP servers.
 The `/recommend` page exposes the browser selectable recommendation flow:
 query, top-k, selected and rejected IDs, select-all/select-none helpers,
-TLDR/reason text, and related suggestions for partially selected bundles. The
-CLI/API expose additional active-context, baseline-context, availability,
-local/no-key, and language controls for host loops.
+TLDR/reason text, and related suggestions for partially selected bundles. See
+the [host integration guide](harness/attaching-to-hosts.md#2-python-library-path)
+for CLI/API filtering controls and advisory availability policy.
 Generic/API/local harnesses that call ctx-core validation tools write to
 the runtime lifecycle ledger. The dashboard exposes that ledger at
 `/runtime` and as JSON at `/api/runtime.json`, including validation and

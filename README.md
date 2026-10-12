@@ -91,7 +91,9 @@ Install `claude-ctx[harness]` only if you want real model-backed evaluations.
 
 ### `--apply` writes the working tree
 
-Include `--apply` in the same `ctx fit --test --budget N` invocation; prior evaluations are not loaded.
+Include `--apply` in the same `ctx fit --catalog my-fit.json --test --budget N`
+invocation; prior evaluations are not loaded. Supply your own
+[candidate catalog](https://stevesolun.github.io/ctx/#optional-ctx-fit).
 `--yes` authorizes the evaluation and resulting write. Without it, a winning result is only previewed.
 The write itself runs no git command, although evaluation uses read-only history queries.
 

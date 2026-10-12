@@ -293,8 +293,11 @@ the artifact, index freshness, and operation. Measure these on your target
 corpus before putting them on a latency-sensitive path. `recommend_bundle()` accepts
 `selected`, `rejected`, `active_context`, and `baseline_context` to keep
 already-present context out of new load suggestions. It also accepts
-`local_code_task`, `no_api_keys`, `language`, `include_baseline_context`, and
-`include_unavailable` when a local/no-key coding loop needs stricter filtering.
+`local_code_task`, `no_api_keys`, and `language` to filter generic planning,
+credential-dependent, or wrong-language suggestions. `include_baseline_context`
+opts baseline tools back in. Relevant tools without local material remain
+eligible; `include_unavailable` is retained for compatibility and no longer
+changes that policy.
 Returned rows include availability metadata (`installable`, `load_status`, and
 `source_path`) so hosts can distinguish local wiki entries from manual or
 external-install rows.
@@ -465,7 +468,10 @@ use skills: security-review, code-review
 Only local wiki skill rows are named in `loopflow.use_skills`. Catalog skills
 remain under `capabilities.skills` with `status: available`,
 `load_status: external-install-required`, and `install_command` metadata when
-the current context allows non-local recommendations.
+present. The legacy LoopFlow adapter additionally excludes skills without
+locally loadable material from capability and related rows for local-code or
+no-key tasks. That extra availability filter applies to skills; agents and MCP
+records still use the shared [context filters](#2-python-library-path).
 
 When the LoopFlow run uses its own LLM rather than a hosted Claude Code
 session, grant harnesses and pass the model profile:

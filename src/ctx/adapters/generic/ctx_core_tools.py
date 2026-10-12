@@ -30,9 +30,9 @@ MCP servers):
         Tokenizes the query into tags, walks the graph, suppresses
         selected/rejected/active/default-baseline context, and returns
         enriched rows with id, tags, availability, tldr, reason, selection
-        metadata, baseline_context, and context_policy. Local/no-key/language
-        hints can hide unavailable, external-service, generic-planning, or
-        wrong-language rows unless include_unavailable opts them back in.
+        metadata, baseline_context, and context_policy. Filtering and
+        availability policy is documented in
+        ``docs/harness/attaching-to-hosts.md`` (Python library path).
 
     ctx__recommend_related(
         selected,
@@ -43,7 +43,7 @@ MCP servers):
         rejection_mode="use",
     )
         Selected/rejected recommendation IDs → graph-related rows.
-        Excludes selected, rejected, unavailable, and deprecated nodes.
+        See the same host guide for the related-result availability contract.
 
     ctx__graph_query(seeds, max_hops=2, top_n=10)
         Direct graph walk from a list of seed entity names.

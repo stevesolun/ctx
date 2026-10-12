@@ -3,6 +3,11 @@
 Milestone 0 deliverable. Every significant CTX subsystem classified
 `KEEP` / `ADAPT` / `ARCHIVE` / `DELETE` against the CTX Fit product mandate.
 
+This is a historical classification, not a current deletion plan. Its
+Fit-primary and bundled-catalog assumptions are superseded by
+[ADR-017](DECISIONS.md); use [the standing plan](BRING_YOUR_OWN_PLAN.md) for
+the current preservation and removal boundaries.
+
 Method: five parallel read-only classification lanes plus coordinator
 verification. **130 components** classified. Every claim is anchored to a
 `file:line` or an executed command. The governing question for each component
