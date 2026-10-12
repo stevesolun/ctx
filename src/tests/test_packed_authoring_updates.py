@@ -326,9 +326,7 @@ def test_mirror_publication_failure_restores_loose_body_and_active_packs(
 
 
 @pytest.mark.parametrize("empty_body", ["", " \n\t"])
-def test_forced_skill_mirror_rejects_empty_packed_page_without_writes(
-    authoring_wiki, empty_body
-):
+def test_forced_skill_mirror_rejects_empty_packed_page_without_writes(authoring_wiki, empty_body):
     root, rebuild = authoring_wiki
     (root / "source.md").write_text(_body("Last good skill instructions"))
     _add(root, "skill")

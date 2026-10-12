@@ -158,9 +158,7 @@ def test_dry_run_proposal_reuses_snapshot_without_refresh(tmp_path, monkeypatch,
 
 
 @pytest.mark.parametrize("kind", ["skill", "agent"])
-def test_bulk_mirror_refreshes_snapshot_after_successful_publication(
-    tmp_path, monkeypatch, kind
-):
+def test_bulk_mirror_refreshes_snapshot_after_successful_publication(tmp_path, monkeypatch, kind):
     wiki = _prepare(tmp_path, kind, omit="alpha")
     updated = _body("bravo", "Updated while publishing alpha")
     _source_path(tmp_path, kind, "bravo").write_text(updated, encoding="utf-8")
@@ -232,9 +230,7 @@ def test_corrupt_bulk_snapshot_fails_before_mutation(tmp_path, kind, corruption)
 
 @pytest.mark.parametrize("kind", ["skill", "agent"])
 @pytest.mark.parametrize("corruption", ["checksum", "missing-base"])
-def test_bulk_write_revalidates_after_cached_comparison(
-    tmp_path, monkeypatch, kind, corruption
-):
+def test_bulk_write_revalidates_after_cached_comparison(tmp_path, monkeypatch, kind, corruption):
     wiki = _prepare(tmp_path, kind, omit="bravo")
     load = wiki_bodies.load_merged_wiki_pages
     observed = []

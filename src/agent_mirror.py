@@ -312,8 +312,7 @@ def prune_orphans(
     destinations.update(
         wiki_dir / path
         for path in pages or {}
-        if path.startswith("converted-agents/")
-        and "/" not in path[len("converted-agents/") :]
+        if path.startswith("converted-agents/") and "/" not in path[len("converted-agents/") :]
     )
     results: list[MirrorResult] = []
     for dest in sorted(destinations):

@@ -11,6 +11,34 @@
 
 ## Checkpoint
 
+### Test-phase layout repair — 2026-10-13 (Asia/Jerusalem)
+
+- Starting head is `282fabe4381b41f489990a1e5a4ccfc6c0822305`; the worktree
+  was clean. The supplied preflight log stopped at check 4/20, `ruff format`,
+  before pytest. It named only `src/agent_mirror.py`,
+  `src/tests/fit/test_user_catalog.py`, `src/tests/test_mirror_pack_snapshots.py`
+  and `src/tests/test_packed_authoring_updates.py`.
+- Manually corrected line wrapping in those four files, preserving logic,
+  fixtures and all assertions. No product or test behavior repair was needed:
+  the focused batch passed **92 tests in 15.16s** before edits and **92 tests
+  in 16.50s** after edits, both exit 0:
+
+  ```bash
+  PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD/src" python -m pytest -q --no-cov \
+    -p no:cacheprovider src/tests/fit/test_user_catalog.py \
+    src/tests/test_mirror_pack_snapshots.py \
+    src/tests/test_packed_authoring_updates.py src/tests/test_agent_mirror.py
+  ```
+
+- The exact formatter failure was neither reproduced nor reverified here:
+  current test-phase instructions prohibit formatters, linters, static analysis
+  and broad gates. Formatting acceptance and authoritative preflight remain
+  unverified and owned by the outer executor. This is focused working-tree
+  evidence, not a committed-head gate or real-host/benchmark acceptance.
+- No new untracked test artifacts remain. Existing ignored caches were left
+  intact. Only this checkpoint changed after the final test run. No pipeline
+  control, delivery, paid evaluation or personal host configuration occurred.
+
 ### Bulk mirror review repair — 2026-10-13 (Asia/Jerusalem)
 
 - Starting head is `208f7de7922b8cf5020fdc2a786642880c463062`; the worktree

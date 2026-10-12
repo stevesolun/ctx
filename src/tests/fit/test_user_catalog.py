@@ -42,7 +42,10 @@ def _catalog(tmp_path: Path, entries: list[dict[str, object]] | None = None) -> 
     path = tmp_path / "user-catalog.json"
     path.write_text(
         json.dumps(
-            {"schema": USER_CATALOG_SCHEMA, "entries": entries if entries is not None else [_entry()]}
+            {
+                "schema": USER_CATALOG_SCHEMA,
+                "entries": entries if entries is not None else [_entry()],
+            }
         ),
         encoding="utf-8",
     )
@@ -75,7 +78,9 @@ def test_default_stays_empty_while_explicit_material_can_be_evaluated(
     authorized = authorize_experiment(experiment, expected_digest=experiment.plan.executable_digest)
     path.write_text("replaced after approval", encoding="utf-8")
     assert authorized.can_execute
-    assert authorized.candidates.candidates[1].capability_materials == treatment.capability_materials
+    assert (
+        authorized.candidates.candidates[1].capability_materials == treatment.capability_materials
+    )
 
 
 def test_explicit_candidate_source_and_materials_do_not_need_package_content(
@@ -126,7 +131,9 @@ def test_catalog_and_plan_identity_change_with_supplied_content(
     selected = first_source.retrieve(WorkObservation(signals=("python",)))[0]
     assert first_source.capability_materials is not None
     assert selected.source_digest == first_source.capability_materials[0].catalog_entry_digest
-    material_changed = replace(first_source, capability_materials=second_source.capability_materials)
+    material_changed = replace(
+        first_source, capability_materials=second_source.capability_materials
+    )
     assert first_source.catalog_snapshot_digest != material_changed.catalog_snapshot_digest
 
 
@@ -168,12 +175,16 @@ def test_supplied_identity_survives_fake_evaluation_apply_and_readback(
     repo = repo_with_history()
     installed = repo / ".claude" / "skills" / "current" / "SKILL.md"
     installed.parent.mkdir(parents=True)
-    installed.write_text("---\nname: current\n---\n\nPreserve current behavior.\n", encoding="utf-8")
+    installed.write_text(
+        "---\nname: current\n---\n\nPreserve current behavior.\n", encoding="utf-8"
+    )
     source = open_user_candidate_source(_catalog(tmp_path))
     assert source.capability_materials is not None
     material = replace(source.capability_materials[0], source_identity="custom#skill:local-testing")
     source = replace(source, capability_materials=(material,))
-    experiment = resolve_experiment(build_fit_profile(repo), candidate_source=source, budget_usd=500)
+    experiment = resolve_experiment(
+        build_fit_profile(repo), candidate_source=source, budget_usd=500
+    )
     baseline = experiment.candidates.baseline
     assert baseline is not None
     assert baseline.capability_materials[0].source_identity == (
@@ -196,7 +207,9 @@ def test_supplied_identity_survives_fake_evaluation_apply_and_readback(
         )
 
     monkeypatch.setattr("ctx.fit.providers.build_agent_driver", lambda **_kwargs: None)
-    monkeypatch.setattr("ctx.fit.live_runner.make_live_runner", lambda *_args, **_kwargs: fake_runner)
+    monkeypatch.setattr(
+        "ctx.fit.live_runner.make_live_runner", lambda *_args, **_kwargs: fake_runner
+    )
     authorized = authorize_experiment(experiment, expected_digest=experiment.plan.executable_digest)
     outcome = run_experiment(authorized, live=True)
     assert outcome.recommendation.winner_id == treatment.candidate_id
@@ -324,7 +337,10 @@ def test_cli_catalog_plans_without_bypassing_spend_gates(
 
     monkeypatch.setattr("ctx.fit.experiment.run_experiment", forbidden)
     repo = repo_with_history()
-    assert ctx_main(["fit", str(repo), "--catalog", str(_catalog(tmp_path)), "--json", *options]) == code
+    assert (
+        ctx_main(["fit", str(repo), "--catalog", str(_catalog(tmp_path)), "--json", *options])
+        == code
+    )
     payload = json.loads(capsys.readouterr().out)
     assert payload["plan"]["decision"] == decision
     assert payload["plan"]["candidate_count"] == 2
@@ -355,7 +371,16 @@ def test_cli_can_run_explicit_catalog_in_honest_simulation(
     monkeypatch.setattr("ctx.cli.fit._provider_available", lambda _model: False)
     repo = repo_with_history()
     result = ctx_main(
-        ["fit", str(repo), "--catalog", str(_catalog(tmp_path)), "--test", "--budget", "500", "--yes"]
+        [
+            "fit",
+            str(repo),
+            "--catalog",
+            str(_catalog(tmp_path)),
+            "--test",
+            "--budget",
+            "500",
+            "--yes",
+        ]
     )
     output = capsys.readouterr().out
     assert result == 0
