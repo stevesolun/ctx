@@ -11,6 +11,34 @@
 
 ## Checkpoint
 
+### Test-phase rollback typing repair — 2026-10-13 (Asia/Jerusalem)
+
+- Started clean at detached head `f217bec024e8e58be27473bb84ffba99060c5972`
+  in the outer run's worktree for `codex/bring-your-own-knowledge`. The supplied
+  preflight log passed formatting and Ruff, then stopped at check 6/20 with
+  one mypy assignment error in `wiki_bodies.py:156`.
+- `_replace_body` reused the preceding write loop's `str` variable `text` for
+  rollback values typed `str | None`. Renamed only the rollback target, None
+  check and restoration argument to `prior_text`; both restoration branches,
+  exact bytes and prior R1–R7 behavior are unchanged.
+- Existing skill/agent publication-failure tests passed **2 tests in 1.10s**
+  before the edit and **2 tests in 1.82s** afterward, both exit 0. They force
+  overlay failure and assert byte-for-byte snapshots, including CRLF content:
+
+  ```bash
+  PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD/src" python -m pytest -q --no-cov \
+    -p no:cacheprovider \
+    src/tests/test_packed_authoring_updates.py::test_mirror_publication_failure_restores_loose_body_and_active_packs
+  ```
+
+- The exact mypy failure was neither reproduced nor reverified locally:
+  this test phase prohibits static tools. Mypy and authoritative preflight
+  remain with the outer executor. This is focused working-tree evidence;
+  no broad-suite, real-host or comparative-benchmark acceptance is claimed.
+- No new worktree test artifacts remain; pre-existing ignored caches remain
+  intact. Only this checkpoint changed after the final test run. No pipeline
+  control, delivery, paid calls or personal host changes occurred.
+
 ### Test-phase layout repair — 2026-10-13 (Asia/Jerusalem)
 
 - Starting head is `282fabe4381b41f489990a1e5a4ccfc6c0822305`; the worktree

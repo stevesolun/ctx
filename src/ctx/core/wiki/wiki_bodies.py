@@ -153,10 +153,10 @@ def _replace_body(
                 if manifest is None:
                     raise WikiPackManifestError("active wiki base disappeared during body update")
     except Exception:
-        for path, text in old_contents.items():
-            if text is None:
+        for path, prior_text in old_contents.items():
+            if prior_text is None:
                 reject_symlink_path(path)
                 path.unlink(missing_ok=True)
             else:
-                safe_atomic_write_text(path, text, encoding="utf-8")
+                safe_atomic_write_text(path, prior_text, encoding="utf-8")
         raise
