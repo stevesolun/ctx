@@ -37,7 +37,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from ctx.utils._fs_utils import atomic_write_text as _atomic_write_text
+from ctx.core.wiki.wiki_bodies import active_wiki_pages, replace_agent_body
+from ctx.utils._fs_utils import reject_symlink_path
 from ctx_config import cfg
 from ctx.core.wiki.wiki_utils import validate_skill_name
 
@@ -188,6 +189,7 @@ def mirror_one(
         )
 
     try:
+        reject_symlink_path(source)
         text = source.read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
         return MirrorResult(
@@ -209,22 +211,23 @@ def mirror_one(
 
     dest_dir = wiki_dir / "converted-agents"
     dest = dest_dir / f"{slug}.md"
+    pages = active_wiki_pages(wiki_dir)
+    existing = pages.get(f"converted-agents/{slug}.md") if pages is not None else None
 
-    # Change detection via content hash — avoids rewriting 444 files
-    # every run when only a handful changed.
-    if dest.is_file() and not force:
+    if pages is None and dest.is_file():
+        reject_symlink_path(dest)
         try:
             existing = dest.read_text(encoding="utf-8", errors="replace")
         except OSError:
             existing = ""
-        if _sha256(existing) == _sha256(text):
-            return MirrorResult(
-                slug=slug,
-                status="unchanged",
-                source_path=str(source),
-                dest_path=str(dest),
-                bytes_copied=0,
-            )
+    if existing is not None and not force and _sha256(existing) == _sha256(text):
+        return MirrorResult(
+            slug=slug,
+            status="unchanged",
+            source_path=str(source),
+            dest_path=str(dest),
+            bytes_copied=0,
+        )
 
     if dry_run:
         return MirrorResult(
@@ -236,8 +239,7 @@ def mirror_one(
             message="dry-run: no files written",
         )
 
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    _atomic_write_text(dest, text)
+    replace_agent_body(wiki_dir, slug, text)
     return MirrorResult(
         slug=slug,
         status="mirrored",
@@ -299,10 +301,16 @@ def prune_orphans(
     bodies would quietly linger and become installable again.
     """
     mirror_dir = wiki_dir / "converted-agents"
-    if not mirror_dir.is_dir():
-        return []
+    pages = active_wiki_pages(wiki_dir)
+    destinations = set(mirror_dir.glob("*.md"))
+    destinations.update(
+        wiki_dir / path
+        for path in pages or {}
+        if path.startswith("converted-agents/")
+        and "/" not in path[len("converted-agents/") :]
+    )
     results: list[MirrorResult] = []
-    for dest in sorted(mirror_dir.glob("*.md")):
+    for dest in sorted(destinations):
         slug = dest.stem
         source = agents_dir / f"{slug}.md"
         if source.is_file():
@@ -319,7 +327,7 @@ def prune_orphans(
             )
             continue
         try:
-            dest.unlink()
+            replace_agent_body(wiki_dir, slug, None)
             results.append(
                 MirrorResult(
                     slug=slug,

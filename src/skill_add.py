@@ -19,6 +19,7 @@ import sys
 import yaml  # type: ignore[import-untyped]
 from datetime import datetime, timezone
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from batch_convert import convert_skill
 from ctx.core.entity_update import build_update_review, render_update_review
@@ -29,13 +30,19 @@ from ctx_config import cfg
 from intake_pipeline import IntakeRejected, check_intake, record_embedding
 from ctx.adapters.claude_code.install.install_utils import safe_copy_file
 from ctx.core.wiki.wiki_queue import enqueue_entity_upsert
+from ctx.core.wiki.wiki_bodies import active_wiki_pages, replace_skill_body, skill_body_path
 from ctx.core.wiki.wiki_packs import (
     load_merged_wiki_pages,
     write_active_wiki_overlay_pack,
 )
 from ctx.core.wiki.wiki_sync import append_log, ensure_wiki, update_index
 from ctx.core.wiki.wiki_utils import parse_frontmatter, validate_skill_name
-from ctx.utils._fs_utils import reject_symlink_path, safe_atomic_write_text, secure_directory
+from ctx.utils._fs_utils import (
+    ensure_secure_directory,
+    reject_symlink_path,
+    safe_atomic_write_text,
+    secure_directory,
+)
 
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -111,7 +118,11 @@ def _install_skill_snapshot(
 def mirror_install_body(installed_path: Path, name: str, converted_root: Path) -> Path:
     """Mirror a short installed SKILL.md into the wiki install source tree."""
     dest = converted_root / name / "SKILL.md"
-    safe_copy_file(installed_path, dest, dest_root=converted_root)
+    replace_skill_body(
+        converted_root.parent,
+        name,
+        {"SKILL.md": _read_skill_snapshot(installed_path)},
+    )
     return dest
 
 
@@ -135,17 +146,26 @@ def maybe_convert(
     Returns:
         (was_converted, output_dir | None)
     """
+    validate_skill_name(name)
     if line_count <= cfg.line_threshold:
         return False, None
 
     output_dir = converted_root / name
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # batch_convert.convert_skill operates on the source path and writes to output_dir
-    result = convert_skill(installed_path, output_dir)
-
-    if result.get("status") == "converted":
-        return True, output_dir
+    active_wiki_pages(converted_root.parent)
+    ensure_secure_directory(converted_root)
+    with TemporaryDirectory(prefix=f".{name}-", dir=converted_root) as staging_dir:
+        staged = Path(staging_dir)
+        result = convert_skill(installed_path, staged)
+        if result.get("status") == "converted":
+            if not (staged / "SKILL.md").is_file():
+                raise ValueError("skill conversion produced no SKILL.md")
+            files = {
+                path.relative_to(staged).as_posix(): _read_skill_snapshot(path)
+                for path in sorted(staged.rglob("*"))
+                if path.is_file() and skill_body_path(path.relative_to(staged).as_posix())
+            }
+            replace_skill_body(converted_root.parent, name, files)
+            return True, output_dir
 
     return False, None
 
@@ -263,11 +283,9 @@ def _read_entity_page_text(wiki_path: Path, name: str) -> str | None:
     page = wiki_path / relpath
     if page.exists():
         reject_symlink_path(page)
-    packs_dir = wiki_path / "wiki-packs"
-    if packs_dir.is_dir():
-        pages = load_merged_wiki_pages(packs_dir)
-        if relpath in pages:
-            return pages[relpath]
+    pages = active_wiki_pages(wiki_path)
+    if pages is not None:
+        return pages.get(relpath)
     if page.exists():
         return page.read_text(encoding="utf-8", errors="replace")
     return None
@@ -450,6 +468,7 @@ def add_skill(
 
     content = snapshot_content.removeprefix("\ufeff")
     line_count = len(content.splitlines())
+    active_wiki_pages(wiki_path)
 
     installed_path = skills_dir / name / "SKILL.md"
     entity_page = wiki_path / "entities" / "skills" / f"{name}.md"

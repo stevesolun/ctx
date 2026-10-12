@@ -248,16 +248,26 @@ class TestMaybeConvert:
         assert was_converted is False
         assert path is None
 
-    def test_above_threshold_success(self, tmp_path):
+    def test_above_threshold_success(self, tmp_path, monkeypatch):
         installed = tmp_path / "SKILL.md"
         # Need > 180 lines to trigger conversion. Create content with many lines.
         lines = ["# long skill\n"] + [f"line {i}\n" for i in range(200)]
         installed.write_text("".join(lines))
         converted_root = tmp_path / "converted"
-        _fake_batch_convert.convert_skill.return_value = {"status": "converted"}
+
+        def convert(source, output_dir):
+            assert source == installed
+            (output_dir / "references").mkdir(parents=True)
+            (output_dir / "SKILL.md").write_text("# Converted skill\n")
+            (output_dir / "references" / "step.md").write_text("# Converted step\n")
+            return {"status": "converted"}
+
+        monkeypatch.setattr(_sa, "convert_skill", convert)
         was_converted, path = maybe_convert(installed, "my-skill", converted_root, 201)
         assert was_converted is True
         assert path == converted_root / "my-skill"
+        assert (path / "SKILL.md").read_text() == "# Converted skill\n"
+        assert (path / "references" / "step.md").read_text() == "# Converted step\n"
 
     def test_above_threshold_failure(self, tmp_path):
         installed = tmp_path / "SKILL.md"
@@ -924,7 +934,15 @@ class TestAddSkill:
         _fake_intake.check_intake.return_value = decision
         _fake_intake.record_embedding.return_value = None
         _fake_intake.record_embedding.side_effect = None
-        _fake_batch_convert.convert_skill.return_value = {"status": "converted"}
+
+        def convert(installed_path, output_dir):
+            assert installed_path == skills_dir / "myskill" / "SKILL.md"
+            (output_dir / "references").mkdir(parents=True)
+            (output_dir / "SKILL.md").write_text("# Converted skill\n")
+            (output_dir / "references" / "step.md").write_text("# Converted step\n")
+            return {"status": "converted"}
+
+        monkeypatch.setattr(_sa, "convert_skill", convert)
         monkeypatch.setattr(_sa, "update_index", MagicMock())
         monkeypatch.setattr(_sa, "append_log", MagicMock())
 
@@ -952,6 +970,9 @@ class TestAddSkill:
             skills_dir=skills_dir,
         )
         assert result["converted"] is True
+        converted = wiki / "converted" / "myskill"
+        assert (converted / "SKILL.md").read_text() == "# Converted skill\n"
+        assert (converted / "references" / "step.md").read_text() == "# Converted step\n"
 
     def test_existing_skill_review_skips_without_mutating_files(self, tmp_path, monkeypatch):
         wiki = self._setup_wiki(tmp_path)

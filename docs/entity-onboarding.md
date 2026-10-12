@@ -108,6 +108,13 @@ Read changed fields, benefits, regressions, source URLs, and security findings.
 Use `--update-existing` only after review; `--skip-existing` preserves an
 existing record in a batch.
 
+With active wiki packs, approved skill and agent updates publish their rich
+bodies along with the entity record. Skill replacements also retire obsolete
+packed reference pages. Rebuilds then use that reviewed content rather than
+stale loose mirrors. Explicit mirror refresh and prune commands maintain the
+same packed-body authority; pruning a mirror does not remove its catalog card
+or uninstall a host tool. Corrupt or incomplete active packs block mutation.
+
 Removing a catalog record, unloading runtime context, and uninstalling files
 are separate operations. Use the local dashboard or the matching maintenance
 command only after checking which action it performs. Keep backups or version

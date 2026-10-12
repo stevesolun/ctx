@@ -43,7 +43,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from ctx.utils._fs_utils import atomic_write_text as _atomic_write_text
+from ctx.core.wiki.wiki_bodies import active_wiki_pages, replace_skill_body
+from ctx.utils._fs_utils import reject_symlink_path
 from ctx_config import cfg
 from ctx.core.wiki.wiki_utils import validate_skill_name
 
@@ -139,6 +140,7 @@ def mirror_one(
         )
 
     try:
+        reject_symlink_path(source)
         body = source.read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
         return MirrorResult(
@@ -167,24 +169,29 @@ def mirror_one(
 
     dest_dir = _converted_dir(wiki_dir, slug)
     dest = dest_dir / "SKILL.md"
+    pages = active_wiki_pages(wiki_dir)
+    prefix = f"converted/{slug}/"
+    existing_pages = {
+        path: text for path, text in (pages or {}).items() if path.startswith(prefix)
+    }
+    existing_dir = bool(existing_pages) if pages is not None else dest_dir.is_dir()
 
-    # Existing converted/<slug>/ dir usually means the long-skill pipeline
-    # produced it. Don't overwrite without --force: an accidental mirror
-    # call must never replace a pipeline-converted SKILL.md with raw body.
-    if dest_dir.is_dir() and not force:
-        if dest.is_file():
+    if existing_dir and not force:
+        existing = existing_pages.get(prefix + "SKILL.md")
+        if pages is None and dest.is_file():
+            reject_symlink_path(dest)
             try:
                 existing = dest.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 existing = ""
-            if existing == body:
-                return MirrorResult(
-                    slug=slug,
-                    status="unchanged",
-                    source_path=str(source),
-                    dest_path=str(dest),
-                    body_lines=lines,
-                )
+        if existing == body:
+            return MirrorResult(
+                slug=slug,
+                status="unchanged",
+                source_path=str(source),
+                dest_path=str(dest),
+                body_lines=lines,
+            )
         return MirrorResult(
             slug=slug,
             status="skipped-existing-pipeline",
@@ -204,8 +211,7 @@ def mirror_one(
             message="dry-run: no files written",
         )
 
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    _atomic_write_text(dest, body)
+    replace_skill_body(wiki_dir, slug, {"SKILL.md": body})
     return MirrorResult(
         slug=slug,
         status="mirrored",
@@ -258,19 +264,23 @@ def prune_orphans(
     content derived from the original, not a raw mirror.
     """
     mirror_root = wiki_dir / "converted"
-    if not mirror_root.is_dir():
-        return []
+    pages = active_wiki_pages(wiki_dir)
+    directories = {path for path in mirror_root.glob("*") if path.is_dir()}
+    directories.update(
+        mirror_root / path.split("/")[1]
+        for path in pages or {}
+        if path.startswith("converted/") and len(path.split("/")) >= 3
+    )
     results: list[MirrorResult] = []
-    for conv_dir in sorted(mirror_root.iterdir()):
-        if not conv_dir.is_dir():
-            continue
+    for conv_dir in sorted(directories):
         slug = conv_dir.name
         local_src = skills_dir / slug / "SKILL.md"
         if local_src.is_file():
             continue  # still present upstream
-        # Don't touch long-skill pipelines — they have references/ or
-        # other siblings beyond SKILL.md.
-        contents = {p.name for p in conv_dir.iterdir()}
+        prefix = f"converted/{slug}/"
+        contents = {path[len(prefix) :] for path in pages or {} if path.startswith(prefix)}
+        if conv_dir.is_dir():
+            contents.update(path.name for path in conv_dir.iterdir())
         if contents and contents != {"SKILL.md"}:
             continue
         if dry_run:
@@ -285,9 +295,9 @@ def prune_orphans(
             )
             continue
         try:
-            for f in conv_dir.iterdir():
-                f.unlink()
-            conv_dir.rmdir()
+            replace_skill_body(wiki_dir, slug, {})
+            if conv_dir.is_dir():
+                conv_dir.rmdir()
             results.append(
                 MirrorResult(
                     slug=slug,

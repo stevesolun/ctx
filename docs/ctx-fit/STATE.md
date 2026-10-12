@@ -11,7 +11,80 @@
 
 ## Checkpoint
 
-### Active review repair — 2026-10-13 (Asia/Jerusalem)
+### Follow-up review repair checkpoint — 2026-10-13 (Asia/Jerusalem)
+
+- Starting head is `0f1bca67f217949894bd361d5717a24cb695277d`; the worktree
+  was clean when this follow-up began. The first repair batch below is committed.
+  The outer executor still owns all later validation and delivery phases.
+- The owner explicitly authorized completing R3's authoring/mirror side under
+  the existing rich-content preservation contract, plus the mechanical R6
+  supplied-material validation fix. Approval-only installations, empty/offline
+  defaults and all prior accepted R1/R2/R4/R5 repairs remain unchanged.
+- R3 was a write-ownership gap: packed rich content is authoritative, but
+  approved author updates and mirror pruning changed only loose bodies.
+  R6 was an admission/reader invariant mismatch: a supplied treatment could
+  carry provenance that the applied-sidecar reader rejected after evaluation.
+- Incoming evidence: the owner reports 15 R2/R3 reader-side tests passed on
+  `0f1bca67` in 1.15s. Independent R1 replay accepted stable local-catalog
+  previews, captured approved bytes after file mutation, malformed-body
+  refusal and no implicit data/install behavior. It did not cover custom
+  supplied-material identity. This is prior-tree evidence, not proof of the
+  follow-up repairs.
+- Both repairs are applied; disjoint source/test writers are finished. Approved
+  skill/agent authoring and explicit mirror updates publish rich bodies into
+  active overlays. Fresh staged conversion snapshots retire obsolete references;
+  mirror pruning also handles packed-only bodies. Deletions stay scoped to the
+  selected body's managed files. Authoritative readers still reject stale loose
+  content. Corrupt or missing-base packs block mutation before installation.
+- Body publication rejects empty Markdown and restores prior loose bytes,
+  including line endings, if overlay publication fails. Authoring retains its
+  existing multi-step completion semantics: approved installed content can be
+  newer than the wiki if a later publication operation fails; this repair does
+  not introduce a transaction across installation and wiki authoring.
+- Treatment admission and applied-sidecar loading now share the requirement
+  that material provenance ends in `#<capability_id>`. Invalid supplied and
+  explicit treatments fail before evaluation or apply; repository-baseline
+  identities remain accepted. Simulated execution covers preview, authorization,
+  evaluation, apply and sidecar read-back with exact material identity.
+- Independent read-only review accepted both repairs with no remaining material
+  finding; it ran no checks. The coordinator's focused batch on the frozen
+  source changes above `0f1bca67` reported **304 passed, one failed in 179.40s**:
+
+  ```bash
+  PYTHONPATH="$PWD/src" python -m pytest -q --no-cov \
+    src/tests/test_packed_authoring_updates.py \
+    src/tests/test_skill_add.py \
+    src/tests/test_agent_add.py \
+    src/tests/test_skill_mirror.py \
+    src/tests/test_agent_mirror.py \
+    src/tests/test_wiki_graphify_packs.py \
+    src/tests/fit/test_user_catalog.py \
+    src/tests/fit/test_applied_configuration.py \
+    src/tests/fit/test_candidates.py \
+    src/tests/fit/test_apply.py
+  ```
+
+- The sole failure was an older successful-conversion mock that returned success
+  without writing `SKILL.md`; the new staging guard correctly refused it. After
+  repairing only that fixture, the affected-file rerun passed **62 tests in
+  2.19s**, exit 0:
+
+  ```bash
+  PYTHONPATH="$PWD/src" python -m pytest -q --no-cov src/tests/test_skill_add.py
+  ```
+
+- All 24 new packed-authoring cases passed in the first batch, including actual
+  authoring command updates, repeated rebuilds, retired references, packed-only
+  prune, corruption refusal and publication-failure rollback. No source changed
+  after that batch. This is local repair evidence, not a fresh committed-head
+  gate; the checkpoint alone changed after the final rerun.
+- Complete suite, lint/type/format, documentation build, authoritative preflight
+  and GitHub delivery remain with the outer executor. No paid evaluation,
+  personal host reconfiguration, automatic installation, pipeline control,
+  history rewriting, PR286 mutation, merge, tag or publication occurred here.
+  Real Codex/Claude UI host acceptance and comparative savings remain unverified.
+
+### First review repair checkpoint — 2026-10-13 (Asia/Jerusalem)
 
 - This isolated worktree is the review phase of the active outer no-mistakes
   run on `codex/bring-your-own-knowledge`, starting at

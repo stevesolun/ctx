@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -92,6 +93,21 @@ def test_valid_manifest_loads_only_exact_candidate_user_context(tmp_path: Path) 
     assert candidate.capability_materials[0].content in loaded.user_context
     assert candidate.selection_reason not in loaded.user_context
     assert candidate.evidence[0] not in loaded.user_context
+
+
+def test_sidecar_requires_source_fragment_even_for_baseline(tmp_path: Path) -> None:
+    candidate = _candidate()
+    material = candidate.capability_materials[0]
+    candidate = replace(
+        candidate,
+        candidate_id="baseline",
+        role="baseline",
+        capability_materials=(replace(material, source_identity=material.capability_id),),
+    )
+    _write_manifest(tmp_path, _payload(candidate))
+
+    with pytest.raises(AppliedConfigurationError, match="source_identity does not name"):
+        load_applied_configuration(tmp_path)
 
 
 def test_applied_configuration_is_found_from_a_repository_subdirectory(tmp_path: Path) -> None:

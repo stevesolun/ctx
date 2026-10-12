@@ -103,8 +103,8 @@ reconcile your records after you configure the desired backend.
 When active wiki packs exist, rebuilds use their validated merged view,
 including overlays and deletions. Stale loose Markdown files do not override
 that view. Use [pack-aware authoring](entity-onboarding.md#add-records-you-own)
-to update metadata; corrupt or incomplete active packs stop the rebuild rather
-than replacing your knowledge with an empty graph.
+to update metadata and reviewed skill/agent bodies; corrupt or incomplete active
+packs stop the rebuild rather than replacing your knowledge with an empty graph.
 
 ## Querying
 

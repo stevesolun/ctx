@@ -32,13 +32,13 @@ from ctx.adapters.claude_code.install.install_utils import safe_copy_file
 from intake_pipeline import IntakeRejected, check_intake, record_embedding
 from wiki_batch_entities import generate_agent_page
 from ctx.core.wiki.wiki_queue import enqueue_entity_upsert
+from ctx.core.wiki.wiki_bodies import active_wiki_pages, replace_agent_body
 from ctx.core.wiki.wiki_packs import (
-    load_merged_wiki_pages,
     write_active_wiki_overlay_pack,
 )
 from ctx.core.wiki.wiki_sync import append_log, ensure_wiki, update_index
 from ctx.core.wiki.wiki_utils import validate_skill_name
-from ctx.utils._fs_utils import reject_symlink_path, safe_atomic_write_text
+from ctx.utils._fs_utils import reject_symlink_path, safe_atomic_write_text, secure_directory
 
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -61,7 +61,10 @@ def mirror_agent_body(installed_path: Path, wiki_path: Path, name: str) -> Path:
     """Mirror the installed agent body into the wiki install source tree."""
     mirror_root = wiki_path / "converted-agents"
     dest = mirror_root / f"{name}.md"
-    safe_copy_file(installed_path, dest, dest_root=mirror_root)
+    reject_symlink_path(installed_path)
+    with secure_directory(installed_path.parent) as directory:
+        content = directory.read_text(installed_path.name, encoding="utf-8", errors="replace")
+    replace_agent_body(wiki_path, name, content)
     return dest
 
 
@@ -85,11 +88,9 @@ def write_entity_page(wiki_path: Path, name: str, content: str) -> bool:
 
 def _read_entity_page_text(wiki_path: Path, name: str) -> str | None:
     relpath = f"entities/agents/{name}.md"
-    packs_dir = wiki_path / "wiki-packs"
-    if packs_dir.is_dir():
-        pages = load_merged_wiki_pages(packs_dir)
-        if relpath in pages:
-            return pages[relpath]
+    pages = active_wiki_pages(wiki_path)
+    if pages is not None:
+        return pages.get(relpath)
     entity_page = wiki_path / relpath
     if entity_page.exists():
         return entity_page.read_text(encoding="utf-8", errors="replace")
@@ -142,6 +143,7 @@ def add_agent(
 
     content = source_path.read_text(encoding="utf-8-sig", errors="replace")
     line_count = len(content.splitlines())
+    active_wiki_pages(wiki_path)
 
     installed_path = agents_dir / f"{name}.md"
     has_existing = installed_path.exists() or _read_entity_page_text(wiki_path, name) is not None

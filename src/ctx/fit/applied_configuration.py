@@ -181,9 +181,7 @@ def _capability_material(value: object, index: int) -> CapabilityMaterial:
     try:
         capability_id = _string(data["capability_id"], f"{label}.capability_id")
         source_identity = _string(data["source_identity"], f"{label}.source_identity")
-        if source_identity.rpartition("#")[2] != capability_id:
-            raise _fail(f"{label}.source_identity does not name its capability ID")
-        return CapabilityMaterial(
+        material = CapabilityMaterial(
             capability_id=capability_id,
             delivery_mode=cast(
                 CapabilityDeliveryMode,
@@ -196,6 +194,9 @@ def _capability_material(value: object, index: int) -> CapabilityMaterial:
             content=content,
             content_sha256=_string(data["content_sha256"], f"{label}.content_sha256"),
         )
+        if not material.source_identity_names_capability:
+            raise _fail(f"{label}.source_identity does not name its capability ID")
+        return material
     except ValueError as exc:
         raise _fail(f"{label}: {exc}") from exc
 

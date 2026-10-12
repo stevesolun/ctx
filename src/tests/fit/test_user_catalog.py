@@ -8,11 +8,15 @@ import pytest
 
 from ctx.cli.run import main as ctx_main
 from ctx.engine.planner import BoundedCapabilityPlanner, WorkObservation
+from ctx.fit.applied_configuration import load_applied_configuration
+from ctx.fit.apply import apply_plan, plan_apply
 from ctx.fit.candidates import (
     MAX_CANDIDATE_USER_CONTEXT_BYTES,
+    CandidateConfiguration,
     generate_candidates,
     render_candidate_user_context,
 )
+from ctx.fit.execution import TrialResult
 from ctx.fit.experiment import ModelPrice, authorize_experiment, resolve_experiment, run_experiment
 from ctx.fit.profile import build_fit_profile
 from ctx.fit.release_catalog import (
@@ -21,6 +25,7 @@ from ctx.fit.release_catalog import (
     open_release_candidate_source,
     open_user_candidate_source,
 )
+from ctx.fit.tasks import FitTask
 
 
 def _entry(**overrides: object) -> dict[str, object]:
@@ -123,6 +128,97 @@ def test_catalog_and_plan_identity_change_with_supplied_content(
     assert selected.source_digest == first_source.capability_materials[0].catalog_entry_digest
     material_changed = replace(first_source, capability_materials=second_source.capability_materials)
     assert first_source.catalog_snapshot_digest != material_changed.catalog_snapshot_digest
+
+
+@pytest.mark.parametrize(
+    "source_identity",
+    [
+        "custom",
+        "custom#skill:different",
+        "skill:local-testing",
+        "repository:.claude/skills/local-testing/SKILL.md",
+    ],
+)
+def test_supplied_treatment_identity_is_rejected_at_admission(
+    tmp_path: Path, repo_with_history, source_identity: str
+) -> None:
+    profile = build_fit_profile(repo_with_history())
+    source = open_user_candidate_source(_catalog(tmp_path))
+    valid = resolve_experiment(profile, candidate_source=source, budget_usd=500)
+    assert source.capability_materials is not None
+    invalid_material = replace(source.capability_materials[0], source_identity=source_identity)
+    invalid_source = replace(source, capability_materials=(invalid_material,))
+
+    with pytest.raises(ValueError, match="source identity does not name its capability ID"):
+        generate_candidates(
+            profile,
+            BoundedCapabilityPlanner(source=invalid_source),
+            model=valid.model,
+            capability_materials=invalid_source.capability_materials,
+        )
+    with pytest.raises(ValueError, match="source identity does not name its capability ID"):
+        resolve_experiment(profile, candidate_source=invalid_source, budget_usd=500)
+    with pytest.raises(ValueError, match="source identity does not name its capability ID"):
+        replace(valid.candidates.candidates[1], capability_materials=(invalid_material,))
+
+
+def test_supplied_identity_survives_fake_evaluation_apply_and_readback(
+    tmp_path: Path, repo_with_history, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = repo_with_history()
+    installed = repo / ".claude" / "skills" / "current" / "SKILL.md"
+    installed.parent.mkdir(parents=True)
+    installed.write_text("---\nname: current\n---\n\nPreserve current behavior.\n", encoding="utf-8")
+    source = open_user_candidate_source(_catalog(tmp_path))
+    assert source.capability_materials is not None
+    material = replace(source.capability_materials[0], source_identity="custom#skill:local-testing")
+    source = replace(source, capability_materials=(material,))
+    experiment = resolve_experiment(build_fit_profile(repo), candidate_source=source, budget_usd=500)
+    baseline = experiment.candidates.baseline
+    assert baseline is not None
+    assert baseline.capability_materials[0].source_identity == (
+        "repository:.claude/skills/current/SKILL.md"
+    )
+    assert "Preserve current behavior." in render_candidate_user_context(baseline)
+    treatment = experiment.candidates.candidates[1]
+    previewed = treatment.to_dict()
+    observed: list[CandidateConfiguration] = []
+
+    def fake_runner(candidate: CandidateConfiguration, task: FitTask, index: int) -> TrialResult:
+        observed.append(candidate)
+        return TrialResult(
+            candidate_id=candidate.candidate_id,
+            task_id=task.task_id,
+            trial_index=index,
+            outcome="failed" if candidate.role == "baseline" else "verified",
+            cost_usd=0.01,
+            detail="Synthetic identity round-trip regression fixture.",
+        )
+
+    monkeypatch.setattr("ctx.fit.providers.build_agent_driver", lambda **_kwargs: None)
+    monkeypatch.setattr("ctx.fit.live_runner.make_live_runner", lambda *_args, **_kwargs: fake_runner)
+    authorized = authorize_experiment(experiment, expected_digest=experiment.plan.executable_digest)
+    outcome = run_experiment(authorized, live=True)
+    assert outcome.recommendation.winner_id == treatment.candidate_id
+    assert treatment in observed
+    assert all(
+        candidate.to_dict() == previewed
+        for candidate in observed
+        if candidate.candidate_id == treatment.candidate_id
+    )
+
+    plan = plan_apply(outcome.recommendation, outcome.candidates, repo_path=repo)
+    assert plan.can_apply
+    assert json.loads(plan.artifacts[0].content)["candidate"] == previewed
+    apply_plan(plan, repo)
+    loaded = load_applied_configuration(repo)
+    assert loaded is not None
+    assert loaded.candidate == treatment
+    assert loaded.configuration_hash == treatment.configuration_hash
+    assert loaded.user_context == render_candidate_user_context(treatment)
+    followup = resolve_experiment(build_fit_profile(repo), candidate_source=source, budget_usd=500)
+    assert followup.candidates.baseline is not None
+    assert followup.candidates.baseline.capability_materials == (material,)
 
 
 def test_empty_or_unmatched_user_catalog_abstains(tmp_path: Path, repo_with_history) -> None:

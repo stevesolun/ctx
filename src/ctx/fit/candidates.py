@@ -184,6 +184,10 @@ class CapabilityMaterial:
     def content_bytes(self) -> int:
         return len(self.content.encode("utf-8"))
 
+    @property
+    def source_identity_names_capability(self) -> bool:
+        return self.source_identity.endswith(f"#{self.capability_id}")
+
     def to_dict(self) -> dict[str, object]:
         return {
             "capability_id": self.capability_id,
@@ -513,6 +517,12 @@ class CandidateConfiguration:
             missing = sorted(set(self.capability_ids) - set(material_ids))
             detail = f": {', '.join(missing)}" if missing else ""
             raise ValueError(f"candidate is missing exact capability material{detail}")
+        if self.role != "baseline":
+            for material in self.capability_materials:
+                if not material.source_identity_names_capability:
+                    raise ValueError(
+                        "treatment capability source identity does not name its capability ID"
+                    )
         instruction_paths = tuple(item.path for item in self.instruction_materials)
         if len(set(instruction_paths)) != len(instruction_paths):
             raise ValueError("candidate instruction material contains duplicate paths")
