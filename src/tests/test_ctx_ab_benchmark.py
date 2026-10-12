@@ -8274,8 +8274,13 @@ def test_official_verdict_rejects_post_attestation_artifact_drift(
 def test_authenticated_freeze_drives_all_thirty_pairs_and_sixty_arms(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    historical_benchmark_artifacts: tuple[Path, Path],
 ) -> None:
     monkeypatch.setattr(benchmark.sys, "platform", "darwin")
+    archive, _availability = historical_benchmark_artifacts
+    # This dispatcher test uses explicit test-owned bytes, not release downloads.
+    # The real manifest/hydration boundary is exercised independently above.
+    monkeypatch.setattr(benchmark, "hydrate_production_catalog_archive", lambda: archive)
     holdout, paths = _official_holdout_fixture(tmp_path)
     result_by_key = {
         (row["scenario"], row["trial"], row["arm"]): dict(row)

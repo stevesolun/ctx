@@ -106,6 +106,8 @@ def test_wiki_graphify_includes_harness_nodes(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    import ctx_config
+
     entities = tmp_path / "entities"
     skills_dir = entities / "skills"
     agents_dir = entities / "agents"
@@ -114,16 +116,22 @@ def test_wiki_graphify_includes_harness_nodes(
     for directory in (skills_dir, agents_dir, mcp_dir, harness_dir):
         directory.mkdir(parents=True)
 
+    # Pack discovery and semantic caches must use the fixture, never the user's wiki.
+    monkeypatch.setattr(wg, "WIKI_DIR", tmp_path)
+    monkeypatch.setattr(wg, "GRAPH_OUT", tmp_path / "graphify-out")
+    monkeypatch.setattr(wg, "CONCEPTS_DIR", tmp_path / "concepts")
     monkeypatch.setattr(wg, "SKILL_ENTITIES", skills_dir)
     monkeypatch.setattr(wg, "AGENT_ENTITIES", agents_dir)
     monkeypatch.setattr(wg, "MCP_ENTITIES", mcp_dir)
     monkeypatch.setattr(wg, "HARNESS_ENTITIES", harness_dir)
     monkeypatch.setattr(wg, "QUALITY_SIDECAR_DIR", tmp_path / "quality")
+    monkeypatch.setattr(ctx_config.cfg, "graph_edge_weight_semantic", 0.0)
 
     _write_harness(harness_dir / "text-to-cad.md")
 
     graph, _ = wg.build_graph(incremental=False)
 
+    assert set(graph) == {"harness:text-to-cad"}
     assert graph.nodes["harness:text-to-cad"]["type"] == "harness"
     assert "cad" in graph.nodes["harness:text-to-cad"]["tags"]
     assert wg._entity_page_path("harness", "text-to-cad") == (harness_dir / "text-to-cad.md")

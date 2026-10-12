@@ -310,6 +310,8 @@ def test_build_graph_produces_edges_on_small_fixture(tmp_path, monkeypatch) -> N
     at least one edge. Catches any future refactor that breaks the
     tag->edge flow entirely.
     """
+    import ctx_config
+
     wiki = tmp_path / "wiki"
     (wiki / "entities" / "skills").mkdir(parents=True)
     (wiki / "entities" / "agents").mkdir(parents=True)
@@ -334,6 +336,9 @@ def test_build_graph_produces_edges_on_small_fixture(tmp_path, monkeypatch) -> N
     )
     write(wiki / "entities" / "agents" / "code-reviewer.md", "code-reviewer", ["review", "python"])
 
+    monkeypatch.setattr(wg, "WIKI_DIR", wiki)
+    monkeypatch.setattr(wg, "GRAPH_OUT", wiki / "graphify-out")
+    monkeypatch.setattr(wg, "CONCEPTS_DIR", wiki / "concepts")
     monkeypatch.setattr(wg, "SKILL_ENTITIES", wiki / "entities" / "skills")
     monkeypatch.setattr(wg, "AGENT_ENTITIES", wiki / "entities" / "agents")
     # Repoint MCP_ENTITIES too — without this, build_graph would
@@ -342,12 +347,8 @@ def test_build_graph_produces_edges_on_small_fixture(tmp_path, monkeypatch) -> N
     monkeypatch.setattr(wg, "MCP_ENTITIES", wiki / "entities" / "mcp-servers")
     monkeypatch.setattr(wg, "HARNESS_ENTITIES", wiki / "entities" / "harnesses")
     monkeypatch.setattr(wg, "QUALITY_SIDECAR_DIR", tmp_path / "sidecars")
-    # Isolation: bypass any prior graph.pickle in the user's real
-    # ~/.claude/skill-wiki/ so the test sees the fresh fixture only.
-    # Without this, patch_graph would inherit the 13K-node real graph
-    # and remove every node not present in the 4-entity fixture,
-    # leaving the result at the mercy of the live pickle's state.
-    monkeypatch.setattr(wg, "load_prior_graph", lambda: None)
+    # This test exercises tag edges, not model/network-dependent similarity.
+    monkeypatch.setattr(ctx_config.cfg, "graph_edge_weight_semantic", 0.0)
 
     G, _ = wg.build_graph(incremental=False)
 

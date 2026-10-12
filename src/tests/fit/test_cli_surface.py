@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -16,14 +17,38 @@ HIDDEN_BUT_WORKING = ("run", "resume", "sessions")
 
 
 def _ctx(*args: str) -> subprocess.CompletedProcess[str]:
+    # A gate checkout may share a Python environment installed editable from
+    # another tree. Exercise this source tree, not that editable installation.
+    environment = {**os.environ, "PYTHONPATH": str(ROOT / "src")}
     return subprocess.run(
         [sys.executable, "-m", "ctx", *args],
         cwd=ROOT,
+        env=environment,
         capture_output=True,
         text=True,
         timeout=60,
         check=False,
     )
+
+
+@pytest.mark.parametrize("foreign_path", [False, True])
+def test_subprocess_imports_this_checkout_regardless_of_inherited_pythonpath(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, foreign_path: bool
+) -> None:
+    if foreign_path:
+        package = tmp_path / "ctx"
+        package.mkdir()
+        (package / "__init__.py").write_text("", encoding="utf-8")
+        (package / "__main__.py").write_text("print('foreign checkout')\n", encoding="utf-8")
+        monkeypatch.setenv("PYTHONPATH", str(tmp_path))
+    else:
+        monkeypatch.delenv("PYTHONPATH", raising=False)
+
+    result = _ctx("--help")
+
+    assert result.returncode == 0
+    assert "recommend" in result.stdout.splitlines()[0]
+    assert "foreign checkout" not in result.stdout
 
 
 def test_help_advertises_only_the_product_surface() -> None:

@@ -74,6 +74,39 @@
 - Historical benchmark representative replay: 11 pass in 39.14s, including
   three previously drift-sensitive cases; source hashes unchanged before/after.
   The full parameterized suite remains for the committed gate, not assumed green.
+- Implementation committed as `e88dd835376a595aeaad5032c8a444320baa116b`.
+  Its clean committed fast gate completed in 564.122s: 11/12 lanes passed;
+  unit lane failed with 9 failures, 9,501 passes, five skips and 92.03% coverage.
+  This is a failed acceptance gate, not a release. Remaining failures are one
+  historical holdout hydration fixture, three CLI subprocesses importing the
+  older editable checkout, three Fit diagnostic fixture preconditions, one
+  graphify fixture retaining the personal wiki root, and one obsolete mandatory
+  graph-release-manifest expectation. Five disjoint repair lanes are active;
+  no broad retry until the repair batch is independently exercised.
+- Exact `e88dd835` installed-wheel, docs/browser, graph, telemetry, similarity,
+  contract, canary, static, policy and packaging lanes passed. Two actual package
+  builds reproduced identical hashes; wheel 1,542,952 bytes and source archive
+  1,364,031 bytes. Coordinator replayed the exact publish content inspector:
+  no downloaded corpus, retired catalog seeds or tests-only fixtures included.
+  Artifacts retain version 1.0.21 but are unreleased branch builds, not a new
+  PyPI release. No real paid host turn or comparative savings claim is certified.
+- Delivery branch remains local and unpushed. AXI home confirms no active run
+  owns it; the old failed audit run is untouched. After focused repairs and a
+  fresh committed fast gate, the no-mistakes pipeline must run the authoritative
+  preflight, independent review and GitHub delivery/checks.
+- All nine failures now have scoped test-only repairs. CLI children pin the
+  tested source tree; graph tests isolate every wiki/cache root; three Fit
+  readiness scenarios and one historical benchmark explicitly provide their
+  old catalog preconditions; LFS acceptance now pins empty infrastructure.
+  Added unpatched empty-catalog refusal and foreign-PYTHONPATH regressions.
+  Coordinator combined replay: 57 passed in 31.75s; Ruff/format/diff checks pass.
+  Synthetic-only export replay also passed without any ignored release archive.
+  Production source is unchanged from `e88dd835`; fresh full gates still pending.
+- Independent repair-batch review: ACCEPT, no material findings. Reviewer replay
+  passed nine focused empty-state/import/LFS checks in 6.29s; six-test-file diff
+  SHA-256 `70c9e458c63976ecc6bd4a3293b1f963024e63032ce08483fe5caf05bea16891`
+  unchanged across review. Coordinator mypy check of the six changed test files
+  also passes. Writers frozen before committing the repair batch.
 
 ### Previous audit checkpoint (historical)
 

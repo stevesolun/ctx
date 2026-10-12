@@ -158,6 +158,20 @@ def test_a_failing_environment_check_reaches_the_verdict(
     assert out.rindex("litellm is not installed") > out.index(REFUSES)
 
 
+def test_empty_default_catalog_is_reported_as_an_evaluation_blocker(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The real empty package must not borrow another test's supplied catalog."""
+
+    out = _doctor(_repo_with_a_derivable_task(tmp_path), capsys)
+
+    assert READY not in out
+    assert REFUSES in out
+    cause = "the capability catalog could not be opened; no candidate can be proposed"
+    assert out.rindex(cause) > out.index(REFUSES)
+
+
+@pytest.mark.usefixtures("historical_fit_catalog")
 def test_absent_credentials_are_reported_without_blocking(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -303,6 +317,7 @@ def test_a_discovered_test_command_is_not_reported_as_run(
     assert "tests runnable via" not in out
 
 
+@pytest.mark.usefixtures("historical_fit_catalog")
 def test_a_node_manifest_does_not_make_a_missing_runtime_ready(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -330,6 +345,7 @@ def test_a_node_manifest_does_not_make_a_missing_runtime_ready(
     assert "isolated" in out
 
 
+@pytest.mark.usefixtures("historical_fit_catalog")
 def test_an_installed_but_inoperable_sandbox_prevents_a_live_ready_verdict(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
