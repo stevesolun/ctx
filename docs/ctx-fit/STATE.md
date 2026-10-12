@@ -11,6 +11,32 @@
 
 ## Checkpoint
 
+### CI-phase harness argument repair — 2026-10-13 (Asia/Jerusalem)
+
+- Started clean at detached `158cd58dbf143c6d1915f3c8f59b8122b1b2fdd7`
+  in the outer run's worktree for `codex/bring-your-own-knowledge`, PR #288.
+  Supplied hosted evidence reported **9,521 passed, two failed, 51 skipped**;
+  `CI required` failed because `unit-linux` failed. Both named harness tests
+  reproduced locally before editing: **two failed in 0.16s**.
+- The prior internal environment-name rename updated the shared requirements
+  extractor but missed the harness CLI parser. Aligned its argparse destination
+  with `provider_key_env_name`, preserving the public `--api-key-env` flag,
+  `API_KEY_ENV` help metavar and `api_key_env` requirements key. The existing
+  Hugging Face test now sets a synthetic credential and retains its assertion
+  that the plan includes the environment name without the credential value.
+- Coordinator verification used `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD/src"
+  python -m pytest -q --no-cov -p no:cacheprovider`: the two reported regressions
+  passed in **0.13s**, then `src/tests/test_harness_install.py`,
+  `src/tests/test_harness_recommendations.py`, and `src/tests/test_ctx_init.py`
+  passed **139 tests in 1.65s**, with one existing tar-extraction deprecation
+  warning. A direct CLI-help assertion passed. Independent read-only diff
+  review found no issue; `git diff --check` passed.
+- This is focused working-tree evidence on macOS, not a hosted Linux or
+  CodeQL result. Broad gates, static phases, authoritative preflight, commits
+  and GitHub delivery remain with the outer executor. No pipeline control,
+  push, merge, tag, publication, paid evaluation or personal host change ran.
+  Real-host acceptance and comparative savings remain unverified.
+
 ### CI-phase repair — 2026-10-13 (Asia/Jerusalem)
 
 - Started from clean detached `c98f772b5b743c633cf93659f6a785b4682c957c`

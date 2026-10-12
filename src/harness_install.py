@@ -1100,6 +1100,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", help="Model slug, e.g. openrouter/openai/gpt-5.5")
     parser.add_argument(
         "--api-key-env",
+        dest="provider_key_env_name",
+        metavar="API_KEY_ENV",
         help="Environment variable that stores the custom provider API key",
     )
     parser.add_argument("--harness-runtime", help="Runtime/OS target for harness fit")

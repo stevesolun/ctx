@@ -1175,6 +1175,7 @@ def test_recommend_mode_accepts_huggingface_api_key_env(
     monkeypatch: Any,
     capsys: Any,
 ) -> None:
+    monkeypatch.setenv("HF_TOKEN", "hf_test_secret_must_not_appear_in_plan")
     monkeypatch.setattr(harness_install, "recommend_harnesses_for_cli", lambda **_: [])
 
     rc = harness_install.main(
