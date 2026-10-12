@@ -11,6 +11,58 @@
 
 ## Checkpoint
 
+### Test-phase tracker and concurrency repair — 2026-10-13 (Asia/Jerusalem)
+
+- Started clean at detached head `650e784b286b805b832b258a5ecb6dc34ad076d7`
+  in the outer run's worktree for `codex/bring-your-own-knowledge`. The supplied
+  authoritative preflight passed formatting, Ruff and mypy, then reported
+  **9,617 passed, two failed, five skipped, 92.16% coverage in 853.27s**.
+  Those incoming results describe the starting tree, not this repair.
+- The tracker failure was missing ownership metadata for
+  `src/ctx/core/wiki/wiki_bodies.py`. The tracker lane reproduced the exact
+  named case before editing. Existing row `GRAPH-003` now attributes the helper
+  and maps `test_packed_authoring_updates.py` and `test_mirror_pack_snapshots.py`
+  to their actual assertions. Historical acceptance metadata remains explicitly
+  historical; these two body/snapshot suites were not rerun in this phase.
+- The exact concurrency case passed alone before edits: **one passed in 1.96s**.
+  An in-memory timing probe passed in **2.04s** and measured the winning
+  thread's real material rederivation at **0.291s**, including three snapshot
+  calls and four journal-record reads. That work occurred after the contender
+  was correctly rejected and the barrier released, inside `first.result`'s
+  ten-second deadline. The original outer-run slowdown was not reproduced
+  without instrumentation; its precise scheduling cause remains unknown.
+- A controlled probe wrapped `_rederive_under_material_lock`, adding
+  `time.sleep(10.1)` before calling the real helper whenever `read_content`
+  was true. Running the exact concurrency case through `pytest.main` with
+  `-q --tb=short --no-cov -p no:cacheprovider` reproduced the reported
+  `first.result(timeout=10)` failure: **one failed in 41.86s**, exit 1.
+  This demonstrates dependence on unrelated material-validation latency,
+  not a failed once-only permit claim.
+- Only the atomicity test changed: it validates real activated journal/CAS
+  material before starting the two contenders, then returns that material
+  from its existing event-barrier stub. Real permit/route consumption,
+  concurrent duplicate rejection, one-call assertion and all ten-second bounds
+  remain; exact returned bytes are also asserted. Production authorization,
+  locks, fresh material validation and all R1–R7 behavior are unchanged.
+- Coordinator verification on the combined modified tree passed **25 tests in
+  24.63s**, exit 0, including the two named cases and existing real-material,
+  authorization-order, missing-journal, CAS-tampering and activation checks:
+
+  ```bash
+  PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD/src" python -m pytest -q --no-cov \
+    -p no:cacheprovider src/tests/runtime/test_activated_skill_exposure.py \
+    src/tests/test_feature_user_story_tracker.py
+  ```
+
+- The identical controlled latency probe after repair passed **one test in
+  12.55s**, exit 0. Independent read-only review found no material issue;
+  that review ran no checks and is separate from coordinator test evidence.
+- Only this checkpoint changed after verification. No new worktree test
+  artifacts remain; pre-existing ignored caches remain intact. Static tools,
+  broad suites, authoritative preflight and delivery remain with the outer
+  executor. No pipeline control, paid calls or personal host changes occurred.
+  Real-host acceptance and comparative savings remain unverified.
+
 ### Test-phase rollback typing repair — 2026-10-13 (Asia/Jerusalem)
 
 - Started clean at detached head `f217bec024e8e58be27473bb84ffba99060c5972`
