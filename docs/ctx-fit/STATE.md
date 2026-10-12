@@ -11,6 +11,34 @@
 
 ## Checkpoint
 
+### Active product change — 2026-10-12 (Asia/Jerusalem)
+
+- Owner explicitly authorizes product changes, removal of downloaded product
+  corpus data and GitHub shipping. New standing contract: ADR-017 and
+  `BRING_YOUR_OWN_PLAN.md`; the previous Fit-only audit objective is historical.
+- Working branch: `codex/bring-your-own-knowledge`, based on complete audit
+  delivery `0afdac155083db28935da2c4a9d4ef64bb21b621`, in the attached delivery
+  worktree. Original checkout's dirty checkpoint and `.scratch/` untouched.
+- Status: discovery complete; implementation planning recorded; NOT shipped.
+- Three independent read-only investigations completed: corpus/bootstrap,
+  native/shared engine, CI/release. They found two distinct production
+  recommenders plus several implicit corpus-download/injection paths.
+- BYO-1 recorded. BYO-2/3/4 ready for parallel implementation with disjoint
+  ownership. BYO-5/6/7 pending; no new behavior has passed acceptance yet.
+- PR286 remains draft/unmerged at0afdac15; main remains11b582a7. The old AXI
+  monitor now reports terminal `failed: daemon shutting down` after prior
+  successful checks; no active pipeline owns this new branch.
+- Native goal record still contains the blocked previous audit objective;
+  this file and the new plan record the new owner mandate. Do not falsely mark
+  the old objective complete or treat its previous evidence as new-code proof.
+- Deletion boundary: tracked downloaded corpus and default package seeds only.
+  Personal mixed wiki/skills, secrets, history and remote releases preserved.
+- Open nonblocking owner question: suggestions/explicit install versus general
+  automatic install under per-kind preapproval. Preserve consent, and do not
+  enable new automatic execution by inference.
+
+### Previous audit checkpoint (historical)
+
 - Updated: 2026-10-04 (Europe/Prague)
 - Active goal: complete the final evidence handoff and remaining delivery phases
 - Phase: document-phase reconciliation complete; starter-command duplicate removed and corrected page verified; prior runtime acceptance remains applicable, and remaining delivery phases belong to the outer executor

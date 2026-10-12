@@ -2,6 +2,16 @@
 
 ## The product
 
+**Current mandate (2026-10-12, ADR-017):** CTX ships a host-neutral
+recommendation engine with an empty, user-owned knowledge graph/wiki. Users
+and organizations supply their own skills, agents and MCP records. Native
+host events and MCP/CLI clients use shared bounded recommendation policy;
+similarity never grants installation or execution permission. No downloaded
+tool corpus, fallback skills or implicit catalog download belongs in the
+default product. Read `docs/ctx-fit/BRING_YOUR_OWN_PLAN.md` for the standing
+contract and acceptance plan. The following Fit behavior is preserved as an
+optional evaluator, not the primary product definition.
+
 CTX Fit finds the cheapest AI coding setup that reliably works on a given
 repository, and produces the winning configuration as a reviewable change.
 
@@ -70,6 +80,11 @@ Never treat an agent's self-report as verification — that rule is the product'
 core premise and it applies to work on the product too.
 
 ## Settled decisions — do not re-litigate
+
+ADR-017 records the owner's new direction and supersedes the primary-product
+portions of ADR-001/006/010/014 below. Do not restore bundled data or Fit-primary
+behavior merely to satisfy an obsolete contract; update that contract with
+explicit evidence. All unrelated safety and verification requirements remain.
 
 `docs/ctx-fit/DECISIONS.md` is the decision log. Each ADR is recorded once with
 its evidence; reopening one requires new evidence, recorded there. The ones that

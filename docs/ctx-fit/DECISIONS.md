@@ -8,6 +8,38 @@ Status values: `ACCEPTED` · `SUPERSEDED` · `PROPOSED`
 
 ---
 
+## ADR-017 — Ship user-owned knowledge infrastructure, not a tool corpus · `ACCEPTED`
+
+**Evidence.** On 2026-10-12 the owner explicitly requested removal of downloaded
+skills, agents and MCP data while preserving graph/wiki structure and one
+engine that recommends relevant tools during work in Codex, Claude Code and
+other hosts. Users and organizations supply their own knowledge. This is a
+new product mandate, not an inference from the old audit.
+
+**Decision.** CTX's primary product is a host-neutral, event-driven recommender
+over user-owned graph/wiki knowledge. Fresh setup is empty, local and offline;
+zero useful recommendations is valid. CLI, MCP and native hook adapters share
+the recommendation policy and a total cap of five. No bundled tool bodies,
+fallback corpus, automatic CTX catalog hydration or owned-dataset publication
+belongs in the default distribution. Preserve schema, authoring, import,
+indexing, query and consent infrastructure. Graph metadata is untrusted data,
+not installation or execution permission. Savings require measured evidence.
+
+**Supersession.** This supersedes ADR-001's Fit-primary product choice,
+ADR-006's exclusion of user graph production/curation, and ADR-010's exclusion
+of the lifecycle from the primary product. ADR-014 still defines the optional
+Fit evaluator, not the default product. Preserve ADR-003/004/005/008/009/013/016
+and all safety, verification, cost-honesty and recoverability constraints.
+This ADR does not claim that general automatic provisioning or all external
+host integrations have already been implemented or verified.
+
+**Delivery.** Follow `BRING_YOUR_OWN_PLAN.md`. Preserve audit fixes and history;
+remove only classified product corpus data, not mixed personal tool homes or
+existing remote historical releases. Replace obsolete corpus-specific tests
+with empty-state/user-data contracts rather than weakening safety gates.
+
+---
+
 ## ADR-016 — The repository verifier is an explicit trust boundary · `ACCEPTED`
 
 **Context.** ADR-005 makes the repository's own command authoritative, but did
