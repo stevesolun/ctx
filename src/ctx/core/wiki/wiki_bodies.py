@@ -25,6 +25,38 @@ def active_wiki_pages(wiki_path: Path) -> dict[str, str] | None:
     return load_merged_wiki_pages(packs_dir)
 
 
+class WikiBodySnapshot:
+    """Validated comparison pages scoped to one mirror operation."""
+
+    def __init__(self, wiki_path: Path) -> None:
+        self.wiki_path = wiki_path
+        self._loaded = False
+        self._pages: dict[str, str] | None = None
+        self._skill_names: set[str] = set()
+
+    @property
+    def pages(self) -> dict[str, str] | None:
+        if not self._loaded:
+            self.refresh()
+        return self._pages
+
+    def has_skill(self, name: str) -> bool:
+        if not self._loaded:
+            self.refresh()
+        return name in self._skill_names
+
+    def refresh(self) -> None:
+        pages = active_wiki_pages(self.wiki_path)
+        skill_names = {
+            path.split("/", 2)[1]
+            for path in pages or {}
+            if path.startswith("converted/") and len(path.split("/", 2)) == 3
+        }
+        self._pages = pages
+        self._skill_names = skill_names
+        self._loaded = True
+
+
 def skill_body_path(relative_path: str) -> bool:
     """Identify the files owned by a converted skill body."""
     return relative_path in {

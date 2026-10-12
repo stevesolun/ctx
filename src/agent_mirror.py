@@ -37,7 +37,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from ctx.core.wiki.wiki_bodies import active_wiki_pages, replace_agent_body
+from ctx.core.wiki.wiki_bodies import WikiBodySnapshot, active_wiki_pages, replace_agent_body
 from ctx.utils._fs_utils import reject_symlink_path
 from ctx_config import cfg
 from ctx.core.wiki.wiki_utils import validate_skill_name
@@ -152,6 +152,7 @@ def mirror_one(
     wiki_dir: Path,
     force: bool = False,
     dry_run: bool = False,
+    _snapshot: WikiBodySnapshot | None = None,
 ) -> MirrorResult:
     """Mirror one live agent body into the wiki's converted-agents dir.
 
@@ -211,7 +212,8 @@ def mirror_one(
 
     dest_dir = wiki_dir / "converted-agents"
     dest = dest_dir / f"{slug}.md"
-    pages = active_wiki_pages(wiki_dir)
+    snapshot = _snapshot if _snapshot is not None else WikiBodySnapshot(wiki_dir)
+    pages = snapshot.pages
     existing = pages.get(f"converted-agents/{slug}.md") if pages is not None else None
 
     if pages is None and dest.is_file():
@@ -240,6 +242,8 @@ def mirror_one(
         )
 
     replace_agent_body(wiki_dir, slug, text)
+    if _snapshot is not None:
+        snapshot.refresh()
     return MirrorResult(
         slug=slug,
         status="mirrored",
@@ -261,6 +265,7 @@ def mirror_all(
 ) -> list[MirrorResult]:
     """Mirror every eligible agent body. Orders output for stable logs."""
     results: list[MirrorResult] = []
+    snapshot = WikiBodySnapshot(wiki_dir)
     for path in _iter_agent_files(agents_dir):
         slug = path.stem
         # Fast short-circuit before the expensive read when we can tell
@@ -283,6 +288,7 @@ def mirror_all(
                 wiki_dir=wiki_dir,
                 force=force,
                 dry_run=dry_run,
+                _snapshot=snapshot,
             )
         )
     return results

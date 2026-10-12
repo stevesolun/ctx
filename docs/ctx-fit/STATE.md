@@ -11,6 +11,48 @@
 
 ## Checkpoint
 
+### Bulk mirror review repair — 2026-10-13 (Asia/Jerusalem)
+
+- Starting head is `208f7de7922b8cf5020fdc2a786642880c463062`; the worktree
+  was clean. The owner authorized the narrow R7 performance repair while
+  preserving R1–R6, approval-only behavior and fail-closed publication.
+- R7 was a snapshot-lifetime mismatch: each unchanged bulk item validated and
+  parsed the entire active wiki, and each skill scanned all packed pages again.
+  Bulk calls now share one lazily validated comparison snapshot with an indexed
+  skill lookup. Successful writes refresh it before the next comparison.
+  Direct calls get independent snapshots; mutation helpers still validate the
+  current packs before writing. Dry runs and skipped items do not refresh.
+- Incoming exact-head evidence supplied by the outer run: **104 packed-authoring,
+  user-catalog and applied-configuration tests passed in 15.07s** on `208f7de7`.
+  That replay predates R7 and is distinct from both this repair's focused checks
+  and any future committed-head gate.
+- Source changes are limited to the shared snapshot helper and the two mirror
+  comparison paths. Source/test edits are frozen. Independent read-only review
+  accepted the source and all 19 new regression cases with no material findings;
+  it ran no checks. The coordinator's single focused batch on these uncommitted
+  changes above `208f7de7` passed **47 tests in 24.27s**, exit 0:
+
+  ```bash
+  PYTHONPATH="$PWD/src" python -m pytest -q --no-cov \
+    src/tests/test_mirror_pack_snapshots.py \
+    src/tests/test_agent_mirror.py \
+    src/tests/test_skill_mirror.py \
+    src/tests/test_packed_authoring_updates.py::test_standalone_mirror_update_and_prune_publish_overlays \
+    src/tests/test_packed_authoring_updates.py::test_mirror_publication_failure_restores_loose_body_and_active_packs
+  ```
+
+- Deterministic call-count coverage confirms one comparison snapshot load for
+  multiple unchanged items, one skill-directory indexing pass, refreshed later
+  comparisons after publication, direct-call freshness and dry-run behavior.
+  Corrupt/missing base packs detected initially or after a cached comparison
+  fail before mutation. Existing publication rollback and prune cases also pass.
+  This is focused local evidence, not a committed-head full gate or performance
+  benchmark. Only this checkpoint changed after the run.
+- Full gates, static checks, documentation build and GitHub delivery remain
+  with the outer executor. No paid calls, personal host changes, pipeline
+  control, direct push, merge or publication are part of this review phase.
+  Real-host acceptance and comparative savings remain unverified.
+
 ### Follow-up review repair checkpoint — 2026-10-13 (Asia/Jerusalem)
 
 - Starting head is `0f1bca67f217949894bd361d5717a24cb695277d`; the worktree

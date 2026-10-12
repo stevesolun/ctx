@@ -43,7 +43,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from ctx.core.wiki.wiki_bodies import active_wiki_pages, replace_skill_body
+from ctx.core.wiki.wiki_bodies import WikiBodySnapshot, active_wiki_pages, replace_skill_body
 from ctx.utils._fs_utils import reject_symlink_path
 from ctx_config import cfg
 from ctx.core.wiki.wiki_utils import validate_skill_name
@@ -103,6 +103,7 @@ def mirror_one(
     line_threshold: int,
     force: bool = False,
     dry_run: bool = False,
+    _snapshot: WikiBodySnapshot | None = None,
 ) -> MirrorResult:
     """Mirror one local short skill's SKILL.md into the wiki.
 
@@ -169,15 +170,13 @@ def mirror_one(
 
     dest_dir = _converted_dir(wiki_dir, slug)
     dest = dest_dir / "SKILL.md"
-    pages = active_wiki_pages(wiki_dir)
+    snapshot = _snapshot if _snapshot is not None else WikiBodySnapshot(wiki_dir)
+    pages = snapshot.pages
     prefix = f"converted/{slug}/"
-    existing_pages = {
-        path: text for path, text in (pages or {}).items() if path.startswith(prefix)
-    }
-    existing_dir = bool(existing_pages) if pages is not None else dest_dir.is_dir()
+    existing_dir = snapshot.has_skill(slug) if pages is not None else dest_dir.is_dir()
 
     if existing_dir and not force:
-        existing = existing_pages.get(prefix + "SKILL.md")
+        existing = pages.get(prefix + "SKILL.md") if pages is not None else None
         if pages is None and dest.is_file():
             reject_symlink_path(dest)
             try:
@@ -212,6 +211,8 @@ def mirror_one(
         )
 
     replace_skill_body(wiki_dir, slug, {"SKILL.md": body})
+    if _snapshot is not None:
+        snapshot.refresh()
     return MirrorResult(
         slug=slug,
         status="mirrored",
@@ -234,6 +235,7 @@ def mirror_all(
 ) -> list[MirrorResult]:
     """Mirror every short local skill that has no wiki converted/ dir."""
     results: list[MirrorResult] = []
+    snapshot = WikiBodySnapshot(wiki_dir)
     for path in _iter_local_skill_dirs(skills_dir):
         slug = path.name
         results.append(
@@ -244,6 +246,7 @@ def mirror_all(
                 line_threshold=line_threshold,
                 force=force,
                 dry_run=dry_run,
+                _snapshot=snapshot,
             )
         )
     return results
