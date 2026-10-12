@@ -6164,6 +6164,17 @@ def test_production_ctx_run_subprocess_compares_both_arms_with_local_provider(
 
     shim_dir = tmp_path / "provider-shim"
     shim_dir.mkdir()
+    # This exercises child CLI/provider/lifecycle wiring, not selection latency.
+    # Keep real selection with its explicit semantic-test budget; the production
+    # 50 ms boundary is covered by test_selector_default_deadline_is_checked_after_file_read.
+    (shim_dir / "sitecustomize.py").write_text(
+        "from functools import partial\n"
+        "from ctx.adapters.generic import adaptive_runtime\n\n"
+        "adaptive_runtime.select_installed_skill = partial(\n"
+        "    adaptive_runtime.select_installed_skill, selection_timeout_ms=5_000\n"
+        ")\n",
+        encoding="utf-8",
+    )
     (shim_dir / "litellm.py").write_text(
         """
 import json

@@ -11,6 +11,64 @@
 
 ## Checkpoint
 
+### Test-phase local-provider timing repair — 2026-10-13 (Asia/Jerusalem)
+
+- Started clean at detached head `035f1098a615076ff53c75864e695d8dc3a99f6a`
+  in the outer run's worktree for `codex/bring-your-own-knowledge`. Incoming
+  preflight evidence passed static checks and reported **9,618 passed, one
+  failed, five skipped, 92.12% coverage in 772.00s**. Those results describe
+  the starting tree, not this repair.
+- The exact failing selector,
+  `src/tests/test_ctx_ab_benchmark.py::test_production_ctx_run_subprocess_compares_both_arms_with_local_provider`,
+  passed alone before edits: **one passed in 2.45s**, exit 0. It asserted
+  successful synthetic selection while using the legacy selector's real
+  **50 ms** deadline. That deadline intentionally abstains after an over-budget
+  read, even when skill material is valid. The incoming 51.663 ms telemetry
+  is consistent with that path; the original scheduling delay was not measured
+  again or attributed to a specific external workload.
+- A deterministic child-process probe preserved the real secure skill read,
+  asserted that it returned valid material, then advanced only the adaptive
+  module's `perf_counter` from zero to **0.051 seconds** (leaving real
+  `monotonic` intact). The exact test failed in **2.23s**, exit 1, with
+  `ctx run lifecycle is incomplete for skill:click-public-api-feature: actions=[]`.
+  The child/provider succeeded; telemetry recorded `skill_selected=false`,
+  51 ms, zero selected/submitted bytes and null score. Its ledger contained
+  only `dev_event` and successful `session_end`, reproducing the supplied
+  failure signature without CPU load or retries.
+- The only test change writes `sitecustomize.py` into this test's existing
+  temporary provider shim. It wraps the real selector with its existing
+  explicit `selection_timeout_ms=5_000` semantic-test budget. Child CLI argv,
+  local HTTP provider, real skill reading/ranking, exact tool schemas,
+  content/identity assertions and the complete selected lifecycle remain.
+  No production default, authorization, security boundary, R1–R7 repair,
+  tracker attribution, concurrency repair or approval-only behavior changed.
+- The identical controlled 51 ms probe after repair passed **one test in
+  1.82s**, exit 0, with 744 selected/submitted bytes and the full
+  `load_requested` / `load_applied` / `used` / `unload_applied` cycle.
+  Coordinator verification on the repaired test passed **seven tests in
+  2.05s**, exit 0, including both unchanged 50 ms / 50.001 ms production
+  boundary cases, equal CLI controls and lifecycle rejection/budget behavior:
+
+  ```bash
+  PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD/src" python -m pytest -q --no-cov \
+    -p no:cacheprovider --basetemp="$PWD/.test-phase-local-provider/focused" \
+    src/tests/test_ctx_ab_benchmark.py::test_production_ctx_run_subprocess_compares_both_arms_with_local_provider \
+    src/tests/test_ctx_ab_benchmark.py::test_production_ctx_command_uses_shipped_cli_with_equal_controls \
+    src/tests/test_ctx_ab_benchmark.py::test_production_lifecycle_rejects_request_only_evidence \
+    src/tests/test_adaptive_runtime.py::test_selector_default_deadline_is_checked_after_file_read \
+    src/tests/test_adaptive_runtime.py::test_cli_adaptive_lifecycle_records_applied_use_and_unload \
+    src/tests/test_adaptive_runtime.py::test_cli_adaptive_lifecycle_keeps_unapplied_request_on_budget_stop
+  ```
+
+- Independent read-only review found no issue and ran no checks. Only this
+  checkpoint changed after focused verification. Temporary probe scripts,
+  child workspaces and their caches were removed; pre-existing ignored caches
+  remain intact. Static tools, broad suites and authoritative preflight were
+  not run in this phase and remain with the outer executor, along with delivery.
+  No pipeline control, paid calls or personal host changes occurred. This is
+  synthetic local-provider evidence, not real-host acceptance or measured
+  comparative savings.
+
 ### Test-phase tracker and concurrency repair — 2026-10-13 (Asia/Jerusalem)
 
 - Started clean at detached head `650e784b286b805b832b258a5ecb6dc34ad076d7`
