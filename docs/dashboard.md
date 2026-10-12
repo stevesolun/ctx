@@ -74,7 +74,7 @@ python scripts/dashboard_smoke.py --warm \
 ### Check queue and artifact state - `/status`
 
 The status tab shows the durable wiki/graph maintenance queue and the
-generated graph/wiki artifacts that ctx can ship or consume. It reports:
+generated graph/wiki artifacts from your own knowledge. It reports:
 
 - queue DB availability and job counts by state (`pending`, `running`,
   `succeeded`, `failed`, `cancelled`)
@@ -98,14 +98,12 @@ generated graph/wiki artifacts that ctx can ship or consume. It reports:
 
 #### Catalog badge links
 
-The README entity badges open the public `/catalog/` launcher so they never
-point at a dead `127.0.0.1` URL from GitHub, PyPI, or Hugging Face. The public
-page provides search, autocomplete suggestions, and tile cards that deep-link
-into the local dashboard. To open the full live searchable tile catalog, install
-the full wiki pages and start the local dashboard:
+The public [catalog page](catalog.md) explains the empty, user-owned catalog
+and links to local browsing. Author or import your own records through
+[entity onboarding](entity-onboarding.md), then start the local dashboard:
 
 ```bash
-ctx-init --graph --graph-install-mode full --model-mode skip
+ctx-init --model-mode skip
 python -m ctx_monitor serve
 ```
 
@@ -119,11 +117,10 @@ Then use:
 The local catalog includes search, browser autocomplete suggestions, type
 filters, tile cards, and click-through detail pages for each entity.
 
-The wiki tab requires full wiki markdown content from
-`ctx-init --graph --graph-install-mode full`, installed wiki packs, or
-local/private wiki entities. The default runtime graph install powers
-recommendations and graph stats but does not expand every entity page. When
-entity pages exist, the wiki tab is a filterable card grid over a
+The wiki tab reads user-authored Markdown, explicitly imported wiki packs, or
+other local/private wiki entities. Initialization creates an empty structure;
+it does not download pages or a recommendation graph. When entity pages exist,
+the wiki tab is a filterable card grid over a
 deterministic, bounded dashboard sample: up to 500 pages per
 dashboard-supported entity type. If `~/.claude/skill-wiki/wiki-packs/` is
 installed, the dashboard reads the merged base+overlay pack state first: pack

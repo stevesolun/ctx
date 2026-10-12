@@ -147,9 +147,10 @@ on bad values, catching typos before they pollute sidecars.
 
 ### Why two weight vectors
 
-Skills and agents differ in how they're invoked. Skills are loaded
-automatically by the router, so **telemetry** (load counts, recency) is
-the strongest post-install quality signal — hence 0.40 weight.
+The legacy quality weights distinguish skills and agents by their expected
+usage patterns. Skill **telemetry** (load counts, recency) receives the strongest
+post-install weight, 0.40. The current router only suggests tools; a host must
+supply actual usage events for these signals to describe real activity.
 
 Agents are invoked via the Agent tool, deliberately and rarely. A
 seldom-used agent isn't stale, it's specialized. The agent weights

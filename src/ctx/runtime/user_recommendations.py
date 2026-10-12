@@ -21,7 +21,7 @@ from ctx.adapters.hook_config import update_json_object_locked
 from ctx.runtime.query_delivery import SensitiveQueryInput
 
 
-_NAME = re.compile(r"\A[a-z0-9][a-z0-9._@-]{0,127}\Z")
+_NAME = re.compile(r"\A[a-zA-Z0-9][a-zA-Z0-9._@-]{0,127}\Z")
 _TAG = re.compile(r"\A[a-z0-9][a-z0-9.+#_-]{0,63}\Z")
 _KINDS = frozenset({"skill", "agent", "mcp-server"})
 _AVAILABILITY = frozenset(

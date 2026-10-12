@@ -34,9 +34,9 @@ contract stabilizes.
 
 ## What It Skips
 
-- It does not run `ctx-init --graph` by default; even the fast runtime graph
-  install downloads or extracts a large release artifact, so it stays in
-  dedicated public-install smoke tests.
+- It does not fetch a tool corpus. `ctx-init --graph` now creates an empty
+  local structure unless a user explicitly supplies an archive source.
+  User archive imports and populated graph behavior need their own fixtures.
 - It does not execute hooks inside a live Claude Code process by default. The
   live host path is opt-in because it can consume Anthropic or provider quota.
 - It does not connect to a real third-party MCP server.

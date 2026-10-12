@@ -191,7 +191,27 @@ def _strip_frontmatter(content: str) -> str:
     return parts[2] if len(parts) >= 3 else content
 
 
-def _load_full_body(meta: dict, slug: str, entity_type: str) -> str:
+def _packed_converted_pages(pages: dict[str, str]) -> dict[str, dict[str, str]]:
+    sources: dict[str, dict[str, str]] = {}
+    for path, text in pages.items():
+        parts = path.split("/")
+        if len(parts) >= 3 and parts[0] == "converted":
+            node_id = f"skill:{parts[1]}"
+        elif len(parts) == 2 and parts[0] == "converted-agents":
+            node_id = f"agent:{Path(parts[1]).stem}"
+        else:
+            continue
+        sources.setdefault(node_id, {})[path] = text
+    return sources
+
+
+def _load_full_body(
+    meta: dict,
+    slug: str,
+    entity_type: str,
+    *,
+    packed_pages: dict[str, str] | None = None,
+) -> str:
     """Load the canonical content source for semantic embedding.
 
     Different entity types live in different places in the wiki:
@@ -218,7 +238,23 @@ def _load_full_body(meta: dict, slug: str, entity_type: str) -> str:
     entity_body = _strip_frontmatter(meta.get("_content", ""))
 
     rich_body = ""
-    if entity_type == "skill" and not meta.get("_packed"):
+    if packed_pages is not None:
+        if entity_type == "skill":
+            skill_path = f"converted/{slug}/SKILL.md"
+            if skill_path in packed_pages:
+                refs_prefix = f"converted/{slug}/references/"
+                packed_parts = [packed_pages[skill_path]]
+                packed_parts.extend(
+                    text
+                    for path, text in sorted(packed_pages.items())
+                    if path.startswith(refs_prefix)
+                    and "/" not in path[len(refs_prefix) :]
+                    and path.endswith(".md")
+                )
+                rich_body = "\n\n".join(part for part in packed_parts if part.strip())
+        elif entity_type == "agent":
+            rich_body = packed_pages.get(f"converted-agents/{slug}.md", "")
+    elif entity_type == "skill" and not meta.get("_packed"):
         converted_dir = WIKI_DIR / "converted" / slug
         original_md = converted_dir / "SKILL.md.original"
         skill_md = converted_dir / "SKILL.md"
@@ -509,6 +545,7 @@ def build_graph(
     # ── Phase 1: discover nodes + collect embedding texts ─────────────
     embed_nodes: list[_sem.SemanticNode] = []
     packed_pages = _active_wiki_pages()
+    packed_sources = _packed_converted_pages(packed_pages) if packed_pages is not None else {}
     for entity_dir, entity_type, glob_pattern in sources:
         if packed_pages is not None:
             prefix = entity_dir.relative_to(WIKI_DIR).as_posix() + "/"
@@ -546,7 +583,14 @@ def build_graph(
             embed_nodes.append(
                 _sem.SemanticNode(
                     node_id=node_id,
-                    text=_load_full_body(meta, slug, entity_type),
+                    text=_load_full_body(
+                        meta,
+                        slug,
+                        entity_type,
+                        packed_pages=(
+                            packed_sources.get(node_id, {}) if packed_pages is not None else None
+                        ),
+                    ),
                 )
             )
 

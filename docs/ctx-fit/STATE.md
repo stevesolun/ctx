@@ -11,7 +11,71 @@
 
 ## Checkpoint
 
-### Active product change — 2026-10-12 (Asia/Jerusalem)
+### Active review repair — 2026-10-13 (Asia/Jerusalem)
+
+- This isolated worktree is the review phase of the active outer no-mistakes
+  run on `codex/bring-your-own-knowledge`, starting at
+  `cd368ab38db28b797501c21b90800fd3e3d927d0`. The outer executor owns subsequent
+  test, documentation, lint, authoritative preflight, push, PR and hosted-check
+  phases. This phase must not control another pipeline or perform delivery.
+- The owner explicitly approved all five review findings: "Yes, fix all five.
+  Keep optional Fit working with explicitly supplied user data, keep
+  installation approval-only, and continue through verification and GitHub
+  delivery. Let’s finish this." These repairs preserve ADR-017's empty/offline
+  defaults, prior audit fixes, user data and the existing approval boundaries.
+- R1 is a source/material ownership gap in optional Fit; R2 is a native
+  projection alphabet mismatch; R3 is inconsistent packed-content authority
+  between entity discovery and semantic input; R4/R5 are current-facing
+  documentation drift from the approval-only, user-owned product contract.
+- Incoming exact-head evidence for clean `cd368ab3`, supplied by the outer run:
+  all 12 committed fast-gate lanes passed; 9,514 tests passed, five skipped,
+  92.09% coverage in 659.05s; full gate 663.794s. Recorded evidence locations:
+  `.gate/local-fast.json` and `/tmp/ctx-byo-fast-cd368ab3.log`. Those results
+  precede these repairs and do not verify the modified tree.
+- All five repairs are applied; source/test writers are frozen. Fit accepts an
+  explicit bounded local `ctx.fit.catalog-v1` JSON file through `--catalog`,
+  or supplied source/material API inputs. Default knowledge stays empty;
+  exact material binding, current baselines, unknown-cost refusal and
+  budget/approval gates remain in place. The public guide includes the format.
+- Native hooks preserve bounded mixed-case identifiers with CLI/MCP parity
+  coverage and unsafe-name rejection. Graph rebuilds use authoritative merged
+  packed skill bodies/references and agent prompts; overlays, tombstones and
+  corruption guards remain authoritative over stale loose content. Original
+  backup files remain excluded from packs by design.
+- Router, source and adjacent setup guidance now describes user-owned inputs
+  and installation only after explicit approval. The old capability-engine
+  plan is clearly historical. No documentation navigation or linked assets
+  changed; acceptance rows remain pending final-tree validation.
+- Independent read-only review found no material blockers in the five repairs;
+  it did not execute checks. Coordinator's single focused run on the frozen
+  source/test changes above `cd368ab3` passed **206 tests in 161.02s**, exit 0:
+
+  ```bash
+  PYTHONPATH="$PWD/src" python -m pytest -q --no-cov \
+    src/tests/fit/test_user_catalog.py \
+    src/tests/fit/test_candidates.py \
+    src/tests/fit/test_experiment.py \
+    src/tests/fit/test_cli_fit.py \
+    src/tests/fit/test_cli_budget.py \
+    src/tests/fit/test_cli_surface.py \
+    src/tests/test_user_knowledge_recommendations.py \
+    src/tests/test_wiki_graphify_packs.py \
+    src/tests/test_wiki_graphify_density.py::test_load_full_body_prefers_original_backup_over_shards
+  ```
+
+- That run covers explicit-catalog simulation and refusal boundaries, actual
+  CLI/MCP/native child processes over synthetic user data, and repeated packed
+  rebuilds. It is not committed-head or broad acceptance evidence. No complete
+  suite, lint/type/format gate, documentation build, authoritative preflight,
+  pipeline control or GitHub action ran in this review phase. Those required
+  phases remain with the outer executor; only this evidence checkpoint changed
+  after the focused run.
+- No paid evaluation, personal host reconfiguration, automatic installation,
+  history rewriting, PR286 mutation, merge, version tag or PyPI publication is
+  part of this review repair. Real Codex/Claude UI host acceptance and measured
+  comparative savings remain unverified.
+
+### Previous product-change checkpoint — 2026-10-12 (Asia/Jerusalem)
 
 - Owner explicitly authorizes product changes, removal of downloaded product
   corpus data and GitHub shipping. New standing contract: ADR-017 and

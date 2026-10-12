@@ -3,7 +3,7 @@
 The configuration space is combinatorial — agents times models times skills
 times instructions. Brute force is both unaffordable and contrary to the point
 of CTX. This module is where CTX's existing intelligence earns its place: the
-shipped capability catalog and the already-accepted
+user-supplied capability catalog and the already-accepted
 :class:`~ctx.engine.planner.BoundedCapabilityPlanner` reduce that space to a
 handful of capabilities, and this module composes those into a small, diverse,
 explained set of configurations worth actually testing.
@@ -827,6 +827,7 @@ def generate_candidates(
     *,
     model: str | None = None,
     max_candidates: int = MAX_CANDIDATES,
+    capability_materials: tuple[CapabilityMaterial, ...] | None = None,
 ) -> CandidateSet:
     """Produce a bounded, diverse, explained candidate set for one repository.
 
@@ -942,7 +943,13 @@ def generate_candidates(
 
     considered = len(plan.selections)
     applicable = [item for item in plan.selections if item.kind in APPLICABLE_CAPABILITY_KINDS]
-    materials = {item.capability_id: _material_for(item) for item in applicable}
+    if capability_materials is None:
+        materials = {item.capability_id: _material_for(item) for item in applicable}
+    else:
+        supplied = {item.capability_id: item for item in capability_materials}
+        if len(supplied) != len(capability_materials):
+            raise ValueError("supplied capability material contains duplicate identities")
+        materials = {item.capability_id: supplied.get(item.capability_id) for item in applicable}
     ranked = [item for item in applicable if materials[item.capability_id] is not None]
 
     if inapplicable := tuple(
@@ -959,7 +966,7 @@ def generate_candidates(
         item.capability_id for item in applicable if materials[item.capability_id] is None
     ):
         warnings.append(
-            "excluded from the comparison because exact executable material is not shipped: "
+            "excluded from the comparison because exact executable material is not supplied: "
             + ", ".join(missing_material)
         )
 
@@ -972,7 +979,7 @@ def generate_candidates(
             candidates=(baseline,),
             abstained=True,
             abstention_reason=(
-                "the relevant capabilities have no exact shipped material, so CTX cannot "
+                "the relevant capabilities have no exact supplied material, so CTX cannot "
                 "run and later reproduce them"
                 if no_material
                 else "every capability relevant to this repository is of a kind a trial "

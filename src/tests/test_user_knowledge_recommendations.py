@@ -19,12 +19,12 @@ from ctx.adapters.generic.providers import ToolCall
 from ctx.cli.run import main
 
 
-def _wiki(tmp_path: Path, *, count: int = 3) -> Path:
+def _wiki(tmp_path: Path, *, count: int = 3, prefix: str = "python-api") -> Path:
     wiki = tmp_path / "user-wiki"
     graph = nx.Graph()
     for index in range(count):
         kind = ("skill", "agent", "mcp-server")[index % 3]
-        name = f"python-api-{index}"
+        name = f"{prefix}-{index}"
         graph.add_node(
             f"{kind}:{name}",
             label=name,
@@ -57,8 +57,9 @@ def _context(raw: bytes) -> str:
     return json.loads(raw)["hookSpecificOutput"]["additionalContext"]
 
 
-def test_default_hooks_share_mcp_user_graph_ranking(tmp_path: Path) -> None:
-    wiki = _wiki(tmp_path)
+@pytest.mark.parametrize("prefix", ["python-api", "Python-Testing"])
+def test_default_hooks_share_mcp_user_graph_ranking(tmp_path: Path, prefix: str) -> None:
+    wiki = _wiki(tmp_path, prefix=prefix)
     expected = json.loads(
         CtxCoreToolbox(wiki_dir=wiki).dispatch(
             ToolCall(
@@ -211,14 +212,35 @@ def test_host_projection_rejects_instructions_controls_and_arbitrary_fields() ->
     assert "\\u001b" not in context
 
 
+@pytest.mark.parametrize("name", ["Python-Testing", "Agent_Review.v2", "MCP@Local", "A" * 128])
+def test_host_projection_preserves_bounded_identifiers(name: str) -> None:
+    from ctx.runtime.user_recommendations import recommendation_context
+
+    context = recommendation_context({"results": [{"type": "skill", "name": name}]})
+
+    assert context is not None
+    assert json.loads(context.rsplit("\n", 1)[1])[0]["id"] == f"skill:{name}"
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["", "A" * 129, "../Tool", "Tool/Name", "Tool\\Name", ".Tool", "Tool\n", "Tool\x00", "Tööl"],
+)
+def test_host_projection_rejects_unsafe_identifiers(name: str) -> None:
+    from ctx.runtime.user_recommendations import recommendation_context
+
+    assert recommendation_context({"results": [{"type": "skill", "name": name}]}) is None
+
+
 @pytest.mark.parametrize(
     "query",
     ["build python api", "fix python api in this local repo", "python feature implementation"],
 )
+@pytest.mark.parametrize("prefix", ["python-api", "Python-Testing"])
 def test_real_cli_mcp_and_native_hook_processes_share_user_catalog(
-    tmp_path: Path, query: str
+    tmp_path: Path, query: str, prefix: str
 ) -> None:
-    wiki = _wiki(tmp_path)
+    wiki = _wiki(tmp_path, prefix=prefix)
     environment = {
         **os.environ,
         "CTX_WIKI_DIR": str(wiki),

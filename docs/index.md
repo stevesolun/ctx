@@ -103,13 +103,42 @@ and discovered test command alone do not supply representative Fit tasks.
 | --- | --- | --- |
 | `ctx fit` | nothing; no model call | reads the working tree |
 | `ctx fit --json` | nothing; no model call | reads the working tree, prints the profile as JSON |
-| `ctx fit --dry-run` | nothing; no model call | additionally runs read-only git queries (`log`, `show --name-only`, `ls-tree`, `rev-parse`) to derive representative tasks, then prints the experiment plan and a cost estimate |
-| `ctx fit --test --budget N` | up to `N` dollars | runs candidates and verifies each trial with the repository's own test command |
-| `ctx fit --test --budget N --apply --yes` | up to `N` dollars for evaluation | writes the winning configuration into your working tree; the write runs no git command, though evaluation does |
-| `ctx fit --test --budget N --pr --yes` | up to `N` dollars for evaluation | creates a branch, commits, **pushes to your remote**, and opens a pull request through `gh` |
+| `ctx fit --catalog my-fit.json --dry-run` | nothing; no model call | reads your candidate catalog and runs read-only git queries (`log`, `show --name-only`, `ls-tree`, `rev-parse`) to derive representative tasks, then prints the experiment plan and a cost estimate |
+| `ctx fit --catalog my-fit.json --test --budget N` | up to `N` dollars | runs candidates and verifies each trial with the repository's own test command |
+| `ctx fit --catalog my-fit.json --test --budget N --apply --yes` | up to `N` dollars for evaluation | writes the winning configuration into your working tree; the write runs no git command, though evaluation does |
+| `ctx fit --catalog my-fit.json --test --budget N --pr --yes` | up to `N` dollars for evaluation | creates a branch, commits, **pushes to your remote**, and opens a pull request through `gh` |
 
 `--dry-run` reads history to derive tasks and writes nothing — not to the
 repository, not to the index, not to any ref.
+
+Fit has no default candidate catalog. Supply a local JSON file with the skill
+material you want to compare; without it, planning reports no candidates and
+evaluation abstains. `--catalog` alone also produces a free plan. For example,
+save this as `my-fit.json`:
+
+```json
+{
+  "schema": "ctx.fit.catalog-v1",
+  "entries": [
+    {
+      "id": "skill:python-testing",
+      "type": "skill",
+      "signals": ["python", "test"],
+      "content": "---\nname: python-testing\n---\n\nCheck edge cases and run the repository tests.\n"
+    }
+  ]
+}
+```
+
+Each entry contains exactly these four fields. Skill names and signals use
+bounded canonical lowercase tokens; the skill frontmatter name must match the
+ID. Content is inline UTF-8, with no fetched URLs or referenced file reads.
+Catalogs are limited to 512 entries and 2 MiB, with each skill and each complete
+candidate subject to the 16 KiB context limit. Fit currently evaluates skills
+as task context; the shared advisory recommender separately supports skills,
+agents, and MCP servers. Plans bind the exact supplied bytes, preserve the
+current setup as the baseline, and keep unresolved costs unknown. Supplying
+catalog data does not authorize evaluation, installation, or activation.
 
 Spending requires two explicit flags. `--budget` must be a finite, non-negative
 number of US dollars; negative values, NaN, and infinity exit with an error
@@ -157,7 +186,8 @@ and the [packaged Bubblewrap profile](https://gitlab.com/apparmor/apparmor/-/blo
 
 ### `--apply` and `--pr` are different writes
 
-Include `--apply` or `--pr` in the same `ctx fit --test --budget N` invocation.
+Include `--apply` or `--pr` in the same
+`ctx fit --catalog my-fit.json --test --budget N` invocation.
 CTX Fit does not load evidence from prior evaluations, so either write flag
 alone is refused. `--yes` authorizes both the displayed evaluation plan and
 its resulting write. Without `--yes`, evaluation can be confirmed interactively,

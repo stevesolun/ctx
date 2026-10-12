@@ -52,6 +52,14 @@ def register(sub: argparse._SubParsersAction) -> None:
     )
     parser.add_argument("--json", action="store_true", help="Emit the Fit profile as JSON.")
     parser.add_argument(
+        "--catalog",
+        metavar="PATH",
+        help=(
+            "Explicit local ctx.fit.catalog-v1 JSON containing user-owned skill entries "
+            "and inline content. Plans without executing; no default catalog is supplied."
+        ),
+    )
+    parser.add_argument(
         "--test",
         action="store_true",
         help=(
@@ -319,6 +327,7 @@ def default_namespace(repo: str = ".") -> argparse.Namespace:
         yes=False,
         dry_run=False,
         budget=None,
+        catalog=None,
         max_depth=4,
     )
 
@@ -488,13 +497,22 @@ def cmd_fit(args: argparse.Namespace) -> int:
     # the experiment stack.
     from ctx.fit.experiment import authorize_experiment, resolve_experiment, run_experiment
 
-    wants_plan = bool(args.dry_run or args.budget is not None or args.test)
+    catalog_path = getattr(args, "catalog", None)
+    wants_plan = bool(
+        args.dry_run or args.budget is not None or args.test or catalog_path is not None
+    )
     # One derivation, read twice. The plan below and the campaign further down
     # are views of this object, so the experiment the user approves is the
     # experiment their money buys.
-    experiment: ResolvedExperiment | None = (
-        resolve_experiment(profile, budget_usd=args.budget) if wants_plan else None
-    )
+    experiment: ResolvedExperiment | None = None
+    if wants_plan:
+        try:
+            experiment = resolve_experiment(
+                profile, budget_usd=args.budget, catalog_path=catalog_path
+            )
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
     plan = experiment.plan if experiment is not None else None
 
     # Evaluation is the only step that can spend, so it is gated twice: an

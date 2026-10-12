@@ -50,6 +50,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from ctx.fit.execution import ExecutionReport
     from ctx.fit.live_runner import CampaignEnvironment
     from ctx.fit.recommend import Recommendation
+    from ctx.fit.release_catalog import ReleaseCandidateSource
     from ctx.fit.tasks import FitTask, TaskSet
 
 EXPERIMENT_PLAN_SCHEMA = "ctx.fit.experiment-plan-v1"
@@ -753,10 +754,12 @@ def resolve_experiment(
     trials_per_task: int = DEFAULT_TRIALS_PER_TASK,
     reliability_floor: float = DEFAULT_RELIABILITY_FLOOR,
     task_limit: int = DEFAULT_TASK_LIMIT,
+    catalog_path: str | Path | None = None,
+    candidate_source: ReleaseCandidateSource | None = None,
 ) -> ResolvedExperiment:
     """Derive the whole experiment, and plan it. Executes nothing (ADR-013).
 
-    Reads the shipped capability catalog and this repository's Git history. No
+    Reads an explicitly supplied catalog and this repository's Git history. No
     model is called and no money can be spent here, so a user who only wants to
     see the plan pays nothing for it. Task derivation is the slow half, and it
     happens exactly once — a ``--test`` run used to pay for it twice.
@@ -765,7 +768,7 @@ def resolve_experiment(
     from ctx.engine.planner import BoundedCapabilityPlanner
     from ctx.fit.candidates import generate_candidates
     from ctx.fit.providers import DEFAULT_MAX_ITERATIONS
-    from ctx.fit.release_catalog import open_release_candidate_source
+    from ctx.fit.release_catalog import open_release_candidate_source, open_user_candidate_source
     from ctx.fit.tasks import derive_tasks
 
     effective_model = model or DEFAULT_MODEL
@@ -781,14 +784,23 @@ def resolve_experiment(
         # same blocked plan rather than failing before that explanation exists.
         pass
 
-    source = open_release_candidate_source()
+    if catalog_path is not None and candidate_source is not None:
+        raise ValueError("supply either catalog_path or candidate_source, not both")
+    source = candidate_source
+    if catalog_path is not None:
+        source = open_user_candidate_source(catalog_path)
+    elif source is None:
+        source = open_release_candidate_source()
     if source is None:
         candidates = CandidateSet(abstained=True, abstention_reason=_CATALOG_UNAVAILABLE)
     else:
         # The candidates carry the model the plan is priced against, or the
         # estimate quotes one model while the trials silently run another.
         candidates = generate_candidates(
-            profile, BoundedCapabilityPlanner(source=source), model=effective_model
+            profile,
+            BoundedCapabilityPlanner(source=source),
+            model=effective_model,
+            capability_materials=source.capability_materials,
         )
 
     field_models = {candidate.model for candidate in candidates.candidates}
