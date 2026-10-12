@@ -757,7 +757,7 @@ jobs:
           import sys
 
           CHECKS = (
-              ("bare ctx", ["ctx"], "AI agent readiness"),
+              ("bare ctx", ["ctx"], "Start empty with ctx-init"),
               ("ctx fit", ["ctx", "fit", "."], "Repository:"),
               ("ctx doctor", ["ctx", "doctor"], "CTX Fit diagnostics"),
           )

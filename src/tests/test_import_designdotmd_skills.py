@@ -1306,10 +1306,12 @@ def test_atomic_replacement_preserves_existing_destination_mode(
     assert stat.S_IMODE(skill.stat().st_mode) == 0o751
 
 
-def test_new_destination_mode_respects_process_umask(
+@pytest.mark.parametrize("process_umask", [0o000, 0o027])
+def test_new_destination_is_owner_only_even_with_permissive_umask(
     design_import: DesignImportFixture,
+    process_umask: int,
 ) -> None:
-    previous_umask = os.umask(0o027)
+    previous_umask = os.umask(process_umask)
     try:
         skill, _ = importer.deploy_entry(
             design_import.entry,
@@ -1320,7 +1322,7 @@ def test_new_destination_mode_respects_process_umask(
     finally:
         os.umask(previous_umask)
 
-    assert stat.S_IMODE(skill.stat().st_mode) == 0o640
+    assert stat.S_IMODE(skill.stat().st_mode) == 0o600
 
 
 def test_manifest_tags_type_error_names_entry_and_received_type(

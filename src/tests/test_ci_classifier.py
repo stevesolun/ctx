@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 import re
@@ -1747,6 +1748,30 @@ def test_ci_required_rejects_missing_graph_check_on_mixed_artifact_pr() -> None:
     assert failed_required_jobs(needs, event_name="pull_request") == {
         "graph-check": "skipped",
     }
+
+
+def test_wheel_product_smoke_accepts_recommendation_first_default(capsys: Any) -> None:
+    from ctx.cli.run import main as cli_main
+
+    workflow = yaml.safe_load(Path(".github/workflows/test.yml").read_text(encoding="utf-8"))
+    smoke_step = next(
+        step
+        for step in workflow["jobs"]["package-smoke"]["steps"]
+        if step["name"] == "Product smoke on the installed wheel"
+    )
+    script = smoke_step["run"].split("python - <<'PY'\n", maxsplit=1)[1].rsplit("\nPY", 1)[0]
+    checks = next(
+        ast.literal_eval(node.value)
+        for node in ast.parse(script).body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "CHECKS" for target in node.targets)
+    )
+    bare_needle = next(needle for _label, argv, needle in checks if argv == ["ctx"])
+
+    assert cli_main([]) == 0
+    assert bare_needle in capsys.readouterr().out
+    assert any(argv == ["ctx", "fit", "."] for _label, argv, _needle in checks)
+    assert any(argv == ["ctx", "doctor"] for _label, argv, _needle in checks)
 
 
 def test_workflow_runs_focused_telemetry_enterprise_gate() -> None:

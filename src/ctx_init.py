@@ -1666,7 +1666,7 @@ _HARNESS_REQUIREMENT_FIELDS = (
     ("verification", "harness_verify"),
     ("privacy", "harness_privacy"),
     ("attach_mode", "harness_attach_mode"),
-    ("api_key_env", "api_key_env"),
+    ("api_key_env", "provider_key_env_name"),
 )
 
 _HARNESS_REQUIREMENT_FLAGS = {
@@ -1684,11 +1684,12 @@ def _model_provider_prefix(model: str) -> str:
     return model.split("/", 1)[0] if "/" in model else model
 
 
-def _resolve_api_key_env(
+def _resolve_provider_key_env_name(
     explicit: str | None,
     model: str | None,
     provider: str | None,
 ) -> str | None:
+    """Resolve the environment variable's name without reading its secret value."""
     if explicit is not None:
         return explicit or None
     prefix = provider or (_model_provider_prefix(model) if model else "")
@@ -2463,14 +2464,14 @@ def run_wizard(
             )
             or None
         )
-        api_key_default = _resolve_api_key_env(
-            args.api_key_env,
+        provider_key_env_default = _resolve_provider_key_env_name(
+            args.provider_key_env_name,
             args.model,
             args.model_provider,
         )
-        args.api_key_env = _prompt_text(
+        args.provider_key_env_name = _prompt_text(
             "API key environment variable (blank for local/no key)",
-            default=api_key_default,
+            default=provider_key_env_default,
         )
         args.base_url = (
             _prompt_text(
@@ -2508,13 +2509,24 @@ def run_model_onboarding(args: argparse.Namespace, claude: Path) -> int:
         return 1
 
     provider = args.model_provider or (_model_provider_prefix(args.model) if args.model else None)
-    api_key_env = _resolve_api_key_env(args.api_key_env, args.model, provider)
+    provider_key_env_name = _resolve_provider_key_env_name(
+        args.provider_key_env_name, args.model, provider
+    )
+    if (
+        provider_key_env_name
+        and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", provider_key_env_name) is None
+    ):
+        print(
+            "  [warn] --api-key-env requires an environment variable name, not a value",
+            file=sys.stderr,
+        )
+        return 1
     harness_requirements = _harness_requirements_from_args(args) if mode == "custom" else {}
     profile: dict[str, Any] = {
         "mode": mode,
         "provider": provider,
         "model": args.model,
-        "api_key_env": api_key_env,
+        "api_key_env": provider_key_env_name,
         "base_url": args.base_url,
         "goal": goal,
         "knowledge_mode": getattr(args, "knowledge_mode", "local"),
@@ -2528,12 +2540,12 @@ def run_model_onboarding(args: argparse.Namespace, claude: Path) -> int:
         print(f"  [skip] {_MODEL_PROFILE_NAME} already present (use --force)")
 
     rc = 0
-    if mode == "custom" and api_key_env and not os.environ.get(api_key_env):
-        print(f"  [warn] set {api_key_env} before running ctx with this model")
+    if mode == "custom" and provider_key_env_name and not os.environ.get(provider_key_env_name):
+        print(f"  [warn] set {provider_key_env_name} before running ctx with this model")
     if mode == "custom" and args.validate_model:
         rc = validate_model_connection(
             model=args.model,
-            api_key_env=api_key_env,
+            api_key_env=provider_key_env_name,
             base_url=args.base_url,
         )
         if rc == 0:
@@ -2702,6 +2714,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", help="Custom model slug, e.g. openai/gpt-5.5")
     parser.add_argument(
         "--api-key-env",
+        dest="provider_key_env_name",
+        metavar="API_KEY_ENV",
         help="Environment variable that stores the custom provider API key",
     )
     parser.add_argument("--base-url", help="Custom provider base URL")

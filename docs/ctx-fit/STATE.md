@@ -11,6 +11,57 @@
 
 ## Checkpoint
 
+### CI-phase repair — 2026-10-13 (Asia/Jerusalem)
+
+- Started from clean detached `c98f772b5b743c633cf93659f6a785b4682c957c`
+  in the outer run's worktree for `codex/bring-your-own-knowledge`, PR #288.
+  Read the exact-head hosted job log and CodeQL annotations. The incoming
+  Linux result was **9,514 passed, one failed, 51 skipped**, with 91.36%
+  coverage; it is starting-tree evidence, not verification of this repair.
+- Both wheel jobs still expected bare `ctx` to print Fit readiness. Updated
+  that expectation to the current empty-setup guidance and added a regression
+  comparing the workflow expectation with actual CLI output. Optional Fit,
+  doctor and Fit JSON smoke remain. The Linux failure reproduced locally:
+  the threat-model test still asserted an inherited corpus existed. Its
+  replacement checks empty defaults, missing-evidence refusal and the retained
+  explicit source/legal-evidence/body-digest/full-manifest requirements;
+  canonical provenance and ephemeral-wiki assertions remain.
+- CodeQL reported four high-severity findings. New importer files now start
+  at `0600`, including with umask `000`; replacement files retain their
+  existing mode. The three sensitive-data traces carried provider environment
+  **names**, not credential values. Internal parser/plan identifiers now make
+  that distinction explicit, with no scanner suppression. Public CLI flags,
+  help metavars, persisted JSON fields and approval-digest logic are unchanged.
+  Onboarding rejects malformed environment names before writing its profile
+  or warning with that input. Regressions verify environment names are kept
+  and actual environment values are absent from profiles and plan output.
+- Coordinator verification on the repair passed these focused groups using
+  `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD/src" python -m pytest -q
+  --no-cov -p no:cacheprovider`:
+  - `test_ci_classifier.py`, `fit/test_cli_surface.py`, and
+    `test_threat_model_docs.py`: **138 passed in 11.02s**.
+  - `test_source_registry.py`: **77 passed in 0.21s**.
+  - `test_import_designdotmd_skills.py`: **93 passed in 0.56s**.
+  - `test_ctx_init.py`, `test_ctx_ab_live_coding_pair.py`,
+    `test_harness_recommendations.py`, and `test_ctx_ab_benchmark.py`:
+    **363 passed in 52.54s**, with one existing tar-extraction deprecation
+    warning. All paths above are under `src/tests/`.
+- Built the final wheel with `python -m build --wheel --no-isolation`,
+  installed it into a clean worktree-local venv, and passed `pip check`.
+  Extracted and ran the updated workflow's actual Python smoke body from a
+  tiny fixture directory with an isolated home and no `PYTHONPATH`.
+  Confirmed imports resolved to the installed wheel. Bare `ctx`, `ctx fit`,
+  `ctx doctor`, and `ctx fit --json` all passed. Package identity remains
+  `claude-ctx` version `1.0.21`. Final formatting changed no Python AST.
+- Independent read-only review found no material issue. Diagnostic downloads
+  and the worktree-local build/smoke environment were removed after inspection;
+  `git diff --check` passed. No local CodeQL executable is available, so
+  CodeQL clearance and hosted Linux/macOS results remain **not verified**.
+  No broad gate, pipeline control, commit, push, merge, tag or publication ran
+  in this phase. Remaining exact-head authoritative checks and delivery belong
+  to the outer executor. No paid evaluation or personal host change occurred;
+  real-host acceptance and comparative savings remain unverified.
+
 ### Document-phase reconciliation — 2026-10-13 (Asia/Jerusalem)
 
 - Inspected the requested `11b582a7` → `035f1098` change and the actual

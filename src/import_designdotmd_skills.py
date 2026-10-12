@@ -501,7 +501,7 @@ def _atomic_write_text(parent_fd: int, destination_name: str, content: str) -> N
     fd = os.open(
         temp_name,
         os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
-        0o666 if existing_mode is None else existing_mode,
+        0o600,
         dir_fd=parent_fd,
     )
     try:

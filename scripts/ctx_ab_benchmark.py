@@ -5309,14 +5309,14 @@ def live_coding_pair_contract(
     output: Path,
     cache_root: Path,
     model: str,
-    api_key_env: str,
+    provider_key_env_name: str,
     timeout: float,
     max_iterations: int,
     max_tokens: int,
     provider_timeout: float,
     execute: bool = False,
 ) -> dict[str, Any]:
-    """Return one canonical, claim-ineligible future live-pair plan."""
+    """Return a future live-pair plan with an environment name, never its value."""
 
     if not isinstance(scenario, Scenario):
         raise TypeError("scenario must be a Scenario")
@@ -5334,8 +5334,8 @@ def live_coding_pair_contract(
     if not isinstance(model, str) or re.fullmatch(r"[a-z0-9][a-z0-9_.-]*/[^/\s]+", model) is None:
         raise ValueError("live coding pair model must include an explicit provider prefix")
     if (
-        not isinstance(api_key_env, str)
-        or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", api_key_env) is None
+        not isinstance(provider_key_env_name, str)
+        or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", provider_key_env_name) is None
     ):
         raise ValueError("live coding pair requires an explicit provider key environment name")
     for field_name, duration in (
@@ -5494,7 +5494,7 @@ def live_coding_pair_contract(
             "route": "provider_default",
             "provider_prefix": model.split("/", 1)[0],
             "requested_model": model,
-            "api_key_environment": api_key_env,
+            "api_key_environment": provider_key_env_name,
             "credential_policy": "same secret value in both arms; never persisted",
         },
         "controls": {
@@ -5655,7 +5655,7 @@ def approve_live_coding_pair_plan(
     output: Path,
     cache_root: Path,
     model: str,
-    api_key_env: str,
+    provider_key_env_name: str,
     timeout: float,
     max_iterations: int,
     max_tokens: int,
@@ -5672,7 +5672,7 @@ def approve_live_coding_pair_plan(
         output=output,
         cache_root=cache_root,
         model=model,
-        api_key_env=api_key_env,
+        provider_key_env_name=provider_key_env_name,
         timeout=timeout,
         max_iterations=max_iterations,
         max_tokens=max_tokens,
@@ -5855,7 +5855,7 @@ def _assert_live_coding_contract_current(
         output=output,
         cache_root=cache_root,
         model=model,
-        api_key_env=api_key_env,
+        provider_key_env_name=api_key_env,
         timeout=timeout,
         max_iterations=max_iterations,
         max_tokens=max_tokens,
@@ -5925,7 +5925,7 @@ def run_live_coding_pair(
         output=output,
         cache_root=cache_root,
         model=model,
-        api_key_env=api_key_env,
+        provider_key_env_name=api_key_env,
         timeout=timeout,
         max_iterations=max_iterations,
         max_tokens=max_tokens,
@@ -11293,7 +11293,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--model", default=os.environ.get("CTX_BENCHMARK_MODEL", "gpt-5.5"))
     parser.add_argument("--codex", default=shutil.which("codex") or "codex")
-    parser.add_argument("--api-key-env")
+    parser.add_argument("--api-key-env", dest="provider_key_env_name", metavar="API_KEY_ENV")
     parser.add_argument("--base-url")
     parser.add_argument("--max-iterations", type=int, default=25)
     parser.add_argument("--max-tokens", type=int)
@@ -11547,7 +11547,7 @@ def _run_deterministic_bridge_main(args: argparse.Namespace) -> int:
         raise SystemExit("--deterministic-bridge timeouts must be positive")
     if args.deterministic_bridge_token_budget < 1:
         raise SystemExit("--deterministic-bridge-token-budget must be positive")
-    if args.base_url is not None or args.api_key_env is not None:
+    if args.base_url is not None or args.provider_key_env_name is not None:
         raise SystemExit("--deterministic-bridge rejects external provider routes and keys")
     if args.dry_run or args.list:
         raise SystemExit("--deterministic-bridge is an executing diagnostic, not list/dry-run")
@@ -11665,7 +11665,7 @@ def _run_live_coding_pair_main(args: argparse.Namespace) -> int:
         raise SystemExit("--live-coding-pair timeouts must be positive")
     if args.base_url is not None:
         raise SystemExit("--live-coding-pair rejects custom provider routes")
-    if args.api_key_env is None:
+    if args.provider_key_env_name is None:
         raise SystemExit("--live-coding-pair requires --api-key-env")
     if args.output is None:
         raise SystemExit("--live-coding-pair requires an explicit --output path")
@@ -11698,7 +11698,7 @@ def _run_live_coding_pair_main(args: argparse.Namespace) -> int:
             output=args.output,
             cache_root=args.cache_root,
             model=args.model,
-            api_key_env=args.api_key_env,
+            provider_key_env_name=args.provider_key_env_name,
             timeout=args.timeout,
             max_iterations=args.max_iterations,
             max_tokens=args.max_tokens,
@@ -11723,7 +11723,7 @@ def _run_live_coding_pair_main(args: argparse.Namespace) -> int:
         output=args.output,
         cache_root=args.cache_root,
         model=args.model,
-        api_key_env=args.api_key_env,
+        provider_key_env_name=args.provider_key_env_name,
         timeout=args.timeout,
         max_iterations=args.max_iterations,
         max_tokens=args.max_tokens,
@@ -11735,7 +11735,7 @@ def _run_live_coding_pair_main(args: argparse.Namespace) -> int:
     if not args.live_coding_pair_execute:
         print(json.dumps(report, indent=2, sort_keys=True))
         return 0
-    if not os.environ.get(args.api_key_env):
+    if not os.environ.get(args.provider_key_env_name):
         raise SystemExit("live coding pair approved provider key environment is not set")
     try:
         cache = ensure_repo_cache(scenario, args.cache_root)
@@ -11746,7 +11746,7 @@ def _run_live_coding_pair_main(args: argparse.Namespace) -> int:
             output=args.output,
             cache_root=args.cache_root,
             model=args.model,
-            api_key_env=args.api_key_env,
+            api_key_env=args.provider_key_env_name,
             timeout=args.timeout,
             max_iterations=args.max_iterations,
             max_tokens=args.max_tokens,
@@ -11759,7 +11759,7 @@ def _run_live_coding_pair_main(args: argparse.Namespace) -> int:
             args.output.mkdir(mode=stat.S_IRWXU, parents=True, exist_ok=False)
             args.output.chmod(stat.S_IRWXU)
         error_message = str(exc)
-        provider_secret = os.environ.get(args.api_key_env, "")
+        provider_secret = os.environ.get(args.provider_key_env_name, "")
         if provider_secret:
             error_message = error_message.replace(provider_secret, "<REDACTED>")
         failure = {
@@ -12000,11 +12000,13 @@ def _run_main(
         )
     if (
         args.engine == "production-ctx-run"
-        and args.api_key_env
-        and not os.environ.get(args.api_key_env)
+        and args.provider_key_env_name
+        and not os.environ.get(args.provider_key_env_name)
         and not args.dry_run
     ):
-        raise SystemExit(f"provider key environment variable is not set: {args.api_key_env}")
+        raise SystemExit(
+            f"provider key environment variable is not set: {args.provider_key_env_name}"
+        )
     catalog_snapshot: CatalogSnapshot | None = None
     if args.engine == PRODUCTION_CATALOG_ENGINE:
         try:
@@ -12066,7 +12068,7 @@ def _run_main(
             "max_iterations": args.max_iterations,
             "max_tokens": args.max_tokens,
             "provider_timeout_seconds": args.provider_timeout,
-            "api_key_env": args.api_key_env,
+            "api_key_env": args.provider_key_env_name,
             "base_url": args.base_url,
             "dry_run": args.dry_run,
             "unified_engine_treatment": args.unified_engine_treatment,
@@ -12270,7 +12272,7 @@ def _run_main(
                                 timeout=args.timeout,
                                 dry_run=args.dry_run,
                                 incidents=incidents,
-                                api_key_env=args.api_key_env,
+                                api_key_env=args.provider_key_env_name,
                                 base_url=args.base_url,
                                 max_iterations=args.max_iterations,
                                 max_tokens=args.max_tokens,

@@ -1758,6 +1758,57 @@ def test_main_custom_model_writes_profile_and_recommends_harness(
     assert "text-to-cad" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("env_value", [None, "provider-secret-not-for-profile"])
+def test_custom_model_profile_records_only_the_environment_name(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+    env_value: str | None,
+) -> None:
+    monkeypatch.setattr(ci, "_claude_dir", lambda: tmp_path)
+    monkeypatch.setattr(ci, "recommend_harnesses", lambda *args, **kwargs: [])
+    env_name = "CTX_TEST_PROVIDER_KEY"
+    if env_value is None:
+        monkeypatch.delenv(env_name, raising=False)
+    else:
+        monkeypatch.setenv(env_name, env_value)
+
+    assert (
+        ci.main(["--model-mode", "custom", "--model", "openai/test", "--api-key-env", env_name])
+        == 0
+    )
+
+    profile_text = (tmp_path / "ctx-model-profile.json").read_text()
+    profile = json.loads(profile_text)
+    assert profile["api_key_env"] == env_name
+    assert profile["harness_requirements"]["api_key_env"] == env_name
+    output = capsys.readouterr()
+    assert "provider-secret-not-for-profile" not in profile_text + output.out + output.err
+    if env_value is None:
+        assert f"set {env_name}" in output.out
+
+
+@pytest.mark.parametrize("env_name", ["sk-test-private-value", "KEY=value", "bad name", "9KEY"])
+def test_custom_model_rejects_an_invalid_environment_name_without_echoing_it(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+    env_name: str,
+) -> None:
+    monkeypatch.setattr(ci, "_claude_dir", lambda: tmp_path)
+    monkeypatch.setattr(ci, "recommend_harnesses", lambda *args, **kwargs: [])
+
+    assert (
+        ci.main(["--model-mode", "custom", "--model", "openai/test", "--api-key-env", env_name])
+        == 1
+    )
+
+    assert not (tmp_path / "ctx-model-profile.json").exists()
+    output = capsys.readouterr()
+    assert "environment variable name" in output.err
+    assert env_name not in output.out + output.err
+
+
 def test_main_custom_model_records_structured_harness_requirements(
     tmp_path: Path,
     monkeypatch,
