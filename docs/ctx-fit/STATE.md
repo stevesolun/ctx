@@ -11,6 +11,55 @@
 
 ## Checkpoint
 
+### Delivery complete; PR intentionally unmerged — 2026-10-14 (Asia/Jerusalem)
+
+- Run `01M4X415NWZ7X3A5ZC4N4807RC` returned **`checks-passed`** at
+  `62c3dcf2a210bedfdf3a024798005fdba78085c1` on
+  [PR #288](https://github.com/stevesolun/ctx/pull/288). Direct GitHub read-back
+  confirmed that exact head, **OPEN**, `mergedAt: null`, **23 successful checks
+  and one intentional matrix skip**. Stop delivery here; do not wait for or
+  perform a merge. No tag, PyPI publication or remote LFS change occurred.
+- Hosted Linux evidence: run `38584215561`, job `115921930620`,
+  **9,629 passed, 51 skipped, 91.37% coverage in 526.13 seconds**. CodeQL,
+  dependency audits, Linux/macOS wheel smoke, clean-host, docs and the required
+  CI aggregate all passed. These verify `62c3dcf2`, not this documentation-only
+  follow-up or the older `5ca2d97d` baseline.
+- The final source repair `a6c41308` passed all **20 authoritative preflight
+  checks**, including **9,733 passed, five skipped, 92.17% coverage in
+  470.29 seconds**. Subsequent documentation changes are included in the
+  pushed head and its hosted checks. Focused actual-process recommendation
+  parity and corrected desktop/mobile Wiki checks also passed.
+- Approved R1/R2/R3 repairs are delivered: active overlay append precedence,
+  safe removal of generated legacy hooks, and credential-name rejection before
+  setup effects. The gate additionally corrected two formatting layouts and
+  obsolete empty-Wiki archive guidance; both formatting attempts and the
+  reproduced UI failure remain recorded below rather than being hidden.
+- Independent final handoff review caught an overly broad transactional claim
+  in the PR summary. Corrected the summary to rollback-safe wiki-body
+  publication/mirroring, explicitly retaining separate installation and wiki
+  publication steps. Final verification totals were added to the PR body;
+  read-back confirmed the metadata-only update did not change its head/state.
+- Guarded `no-mistakes axi sync` synchronized the clean coordinator checkout
+  with the verified pushed head and preserved every pipeline repair commit.
+  The owner subsequently requested committing and pushing this final
+  checkpoint too, without rerunning the whole suite. This documentation-only
+  follow-up changes only `docs/ctx-fit/STATE.md`; all other files remain
+  identical to the verified code head. Verification is limited to the diff,
+  whitespace and scope checks, followed by remote-head and unmerged-PR
+  read-back. The commit uses `[skip ci]` for this explicitly requested
+  status-only exception; no workflow or branch-protection configuration changes.
+  Prior green checks remain attributed to `62c3dcf2`, not to this new commit.
+  Skipped required checks may leave the new PR head pending until a future
+  checked commit; the owner explicitly requires the PR to remain unmerged.
+  The post-verification monitor expired while the PR remained open; that is
+  not a test failure. Do not restart the full delivery pipeline solely for
+  this status note. The final verification evidence is also in PR #288.
+- Product remains empty/user-owned, advisory, capped at five mixed suggestions,
+  installation approval-only, with optional Fit using explicit user data.
+  Actual Codex/Claude UI acceptance, comparative savings, concurrent overlay
+  append serialization, and the earlier intermittent Linux crash cause remain
+  unverified. These limits are not newly completed by the green checks.
+
 ### Documentation-phase reconciliation — 2026-10-14 (Asia/Jerusalem)
 
 - Reviewed `11b582a7cd4d549f1e83c412e04421bcc9c3fc28` through detached
