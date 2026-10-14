@@ -6193,6 +6193,10 @@ def test_render_wiki_index_empty_when_no_entities(fake_claude: Path) -> None:
     # No entities → still renders the chrome + a helpful empty state.
     assert "<h1>Wiki</h1>" in html_out
     assert "No wiki entities found" in html_out
+    assert "graph/wiki-graph.tar.gz" not in html_out
+    assert "Add your own skill, agent, or MCP records" in html_out
+    assert "explicitly import a user-owned archive" in html_out
+    assert "<a href='/docs'>the documentation</a>" in html_out
 
 
 def test_render_wiki_index_rejects_unsafe_filenames(fake_claude: Path) -> None:

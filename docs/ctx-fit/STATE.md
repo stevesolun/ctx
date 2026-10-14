@@ -11,6 +11,69 @@
 
 ## Checkpoint
 
+### Empty-wiki onboarding repair — 2026-10-14 (Asia/Jerusalem)
+
+- Resumed detached `365f71111219117772f6fe5b45f515436e87ec17` with the
+  preceding test phase's regression assertion and checkpoint already present.
+  Reproduced the exact reported failure using
+  `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD/src" python -m pytest -q --no-cov -p no:cacheprovider src/tests/test_ctx_monitor.py::test_render_wiki_index_empty_when_no_entities`:
+  **1 failed in 0.63s**, exit 1, on the retired archive reference.
+- Root cause was stale empty-state copy in `src/ctx/monitor/pages/wiki.py`.
+  Replaced it with guidance to add user-owned skill, agent or MCP records or
+  explicitly import a user-owned archive, linking the existing `/docs` route.
+  Preserved the archive regression assertion and added assertions for the
+  replacement guidance and link. No recommendation or import behavior changed.
+- The same focused command now reports **1 passed in 0.83s**, exit 0.
+  No new screenshot, broad suite, formatter, linter, static analysis, pipeline
+  control or delivery action ran. The earlier screenshot records the pre-fix
+  defect; current evidence is rendered HTML exercised by the focused test.
+  The outer executor owns remaining gates and delivery; keep PR #288 open
+  and unmerged. Prior repairs and evidence remain intact.
+
+### Focused test-phase evidence and empty-wiki blocker — 2026-10-14 (Asia/Jerusalem)
+
+- Started clean at detached `365f71111219117772f6fe5b45f515436e87ec17`.
+  The outer executor supplied successful `scripts/no_mistakes_run.sh test`
+  baseline evidence. This phase did not repeat a broad suite, run static or
+  documentation gates, control the pipeline, or perform delivery actions.
+- Using `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD/src" python -m pytest -q
+  --no-cov -p no:cacheprovider`, the BYO bootstrap, shared recommendation and
+  explicit Fit user-catalog files plus focused overlay/packed authoring/hook
+  upgrade selectors passed **141 tests in 13.97s**. The separate provider-name,
+  importer permissions, advisory tool-description and two crash selectors
+  passed **36 tests in 6.42s**. The two public-catalog browser selectors passed.
+  These are local working-tree results; the hosted Linux exception remains
+  undiagnosed.
+- A real-process probe initialized an empty offline profile, authored six
+  synthetic mixed records, rebuilt their graph with explicitly disabled
+  semantic embeddings, and compared CLI/API/MCP/Codex-hook/Claude-hook results.
+  All surfaces agreed on five mixed-case recommendations; no-match stayed empty,
+  reinitialization preserved wiki bytes, and unavailable tools remained eligible.
+  Legacy preapproval plus `manage` mode changed no tool, consent or knowledge
+  files. Local telemetry appended an event log; it is not an installation.
+  A Python socket audit guard observed no network attempts. Four invalid
+  provider-name CLI invocations also rejected without echoing values; guarded
+  replays observed no filesystem write attempts.
+- **New blocker:** the actual empty local dashboard `/wiki` still instructs
+  users to extract retired `graph/wiki-graph.tar.gz`. The archive was removed
+  with the corpus, so this fresh-user instruction is unusable and contradicts
+  user-owned onboarding. Chromium screenshot and rendered HTML reproduce it;
+  `/api/entities/search.json` correctly returns zero records. Extended
+  `src/tests/test_ctx_monitor.py::test_render_wiki_index_empty_when_no_entities`
+  to reject that archive reference; the focused selector **fails** at line 6196.
+  No production copy was edited in this test-only phase. Replace the obsolete
+  instruction with authoring or explicit user-import guidance, then rerun this
+  selector and capture the corrected surface in the outer repair flow.
+- Evidence and reproducible probes are under
+  `/var/folders/cj/j956f9v920b8wk3wvd8ms2nh0000gn/T/no-mistakes-evidence/01M4X415NWZ7X3A5ZC4N4807RC/`:
+  `user-journey.txt`, `user-journey.json`, `verify_user_journey.py`,
+  `security-cli-rejection.json`, `empty-wiki-dashboard.png`,
+  `empty-wiki-dashboard.html`, `empty-wiki-api.json`, and
+  `capture_empty_dashboard.py`. Evidence uses disposable synthetic local
+  profiles; no actual Codex/Claude UI acceptance or comparative savings are
+  claimed. Keep PR #288 open and unmerged. Outer executor owns remaining gates
+  and delivery.
+
 ### Test-phase formatting correction — 2026-10-14 (Asia/Jerusalem)
 
 - Started clean at detached `439ce44c7f4f6a2c016a327d1d3fab6228f9bfb5`.

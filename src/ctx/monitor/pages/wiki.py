@@ -116,8 +116,8 @@ def render_wiki_index_page(
         + (
             cards
             or "<p class='muted'>No wiki entities found. "
-            "Extract <code>graph/wiki-graph.tar.gz</code> into "
-            "<code>~/.claude/skill-wiki/</code> to populate.</p>"
+            "Add your own skill, agent, or MCP records, or explicitly import a user-owned archive. "
+            "See <a href='/docs'>the documentation</a> for onboarding.</p>"
         )
         + "</div>"
         "</div>"
