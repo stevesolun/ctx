@@ -8,13 +8,11 @@ from pathlib import Path
 from typing import BinaryIO, Protocol
 
 from ctx.runtime.query_decision import QueryHostDescriptor
-from ctx.runtime.query_delivery import QueryDeliveryController, SensitiveQueryInput
+from ctx.runtime.query_delivery import SensitiveQueryInput
+from ctx.runtime.user_recommendations import UserKnowledgeQueryController
 
 
 MAX_STDIN_BYTES = 512 * 1024
-_MODE_ENV = "CTX_ENGINE_MODE"
-_STATE_ROOT_ENV = "CTX_QUERY_DELIVERY_ROOT"
-_MODES = frozenset({"activate", "legacy", "manage", "shadow", "recommend"})
 
 
 class QueryController(Protocol):
@@ -68,30 +66,80 @@ def open_query_delivery_controller(
     *,
     host: QueryHostDescriptor,
     environment: Mapping[str, str],
-) -> QueryDeliveryController:
-    configured_mode = environment.get(_MODE_ENV, "")
-    mode = configured_mode.strip().lower() if isinstance(configured_mode, str) else ""
-    if mode not in _MODES:
-        mode = "legacy"
-    configured_root = environment.get(_STATE_ROOT_ENV, "")
-    if isinstance(configured_root, str) and configured_root:
-        state_root = Path(configured_root)
-        if not state_root.is_absolute():
-            raise ValueError("CTX query delivery root must be absolute")
-    else:
-        state_root = Path.home() / ".ctx" / "query-delivery-v1"
-    return QueryDeliveryController(
-        host=host,
-        mode=mode,
-        state_root=state_root,
-        environment=environment,
-    )
+) -> UserKnowledgeQueryController:
+    if host not in {QueryHostDescriptor.codex(), QueryHostDescriptor.claude_code()}:
+        raise ValueError("native recommendations support Codex and Claude Code")
+    return UserKnowledgeQueryController(environment)
 
 
 def emit_report(report: object, stdout: BinaryIO) -> None:
     permit = getattr(report, "emission_permit", None)
     if permit is not None:
         permit.emit_once(stdout)
+
+
+_FILE_LANGUAGES = {
+    ".py": "python",
+    ".pyi": "python",
+    ".js": "javascript",
+    ".jsx": "javascript",
+    ".ts": "typescript",
+    ".tsx": "typescript",
+    ".cpp": "cpp",
+    ".cc": "cpp",
+    ".cxx": "cpp",
+    ".hpp": "cpp",
+    ".c": "c",
+    ".h": "c",
+    ".cs": "csharp",
+    ".go": "go",
+    ".java": "java",
+    ".php": "php",
+    ".rs": "rust",
+}
+
+
+def emit_tool_observation(
+    value: Mapping[str, object],
+    environment: Mapping[str, str],
+    stdout: BinaryIO,
+) -> None:
+    """Use only declared file-path metadata, never tool output/source/commands."""
+    workspace = existing_workspace(value.get("cwd"))
+    session_id = bounded_text(value.get("session_id"), maximum_bytes=4_096)
+    tool_name = bounded_text(value.get("tool_name"), maximum_bytes=256)
+    tool_input = value.get("tool_input")
+    if workspace is None or session_id is None or tool_name is None:
+        return
+    if not isinstance(tool_input, dict):
+        return
+    project = environment.get("CLAUDE_PROJECT_DIR")
+    if project and existing_workspace(project) != workspace:
+        return
+    languages: set[str] = set()
+    for key in ("file_path", "path", "filename"):
+        file_path = bounded_text(tool_input.get(key), maximum_bytes=4_096)
+        if file_path is not None:
+            language = _FILE_LANGUAGES.get(Path(file_path).suffix.lower())
+            if language:
+                languages.add(language)
+    if not languages:
+        return
+    query = " ".join(sorted(languages))
+    request = SensitiveQueryInput(
+        native_session_id=session_id,
+        logical_prompt_id="file-language-observation",
+        workspace=workspace,
+        prompt=query,
+        language=next(iter(languages)) if len(languages) == 1 else "",
+    )
+    emit_report(
+        UserKnowledgeQueryController(environment).issue(
+            request,
+            hook_event="PostToolUse",
+        ),
+        stdout,
+    )
 
 
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:

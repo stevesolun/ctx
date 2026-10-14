@@ -121,6 +121,36 @@ class TestInstallAgent:
         entity = wiki_dir / "entities" / "agents" / "architect.md"
         assert "status: installed" in entity.read_text(encoding="utf-8")
 
+    def test_public_install_emits_real_load_event_only_after_success(
+        self,
+        wiki_dir: Path,
+        agents_dir: Path,
+        isolated_manifest: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import skill_telemetry
+
+        events_path = tmp_path / "telemetry" / "skill-events.jsonl"
+        monkeypatch.setattr(skill_telemetry, "DEFAULT_EVENTS_PATH", events_path)
+        _seed_agent(wiki_dir, "telemetry-agent")
+
+        installed = agent_install.install_agent(
+            "telemetry-agent",
+            wiki_dir=wiki_dir,
+            agents_dir=agents_dir,
+        )
+        refused = agent_install.install_agent(
+            "../refused",
+            wiki_dir=wiki_dir,
+            agents_dir=agents_dir,
+        )
+
+        events = list(skill_telemetry.read_events(events_path, trusted_root=tmp_path))
+        assert installed.status == "installed"
+        assert refused.status == "failed"
+        assert [(event.event, event.skill) for event in events] == [("load", "telemetry-agent")]
+
     def test_dry_run(
         self,
         wiki_dir: Path,

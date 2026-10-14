@@ -296,6 +296,16 @@ class TestWritePendingSkills:
 
 
 class TestLoadRecentUnmatchedCount:
+    @pytest.fixture(autouse=True)
+    def _freeze_today(self, monkeypatch):
+        # Keep the consumer clock aligned with fixtures imported before midnight.
+        class FixedDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return datetime.fromisoformat(TODAY).replace(tzinfo=timezone.utc).astimezone(tz)
+
+        monkeypatch.setattr(_cm, "datetime", FixedDatetime)
+
     def _write_log(self, path: Path, entries: list[dict]) -> None:
         path.write_text("\n".join(json.dumps(e) for e in entries) + "\n")
 

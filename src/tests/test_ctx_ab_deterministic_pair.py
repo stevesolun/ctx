@@ -12,6 +12,10 @@ import pytest
 
 from ctx.runtime.query_decision import QueryHostDescriptor
 from scripts import ctx_ab_benchmark as benchmark
+from tests.release_catalog_fixture import (
+    RELEASE_CATALOG_FIXTURE_ROOT,
+    historical_release_catalog as historical_release_catalog,
+)
 
 # The deterministic bridge is a loopback in front of the LiteLLM runtime, so it
 # cannot be exercised without it. litellm ships in the `harness` extra, not in
@@ -19,6 +23,19 @@ from scripts import ctx_ab_benchmark as benchmark
 # line 251; the other eleven did not, and failed in CI on an absence that is not
 # a defect. Guard the module once. Run with `pip install -e ".[dev,harness]"`.
 pytest.importorskip("litellm")
+
+
+pytestmark = pytest.mark.usefixtures("historical_benchmark_catalog")
+
+
+@pytest.fixture
+def historical_benchmark_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+    historical_release_catalog: None,
+) -> None:
+    """Keep the legacy benchmark evidence bound to explicit test-owned bytes."""
+
+    monkeypatch.setattr(benchmark, "_RELEASE_CATALOG_ASSET_ROOT", RELEASE_CATALOG_FIXTURE_ROOT)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -29,6 +46,7 @@ def _contract(
     scenario: benchmark.Scenario,
     *,
     scenarios_path: Path = SCENARIOS,
+    provider_timeout: float = 5,
 ) -> dict[str, Any]:
     return benchmark.deterministic_bridge_pair_contract(
         scenario=scenario,
@@ -36,7 +54,7 @@ def _contract(
         model="openai/ctx-ab-deterministic",
         timeout=30,
         max_tokens=512,
-        provider_timeout=5,
+        provider_timeout=provider_timeout,
         token_budget=100_000,
     )
 
@@ -188,7 +206,10 @@ def test_deterministic_bridge_rejects_unapproved_and_unfair_routes_before_execut
             benchmark._run_deterministic_bridge_main(unfair)
 
 
-def test_deterministic_bridge_direct_script_resolves_sibling_bridge_before_approval() -> None:
+def test_deterministic_bridge_direct_script_fails_closed_without_retired_assets(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "must-not-exist"
     result = benchmark.run_process(
         [
             str(Path(sys.executable)),
@@ -215,15 +236,20 @@ def test_deterministic_bridge_direct_script_resolves_sibling_bridge_before_appro
             "5",
             "--timeout",
             "60",
+            "--output",
+            str(output),
         ],
         cwd=ROOT,
         timeout=30,
     )
 
     assert result.returncode == 1
-    assert "approval required before any workspace or provider execution" in result.stderr
+    # Subprocesses deliberately do not inherit the in-process historical fixture.
+    assert "No such file or directory" in result.stderr
+    assert "benefit-eligible-catalog-v1.json" in result.stderr
     assert "ModuleNotFoundError" not in result.stderr
     assert "Traceback" not in result.stderr
+    assert not output.exists()
 
 
 def test_deterministic_bridge_top_level_import_resolves_exact_sibling() -> None:
@@ -257,7 +283,16 @@ def test_deterministic_bridge_pair_uses_current_delivery_and_exact_provider_delt
 ) -> None:
     pytest.importorskip("litellm")
     scenario, cache, scenarios_path = _local_scenario(tmp_path)
-    contract = _contract(scenario, scenarios_path=scenarios_path)
+    # Each arm is a fresh process, so its provider timer includes LiteLLM's
+    # deferred import as well as the loopback request.  Under the parallel full
+    # gate that import alone can approach five seconds; keep the subprocess's
+    # 30-second outer bound while giving this real-adapter check startup room.
+    provider_timeout = 15
+    contract = _contract(
+        scenario,
+        scenarios_path=scenarios_path,
+        provider_timeout=provider_timeout,
+    )
     approval = benchmark.deterministic_bridge_pair_contract_sha256(contract)
     verification_roots: list[Path] = []
     release_factory_calls = 0
@@ -317,7 +352,7 @@ def test_deterministic_bridge_pair_uses_current_delivery_and_exact_provider_delt
         model="openai/ctx-ab-deterministic",
         timeout=30,
         max_tokens=512,
-        provider_timeout=5,
+        provider_timeout=provider_timeout,
         token_budget=100_000,
         approval_digest=approval,
         contract=contract,

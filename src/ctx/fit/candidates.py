@@ -3,7 +3,7 @@
 The configuration space is combinatorial — agents times models times skills
 times instructions. Brute force is both unaffordable and contrary to the point
 of CTX. This module is where CTX's existing intelligence earns its place: the
-shipped capability catalog and the already-accepted
+user-supplied capability catalog and the already-accepted
 :class:`~ctx.engine.planner.BoundedCapabilityPlanner` reduce that space to a
 handful of capabilities, and this module composes those into a small, diverse,
 explained set of configurations worth actually testing.
@@ -34,7 +34,6 @@ import re
 import stat
 from dataclasses import dataclass, field
 from functools import lru_cache
-from importlib import resources
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
@@ -184,6 +183,10 @@ class CapabilityMaterial:
     @property
     def content_bytes(self) -> int:
         return len(self.content.encode("utf-8"))
+
+    @property
+    def source_identity_names_capability(self) -> bool:
+        return self.source_identity.endswith(f"#{self.capability_id}")
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -469,36 +472,8 @@ def _canonical_catalog_entry_digest(entry: dict[str, object]) -> str:
 
 @lru_cache(maxsize=1)
 def _packaged_capability_content() -> dict[str, tuple[str, str]]:
-    """Exact skill bodies shipped in the release candidate catalog."""
-
-    try:
-        raw = (resources.files("ctx.assets") / CATALOG_RESOURCE).read_text(encoding="utf-8")
-        entries = json.loads(raw).get("entries")
-    except (OSError, ModuleNotFoundError, json.JSONDecodeError, AttributeError):
-        return {}
-    if not isinstance(entries, list):
-        return {}
-
-    content: dict[str, tuple[str, str]] = {}
-    for entry in entries:
-        if not isinstance(entry, dict) or entry.get("type") != "skill":
-            continue
-        capability_id = entry.get("id")
-        files = entry.get("files")
-        if not isinstance(capability_id, str) or not isinstance(files, list):
-            continue
-        # This is the exact normalization the trial historically used: each
-        # shipped file was stripped and multiple files were separated by one
-        # blank line.  Capturing the result here makes that normalization part
-        # of the candidate rather than an implicit provider behavior.
-        body = "\n\n".join(
-            item["content"].strip()
-            for item in files
-            if isinstance(item, dict) and isinstance(item.get("content"), str)
-        ).strip()
-        if body:
-            content[capability_id] = (body, _canonical_catalog_entry_digest(entry))
-    return content
+    """No capability bodies ship with CTX; callers must bind their own material."""
+    return {}
 
 
 def _material_for(selection: object) -> CapabilityMaterial | None:
@@ -542,6 +517,12 @@ class CandidateConfiguration:
             missing = sorted(set(self.capability_ids) - set(material_ids))
             detail = f": {', '.join(missing)}" if missing else ""
             raise ValueError(f"candidate is missing exact capability material{detail}")
+        if self.role != "baseline":
+            for material in self.capability_materials:
+                if not material.source_identity_names_capability:
+                    raise ValueError(
+                        "treatment capability source identity does not name its capability ID"
+                    )
         instruction_paths = tuple(item.path for item in self.instruction_materials)
         if len(set(instruction_paths)) != len(instruction_paths):
             raise ValueError("candidate instruction material contains duplicate paths")
@@ -856,6 +837,7 @@ def generate_candidates(
     *,
     model: str | None = None,
     max_candidates: int = MAX_CANDIDATES,
+    capability_materials: tuple[CapabilityMaterial, ...] | None = None,
 ) -> CandidateSet:
     """Produce a bounded, diverse, explained candidate set for one repository.
 
@@ -971,7 +953,13 @@ def generate_candidates(
 
     considered = len(plan.selections)
     applicable = [item for item in plan.selections if item.kind in APPLICABLE_CAPABILITY_KINDS]
-    materials = {item.capability_id: _material_for(item) for item in applicable}
+    if capability_materials is None:
+        materials = {item.capability_id: _material_for(item) for item in applicable}
+    else:
+        supplied = {item.capability_id: item for item in capability_materials}
+        if len(supplied) != len(capability_materials):
+            raise ValueError("supplied capability material contains duplicate identities")
+        materials = {item.capability_id: supplied.get(item.capability_id) for item in applicable}
     ranked = [item for item in applicable if materials[item.capability_id] is not None]
 
     if inapplicable := tuple(
@@ -988,7 +976,7 @@ def generate_candidates(
         item.capability_id for item in applicable if materials[item.capability_id] is None
     ):
         warnings.append(
-            "excluded from the comparison because exact executable material is not shipped: "
+            "excluded from the comparison because exact executable material is not supplied: "
             + ", ".join(missing_material)
         )
 
@@ -1001,7 +989,7 @@ def generate_candidates(
             candidates=(baseline,),
             abstained=True,
             abstention_reason=(
-                "the relevant capabilities have no exact shipped material, so CTX cannot "
+                "the relevant capabilities have no exact supplied material, so CTX cannot "
                 "run and later reproduce them"
                 if no_material
                 else "every capability relevant to this repository is of a kind a trial "

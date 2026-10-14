@@ -24,9 +24,6 @@ import pytest
 import toolbox as cli
 import toolbox_config as tc
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-PUBLIC_TEMPLATES_DIR = REPO_ROOT / "docs" / "toolbox" / "templates"
-
 
 @pytest.fixture()
 def isolated_global(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -41,77 +38,47 @@ def _run(argv: list[str]) -> int:
     return cli.main(argv)
 
 
-def _assert_public_template_json_matches_embedded_starters(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    docs_templates = {
-        path.stem: json.loads(path.read_text(encoding="utf-8"))
-        for path in sorted(PUBLIC_TEMPLATES_DIR.glob("*.json"))
+def _import_user_toolbox(target: Path) -> None:
+    payload = {
+        "version": 1,
+        "toolboxes": {"ship-it": {"description": "User review", "post": ["my-reviewer"]}},
     }
-
-    assert docs_templates
-    assert set(docs_templates) == set(cli._EMBEDDED_TEMPLATES)
-
-    missing_templates_dir = PUBLIC_TEMPLATES_DIR / "__missing_for_test__"
-    assert not missing_templates_dir.exists()
-    monkeypatch.setattr(cli, "TEMPLATES_DIR", missing_templates_dir)
-
-    embedded_templates = {name: cli._load_template(name) for name in sorted(docs_templates)}
-
-    assert embedded_templates == docs_templates
+    source = target.parent / "user-toolbox.json"
+    source.write_text(json.dumps(payload))
+    assert _run(["import", str(source)]) == 0
 
 
-def test_init_seeds_starter_templates(
-    isolated_global: Path,
-    capsys,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    _assert_public_template_json_matches_embedded_starters(monkeypatch)
-
-    rc = _run(["init"])
-    assert rc == 0
-    assert isolated_global.exists()
-    raw = json.loads(isolated_global.read_text(encoding="utf-8"))
-    names = set(raw["toolboxes"].keys())
-    # All 5 expected starters should be present
-    assert {
-        "ship-it",
-        "security-sweep",
-        "refactor-safety",
-        "docs-review",
-        "fresh-repo-init",
-    }.issubset(names)
-
-
-def test_init_refuses_without_force(isolated_global: Path, capsys):
+def test_init_creates_empty_toolbox_configuration(isolated_global, capsys):
     assert _run(["init"]) == 0
-    rc = _run(["init"])
-    assert rc == 1
-    err = capsys.readouterr().err
-    assert "--force" in err
+    raw = json.loads(isolated_global.read_text())
+    assert raw["toolboxes"] == {}
+    assert raw["active"] == []
+    assert cli._EMBEDDED_TEMPLATES == {}
 
 
-def test_init_force_overwrites(isolated_global: Path, capsys):
+def test_init_is_idempotent_and_preserves_user_tools_even_with_force(isolated_global, capsys):
+    _import_user_toolbox(isolated_global)
+    assert _run(["activate", "ship-it"]) == 0
+    before = json.loads(isolated_global.read_text())
     assert _run(["init"]) == 0
     assert _run(["init", "--force"]) == 0
+    assert json.loads(isolated_global.read_text()) == before
 
 
-def test_list_after_init_shows_all(isolated_global: Path, capsys):
-    _run(["init"])
+def test_list_after_empty_init_gives_user_guidance(isolated_global, capsys):
+    assert _run(["init"]) == 0
     capsys.readouterr()
     assert _run(["list"]) == 0
-    out = capsys.readouterr().out
-    for name in ["ship-it", "security-sweep", "refactor-safety", "docs-review", "fresh-repo-init"]:
-        assert name in out
+    assert "import your own" in capsys.readouterr().out
 
 
 def test_show_prints_json(isolated_global: Path, capsys):
-    _run(["init"])
+    _import_user_toolbox(isolated_global)
     capsys.readouterr()
     assert _run(["show", "ship-it"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["name"] == "ship-it"
-    assert "code-reviewer" in payload["post"]
+    assert "my-reviewer" in payload["post"]
 
 
 def test_show_unknown_errors(isolated_global: Path, capsys):
@@ -121,7 +88,7 @@ def test_show_unknown_errors(isolated_global: Path, capsys):
 
 
 def test_activate_and_deactivate(isolated_global: Path, capsys):
-    _run(["init"])
+    _import_user_toolbox(isolated_global)
     capsys.readouterr()
     assert _run(["activate", "ship-it"]) == 0
     raw = json.loads(isolated_global.read_text(encoding="utf-8"))
@@ -138,7 +105,7 @@ def test_activate_unknown_errors(isolated_global: Path, capsys):
 def test_export_then_import_roundtrip(
     isolated_global: Path, tmp_path: Path, capsys: pytest.CaptureFixture
 ):
-    _run(["init"])
+    _import_user_toolbox(isolated_global)
     capsys.readouterr()
 
     # Export (prefer JSON output so we can round-trip without PyYAML)
@@ -160,7 +127,7 @@ def test_export_then_import_roundtrip(
 def test_import_skips_duplicates_without_force(
     isolated_global: Path, tmp_path: Path, capsys: pytest.CaptureFixture
 ):
-    _run(["init"])
+    _import_user_toolbox(isolated_global)
     capsys.readouterr()
 
     # Create a simple JSON payload matching ship-it

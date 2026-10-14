@@ -49,6 +49,9 @@ from ctx.runtime.release_skill_dispatcher import (
 from ctx.runtime.release_skill_lifecycle import activate_installed_release_skill
 
 
+pytestmark = pytest.mark.usefixtures("historical_release_catalog")
+
+
 NOW = "2026-08-02T12:30:00Z"
 TRUSTED_NOW = datetime(2026, 8, 2, 12, 30, tzinfo=UTC)
 
@@ -381,7 +384,15 @@ def test_activated_skill_exposure_permit_is_atomic_under_concurrency(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    request, preparation = _activated_preparation(tmp_path)
+    request = _request(tmp_path)
+    activation = activate_installed_release_skill(
+        request,
+        trusted_utc_now=lambda: TRUSTED_NOW,
+    )
+    preparation = prepare_activated_skill_exposure(
+        request=request,
+        activation_evidence=activation,
+    )
     selection, action = _selection_and_action(request)
     calls: list[str] = []
     entered = threading.Event()
@@ -393,13 +404,21 @@ def test_activated_skill_exposure_permit_is_atomic_under_concurrency(
         lambda *_args, **_kwargs: None,
     )
     route_authority = _route_authority(request, action, (selection,))
-    original_rederive = exposure_module._rederive_under_material_lock
+    # Validate real journal/CAS material outside the permit-contention deadline.
+    # The dedicated consumption tests below cover fresh reads and CAS tampering.
+    validated_material = exposure_module._rederive_under_material_lock(
+        request=request,
+        activation_evidence=activation,
+        read_content=True,
+    )
 
-    def blocked_rederive(**kwargs: object):  # type: ignore[no-untyped-def]
+    def blocked_rederive(
+        **_kwargs: object,
+    ) -> tuple[CapabilityStateV3, exposure_module.RootIdentity, bytes | None]:
         calls.append(action.content_digest)
         entered.set()
         assert release.wait(timeout=10)
-        return original_rederive(**kwargs)  # type: ignore[arg-type]
+        return validated_material
 
     monkeypatch.setattr(exposure_module, "_rederive_under_material_lock", blocked_rederive)
 
@@ -421,6 +440,7 @@ def test_activated_skill_exposure_permit_is_atomic_under_concurrency(
         prepared = first.result(timeout=10)
 
     assert prepared.capability_id == RELEASE_INSTALL_SKILL_ID
+    assert prepared.content.encode("utf-8") == validated_material[2]
     assert len(calls) == 1
 
 

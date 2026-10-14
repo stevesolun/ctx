@@ -57,6 +57,14 @@ def validate_skill_name(name: str) -> str:
     return name
 
 
+def _unquote_scalar(value: str) -> str:
+    """Remove one matching outer pair, preserving quotes inside commands."""
+    value = value.strip()
+    if len(value) >= 2 and value[0] in {"'", '"'} and value[-1] == value[0]:
+        return value[1:-1]
+    return value
+
+
 def parse_frontmatter(text: str) -> dict[str, Any]:
     """Parse YAML-style frontmatter from a markdown string.
 
@@ -79,7 +87,7 @@ def parse_frontmatter(text: str) -> dict[str, Any]:
         key, val = key.strip(), val.strip()
         if val.startswith("[") and val.endswith("]"):
             # Inline list: ``tags: [a, b, c]``
-            fm[key] = [v.strip().strip("'\"") for v in val[1:-1].split(",") if v.strip()]
+            fm[key] = [_unquote_scalar(v) for v in val[1:-1].split(",") if v.strip()]
             i += 1
             continue
         if val == "" and i + 1 < len(lines) and lines[i + 1].lstrip().startswith("- "):
@@ -99,25 +107,21 @@ def parse_frontmatter(text: str) -> dict[str, Any]:
                 indent = len(raw_item) - len(stripped)
                 if stripped.startswith("- "):
                     if current_parts:
-                        collected.append(" ".join(current_parts))
-                    item = stripped[2:].strip().strip("'\"")
+                        collected.append(_unquote_scalar(" ".join(current_parts)))
+                    item = stripped[2:].strip()
                     current_parts = [item] if item else []
                     i += 1
                     continue
                 if current_parts and indent > 0 and stripped:
-                    current_parts.append(stripped.strip().strip("'\""))
+                    current_parts.append(stripped.strip())
                     i += 1
                     continue
                 break
             if current_parts:
-                collected.append(" ".join(current_parts))
+                collected.append(_unquote_scalar(" ".join(current_parts)))
             fm[key] = collected
             continue
-        if (val.startswith('"') and val.endswith('"')) or (
-            val.startswith("'") and val.endswith("'")
-        ):
-            val = val[1:-1]
-        fm[key] = val
+        fm[key] = _unquote_scalar(val)
         i += 1
     return fm
 

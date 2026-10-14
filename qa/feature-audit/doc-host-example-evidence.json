@@ -1,0 +1,889 @@
+{
+  "scope": "DOC-NAV-008, DOC-NAV-027, B-DOC-001 and US-008 local recommendation examples",
+  "source_hashes": {
+    "docs/harness/attaching-to-hosts.md": "1b457a79071b16284256585a0c315e12e4f57cab09ad9b1f186025bfc18fcc22",
+    "docs/harness/loopflow-adapter-demo.md": "d7cb8468ced20c36abc92e132dee2ce13149310fab8164fb5da1baf8d15d1c03",
+    "src/ctx/api.py": "25592e8ba8e238b742b9dc805116e1a1dfe759c56ff5ff7f813fea0b4a04b893",
+    "src/ctx/adapters/loopflow.py": "01af8261230d989121be7c85b081a63a3bbbc0e8a6405e8477e483bae9dae82a"
+  },
+  "isolation": "synthetic real graph/wiki, actual public APIs and adapter CLI; only configured data roots and disabled telemetry redirected; no recommendation functions mocked",
+  "results": [
+    {
+      "example": "exact Python on_user_turn example with host injection callback supplied",
+      "stdout": "  [      agent] code-reviewer  (score 171.2)\n  [      skill] fastapi-pro  (score 71.1)\n  related: agent:code-reviewer - related via fastapi-pro; normalized score 1.000\n  related: mcp-server:filesystem - related via fastapi-pro; normalized score 0.900\n",
+      "injected_body_count": 1,
+      "result": "passed"
+    },
+    {
+      "example": "custom-path toolbox catalog example with fixture path substitution",
+      "stdout": "ctx__recommend_bundle Recommend a top-K bundle of skills / agents / MCP \nctx__graph_query Walk the knowledge graph from a list of seed entit\nctx__recommend_related Recommend related skills / agents / MCP servers af\nctx__wiki_search Keyword search across the llm-wiki entity pages (s\nctx__wiki_get Fetch a single wiki entity page by slug. Returns t\nctx__observe_dev_event Record the current development event for a custom/\nctx__load_entity Request that the host consider loading a recommend\nctx__mark_entity_used Record evidence that a loaded ctx entity was usefu\nctx__record_validation Record a harness validation check result outside t\nctx__record_escalation Record that a predefined escalation condition was \nctx__unload_entity Record that the host/user chose to unload a ctx en\nctx__session_end Record that a custom/API/local harness session end\nctx__session_state Read the current lifecycle state for a session, in\n",
+      "result": "passed"
+    },
+    {
+      "example": "documented adapter CLI",
+      "argv": [
+        "python",
+        "-m",
+        "ctx.adapters.loopflow",
+        "--goal",
+        "mcp agent loop local ollama filesystem",
+        "--loop-name",
+        "ctx capability selection",
+        "--permissions",
+        "skills,agents,mcps,harnesses",
+        "--own-llm",
+        "--model-provider",
+        "ollama",
+        "--model",
+        "ollama/llama3.1",
+        "--selected",
+        "local-ollama-file-operations",
+        "--rejected",
+        "legacy-reviewer",
+        "--top-k",
+        "2"
+      ],
+      "exit_code": 0,
+      "payload": {
+        "adapter": "loopflow",
+        "agent_loop": {
+          "before_act": "Load only the granted capability groups from capabilities.*.",
+          "before_plan": "Call recommend_for_loop() or python -m ctx.adapters.loopflow with task, context, and last failure.",
+          "harness_install": "python -m harness_install --dry-run '--goal=mcp agent loop local ollama filesystem' --model-provider=ollama --model=ollama/llama3.1 -- local-harness",
+          "on_failure": "Pass the latest failure back as last_failure before the next plan."
+        },
+        "capabilities": {
+          "agents": [
+            {
+              "id": "agent:code-reviewer",
+              "installable": true,
+              "installs": 0,
+              "load_status": "local-wiki",
+              "name": "code-reviewer",
+              "normalized_score": 0.3793,
+              "score": 60.7,
+              "source_path": "entities/agents/code-reviewer.md",
+              "type": "agent"
+            }
+          ],
+          "harnesses": [
+            {
+              "fit_score": 1,
+              "installs": 0,
+              "name": "local-harness",
+              "normalized_score": 1,
+              "reliability_score": 0.17,
+              "score": 160,
+              "source": "wiki",
+              "type": "harness"
+            }
+          ],
+          "mcps": [
+            {
+              "id": "mcp-server:filesystem",
+              "installable": true,
+              "installs": 0,
+              "load_status": "local-wiki",
+              "name": "filesystem",
+              "normalized_score": 0.6918,
+              "score": 110.7,
+              "source_path": "entities/mcp-servers/f/filesystem.md",
+              "type": "mcp-server"
+            }
+          ],
+          "skills": [
+            {
+              "id": "skill:fastapi-pro",
+              "installable": true,
+              "installs": 0,
+              "load_status": "local-wiki",
+              "name": "fastapi-pro",
+              "normalized_score": 0.3819,
+              "score": 61.1,
+              "source_path": "converted/fastapi-pro/SKILL.md",
+              "type": "skill"
+            }
+          ]
+        },
+        "context": {
+          "done_when": [],
+          "goal": "mcp agent loop local ollama filesystem",
+          "last_failure_present": false,
+          "look_at": {
+            "count": 0,
+            "items": []
+          },
+          "loop_name": "ctx capability selection",
+          "query": "mcp agent loop local ollama filesystem ctx capability selection loopflow model: ollama ollama/llama3.1"
+        },
+        "loopflow": {
+          "before_plan": "Call python -m ctx.adapters.loopflow before planning and inject this JSON as read-only context.",
+          "harness_rule": "Only load harnesses when the loop runs on a user-owned/API/local LLM.",
+          "use_skills": "use skills: fastapi-pro",
+          "use_tools": "use tools from the \"ctx\" server"
+        },
+        "mcp_server": {
+          "args": [],
+          "command": "ctx-mcp-server",
+          "name": "ctx",
+          "tools": [
+            "ctx__recommend_bundle",
+            "ctx__graph_query",
+            "ctx__recommend_related",
+            "ctx__wiki_search",
+            "ctx__wiki_get",
+            "ctx__observe_dev_event",
+            "ctx__load_entity",
+            "ctx__mark_entity_used",
+            "ctx__record_validation",
+            "ctx__record_escalation",
+            "ctx__unload_entity",
+            "ctx__session_end",
+            "ctx__session_state"
+          ]
+        },
+        "permissions": {
+          "agents": true,
+          "harnesses": true,
+          "mcps": true,
+          "skills": true
+        },
+        "related_recommendations": [],
+        "selection": {
+          "rejected": [
+            "legacy-reviewer"
+          ],
+          "rejection_mode": "use",
+          "selected": [
+            "local-ollama-file-operations"
+          ],
+          "session_bound": false
+        },
+        "version": "ctx.loop_adapter.v1",
+        "warnings": []
+      },
+      "stderr": ""
+    },
+    {
+      "example": "documented adapter CLI",
+      "argv": [
+        "python",
+        "-m",
+        "ctx.adapters.loopflow",
+        "--loop-file",
+        "/var/folders/cj/j956f9v920b8wk3wvd8ms2nh0000gn/T/ctx-doc-host-h3w_jna8/select-capabilities.loop",
+        "--permissions",
+        "skills,agents,mcps,harnesses",
+        "--own-llm",
+        "--model-provider",
+        "ollama",
+        "--model",
+        "ollama/llama3.1"
+      ],
+      "exit_code": 0,
+      "payload": {
+        "adapter": "loopflow",
+        "agent_loop": {
+          "before_act": "Load only the granted capability groups from capabilities.*.",
+          "before_plan": "Call recommend_for_loop() or python -m ctx.adapters.loopflow with task, context, and last failure.",
+          "harness_install": null,
+          "on_failure": "Pass the latest failure back as last_failure before the next plan."
+        },
+        "capabilities": {
+          "agents": [
+            {
+              "id": "agent:code-reviewer",
+              "installable": true,
+              "installs": 0,
+              "load_status": "local-wiki",
+              "name": "code-reviewer",
+              "normalized_score": 0.3793,
+              "score": 60.7,
+              "source_path": "entities/agents/code-reviewer.md",
+              "type": "agent"
+            }
+          ],
+          "harnesses": [],
+          "mcps": [
+            {
+              "id": "mcp-server:local-ollama-file-operations",
+              "installable": true,
+              "installs": 0,
+              "load_status": "local-wiki",
+              "name": "local-ollama-file-operations",
+              "normalized_score": 1,
+              "score": 160,
+              "source_path": "entities/mcp-servers/l/local-ollama-file-operations.md",
+              "type": "mcp-server"
+            },
+            {
+              "id": "mcp-server:filesystem",
+              "installable": true,
+              "installs": 0,
+              "load_status": "local-wiki",
+              "name": "filesystem",
+              "normalized_score": 0.6918,
+              "score": 110.7,
+              "source_path": "entities/mcp-servers/f/filesystem.md",
+              "type": "mcp-server"
+            }
+          ],
+          "skills": [
+            {
+              "id": "skill:fastapi-pro",
+              "installable": true,
+              "installs": 0,
+              "load_status": "local-wiki",
+              "name": "fastapi-pro",
+              "normalized_score": 0.3819,
+              "score": 61.1,
+              "source_path": "converted/fastapi-pro/SKILL.md",
+              "type": "skill"
+            }
+          ]
+        },
+        "context": {
+          "done_when": [
+            "\"pytest src/tests/test_loopflow_adapter.py -q\" passes"
+          ],
+          "goal": "mcp agent loop local ollama filesystem",
+          "last_failure_present": false,
+          "look_at": {
+            "count": 3,
+            "items": [
+              {
+                "basename": "the repo plan",
+                "path_hash": "98729fd43dcd4ca1"
+              },
+              {
+                "basename": "AGENTS.md",
+                "path_hash": "a54ff182c7e8acf5"
+              },
+              {
+                "basename": "and the last failure",
+                "path_hash": "e736a88f35de0034"
+              }
+            ]
+          },
+          "loop_name": "select ctx capabilities",
+          "query": "mcp agent loop local ollama filesystem select ctx capabilities loopflow context: count=3, basename=the repo plan path_hash=98729fd43dcd4ca1, basename=AGENTS.md path_hash=a54ff182c7e8acf5, basename=and the last failure path_hash=e736a88f35de0034 done when: \"pytest src/tests/test_loopflow_adapter.py -q\" passes model: ollama ollama/llama3.1"
+        },
+        "loopflow": {
+          "before_plan": "Call python -m ctx.adapters.loopflow before planning and inject this JSON as read-only context.",
+          "harness_rule": "Only load harnesses when the loop runs on a user-owned/API/local LLM.",
+          "use_skills": "use skills: fastapi-pro",
+          "use_tools": "use tools from the \"ctx\" server"
+        },
+        "mcp_server": {
+          "args": [],
+          "command": "ctx-mcp-server",
+          "name": "ctx",
+          "tools": [
+            "ctx__recommend_bundle",
+            "ctx__graph_query",
+            "ctx__recommend_related",
+            "ctx__wiki_search",
+            "ctx__wiki_get",
+            "ctx__observe_dev_event",
+            "ctx__load_entity",
+            "ctx__mark_entity_used",
+            "ctx__record_validation",
+            "ctx__record_escalation",
+            "ctx__unload_entity",
+            "ctx__session_end",
+            "ctx__session_state"
+          ]
+        },
+        "permissions": {
+          "agents": true,
+          "harnesses": true,
+          "mcps": true,
+          "skills": true
+        },
+        "related_recommendations": [],
+        "selection": {
+          "rejected": [],
+          "rejection_mode": "use",
+          "selected": [],
+          "session_bound": false
+        },
+        "version": "ctx.loop_adapter.v1",
+        "warnings": []
+      },
+      "stderr": ""
+    },
+    {
+      "example": "documented adapter CLI",
+      "argv": [
+        "python",
+        "-m",
+        "ctx.adapters.loopflow",
+        "--loop-file",
+        "/var/folders/cj/j956f9v920b8wk3wvd8ms2nh0000gn/T/ctx-doc-host-h3w_jna8/select-capabilities.loop",
+        "--permissions",
+        "skills,agents,mcps"
+      ],
+      "exit_code": 0,
+      "payload": {
+        "adapter": "loopflow",
+        "agent_loop": {
+          "before_act": "Load only the granted capability groups from capabilities.*.",
+          "before_plan": "Call recommend_for_loop() or python -m ctx.adapters.loopflow with task, context, and last failure.",
+          "harness_install": null,
+          "on_failure": "Pass the latest failure back as last_failure before the next plan."
+        },
+        "capabilities": {
+          "agents": [
+            {
+              "id": "agent:code-reviewer",
+              "installable": true,
+              "installs": 0,
+              "load_status": "local-wiki",
+              "name": "code-reviewer",
+              "normalized_score": 0.3793,
+              "score": 60.7,
+              "source_path": "entities/agents/code-reviewer.md",
+              "type": "agent"
+            }
+          ],
+          "harnesses": [],
+          "mcps": [
+            {
+              "id": "mcp-server:local-ollama-file-operations",
+              "installable": true,
+              "installs": 0,
+              "load_status": "local-wiki",
+              "name": "local-ollama-file-operations",
+              "normalized_score": 1,
+              "score": 160,
+              "source_path": "entities/mcp-servers/l/local-ollama-file-operations.md",
+              "type": "mcp-server"
+            },
+            {
+              "id": "mcp-server:filesystem",
+              "installable": true,
+              "installs": 0,
+              "load_status": "local-wiki",
+              "name": "filesystem",
+              "normalized_score": 0.6918,
+              "score": 110.7,
+              "source_path": "entities/mcp-servers/f/filesystem.md",
+              "type": "mcp-server"
+            }
+          ],
+          "skills": [
+            {
+              "id": "skill:fastapi-pro",
+              "installable": true,
+              "installs": 0,
+              "load_status": "local-wiki",
+              "name": "fastapi-pro",
+              "normalized_score": 0.3819,
+              "score": 61.1,
+              "source_path": "converted/fastapi-pro/SKILL.md",
+              "type": "skill"
+            }
+          ]
+        },
+        "context": {
+          "done_when": [
+            "\"pytest src/tests/test_loopflow_adapter.py -q\" passes"
+          ],
+          "goal": "mcp agent loop local ollama filesystem",
+          "last_failure_present": false,
+          "look_at": {
+            "count": 3,
+            "items": [
+              {
+                "basename": "the repo plan",
+                "path_hash": "98729fd43dcd4ca1"
+              },
+              {
+                "basename": "AGENTS.md",
+                "path_hash": "a54ff182c7e8acf5"
+              },
+              {
+                "basename": "and the last failure",
+                "path_hash": "e736a88f35de0034"
+              }
+            ]
+          },
+          "loop_name": "select ctx capabilities",
+          "query": "mcp agent loop local ollama filesystem select ctx capabilities loopflow context: count=3, basename=the repo plan path_hash=98729fd43dcd4ca1, basename=AGENTS.md path_hash=a54ff182c7e8acf5, basename=and the last failure path_hash=e736a88f35de0034 done when: \"pytest src/tests/test_loopflow_adapter.py -q\" passes"
+        },
+        "loopflow": {
+          "before_plan": "Call python -m ctx.adapters.loopflow before planning and inject this JSON as read-only context.",
+          "harness_rule": "Only load harnesses when the loop runs on a user-owned/API/local LLM.",
+          "use_skills": "use skills: fastapi-pro",
+          "use_tools": "use tools from the \"ctx\" server"
+        },
+        "mcp_server": {
+          "args": [
+            "--allow-tools",
+            "ctx__recommend_bundle,ctx__graph_query,ctx__recommend_related,ctx__wiki_search,ctx__wiki_get",
+            "--entity-types",
+            "skill,agent,mcp-server"
+          ],
+          "command": "ctx-mcp-server",
+          "name": "ctx",
+          "tools": [
+            "ctx__recommend_bundle",
+            "ctx__graph_query",
+            "ctx__recommend_related",
+            "ctx__wiki_search",
+            "ctx__wiki_get"
+          ]
+        },
+        "permissions": {
+          "agents": true,
+          "harnesses": false,
+          "mcps": true,
+          "skills": true
+        },
+        "related_recommendations": [],
+        "selection": {
+          "rejected": [],
+          "rejection_mode": "use",
+          "selected": [],
+          "session_bound": false
+        },
+        "version": "ctx.loop_adapter.v1",
+        "warnings": []
+      },
+      "stderr": ""
+    },
+    {
+      "example": "documented adapter CLI",
+      "argv": [
+        "python",
+        "-m",
+        "ctx.adapters.loopflow",
+        "--loop-file",
+        "/var/folders/cj/j956f9v920b8wk3wvd8ms2nh0000gn/T/ctx-doc-host-h3w_jna8/select-capabilities.loop",
+        "--permissions",
+        "skills,agents,mcps",
+        "--selected",
+        "local-ollama-file-operations",
+        "--rejected",
+        "legacy-reviewer"
+      ],
+      "exit_code": 0,
+      "payload": {
+        "adapter": "loopflow",
+        "agent_loop": {
+          "before_act": "Load only the granted capability groups from capabilities.*.",
+          "before_plan": "Call recommend_for_loop() or python -m ctx.adapters.loopflow with task, context, and last failure.",
+          "harness_install": null,
+          "on_failure": "Pass the latest failure back as last_failure before the next plan."
+        },
+        "capabilities": {
+          "agents": [
+            {
+              "id": "agent:code-reviewer",
+              "installable": true,
+              "installs": 0,
+              "load_status": "local-wiki",
+              "name": "code-reviewer",
+              "normalized_score": 0.3793,
+              "score": 60.7,
+              "source_path": "entities/agents/code-reviewer.md",
+              "type": "agent"
+            }
+          ],
+          "harnesses": [],
+          "mcps": [
+            {
+              "id": "mcp-server:filesystem",
+              "installable": true,
+              "installs": 0,
+              "load_status": "local-wiki",
+              "name": "filesystem",
+              "normalized_score": 0.6918,
+              "score": 110.7,
+              "source_path": "entities/mcp-servers/f/filesystem.md",
+              "type": "mcp-server"
+            }
+          ],
+          "skills": [
+            {
+              "id": "skill:fastapi-pro",
+              "installable": true,
+              "installs": 0,
+              "load_status": "local-wiki",
+              "name": "fastapi-pro",
+              "normalized_score": 0.3819,
+              "score": 61.1,
+              "source_path": "converted/fastapi-pro/SKILL.md",
+              "type": "skill"
+            }
+          ]
+        },
+        "context": {
+          "done_when": [
+            "\"pytest src/tests/test_loopflow_adapter.py -q\" passes"
+          ],
+          "goal": "mcp agent loop local ollama filesystem",
+          "last_failure_present": false,
+          "look_at": {
+            "count": 3,
+            "items": [
+              {
+                "basename": "the repo plan",
+                "path_hash": "98729fd43dcd4ca1"
+              },
+              {
+                "basename": "AGENTS.md",
+                "path_hash": "a54ff182c7e8acf5"
+              },
+              {
+                "basename": "and the last failure",
+                "path_hash": "e736a88f35de0034"
+              }
+            ]
+          },
+          "loop_name": "select ctx capabilities",
+          "query": "mcp agent loop local ollama filesystem select ctx capabilities loopflow context: count=3, basename=the repo plan path_hash=98729fd43dcd4ca1, basename=AGENTS.md path_hash=a54ff182c7e8acf5, basename=and the last failure path_hash=e736a88f35de0034 done when: \"pytest src/tests/test_loopflow_adapter.py -q\" passes"
+        },
+        "loopflow": {
+          "before_plan": "Call python -m ctx.adapters.loopflow before planning and inject this JSON as read-only context.",
+          "harness_rule": "Only load harnesses when the loop runs on a user-owned/API/local LLM.",
+          "use_skills": "use skills: fastapi-pro",
+          "use_tools": "use tools from the \"ctx\" server"
+        },
+        "mcp_server": {
+          "args": [
+            "--allow-tools",
+            "ctx__recommend_bundle,ctx__graph_query,ctx__recommend_related,ctx__wiki_search,ctx__wiki_get",
+            "--entity-types",
+            "skill,agent,mcp-server"
+          ],
+          "command": "ctx-mcp-server",
+          "name": "ctx",
+          "tools": [
+            "ctx__recommend_bundle",
+            "ctx__graph_query",
+            "ctx__recommend_related",
+            "ctx__wiki_search",
+            "ctx__wiki_get"
+          ]
+        },
+        "permissions": {
+          "agents": true,
+          "harnesses": false,
+          "mcps": true,
+          "skills": true
+        },
+        "related_recommendations": [],
+        "selection": {
+          "rejected": [
+            "legacy-reviewer"
+          ],
+          "rejection_mode": "use",
+          "selected": [
+            "local-ollama-file-operations"
+          ],
+          "session_bound": false
+        },
+        "version": "ctx.loop_adapter.v1",
+        "warnings": []
+      },
+      "stderr": ""
+    },
+    {
+      "example": "documented adapter CLI",
+      "argv": [
+        "python",
+        "-m",
+        "ctx.adapters.loopflow",
+        "--loop-file",
+        "/var/folders/cj/j956f9v920b8wk3wvd8ms2nh0000gn/T/ctx-doc-host-h3w_jna8/select-capabilities.loop",
+        "--permissions",
+        "skills,agents,mcps,harnesses",
+        "--own-llm",
+        "--model-provider",
+        "ollama",
+        "--model",
+        "ollama/llama3.1",
+        "--harness-runtime",
+        "local workstation",
+        "--harness-tools",
+        "filesystem, shell, browser",
+        "--harness-privacy",
+        "no cloud prompts"
+      ],
+      "exit_code": 0,
+      "payload": {
+        "adapter": "loopflow",
+        "agent_loop": {
+          "before_act": "Load only the granted capability groups from capabilities.*.",
+          "before_plan": "Call recommend_for_loop() or python -m ctx.adapters.loopflow with task, context, and last failure.",
+          "harness_install": null,
+          "on_failure": "Pass the latest failure back as last_failure before the next plan."
+        },
+        "capabilities": {
+          "agents": [
+            {
+              "id": "agent:code-reviewer",
+              "installable": true,
+              "installs": 0,
+              "load_status": "local-wiki",
+              "name": "code-reviewer",
+              "normalized_score": 0.3793,
+              "score": 60.7,
+              "source_path": "entities/agents/code-reviewer.md",
+              "type": "agent"
+            }
+          ],
+          "harnesses": [],
+          "mcps": [
+            {
+              "id": "mcp-server:local-ollama-file-operations",
+              "installable": true,
+              "installs": 0,
+              "load_status": "local-wiki",
+              "name": "local-ollama-file-operations",
+              "normalized_score": 1,
+              "score": 160,
+              "source_path": "entities/mcp-servers/l/local-ollama-file-operations.md",
+              "type": "mcp-server"
+            },
+            {
+              "id": "mcp-server:filesystem",
+              "installable": true,
+              "installs": 0,
+              "load_status": "local-wiki",
+              "name": "filesystem",
+              "normalized_score": 0.6918,
+              "score": 110.7,
+              "source_path": "entities/mcp-servers/f/filesystem.md",
+              "type": "mcp-server"
+            }
+          ],
+          "skills": [
+            {
+              "id": "skill:fastapi-pro",
+              "installable": true,
+              "installs": 0,
+              "load_status": "local-wiki",
+              "name": "fastapi-pro",
+              "normalized_score": 0.3819,
+              "score": 61.1,
+              "source_path": "converted/fastapi-pro/SKILL.md",
+              "type": "skill"
+            }
+          ]
+        },
+        "context": {
+          "done_when": [
+            "\"pytest src/tests/test_loopflow_adapter.py -q\" passes"
+          ],
+          "goal": "mcp agent loop local ollama filesystem",
+          "last_failure_present": false,
+          "look_at": {
+            "count": 3,
+            "items": [
+              {
+                "basename": "the repo plan",
+                "path_hash": "98729fd43dcd4ca1"
+              },
+              {
+                "basename": "AGENTS.md",
+                "path_hash": "a54ff182c7e8acf5"
+              },
+              {
+                "basename": "and the last failure",
+                "path_hash": "e736a88f35de0034"
+              }
+            ]
+          },
+          "loop_name": "select ctx capabilities",
+          "query": "mcp agent loop local ollama filesystem select ctx capabilities loopflow context: count=3, basename=the repo plan path_hash=98729fd43dcd4ca1, basename=AGENTS.md path_hash=a54ff182c7e8acf5, basename=and the last failure path_hash=e736a88f35de0034 done when: \"pytest src/tests/test_loopflow_adapter.py -q\" passes model: ollama ollama/llama3.1"
+        },
+        "loopflow": {
+          "before_plan": "Call python -m ctx.adapters.loopflow before planning and inject this JSON as read-only context.",
+          "harness_rule": "Only load harnesses when the loop runs on a user-owned/API/local LLM.",
+          "use_skills": "use skills: fastapi-pro",
+          "use_tools": "use tools from the \"ctx\" server"
+        },
+        "mcp_server": {
+          "args": [],
+          "command": "ctx-mcp-server",
+          "name": "ctx",
+          "tools": [
+            "ctx__recommend_bundle",
+            "ctx__graph_query",
+            "ctx__recommend_related",
+            "ctx__wiki_search",
+            "ctx__wiki_get",
+            "ctx__observe_dev_event",
+            "ctx__load_entity",
+            "ctx__mark_entity_used",
+            "ctx__record_validation",
+            "ctx__record_escalation",
+            "ctx__unload_entity",
+            "ctx__session_end",
+            "ctx__session_state"
+          ]
+        },
+        "permissions": {
+          "agents": true,
+          "harnesses": true,
+          "mcps": true,
+          "skills": true
+        },
+        "related_recommendations": [],
+        "selection": {
+          "rejected": [],
+          "rejection_mode": "use",
+          "selected": [],
+          "session_bound": false
+        },
+        "version": "ctx.loop_adapter.v1",
+        "warnings": []
+      },
+      "stderr": ""
+    },
+    {
+      "example": "documented adapter CLI",
+      "argv": [
+        "python",
+        "-m",
+        "ctx.adapters.loopflow",
+        "--loop-file",
+        "/var/folders/cj/j956f9v920b8wk3wvd8ms2nh0000gn/T/ctx-doc-host-h3w_jna8/select-capabilities.loop",
+        "--permissions",
+        "skills,mcps",
+        "--last-failure-file",
+        "/var/folders/cj/j956f9v920b8wk3wvd8ms2nh0000gn/T/ctx-doc-host-h3w_jna8/last-failure.txt"
+      ],
+      "exit_code": 0,
+      "payload": {
+        "adapter": "loopflow",
+        "agent_loop": {
+          "before_act": "Load only the granted capability groups from capabilities.*.",
+          "before_plan": "Call recommend_for_loop() or python -m ctx.adapters.loopflow with task, context, and last failure.",
+          "harness_install": null,
+          "on_failure": "Pass the latest failure back as last_failure before the next plan."
+        },
+        "capabilities": {
+          "agents": [],
+          "harnesses": [],
+          "mcps": [
+            {
+              "id": "mcp-server:local-ollama-file-operations",
+              "installable": true,
+              "installs": 0,
+              "load_status": "local-wiki",
+              "name": "local-ollama-file-operations",
+              "normalized_score": 1,
+              "score": 170,
+              "source_path": "entities/mcp-servers/l/local-ollama-file-operations.md",
+              "type": "mcp-server"
+            },
+            {
+              "id": "mcp-server:filesystem",
+              "installable": true,
+              "installs": 0,
+              "load_status": "local-wiki",
+              "name": "filesystem",
+              "normalized_score": 0.71,
+              "score": 120.7,
+              "source_path": "entities/mcp-servers/f/filesystem.md",
+              "type": "mcp-server"
+            }
+          ],
+          "skills": [
+            {
+              "id": "skill:fastapi-pro",
+              "installable": true,
+              "installs": 0,
+              "load_status": "local-wiki",
+              "name": "fastapi-pro",
+              "normalized_score": 0.4182,
+              "score": 71.1,
+              "source_path": "converted/fastapi-pro/SKILL.md",
+              "type": "skill"
+            }
+          ]
+        },
+        "context": {
+          "done_when": [
+            "\"pytest src/tests/test_loopflow_adapter.py -q\" passes"
+          ],
+          "goal": "mcp agent loop local ollama filesystem",
+          "last_failure_present": true,
+          "look_at": {
+            "count": 3,
+            "items": [
+              {
+                "basename": "the repo plan",
+                "path_hash": "98729fd43dcd4ca1"
+              },
+              {
+                "basename": "AGENTS.md",
+                "path_hash": "a54ff182c7e8acf5"
+              },
+              {
+                "basename": "and the last failure",
+                "path_hash": "e736a88f35de0034"
+              }
+            ]
+          },
+          "loop_name": "select ctx capabilities",
+          "query": "mcp agent loop local ollama filesystem select ctx capabilities loopflow context: count=3, basename=the repo plan path_hash=98729fd43dcd4ca1, basename=AGENTS.md path_hash=a54ff182c7e8acf5, basename=and the last failure path_hash=e736a88f35de0034 done when: \"pytest src/tests/test_loopflow_adapter.py -q\" passes"
+        },
+        "loopflow": {
+          "before_plan": "Call python -m ctx.adapters.loopflow before planning and inject this JSON as read-only context.",
+          "harness_rule": "Only load harnesses when the loop runs on a user-owned/API/local LLM.",
+          "use_skills": "use skills: fastapi-pro",
+          "use_tools": "use tools from the \"ctx\" server"
+        },
+        "mcp_server": {
+          "args": [
+            "--allow-tools",
+            "ctx__recommend_bundle,ctx__graph_query,ctx__recommend_related,ctx__wiki_search,ctx__wiki_get",
+            "--entity-types",
+            "skill,mcp-server"
+          ],
+          "command": "ctx-mcp-server",
+          "name": "ctx",
+          "tools": [
+            "ctx__recommend_bundle",
+            "ctx__graph_query",
+            "ctx__recommend_related",
+            "ctx__wiki_search",
+            "ctx__wiki_get"
+          ]
+        },
+        "permissions": {
+          "agents": false,
+          "harnesses": false,
+          "mcps": true,
+          "skills": true
+        },
+        "related_recommendations": [],
+        "selection": {
+          "rejected": [],
+          "rejection_mode": "use",
+          "selected": [],
+          "session_bound": false
+        },
+        "version": "ctx.loop_adapter.v1",
+        "warnings": []
+      },
+      "stderr": ""
+    }
+  ],
+  "not_claimed": [
+    "Claude SDK or external MCP-host execution",
+    "provider-backed ctx run/resume",
+    "external LoopFlow runner loading/unloading tools",
+    "fresh wheel install",
+    "live third-party server probes"
+  ],
+  "primary_source_review": {
+    "sdk_config": "https://github.com/anthropics/claude-agent-sdk-python/blob/main/src/claude_agent_sdk/types.py",
+    "finding": "McpServerConfig is a union of TypedDict shapes; use a stdio dictionary rather than calling the union"
+  },
+  "retention_note": "2026-09-30 coordinator rerun after the post-e187 named-host documentation correction: eight real local examples passed; source hashes identify the tested working tree. Disposable paths redacted. No external-host interoperability or whole-audit completion claim."
+}

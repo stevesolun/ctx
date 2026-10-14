@@ -136,7 +136,7 @@ def test_codex_handler_controller_or_emission_failure_is_silent(tmp_path: Path) 
     assert output.getvalue() == b""
 
 
-def test_codex_handler_activate_uses_the_real_shared_delivery_controller(
+def test_codex_handler_activate_does_not_load_retired_bundled_tools(
     tmp_path: Path,
 ) -> None:
     output = io.BytesIO()
@@ -148,19 +148,20 @@ def test_codex_handler_activate_uses_the_real_shared_delivery_controller(
         environment={
             "CTX_ENGINE_MODE": "activate",
             "CTX_QUERY_DELIVERY_ROOT": str(state_root),
+            "CTX_WIKI_DIR": str(tmp_path / "empty-wiki"),
         },
         controller_factory=handler._open_controller,
     )
 
     assert result == 0
-    assert b"# ctx Python Testing" in output.getvalue()
-    assert b'"hookEventName":"UserPromptSubmit"' in output.getvalue()
-    persisted = b"\n".join(path.read_bytes() for path in state_root.rglob("*") if path.is_file())
-    assert b"# ctx Python Testing" not in persisted
+    assert output.getvalue() == b""
+    assert not state_root.exists()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="managed skill CAS is POSIX-only")
-def test_codex_handler_manage_auto_installs_and_loads_relevant_skill(tmp_path: Path) -> None:
+def test_codex_handler_manage_never_installs_retired_tools_even_if_preapproved(
+    tmp_path: Path,
+) -> None:
     output = io.BytesIO()
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -180,13 +181,15 @@ def test_codex_handler_manage_auto_installs_and_loads_relevant_skill(tmp_path: P
             "CTX_ENGINE_MODE": "manage",
             "CTX_INSTALL_POLICY_ROOT": str(policy_root),
             "CTX_QUERY_DELIVERY_ROOT": str(state_root),
+            "CTX_WIKI_DIR": str(tmp_path / "empty-wiki"),
         },
         controller_factory=handler._open_controller,
     )
 
     assert result == 0
-    assert b"# ctx Python State and Protocols" in output.getvalue()
-    assert b'"hookEventName":"UserPromptSubmit"' in output.getvalue()
+    assert output.getvalue() == b""
+    assert not state_root.exists()
+    assert list(workspace.iterdir()) == []
 
 
 def test_codex_handler_does_not_treat_experiment_string_as_authority(

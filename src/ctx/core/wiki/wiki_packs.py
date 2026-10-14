@@ -52,6 +52,7 @@ class WikiPackManifest:
     tombstone_count: int
     checksums: dict[str, str]
     created_at: str | None = None
+    append_sequence: int = 0
 
     @classmethod
     def from_mapping(cls, payload: dict[str, Any]) -> "WikiPackManifest":
@@ -69,6 +70,7 @@ class WikiPackManifest:
             tombstone_count=_nonnegative_int(payload, "tombstone_count", default=0),
             checksums=_checksums(payload.get("checksums")),
             created_at=_optional_str(payload, "created_at"),
+            append_sequence=_nonnegative_int(payload, "append_sequence", default=0),
         )
         manifest.validate()
         return manifest
@@ -81,6 +83,12 @@ class WikiPackManifest:
             raise WikiPackManifestError("overlay wiki packs must set parent_export_id")
         if not self.checksums:
             raise WikiPackManifestError("wiki pack manifest checksums must not be empty")
+        if type(self.append_sequence) is not int or self.append_sequence < 0:
+            raise WikiPackManifestError(
+                "wiki pack manifest append_sequence must be nonnegative int"
+            )
+        if self.pack_type == "base" and self.append_sequence:
+            raise WikiPackManifestError("base wiki packs must not set append_sequence")
 
     def to_mapping(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -95,6 +103,8 @@ class WikiPackManifest:
         }
         if self.created_at is not None:
             payload["created_at"] = self.created_at
+        if self.append_sequence:
+            payload["append_sequence"] = self.append_sequence
         return payload
 
 
@@ -198,6 +208,7 @@ def write_active_wiki_overlay_pack(
         return None
 
     base = entries[0].manifest
+    append_sequence = max(entry.manifest.append_sequence for entry in entries) + 1
     base_pack_id = _active_overlay_pack_id(page_map, tombstone_paths)
     for suffix in ["", *[f"-{index}" for index in range(1, 1000)]]:
         pack_id = f"{base_pack_id}{suffix}"
@@ -212,6 +223,7 @@ def write_active_wiki_overlay_pack(
                 pages=page_map,
                 tombstones=tombstone_paths,
                 created_at=created_at,
+                append_sequence=append_sequence,
                 require_new=True,
             )
         except _WikiPackDirectoryCollision:
@@ -268,8 +280,12 @@ def discover_wiki_pack_manifests(packs_dir: Path) -> list[WikiPackEntry]:
     return [base, *sorted(overlay_entries, key=_overlay_sort_key)]
 
 
-def _overlay_sort_key(entry: WikiPackEntry) -> tuple[str, str]:
-    return entry.manifest.created_at or "", entry.manifest.pack_id
+def _overlay_sort_key(entry: WikiPackEntry) -> tuple[int, str, str]:
+    return (
+        entry.manifest.append_sequence,
+        entry.manifest.created_at or "",
+        entry.manifest.pack_id,
+    )
 
 
 def load_merged_wiki_pack_state(packs_dir: Path) -> WikiPackState:
@@ -500,6 +516,7 @@ def _write_wiki_pack(
     tombstones: list[str],
     created_at: str | None,
     require_new: bool = False,
+    append_sequence: int = 0,
 ) -> WikiPackManifest:
     _validate_relative_name(pack_id, "pack_id")
     page_rows = [
@@ -527,6 +544,7 @@ def _write_wiki_pack(
             "tombstones.jsonl": _sha256_text(tombstones_text),
         },
         created_at=created_at,
+        append_sequence=append_sequence,
     )
     manifest.validate()
     try:

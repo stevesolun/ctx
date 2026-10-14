@@ -19,6 +19,9 @@ from ctx.runtime.release_skill_layout import open_release_skill_runtime_layout
 from ctx.runtime.release_skill_lifecycle import activate_installed_release_skill
 
 
+pytestmark = pytest.mark.usefixtures("historical_release_catalog")
+
+
 NOW = datetime(2026, 8, 2, 12, 30, tzinfo=UTC)
 OCCURRED_AT = "2026-08-02T12:00:00Z"
 

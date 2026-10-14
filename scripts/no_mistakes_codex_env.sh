@@ -10,7 +10,7 @@ pwd_ctx_python_bin="${PWD}/.venv/bin"
 repo_ctx_python_bin="${repo_root}/.venv/bin"
 fallback_ctx_python_bin="/tmp/ctx-verify-venv/bin"
 wrapper_path="${script_dir}/$(basename -- "${BASH_SOURCE[0]}")"
-default_codex_app_paths="/Applications/Codex.app/Contents/Resources/codex:/Applications/ChatGPT.app/Contents/Resources/codex:${HOME:-}/Applications/Codex.app/Contents/Resources/codex:${HOME:-}/Applications/ChatGPT.app/Contents/Resources/codex"
+default_codex_app_paths="/Applications/Codex.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex:/Applications/Codex.app/Contents/Resources/codex:/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex:/Applications/ChatGPT.app/Contents/Resources/codex:${HOME:-}/Applications/Codex.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex:${HOME:-}/Applications/Codex.app/Contents/Resources/codex:${HOME:-}/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex:${HOME:-}/Applications/ChatGPT.app/Contents/Resources/codex"
 
 is_runnable_codex() {
   local candidate="$1"

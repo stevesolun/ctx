@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "claude-ctx"
 version = "1.0.21"
-description = "CTX Fit: find the cheapest AI coding setup that reliably works on your repository, then apply the winner as a reviewable change"
+description = "CTX recommends relevant skills, agents and MCP tools from your own knowledge graph while you work. Empty by default; your tools, your control."
 authors = [{ name = "Steve Solun" }]
 license = "MIT"
 readme = "README.md"
@@ -36,9 +36,9 @@ Documentation = "https://stevesolun.github.io/ctx/"
 Changelog = "https://github.com/stevesolun/ctx/blob/main/CHANGELOG.md"
 
 [project.scripts]
-# The public surface is one command. Modules behind the removed entry
-# points still run via `python -m <module>`; only the installed console
-# scripts were retired, so no capability was lost.
+# `ctx` is the primary human surface. Six machine and maintenance scripts still
+# ship while the project works toward ADR-001's two-entry-point destination;
+# retired scripts remain available through supported `python -m` modules.
 # Plan 001 phase R5: entrypoints for modules moved in R1-R4 now point at
 # their canonical package path. Entrypoints for modules still at the
 # flat layout (ctx_init, ctx_monitor, etc.) stay unchanged — they will
@@ -105,8 +105,8 @@ harness = [
     # OpenRouter (the tier-1 aggregator), Anthropic, OpenAI, Gemini,
     # Mistral, ... — and local inference servers (Ollama, vLLM) all
     # flow through a single litellm.completion() call. Keeping the
-    # dep optional means users who only want the Claude Code
-    # integration (ctx-skill-install, the hooks pipeline) don't pay
+    # dep optional means users who only want the Claude Code hooks and
+    # installation modules don't pay
     # the LiteLLM dependency-tree cost.
     # Keep Click on a patched release while remaining compatible with
     # current LiteLLM and the intentionally capped Typer CLI surface.
@@ -221,7 +221,7 @@ packages = [
 ]
 
 [tool.setuptools.package-data]
-ctx = ["config.json", "skill-registry.json", "assets/*.js", "assets/*.css", "assets/*.json"]
+ctx = ["config.json", "skill-registry.json", "assets/*.js", "assets/*.css"]
 
 [tool.pytest.ini_options]
 testpaths = ["src/tests"]

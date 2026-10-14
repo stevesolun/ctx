@@ -8,7 +8,7 @@ from ctx.adapters.claude_code import query_handler as claude_handler
 from ctx.adapters.codex import hook_handler as codex_handler
 
 
-def test_native_hosts_emit_byte_identical_authenticated_context(tmp_path: Path) -> None:
+def test_native_hosts_abstain_identically_without_user_knowledge(tmp_path: Path) -> None:
     codex_output = io.BytesIO()
     claude_output = io.BytesIO()
     codex_payload = {
@@ -37,6 +37,7 @@ def test_native_hosts_emit_byte_identical_authenticated_context(tmp_path: Path) 
             environment={
                 "CTX_ENGINE_MODE": "activate",
                 "CTX_QUERY_DELIVERY_ROOT": str(tmp_path / "codex-state"),
+                "CTX_WIKI_DIR": str(tmp_path / "empty-wiki"),
             },
             controller_factory=codex_handler._open_controller,
         )
@@ -49,6 +50,7 @@ def test_native_hosts_emit_byte_identical_authenticated_context(tmp_path: Path) 
             environment={
                 "CTX_ENGINE_MODE": "activate",
                 "CTX_QUERY_DELIVERY_ROOT": str(tmp_path / "claude-state"),
+                "CTX_WIKI_DIR": str(tmp_path / "empty-wiki"),
             },
             controller_factory=claude_handler._open_controller,
         )
@@ -56,7 +58,4 @@ def test_native_hosts_emit_byte_identical_authenticated_context(tmp_path: Path) 
     )
 
     assert codex_output.getvalue() == claude_output.getvalue()
-    envelope = json.loads(codex_output.getvalue())
-    context = envelope["hookSpecificOutput"]["additionalContext"]
-    assert "# ctx Python Testing" in context
-    assert "issuance is not evidence of use" in context
+    assert codex_output.getvalue() == b""

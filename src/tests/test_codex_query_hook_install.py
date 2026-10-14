@@ -14,18 +14,19 @@ def test_codex_query_hook_has_exact_current_shape_without_trust_state() -> None:
     hooks = installer.make_query_hooks()
 
     assert hooks == {
-        "UserPromptSubmit": [
+        event: [
             {
                 "hooks": [
                     {
                         "type": "command",
                         "command": installer._module_cmd("ctx.adapters.codex.hook_handler"),
                         "timeout": 10,
-                        "additionalContextLimit": 0,
+                        "additionalContextLimit": 4096,
                     }
                 ]
             }
         ]
+        for event in ("UserPromptSubmit", "PostToolUse")
     }
     encoded = json.dumps(hooks)
     assert "matcher" not in encoded

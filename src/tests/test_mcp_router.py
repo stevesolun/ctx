@@ -16,6 +16,7 @@ import io
 import subprocess
 import sys
 import time
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,16 @@ from ctx.adapters.generic.tools import (
 
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "fake_mcp_server.py"
+_INITIALIZE_RESULT_SERVER = """
+import json
+import sys
+
+request = json.loads(sys.stdin.readline())
+result = json.loads(sys.argv[1])
+response = {"jsonrpc": "2.0", "id": request["id"], "result": result}
+print(json.dumps(response), flush=True)
+sys.stdin.read()
+"""
 
 
 def _make_config(
@@ -56,6 +67,17 @@ def _make_config(
         startup_timeout=startup_timeout,
         request_timeout=request_timeout,
         inherit_env=inherit_env,
+    )
+
+
+def _make_initialize_result_config(result: object) -> McpServerConfig:
+    """Return a real child server that emits one chosen initialize result."""
+    return McpServerConfig(
+        name="malformed",
+        command=sys.executable,
+        args=("-c", _INITIALIZE_RESULT_SERVER, json.dumps(result)),
+        startup_timeout=2.0,
+        request_timeout=2.0,
     )
 
 
@@ -136,17 +158,211 @@ class TestClientLifecycle:
         client = McpClient(_make_config())
         client.start()
         try:
+            assert client.negotiated_protocol_version == "2024-11-05"
             # Trivial health: list_tools succeeds → handshake completed.
             tools = client.list_tools()
             assert len(tools) >= 2  # echo + add
         finally:
             client.stop()
 
+    def test_start_offers_and_stores_newest_supported_protocol(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        client = McpClient(_make_config())
+        initialize_params: list[dict[str, Any]] = []
+
+        def fake_request(
+            method: str,
+            params: dict[str, Any] | None,
+            *,
+            timeout: float | None = None,
+        ) -> dict[str, Any]:
+            assert method == "initialize"
+            assert timeout == client._config.startup_timeout
+            assert params is not None
+            initialize_params.append(params)
+            return {"protocolVersion": "2025-11-25"}
+
+        monkeypatch.setattr(client, "_request", fake_request)
+
+        try:
+            client.start()
+            assert initialize_params[0]["protocolVersion"] == "2025-11-25"
+            assert client.negotiated_protocol_version == "2025-11-25"
+        finally:
+            client.stop()
+
+    @pytest.mark.parametrize(
+        ("initialize_result", "error_pattern"),
+        [
+            ({}, "missing protocolVersion"),
+            ({"protocolVersion": 20251125}, "non-string protocolVersion"),
+            ({"protocolVersion": "2026-07-28"}, "unsupported protocolVersion"),
+        ],
+    )
+    def test_start_rejects_invalid_or_unsupported_protocol_before_tool_use(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        initialize_result: dict[str, Any],
+        error_pattern: str,
+    ) -> None:
+        procs = _capture_popen(monkeypatch)
+        client = McpClient(_make_config())
+        methods: list[str] = []
+        notifications: list[str] = []
+
+        def fake_request(
+            method: str,
+            _params: dict[str, Any] | None,
+            *,
+            timeout: float | None = None,
+        ) -> dict[str, Any]:
+            assert timeout == client._config.startup_timeout
+            methods.append(method)
+            return initialize_result
+
+        monkeypatch.setattr(client, "_request", fake_request)
+        monkeypatch.setattr(
+            client,
+            "_notify",
+            lambda method, _params: notifications.append(method),
+        )
+
+        try:
+            with pytest.raises(McpServerError, match=error_pattern):
+                client.start()
+        finally:
+            client.stop()
+
+        assert methods == ["initialize"]
+        assert notifications == []
+        assert client.negotiated_protocol_version is None
+        assert len(procs) == 1
+        _assert_exited(procs[0])
+
+    @pytest.mark.parametrize(
+        ("initialize_result", "result_kind"),
+        [(7, "int"), (["not-an-object"], "list"), (None, "null")],
+        ids=("scalar", "list", "null"),
+    )
+    def test_start_rejects_non_object_initialize_result_and_reaps_child(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        initialize_result: object,
+        result_kind: str,
+    ) -> None:
+        procs = _capture_popen(monkeypatch)
+        client = McpClient(_make_initialize_result_config(initialize_result))
+
+        with pytest.raises(
+            McpServerError,
+            match=rf"malformed\.initialize: result must be a JSON object; received {result_kind}",
+        ):
+            client.start()
+
+        assert client.negotiated_protocol_version is None
+        assert client.stop() is True
+        assert len(procs) == 1
+        _assert_exited(procs[0])
+
+    @pytest.mark.parametrize("value_kind", ["string", "list", "object"])
+    @pytest.mark.parametrize("secret", ["opaque-credential-value", "opaque\nvalue'with\\escapes"])
+    def test_rejected_protocol_version_diagnostic_redacts_credentials(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+        value_kind: str,
+        secret: str,
+    ) -> None:
+        monkeypatch.setenv("MCP_TEST_AUTH", secret)
+        protocol_version: object = secret
+        if value_kind == "list":
+            protocol_version = [secret]
+        elif value_kind == "object":
+            protocol_version = {"credential": secret}
+        procs = _capture_popen(monkeypatch)
+        config = McpServerConfig(
+            name="malformed",
+            command=sys.executable,
+            args=(
+                "-c",
+                _INITIALIZE_RESULT_SERVER,
+                json.dumps({"protocolVersion": protocol_version}),
+            ),
+            credential_env=("MCP_TEST_AUTH",),
+            startup_timeout=2.0,
+        )
+        client = McpClient(config)
+
+        with pytest.raises(McpServerError, match="protocolVersion") as exc:
+            client.start()
+
+        assert client._proc is None
+        assert client._stderr_redaction_values == ()
+        assert client.negotiated_protocol_version is None
+        assert len(procs) == 1
+        _assert_exited(procs[0])
+        diagnostic = "".join(traceback.format_exception(exc.value)) + caplog.text
+        assert secret not in diagnostic
+        assert repr(secret)[1:-1] not in diagnostic
+
     def test_context_manager(self) -> None:
         with McpClient(_make_config()) as client:
             tools = client.list_tools()
             names = {t.name for t in tools}
             assert {"echo", "add"} <= names
+
+    @pytest.mark.parametrize(
+        ("frame", "error_pattern"),
+        [
+            (7, "frame must be a JSON object"),
+            ([1, 2], "frame must be a JSON object"),
+            ("private-payload", "frame must be a JSON object"),
+            (None, "frame must be a JSON object"),
+            (False, "frame must be a JSON object"),
+            ({"jsonrpc": "1.0", "id": 0, "result": {}}, "jsonrpc must be '2.0'"),
+            ({"id": 0, "result": {}}, "jsonrpc must be '2.0'"),
+            ({"jsonrpc": "2.0", "result": {}}, "missing response id"),
+            ({"jsonrpc": "2.0", "method": 7}, "invalid notification"),
+            ({"jsonrpc": "2.0", "id": False, "result": {}}, "invalid response id"),
+            ({"jsonrpc": "2.0", "id": 0}, "exactly one of result or error"),
+            (
+                {"jsonrpc": "2.0", "id": 0, "result": {}, "error": {}},
+                "exactly one of result or error",
+            ),
+            ({"jsonrpc": "2.0", "id": 0, "error": 7}, "invalid error object"),
+            (
+                {"jsonrpc": "2.0", "id": 0, "error": {"code": True, "message": "error"}},
+                "invalid error object",
+            ),
+            ({"jsonrpc": "2.0", "id": 0, "error": {"code": -32603}}, "invalid error object"),
+        ],
+    )
+    def test_invalid_response_frames_raise_protocol_error_and_reap_child(
+        self, monkeypatch: pytest.MonkeyPatch, frame: object, error_pattern: str
+    ) -> None:
+        procs = _capture_popen(monkeypatch)
+        config = McpServerConfig(
+            name="malformed",
+            command=sys.executable,
+            args=(
+                "-c",
+                "import sys; sys.stdin.readline(); print(sys.argv[1], flush=True); sys.stdin.read()",
+                json.dumps(frame),
+            ),
+            startup_timeout=2.0,
+        )
+        client = McpClient(config)
+        try:
+            with pytest.raises(McpServerError, match=error_pattern) as exc:
+                client.start()
+            assert "private-payload" not in str(exc.value)
+            assert client.negotiated_protocol_version is None
+            assert len(procs) == 1
+            _assert_exited(procs[0])
+        finally:
+            client.stop()
 
     def test_double_start_rejected(self) -> None:
         client = McpClient(_make_config())
@@ -156,6 +372,96 @@ class TestClientLifecycle:
                 client.start()
         finally:
             client.stop()
+
+    def test_malformed_frame_diagnostic_does_not_log_raw_server_payload(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        private = "MCP-PRIVATE-FRAME sk-ABCDEFGHIJKLMNOPQRSTUVWX"
+        server = f"print({private!r}, flush=True)\n" + _INITIALIZE_RESULT_SERVER
+        config = McpServerConfig(
+            name="malformed",
+            command=sys.executable,
+            args=("-c", server, json.dumps({"protocolVersion": "2025-11-25"})),
+            startup_timeout=2.0,
+        )
+        with McpClient(config) as client:
+            assert client.negotiated_protocol_version == "2025-11-25"
+        assert "dropping malformed frame" in caplog.text
+        assert "MCP-PRIVATE-FRAME" not in caplog.text
+        assert "sk-ABCDEFGHIJKLMNOPQRSTUVWX" not in caplog.text
+
+    def test_notification_and_stale_id_diagnostics_redact_secret_shapes(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        secret = "sk-ABCDEFGHIJKLMNOPQRSTUVWX"
+        frames = [
+            {"jsonrpc": "2.0", "method": secret},
+            {"jsonrpc": "2.0", "id": secret, "result": {}},
+        ]
+        server = "".join(f"print({json.dumps(frame)!r}, flush=True)\n" for frame in frames)
+        server += _INITIALIZE_RESULT_SERVER
+        config = McpServerConfig(
+            name="malformed",
+            command=sys.executable,
+            args=("-c", server, json.dumps({"protocolVersion": "2025-11-25"})),
+            startup_timeout=2.0,
+        )
+        with caplog.at_level("DEBUG", logger=mcp_router.__name__):
+            with McpClient(config) as client:
+                assert client.negotiated_protocol_version == "2025-11-25"
+        assert "notification" in caplog.text
+        assert "stale response" in caplog.text
+        assert secret not in caplog.text
+
+    @pytest.mark.parametrize(
+        ("method", "result", "error_pattern"),
+        [
+            ("tools/list", 7, "result must be a JSON object"),
+            ("tools/list", [], "result must be a JSON object"),
+            ("tools/list", None, "result must be a JSON object"),
+            ("tools/list", {"tools": 7}, "tools must be an array"),
+            ("tools/list", {"tools": [7]}, "tool must be a JSON object"),
+            (
+                "tools/list",
+                {"tools": [{"name": "echo", "inputSchema": 7}]},
+                "inputSchema must be a JSON object",
+            ),
+            ("tools/call", 7, "result must be a JSON object"),
+            ("tools/call", "payload", "result must be a JSON object"),
+            ("tools/call", None, "result must be a JSON object"),
+            ("tools/call", {"isError": "false", "content": []}, "isError must be a boolean"),
+            ("tools/call", {"content": 7}, "content must be an array"),
+        ],
+    )
+    def test_invalid_tool_results_raise_protocol_errors_and_close_cleanly(
+        self, monkeypatch: pytest.MonkeyPatch, method: str, result: object, error_pattern: str
+    ) -> None:
+        procs = _capture_popen(monkeypatch)
+        server = """
+import json, sys
+for line in sys.stdin:
+    request = json.loads(line)
+    if 'id' not in request:
+        continue
+    result = ({'protocolVersion': '2025-11-25'} if request['method'] == 'initialize'
+              else json.loads(sys.argv[1]))
+    print(json.dumps({'jsonrpc': '2.0', 'id': request['id'], 'result': result}), flush=True)
+"""
+        config = McpServerConfig(
+            name="malformed",
+            command=sys.executable,
+            args=("-c", server, json.dumps(result)),
+            startup_timeout=2.0,
+            request_timeout=2.0,
+        )
+        with McpClient(config) as client:
+            with pytest.raises(McpServerError, match=error_pattern):
+                if method == "tools/list":
+                    client.list_tools()
+                else:
+                    client.call_tool("echo", {})
+        assert len(procs) == 1
+        _assert_exited(procs[0])
 
     def test_stop_before_start_is_noop(self) -> None:
         client = McpClient(_make_config())
@@ -284,6 +590,137 @@ class TestClientToolOperations:
 
 
 class TestClientRobustness:
+    @pytest.mark.parametrize("error_at", ["initialize", "tools/list", "tools/call", "isError"])
+    @pytest.mark.parametrize("secret", ["opaque-credential-value", "opaque\nvalue'with\\escapes"])
+    def test_server_error_diagnostic_redacts_credentials(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+        error_at: str,
+        secret: str,
+    ) -> None:
+        procs = _capture_popen(monkeypatch)
+        server = """
+import json, os, sys
+error_at = sys.argv[1]
+for line in sys.stdin:
+    request = json.loads(line)
+    if 'id' not in request:
+        continue
+    response = {'jsonrpc': '2.0', 'id': request['id']}
+    message = 'request refused for ' + os.environ['MCP_API_KEY'] + '; retry later'
+    if request['method'] == error_at:
+        response['error'] = {'code': -32603, 'message': message}
+    elif request['method'] == 'initialize':
+        response['result'] = {'protocolVersion': '2025-11-25'}
+    else:
+        response['result'] = {'isError': True, 'content': [{'type': 'text', 'text': message}]}
+    print(json.dumps(response), flush=True)
+"""
+        client = McpClient(
+            McpServerConfig(
+                name="error-server",
+                command=sys.executable,
+                args=("-c", server, error_at),
+                env={"MCP_API_KEY": secret},
+                startup_timeout=2.0,
+                request_timeout=2.0,
+            )
+        )
+        try:
+            with pytest.raises(McpServerError, match="request refused for") as exc:
+                client.start()
+                assert client.negotiated_protocol_version == "2025-11-25"
+                if error_at == "tools/list":
+                    client.list_tools()
+                else:
+                    client.call_tool("echo", {})
+            if error_at == "initialize":
+                assert client._proc is None
+                assert client._stderr_redaction_values == ()
+        finally:
+            client.stop()
+
+        assert client._proc is None
+        assert client._stderr_redaction_values == ()
+        assert len(procs) == 1
+        _assert_exited(procs[0])
+        diagnostic = "".join(traceback.format_exception(exc.value)) + caplog.text
+        assert secret not in diagnostic
+        assert repr(secret)[1:-1] not in diagnostic
+        assert "[REDACTED]" in str(exc.value)
+        assert "retry later" in str(exc.value)
+        assert ("isError" if error_at == "isError" else "code=-32603") in str(exc.value)
+
+    @pytest.mark.parametrize(
+        ("malformed_at", "error_pattern"),
+        [
+            ("block", "content block must be a JSON object"),
+            ("type", "content type must be a string"),
+            ("text", "text content must be a string"),
+            ("mime", "image mimeType must be a string"),
+        ],
+    )
+    @pytest.mark.parametrize("nested_kind", ["array", "object"])
+    @pytest.mark.parametrize("is_error", [False, True])
+    def test_malformed_tool_content_rejects_without_credential_diagnostics(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+        malformed_at: str,
+        error_pattern: str,
+        nested_kind: str,
+        is_error: bool,
+    ) -> None:
+        secret = "opaque\nvalue'with\"quotes\\and\\slashes"
+        nested: object = {"nested": [secret]}
+        if nested_kind == "array":
+            nested = [secret]
+        blocks: dict[str, object] = {
+            "block": [nested],
+            "type": {"type": nested},
+            "text": {"type": "text", "text": nested},
+            "mime": {"type": "image", "mimeType": nested},
+        }
+        result = {"isError": is_error, "content": [blocks[malformed_at]]}
+        server = """
+import json, sys
+for line in sys.stdin:
+    request = json.loads(line)
+    if 'id' not in request:
+        continue
+    result = ({'protocolVersion': '2025-11-25'} if request['method'] == 'initialize'
+              else json.loads(sys.argv[1]))
+    print(json.dumps({'jsonrpc': '2.0', 'id': request['id'], 'result': result}), flush=True)
+"""
+        procs = _capture_popen(monkeypatch)
+        client = McpClient(
+            McpServerConfig(
+                name="malformed-content",
+                command=sys.executable,
+                args=("-c", server, json.dumps(result)),
+                env={"MCP_API_KEY": secret},
+                startup_timeout=2.0,
+                request_timeout=2.0,
+            )
+        )
+        try:
+            client.start()
+            assert client.negotiated_protocol_version == "2025-11-25"
+            with pytest.raises(McpServerError, match=error_pattern) as exc:
+                client.call_tool("echo", {})
+        finally:
+            client.stop()
+
+        assert client._proc is None
+        assert client._stderr_redaction_values == ()
+        assert len(procs) == 1
+        _assert_exited(procs[0])
+        diagnostic = "".join(traceback.format_exception(exc.value)) + caplog.text
+        assert secret not in diagnostic
+        assert repr(secret)[1:-1] not in diagnostic
+        assert "opaque" not in diagnostic
+
     @pytest.mark.parametrize(
         ("raw", "forbidden"),
         [
@@ -1187,7 +1624,24 @@ class TestFlattenContent:
     def test_non_dict_block(self) -> None:
         from ctx.adapters.generic.tools.mcp_router import _flatten_content
 
-        assert _flatten_content(["just a string"]) == "just a string"
+        with pytest.raises(McpServerError, match="content block must be a JSON object"):
+            _flatten_content(["just a string"])
+
+    def test_valid_mixed_content_preserves_text_and_safe_summaries(self) -> None:
+        from ctx.adapters.generic.tools.mcp_router import _flatten_content
+
+        text = "verbatim\ntext'with\"quotes\\and\\slashes"
+        assert (
+            _flatten_content(
+                [
+                    {"type": "text", "text": text},
+                    {"type": "image", "mimeType": "image/png", "data": "private-image"},
+                    {"type": "resource", "resource": {"uri": "file:///private", "text": "private"}},
+                    {"type": "fancy", "blob": "private-unknown"},
+                ]
+            )
+            == text + "[image/png image omitted][resource omitted][fancy block omitted]"
+        )
 
 
 # ── Config dataclass ────────────────────────────────────────────────────────

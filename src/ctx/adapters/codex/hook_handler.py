@@ -12,12 +12,14 @@ from ctx.adapters.query_hook_io import (
     MAX_STDIN_BYTES,
     bounded_text,
     emit_report,
+    emit_tool_observation,
     existing_workspace,
     open_query_delivery_controller,
     read_bounded_json_object,
 )
 from ctx.runtime.query_decision import QueryHostDescriptor
-from ctx.runtime.query_delivery import QueryDeliveryController, SensitiveQueryInput
+from ctx.runtime.query_delivery import SensitiveQueryInput
+from ctx.runtime.user_recommendations import UserKnowledgeQueryController
 
 
 _REQUIRED_FIELDS = frozenset(
@@ -36,7 +38,7 @@ _OPTIONAL_FIELDS = frozenset({"agent_id", "agent_type"})
 _PERMISSION_MODES = frozenset({"default", "acceptEdits", "plan", "dontAsk", "bypassPermissions"})
 
 
-def _open_controller(environment: Mapping[str, str]) -> QueryDeliveryController:
+def _open_controller(environment: Mapping[str, str]) -> UserKnowledgeQueryController:
     return open_query_delivery_controller(
         host=QueryHostDescriptor.codex(),
         environment=environment,
@@ -90,6 +92,9 @@ def run_hook(
     try:
         value = read_bounded_json_object(stdin)
         if value is None:
+            return 0
+        if value.get("hook_event_name") == "PostToolUse":
+            emit_tool_observation(value, environment, stdout)
             return 0
         request = _parse_request(value)
         if request is None:

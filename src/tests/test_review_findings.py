@@ -228,12 +228,11 @@ def test_graph_markdown_host_path_scan_covers_key_value_delimiters(payload: byte
 @pytest.mark.parametrize(
     ("workflow_path", "expected_invocations"),
     [
-        (".github/workflows/huggingface-sync.yml", 1),
-        (".github/workflows/publish.yml", 1),
-        (".github/workflows/test.yml", 3),
+        (".github/workflows/publish.yml", 0),
+        (".github/workflows/test.yml", 0),
     ],
 )
-def test_graph_workflows_use_one_strict_release_manifest_resolver(
+def test_software_workflows_do_not_resolve_retired_catalogs(
     workflow_path: str,
     expected_invocations: int,
 ) -> None:
@@ -247,7 +246,7 @@ def test_graph_workflows_use_one_strict_release_manifest_resolver(
     assert "GIT_LFS_" not in workflow
 
 
-def test_preflight_hydrates_strict_manifest_before_graph_validation() -> None:
+def test_preflight_checks_graph_infrastructure_without_hydration() -> None:
     checks, _notes = ci_preflight.select_checks(
         base_ref="origin/main",
         files=["graph/release-artifacts.json"],
@@ -255,18 +254,11 @@ def test_preflight_hydrates_strict_manifest_before_graph_validation() -> None:
         python="python",
     )
     names = [check.name for check in checks]
-    hydrate = next(check for check in checks if check.name == "hydrate graph release assets")
-
-    assert names.index("hydrate graph release assets") < names.index("graph artifact validation")
-    assert hydrate.argv == (
-        "python",
-        "scripts/graph_release_manifest.py",
-        "hydrate",
-        "--manifest",
-        "graph/release-artifacts.json",
-        "--repo-root",
-        ".",
-    )
+    assert "graph infrastructure contract" in names
+    assert all("hydrate" not in check.argv for check in checks)
+    contract = next(check for check in checks if check.name == "graph infrastructure contract")
+    assert "src/tests/test_validate_graph_artifacts.py" in contract.argv
+    assert "src/tests/test_graph_release_manifest.py" in contract.argv
 
 
 def test_hf_card_export_uploads_docs_and_changelog(

@@ -1,29 +1,21 @@
 ---
 name: find-skills
-description: Discover installable agent skills from ctx's shipped Skills.sh catalog, the Skills.sh search API, and the npx skills CLI. Use when a user asks whether a skill exists, wants to add/update a skill, or needs a repeatable procedure for finding candidate skills safely.
+description: Discover candidate skills from user-owned CTX knowledge and explicitly requested external sources. Use when a user asks whether a skill exists, wants to add or update a skill, or needs a safe discovery procedure.
 ---
 
 # Find Skills
 
-Use this when the user wants a skill recommendation or when ctx's curated graph
-does not already contain the capability they need.
+Use this when the user asks for skill discovery. An empty result does not
+authorize a remote search, import, or installation.
 
 ## Source Of Truth
 
-1. Query ctx first: use the shared recommendation surface so curated skills,
-   agents, MCP servers, harnesses, and the shipped Skills.sh external catalog are
-   ranked together.
-2. If ctx is stale or too narrow, search upstream:
-
-```bash
-npx skills find "<query>"
-```
-
-3. For the upstream discovery skill itself, the canonical install command is:
-
-```bash
-npx skills add https://github.com/vercel-labs/skills --skill find-skills
-```
+Query the user's knowledge through the shared
+[recommendation surfaces](../../docs/harness/attaching-to-hosts.md).
+If the user explicitly requests external discovery, review the chosen source
+and discovery command before running it. See
+[entity source surfaces](../../docs/marketplace-registry.md) for supported
+authoring tools and their boundaries. CTX supplies no fallback catalog.
 
 ## Recommendation Checklist
 
@@ -53,13 +45,9 @@ Do not install or import a flagged skill automatically. Present the user with
 the exact concern, the likely benefit, the safer alternative, and the explicit
 command they would need to approve.
 
-## Updating ctx
+## Adding accepted knowledge
 
-When adding accepted skills to ctx itself:
-
-1. Add or update the source skill file.
-2. Run `ctx-skill-add --skill-path <path>/SKILL.md --name <slug>`.
-3. Run `ctx-wiki-graphify`.
-4. Repack `graph/wiki-graph.tar.gz` and refresh repo stats.
-5. Verify with `ctx-scan-repo --repo . --recommend` or
-   `ctx__recommend_bundle` for a query that should return the skill.
+Follow [entity onboarding](../../docs/entity-onboarding.md) for the explicit
+authoring, update-review, indexing, and recommendation-check workflow.
+Keep accepted records in the user's chosen wiki. Installation requires separate
+explicit approval; a recommendation or source record cannot grant it.

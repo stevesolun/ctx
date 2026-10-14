@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
+import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -13,8 +16,10 @@ from typing import Any, Iterator
 import networkx as nx
 import pytest
 
+from ctx import api as ctx_api
 from ctx.monitor import testing as mt
 from ctx.monitor.services import kpi as kpi_service
+from ctx.monitor.services import runtime as runtime_service
 from ctx.monitor.services import sidecars as sidecar_service
 
 playwright_sync: Any = pytest.importorskip("playwright.sync_api")
@@ -41,6 +46,7 @@ def fake_claude(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     claude = tmp_path / ".claude"
     (claude / "skill-quality").mkdir(parents=True)
     monkeypatch.setattr(mt, "claude_dir", lambda: claude)
+    monkeypatch.setattr(mt, "runtime_lifecycle_path", lambda: claude / "runtime" / "events.jsonl")
     monkeypatch.setattr(mt, "dashboard_graph_index_archives", lambda: [])
     sidecar_service.reset_caches()
     kpi_service.reset_cache()
@@ -124,6 +130,47 @@ def _wait_for_browser_state(page: Any, expression: str, *, timeout: float = 5.0)
             return
         time.sleep(0.05)
     raise AssertionError(f"timed out waiting for browser state: {expression}")
+
+
+def _computed_contrast_ratio(page: Any, selector: str) -> float:
+    return float(
+        page.locator(selector).first.evaluate(
+            """
+            node => {
+              const channels = value => {
+                const parts = value.match(/[0-9.]+/g) || [];
+                return parts.slice(0, 3).map(Number);
+              };
+              const luminance = value => {
+                const rgb = channels(value).map(channel => {
+                  const normalized = channel / 255;
+                  return normalized <= 0.04045
+                    ? normalized / 12.92
+                    : Math.pow((normalized + 0.055) / 1.055, 2.4);
+                });
+                return 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+              };
+              const style = getComputedStyle(node);
+              const foreground = luminance(style.color);
+              const background = luminance(style.backgroundColor);
+              return (Math.max(foreground, background) + 0.05)
+                / (Math.min(foreground, background) + 0.05);
+            }
+            """
+        )
+    )
+
+
+def _assert_page_fits_viewport(page: Any) -> None:
+    dimensions = page.evaluate(
+        """
+        () => ({
+          viewport: document.documentElement.clientWidth,
+          document: document.documentElement.scrollWidth,
+        })
+        """
+    )
+    assert dimensions["document"] <= dimensions["viewport"]
 
 
 def test_graph_page_uses_builtin_svg_renderer(
@@ -333,6 +380,45 @@ def test_graph_page_uses_builtin_svg_renderer(
             timeout=5.0,
         )
 
+        agent_filter = page.locator(".graph-type-filter[value='agent']")
+        agent_filter.uncheck()
+        _wait_for_browser_state(
+            page,
+            "() => document.getElementById('graph-count-agent').textContent === '0'",
+            timeout=5.0,
+        )
+        assert (
+            page.locator("[data-3d-node-id='agent:code-reviewer']").evaluate(
+                "node => getComputedStyle(node).display",
+            )
+            == "none"
+        )
+        assert (
+            page.locator(
+                "[data-testid='graph-svg-edge'][data-edge-weight='0.9000']",
+            ).evaluate("node => getComputedStyle(node).display")
+            == "none"
+        )
+        agent_filter.check()
+        _wait_for_browser_state(
+            page,
+            "() => document.getElementById('graph-match-count').textContent === '5 visible'",
+            timeout=5.0,
+        )
+
+        strongest_edge = page.locator(
+            "[data-testid='graph-3d-edge'][data-edge-weight='0.9000']",
+        )
+        strongest_edge.hover(force=True)
+        _wait_for_browser_state(
+            page,
+            "() => document.querySelector('[data-testid=\"graph-edge-detail\"]')"
+            "?.textContent.includes('90% relation strength')",
+            timeout=5.0,
+        )
+        edge_detail = page.locator("[data-testid='graph-edge-detail']").inner_text()
+        assert "shared: review" in edge_detail
+
         reviewer_radius = float(
             page.locator(
                 "[data-3d-node-id='agent:code-reviewer'] [data-testid='graph-svg-node']",
@@ -451,6 +537,213 @@ def test_graph_page_uses_builtin_svg_renderer(
         harness.close()
 
 
+def test_home_uses_fixture_lifecycle_history(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+    page: Any,
+) -> None:
+    sentinel = tmp_path / "caller-history.jsonl"
+    _write_runtime_events(sentinel, [{"action": "validation", "status": "passed"}])
+    monkeypatch.setattr(mt, "runtime_lifecycle_path", lambda: sentinel)
+    claude = request.getfixturevalue("fake_claude")
+    fixture_log = claude / "runtime" / "events.jsonl"
+    _write_runtime_events(fixture_log, [{"action": "validation", "status": "failed"}])
+    read_paths: list[Path] = []
+    real_read_jsonl = runtime_service.read_jsonl
+
+    def read_jsonl(path: Path, limit: int | None = None) -> list[dict[str, Any]]:
+        read_paths.append(path)
+        return real_read_jsonl(path, limit=limit)
+
+    monkeypatch.setattr(runtime_service, "read_jsonl", read_jsonl)
+    harness = _start_monitor(monkeypatch, fake_load=False)
+    try:
+        page.goto(harness.base_url)
+        assert read_paths
+        assert sentinel not in read_paths
+        assert fixture_log in read_paths
+        assert all(path.is_relative_to(claude) for path in read_paths)
+        assert "1 failed / 0 open escalations" in page.locator("body").inner_text()
+    finally:
+        harness.close()
+
+
+def test_navigation_drag_order_persists_and_keyboard_reset_restores_defaults(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    page: Any,
+) -> None:
+    harness = _start_monitor(monkeypatch, fake_load=False)
+    try:
+        page.goto(harness.base_url)
+        page.wait_for_selector("#dashboard-nav", timeout=5000)
+        default_order = page.locator("#dashboard-nav a[data-nav-key]").evaluate_all(
+            "links => links.map(link => link.dataset.navKey)",
+        )
+        assert default_order[0] == "home"
+
+        graph_link = page.locator("#dashboard-nav a[data-nav-key='graph']")
+        home_link = page.locator("#dashboard-nav a[data-nav-key='home']")
+        home_box = home_link.bounding_box()
+        assert home_box is not None
+        graph_link.drag_to(
+            home_link,
+            target_position={"x": 1, "y": home_box["height"] / 2},
+        )
+        _wait_for_browser_state(
+            page,
+            "() => document.querySelector('#dashboard-nav a[data-nav-key]')?.dataset.navKey === 'graph'",
+        )
+        stored_order = page.evaluate(
+            "() => JSON.parse(localStorage.getItem('ctx-monitor-nav-order') || '[]')",
+        )
+        assert stored_order[0] == "graph"
+        assert sorted(stored_order) == sorted(default_order)
+
+        page.reload()
+        page.wait_for_selector("#dashboard-nav", timeout=5000)
+        assert (
+            page.locator("#dashboard-nav a[data-nav-key]").first.get_attribute(
+                "data-nav-key",
+            )
+            == "graph"
+        )
+
+        reset = page.locator("#nav-reset")
+        reset.focus()
+        assert page.evaluate("() => document.activeElement?.id") == "nav-reset"
+        page.keyboard.press("Enter")
+        restored_order = page.locator("#dashboard-nav a[data-nav-key]").evaluate_all(
+            "links => links.map(link => link.dataset.navKey)",
+        )
+        assert restored_order == default_order
+        assert (
+            page.evaluate(
+                "() => localStorage.getItem('ctx-monitor-nav-order')",
+            )
+            is None
+        )
+
+        docs_link = page.locator("#dashboard-nav a[data-nav-key='docs']")
+        docs_link.focus()
+        page.keyboard.press("Enter")
+        page.wait_for_url("**/docs", timeout=5000)
+        assert page.locator("h1").first.inner_text()
+    finally:
+        harness.close()
+
+
+def test_dark_dashboard_surfaces_have_contrast_without_browser_errors(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    page: Any,
+) -> None:
+    graph = nx.Graph()
+    graph.add_node("skill:python-patterns", label="python-patterns", type="skill")
+    graph.add_node("agent:code-reviewer", label="code-reviewer", type="agent")
+    graph.add_edge(
+        "skill:python-patterns",
+        "agent:code-reviewer",
+        weight=0.9,
+        shared_tags=["review"],
+    )
+    monkeypatch.setattr(mt, "load_dashboard_graph", lambda: graph)
+    _write_wiki_entity(fake_claude, "skill", "python-patterns", "# Python patterns\n")
+    page.emulate_media(color_scheme="dark")
+    console_errors: list[str] = []
+    page_errors: list[str] = []
+    page.on(
+        "console",
+        lambda message: console_errors.append(message.text) if message.type == "error" else None,
+    )
+    page.on("pageerror", lambda error: page_errors.append(str(error)))
+
+    harness = _start_monitor(monkeypatch, fake_load=False)
+    try:
+        page.goto(f"{harness.base_url}/config")
+        page.wait_for_selector("#config-form", timeout=5000)
+        assert _computed_contrast_ratio(page, ".card") >= 4.5
+        assert _computed_contrast_ratio(page, "div.card[style*='position:sticky']") >= 4.5
+        _assert_page_fits_viewport(page)
+
+        page.goto(f"{harness.base_url}/graph?slug=python-patterns&type=skill")
+        page.wait_for_selector("[data-testid='graph-edge-detail']", timeout=5000)
+        assert _computed_contrast_ratio(page, ".graph-edge-detail-inline") >= 4.5
+        _assert_page_fits_viewport(page)
+        assert console_errors == []
+        assert page_errors == []
+    finally:
+        harness.close()
+
+
+def test_mobile_home_activity_and_wiki_keep_long_content_inside_viewport(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    page: Any,
+) -> None:
+    long_slug = "mobile-" + "entity" * 18
+    long_session = "session-" + "identifier" * 16
+    _write_wiki_entity(
+        fake_claude,
+        "skill",
+        long_slug,
+        "---\n"
+        "type: skill\n"
+        f"description: {'metadata' * 28}\n"
+        "tags: [mobile, responsive]\n"
+        "---\n# Mobile entity\n",
+    )
+    (fake_claude / "ctx-audit.jsonl").write_text(
+        json.dumps(
+            {
+                "ts": "2026-09-30T10:00:00Z",
+                "event": "skill.loaded",
+                "subject": long_slug,
+                "subject_type": "skill",
+                "session_id": long_session,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (fake_claude / "skill-events.jsonl").write_text(
+        json.dumps(
+            {
+                "timestamp": "2026-09-30T10:00:01Z",
+                "event": "load",
+                "skill": long_slug,
+                "session_id": long_session,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    page.set_viewport_size({"width": 390, "height": 844})
+
+    harness = _start_monitor(monkeypatch, fake_load=False)
+    try:
+        for route, selector in (
+            ("/", ".app-main"),
+            (f"/session/{long_session}", "h1"),
+            ("/wiki", ".wiki-card"),
+        ):
+            page.goto(f"{harness.base_url}{route}")
+            page.wait_for_selector(selector, timeout=5000)
+            _assert_page_fits_viewport(page)
+
+        search_box = page.locator("#wiki-search").bounding_box()
+        first_card = page.locator(".wiki-card").first.bounding_box()
+        assert search_box is not None and first_card is not None
+        viewport_width = page.evaluate("() => document.documentElement.clientWidth")
+        assert search_box["x"] >= 0
+        assert search_box["x"] + search_box["width"] <= viewport_width
+        assert first_card["x"] >= 0
+        assert first_card["x"] + first_card["width"] <= viewport_width
+    finally:
+        harness.close()
+
+
 def test_docs_page_search_jumps_to_cross_tab_result(
     fake_claude: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -553,6 +846,275 @@ def test_wiki_page_autocomplete_and_type_filters_update_visible_tiles(
         harness.close()
 
 
+def test_skills_page_filters_and_paginates_real_sidecars(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    page: Any,
+) -> None:
+    for index in range(50):
+        _write_quality_sidecar(
+            fake_claude,
+            f"skill-{index:03d}",
+            {
+                "slug": f"skill-{index:03d}",
+                "subject_type": "skill",
+                "grade": "A",
+                "raw_score": 0.9 - index / 1000,
+            },
+        )
+    for index in range(5):
+        _write_quality_sidecar(
+            fake_claude,
+            f"agent-{index:03d}",
+            {
+                "slug": f"agent-{index:03d}",
+                "subject_type": "agent",
+                "grade": "B",
+                "raw_score": 0.8 - index / 1000,
+            },
+        )
+
+    harness = _start_monitor(monkeypatch, fake_load=False)
+    try:
+        page.goto(f"{harness.base_url}/skills?limit=50")
+        page.wait_for_selector(".skill-card", timeout=5000)
+        assert page.locator(".skill-card").count() == 50
+        assert "Showing 1-50 of 55 sidecars" in page.locator("#match-count").inner_text()
+
+        page.get_by_role("link", name="next").click()
+        page.wait_for_url("**page=2**", timeout=5000)
+        assert page.locator(".skill-card").count() == 5
+        assert "Showing 51-55 of 55 sidecars" in page.locator("#match-count").inner_text()
+        assert page.locator(".skill-card[data-slug='skill-049']").count() == 1
+
+        with page.expect_navigation():
+            page.select_option(".type-filter", "agent")
+        assert page.locator(".skill-card").count() == 5
+        assert page.locator(".skill-card[data-type='agent']").count() == 5
+        assert "Showing 1-5 of 5 matching sidecars" in page.locator("#match-count").inner_text()
+
+        with page.expect_navigation():
+            page.select_option(".grade-filter", "B")
+        assert page.locator(".skill-card[data-grade='B']").count() == 5
+
+        page.fill("#skill-search", "agent-003")
+        page.locator("#skills-filter-form button[type='submit']").click()
+        page.wait_for_url("**q=agent-003**", timeout=5000)
+        assert page.locator(".skill-card").count() == 1
+        assert page.locator(".skill-card").get_attribute("data-slug") == "agent-003"
+    finally:
+        harness.close()
+
+
+def test_wiki_entity_tabs_switch_overview_subgraph_and_quality(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    page: Any,
+) -> None:
+    graph = nx.Graph()
+    graph.add_node("skill:python-patterns", label="python-patterns", type="skill")
+    graph.add_node("agent:code-reviewer", label="code-reviewer", type="agent")
+    graph.add_edge(
+        "skill:python-patterns",
+        "agent:code-reviewer",
+        weight=0.9,
+        shared_tags=["review"],
+    )
+    monkeypatch.setattr(mt, "load_dashboard_graph", lambda: graph)
+    _write_wiki_entity(
+        fake_claude,
+        "skill",
+        "python-patterns",
+        "---\ntype: skill\ndescription: Durable Python patterns\ntags: [python]\n---\n"
+        "# Python patterns\n\nOverview body marker.\n",
+    )
+    _write_quality_sidecar(
+        fake_claude,
+        "python-patterns",
+        {
+            "slug": "python-patterns",
+            "subject_type": "skill",
+            "grade": "A",
+            "raw_score": 0.93,
+            "weights": {"documentation": 1.0},
+            "signals": {"documentation": {"score": 0.93, "evidence": {"source": "wiki"}}},
+        },
+    )
+
+    harness = _start_monitor(monkeypatch, fake_load=False)
+    try:
+        page.goto(f"{harness.base_url}/wiki/python-patterns?type=skill")
+        page.wait_for_selector("[data-entity-tab='overview']", timeout=5000)
+        assert page.locator("[data-entity-tab-panel='overview']").is_visible()
+        assert (
+            "Overview body marker"
+            in page.locator(
+                "[data-entity-tab-panel='overview']",
+            ).inner_text()
+        )
+        assert page.locator("[data-entity-tab-panel='subgraph']").is_hidden()
+        assert page.locator("[data-entity-tab-panel='quality']").is_hidden()
+
+        page.locator("[data-entity-tab='subgraph']").click()
+        assert page.locator("[data-entity-tab-panel='overview']").is_hidden()
+        assert page.locator("[data-entity-tab-panel='subgraph']").is_visible()
+        assert (
+            "code-reviewer"
+            in page.locator(
+                "[data-entity-tab-panel='subgraph']",
+            ).inner_text()
+        )
+        assert page.evaluate("() => location.hash") == "#subgraph"
+
+        page.locator("[data-entity-tab='quality']").click()
+        assert page.locator("[data-entity-tab-panel='subgraph']").is_hidden()
+        assert page.locator("[data-entity-tab-panel='quality']").is_visible()
+        quality_text = page.locator("[data-entity-tab-panel='quality']").inner_text()
+        assert "score 0.930" in quality_text
+        assert "documentation" in quality_text
+        assert page.evaluate("() => location.hash") == "#quality"
+    finally:
+        harness.close()
+
+
+def test_recommendation_query_selection_and_rejection_update_related_results(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    page: Any,
+) -> None:
+    del fake_claude
+    bundle_calls: list[tuple[str, int]] = []
+    related_calls: list[tuple[list[str], list[str], int]] = []
+
+    def recommend_bundle(query: str, *, top_k: int) -> list[dict[str, object]]:
+        bundle_calls.append((query, top_k))
+        return [
+            {
+                "id": "skill:fastapi-pro",
+                "name": "fastapi-pro",
+                "type": "skill",
+                "normalized_score": 0.91,
+                "selection_state": "suggested",
+                "tldr": "Build APIs safely.",
+                "reason": "matches API work",
+            },
+            {
+                "id": "agent:legacy-reviewer",
+                "name": "legacy-reviewer",
+                "type": "agent",
+                "normalized_score": 0.7,
+                "selection_state": "suggested",
+                "tldr": "Review legacy code.",
+                "reason": "matches review work",
+            },
+        ]
+
+    def recommend_related(
+        selected: list[str],
+        *,
+        rejected: list[str],
+        top_n: int,
+    ) -> list[dict[str, object]]:
+        related_calls.append((selected, rejected, top_n))
+        return [
+            {
+                "id": "mcp-server:filesystem",
+                "name": "filesystem",
+                "type": "mcp-server",
+                "normalized_score": 0.88,
+                "selection_state": "suggested_related",
+                "tldr": "Read the workspace.",
+                "reason": "supports the selected skill",
+            }
+        ]
+
+    monkeypatch.setattr(ctx_api, "recommend_bundle", recommend_bundle)
+    monkeypatch.setattr(ctx_api, "recommend_related", recommend_related)
+    harness = _start_monitor(monkeypatch, fake_load=False)
+    try:
+        page.goto(f"{harness.base_url}/recommend")
+        query_form = page.locator("form[action='/recommend']").first
+        query_form.locator("input[name='q']").fill("build api")
+        query_form.locator("input[name='top_k']").fill("2")
+        query_form.locator("input[name='rejected']").fill("agent:legacy-reviewer")
+        query_form.get_by_role("button", name="Recommend").click()
+        page.wait_for_url("**q=build+api**", timeout=5000)
+        assert bundle_calls == [("build api", 2)]
+        assert page.locator("input[value='skill:fastapi-pro']").count() == 1
+
+        page.get_by_role("link", name="Select all").click()
+        page.wait_for_load_state("load")
+        assert page.locator("input[name='selected']").count() == 2
+        assert page.locator("input[name='selected']:checked").count() == 2
+
+        page.get_by_role("link", name="Select none").click()
+        page.wait_for_load_state("load")
+        assert page.locator("input[name='selected']").count() == 2
+        assert page.locator("input[name='selected']:checked").count() == 0
+        related_calls.clear()
+
+        page.locator("input[value='skill:fastapi-pro']").check()
+        page.get_by_role("button", name="Show related").click()
+        page.wait_for_url("**selected=skill%3Afastapi-pro**", timeout=5000)
+        assert related_calls == [
+            (["skill:fastapi-pro"], ["agent:legacy-reviewer"], 2),
+        ]
+        assert page.locator("input[value='skill:fastapi-pro']").is_checked()
+        assert (
+            "mcp-server:filesystem"
+            in page.get_by_text("Related recommendations")
+            .locator(
+                "..",
+            )
+            .inner_text()
+        )
+    finally:
+        harness.close()
+
+
+def test_empty_runtime_and_recommendation_outcomes_are_explicit(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    page: Any,
+) -> None:
+    monkeypatch.setattr(
+        mt,
+        "runtime_lifecycle_path",
+        lambda: fake_claude / "runtime" / "events.jsonl",
+    )
+
+    def recommend_bundle(query: str, *, top_k: int) -> list[dict[str, object]]:
+        del top_k
+        if query == "explode":
+            raise RuntimeError("controlled recommendation failure")
+        return []
+
+    monkeypatch.setattr(ctx_api, "recommend_bundle", recommend_bundle)
+    harness = _start_monitor(monkeypatch, fake_load=False)
+    try:
+        page.goto(f"{harness.base_url}/runtime")
+        runtime_text = page.locator("body").inner_text()
+        assert "0 validations / 0 failed / 0 open escalations" in runtime_text
+        assert "0 loaded / 0 active / 0 selected / 0 used" in runtime_text
+        assert "0 records / 0 tokens / $0.0000 cost" in runtime_text
+        assert "No tool usage recorded yet." in runtime_text
+        assert "No validation checks recorded yet." in runtime_text
+        assert "No open escalations." in runtime_text
+
+        page.goto(f"{harness.base_url}/recommend?q=nothing&top_k=3")
+        assert page.get_by_text("No recommendations above threshold.").is_visible()
+
+        page.goto(f"{harness.base_url}/recommend?q=explode&top_k=3")
+        assert page.get_by_text("Error", exact=True).is_visible()
+        assert page.get_by_text(
+            "RuntimeError: controlled recommendation failure",
+            exact=True,
+        ).is_visible()
+        assert "Traceback" not in page.locator("body").inner_text()
+    finally:
+        harness.close()
+
+
 def test_manage_page_supports_create_search_update_and_delete(
     fake_claude: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -594,6 +1156,17 @@ def test_manage_page_supports_create_search_update_and_delete(
         )
         assert page.locator("input[name='title']").input_value() == "Custom Reviewer"
 
+        original_text = entity_path.read_text(encoding="utf-8")
+        page.once("dialog", lambda dialog: dialog.dismiss())
+        page.fill("input[name='title']", "Cancelled Update")
+        page.locator("#entity-editor-form button[type='submit']").click()
+        _wait_for_browser_state(
+            page,
+            "() => document.getElementById('entity-editor-status').textContent === 'update cancelled'",
+            timeout=5.0,
+        )
+        assert entity_path.read_text(encoding="utf-8") == original_text
+
         page.once("dialog", lambda dialog: dialog.accept())
         page.fill("input[name='title']", "Custom Reviewer Updated")
         page.locator("#entity-editor-form button[type='submit']").click()
@@ -603,6 +1176,11 @@ def test_manage_page_supports_create_search_update_and_delete(
             timeout=5.0,
         )
         assert "title: Custom Reviewer Updated" in entity_path.read_text(encoding="utf-8")
+
+        updated_text = entity_path.read_text(encoding="utf-8")
+        page.once("dialog", lambda dialog: dialog.dismiss())
+        page.locator("[data-testid='entity-delete-button']").click()
+        assert entity_path.read_text(encoding="utf-8") == updated_text
 
         page.once("dialog", lambda dialog: dialog.accept())
         page.locator("[data-testid='entity-delete-button']").click()
@@ -667,7 +1245,9 @@ def test_config_and_harness_pages_support_browser_wizard_flows(
             "textarea[name='goal']",
             "Build a local Python code-review harness with pytest verification.",
         )
+        page.check("input[name='tools'][value='browser']")
         page.fill("input[name='verify']", "pytest")
+        page.select_option("select[name='privacy']", "secrets allowed by env only")
         _wait_for_browser_state(
             page,
             "() => document.querySelector('[data-testid=\"harness-command-output\"]').textContent.includes('--model-provider \"huggingface\"')",
@@ -677,6 +1257,41 @@ def test_config_and_harness_pages_support_browser_wizard_flows(
         assert '--model "HuggingFaceTB/SmolLM2-135M-Instruct"' in command
         assert "--plan-on-no-fit" in command
         assert page.locator(".harness-card[data-harness-slug='langgraph']").count() == 1
+
+        isolated_home = fake_claude.parent / "harness-cli-home"
+        (isolated_home / ".claude" / "skill-wiki" / "entities" / "harnesses").mkdir(parents=True)
+        (isolated_home / ".claude" / "skill-wiki" / "graphify-out").mkdir()
+        plan_path = fake_claude.parent / "custom-harness-prd.md"
+        argv = shlex.split(command)
+        assert argv[:3] == ["python", "-m", "harness_install"]
+        argv[0] = sys.executable
+        argv.extend(["--plan-output", str(plan_path)])
+        secret = "hf_acceptance_secret_must_not_leak"
+        env = os.environ.copy()
+        env.update({"HOME": str(isolated_home), "HF_TOKEN": secret})
+        completed = subprocess.run(
+            argv,
+            cwd=Path(__file__).resolve().parents[2],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        assert completed.returncode == 0, completed.stderr
+        assert "No harness recommendations matched." in completed.stdout
+        assert f"Custom harness plan: {plan_path}" in completed.stdout
+
+        plan = plan_path.read_text(encoding="utf-8")
+        assert "Model provider: huggingface" in plan
+        assert "Model: HuggingFaceTB/SmolLM2-135M-Instruct" in plan
+        assert "Allowed tools/access: files,git,shell,browser" in plan
+        assert "Verification: pytest" in plan
+        assert "Privacy/network: secrets allowed by env only" in plan
+        assert "Preferred ctx attachment: mcp" in plan
+        assert secret not in plan
+        assert secret not in completed.stdout
+        assert secret not in completed.stderr
 
         page.locator("[data-select-harness='langgraph']").click()
         selected = page.locator("#selected-harness-command").inner_text()
@@ -823,6 +1438,106 @@ def test_events_page_shows_backlog_and_appends_live_events(
         )
         status_text = page.locator("#stream-status").inner_text()
         assert status_text in {"connected; waiting for new events", "live"}
+    finally:
+        harness.close()
+
+
+def test_empty_logs_filter_and_event_stream_reconnect_are_visible(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    page: Any,
+) -> None:
+    audit_path = fake_claude / "ctx-audit.jsonl"
+    harness = _start_monitor(monkeypatch, fake_load=False)
+    try:
+        page.goto(f"{harness.base_url}/logs")
+        page.wait_for_selector("#logs", timeout=5000)
+        assert "Showing last 0" in page.locator("body").inner_text()
+        assert page.locator("#logs tr[data-event]").count() == 0
+
+        audit_path.write_text(
+            "\n".join(
+                json.dumps(row)
+                for row in (
+                    {
+                        "ts": "2026-09-30T11:00:00Z",
+                        "event": "skill.loaded",
+                        "subject": "python-patterns",
+                        "actor": "hook",
+                        "session_id": "filter-session-a",
+                    },
+                    {
+                        "ts": "2026-09-30T11:00:01Z",
+                        "event": "agent.loaded",
+                        "subject": "code-reviewer",
+                        "actor": "hook",
+                        "session_id": "filter-session-b",
+                    },
+                )
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        page.reload()
+        page.wait_for_selector("#logs tr[data-event]", timeout=5000)
+        assert page.locator("#logs tr[data-event]").count() == 2
+        page.fill("#filter", "code-reviewer")
+        assert page.locator("#logs tr[data-event]:visible").count() == 1
+        assert "agent.loaded" in page.locator("#logs tr[data-event]:visible").inner_text()
+        page.fill("#filter", "filter-session-a")
+        assert page.locator("#logs tr[data-event]:visible").count() == 1
+        assert "python-patterns" in page.locator("#logs tr[data-event]:visible").inner_text()
+
+        audit_path.write_text("", encoding="utf-8")
+        attempts = 0
+
+        def interrupt_first_stream(route: Any) -> None:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                route.abort()
+            else:
+                route.continue_()
+
+        page.route("**/api/events.stream", interrupt_first_stream)
+        page.goto(f"{harness.base_url}/events")
+        page.wait_for_selector("#stream", timeout=5000)
+        assert (
+            "no audit events recorded yet; waiting for new events"
+            in page.locator(
+                "#stream",
+            ).inner_text()
+        )
+        _wait_for_browser_state(
+            page,
+            "() => document.getElementById('stream-status').textContent === 'stream error; reconnecting'",
+            timeout=5.0,
+        )
+        _wait_for_browser_state(
+            page,
+            "() => document.getElementById('stream-status').textContent === 'connected; waiting for new events'",
+            timeout=8.0,
+        )
+        assert attempts >= 2
+
+        with audit_path.open("a", encoding="utf-8") as stream:
+            stream.write(
+                json.dumps(
+                    {
+                        "ts": "2026-09-30T11:00:02Z",
+                        "event": "mcp.loaded",
+                        "subject": "filesystem",
+                        "session_id": "reconnected-session",
+                    }
+                )
+                + "\n"
+            )
+        _wait_for_browser_state(
+            page,
+            "() => document.getElementById('stream').textContent.includes('reconnected-session')",
+            timeout=5.0,
+        )
+        assert page.locator("#stream-status").inner_text() == "live"
     finally:
         harness.close()
 

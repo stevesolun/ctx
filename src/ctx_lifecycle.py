@@ -736,10 +736,12 @@ def cmd_review(args: argparse.Namespace) -> int:
     cfg = _build_config()
     proposals, observed = plan_review(sources=sources, cfg=cfg, include_delete=False)
 
-    # Persist observed states regardless — folding the fresh D-streak
-    # keeps the counter correct even if the user declines transitions.
-    for state in observed.values():
-        save_lifecycle_state(state, sidecar_dir=sources.sidecar_dir)
+    # A dry-run is strictly read-only. Normal review still folds the fresh
+    # D-streak before prompting so a declined transition retains observation
+    # history without applying the proposed filesystem change.
+    if not args.dry_run:
+        for state in observed.values():
+            save_lifecycle_state(state, sidecar_dir=sources.sidecar_dir)
 
     if args.json:
         print(

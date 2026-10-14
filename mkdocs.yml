@@ -1,16 +1,15 @@
 # MkDocs Material configuration for the ctx documentation site.
 #
-# The product is CTX Fit (`ctx fit`); the skill-router, toolbox, graph, and
-# dashboard sections below document the older recommendation surface, which
-# still ships and is what the published PyPI release contains.
+# CTX is user-owned graph/wiki infrastructure and a shared tool recommender.
+# CTX Fit remains an optional evaluator; no downloaded catalog is shipped.
 #
 # Build:    python -m mkdocs build --strict
 # Serve:    python -m mkdocs serve
 # Publish:  handled by .github/workflows/docs.yml on push to main.
 site_name: ctx
 site_description: >-
-  CTX Fit finds the cheapest AI coding setup that reliably works on your
-  repository and applies the winner as a reviewable change.
+  CTX recommends relevant skills, agents and MCP tools from your own knowledge
+  graph while you work. Empty by default; your tools, your control.
 site_url: https://stevesolun.github.io/ctx/
 repo_url: https://github.com/stevesolun/ctx
 repo_name: stevesolun/ctx
@@ -34,6 +33,7 @@ not_in_nav: |
 exclude_docs: |
   plans/
   ctx-fit/
+  research/
 
 theme:
   name: material
@@ -106,9 +106,9 @@ extra_javascript:
 
 nav:
   - Home: index.md
-  - Catalog: catalog.md
+  - Your catalog: catalog.md
   - Knowledge graph: knowledge-graph.md
-  - Hugging Face publish: huggingface-publish.md
+  - Historical dataset publication: huggingface-publish.md
   - Entity onboarding: entity-onboarding.md
   - Dashboard: dashboard.md
   - Telemetry: telemetry.md

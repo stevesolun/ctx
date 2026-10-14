@@ -2,20 +2,10 @@
 """
 agent_mirror.py -- Mirror locally-installed agent bodies into the wiki.
 
-Context: ``entities/agents/<slug>.md`` in the wiki is a metadata card —
-title, tags, quality, backlinks — but NOT the agent's prompt body.
-The live body lives at ``~/.claude/agents/<slug>.md`` which is absent
-from the wiki. That breaks portability: a fresh user cloning the repo
-has the card but no agent to install.
-
-This module scans ``~/.claude/agents/*.md``, keeps files that expose a
-Claude-Code agent frontmatter (``name:`` + ``description:``), and
-writes each body verbatim to ``<wiki>/converted-agents/<slug>.md`` —
-a parallel structure to ``<wiki>/converted/<slug>/`` which already
-holds the canonical skill bodies.
-
-The CLI is a one-shot admin operation. ``python -m ctx.adapters.claude_code.install.agent_install`` consumes
-the mirrored files at install time.
+Metadata cards alone do not provide an agent prompt. This explicit maintenance
+command captures user-owned local prompts for later reuse; CTX does not ship
+those prompts. See ``docs/entity-onboarding.md#updates-and-removal`` for the
+shared authoring, packed-body authority, and pruning contract.
 
 Usage:
     python -m agent_mirror                     # mirror everything that changed
@@ -37,7 +27,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from ctx.utils._fs_utils import atomic_write_text as _atomic_write_text
+from ctx.core.wiki.wiki_bodies import WikiBodySnapshot, active_wiki_pages, replace_agent_body
+from ctx.utils._fs_utils import reject_symlink_path
 from ctx_config import cfg
 from ctx.core.wiki.wiki_utils import validate_skill_name
 
@@ -151,11 +142,12 @@ def mirror_one(
     wiki_dir: Path,
     force: bool = False,
     dry_run: bool = False,
+    _snapshot: WikiBodySnapshot | None = None,
 ) -> MirrorResult:
-    """Mirror one live agent body into the wiki's converted-agents dir.
+    """Publish one live agent body through the shared wiki body writer.
 
-    Returns an ``unchanged`` result when the destination already has
-    identical content. ``force=True`` rewrites regardless.
+    Compare active packed content when present, otherwise the loose mirror.
+    Identical content returns ``unchanged``; ``force=True`` rewrites it.
     """
     try:
         validate_skill_name(slug)
@@ -188,6 +180,7 @@ def mirror_one(
         )
 
     try:
+        reject_symlink_path(source)
         text = source.read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
         return MirrorResult(
@@ -209,22 +202,24 @@ def mirror_one(
 
     dest_dir = wiki_dir / "converted-agents"
     dest = dest_dir / f"{slug}.md"
+    snapshot = _snapshot if _snapshot is not None else WikiBodySnapshot(wiki_dir)
+    pages = snapshot.pages
+    existing = pages.get(f"converted-agents/{slug}.md") if pages is not None else None
 
-    # Change detection via content hash — avoids rewriting 444 files
-    # every run when only a handful changed.
-    if dest.is_file() and not force:
+    if pages is None and dest.is_file():
+        reject_symlink_path(dest)
         try:
             existing = dest.read_text(encoding="utf-8", errors="replace")
         except OSError:
             existing = ""
-        if _sha256(existing) == _sha256(text):
-            return MirrorResult(
-                slug=slug,
-                status="unchanged",
-                source_path=str(source),
-                dest_path=str(dest),
-                bytes_copied=0,
-            )
+    if existing is not None and not force and _sha256(existing) == _sha256(text):
+        return MirrorResult(
+            slug=slug,
+            status="unchanged",
+            source_path=str(source),
+            dest_path=str(dest),
+            bytes_copied=0,
+        )
 
     if dry_run:
         return MirrorResult(
@@ -236,8 +231,9 @@ def mirror_one(
             message="dry-run: no files written",
         )
 
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    _atomic_write_text(dest, text)
+    replace_agent_body(wiki_dir, slug, text)
+    if _snapshot is not None:
+        snapshot.refresh()
     return MirrorResult(
         slug=slug,
         status="mirrored",
@@ -259,6 +255,7 @@ def mirror_all(
 ) -> list[MirrorResult]:
     """Mirror every eligible agent body. Orders output for stable logs."""
     results: list[MirrorResult] = []
+    snapshot = WikiBodySnapshot(wiki_dir)
     for path in _iter_agent_files(agents_dir):
         slug = path.stem
         # Fast short-circuit before the expensive read when we can tell
@@ -281,6 +278,7 @@ def mirror_all(
                 wiki_dir=wiki_dir,
                 force=force,
                 dry_run=dry_run,
+                _snapshot=snapshot,
             )
         )
     return results
@@ -299,10 +297,15 @@ def prune_orphans(
     bodies would quietly linger and become installable again.
     """
     mirror_dir = wiki_dir / "converted-agents"
-    if not mirror_dir.is_dir():
-        return []
+    pages = active_wiki_pages(wiki_dir)
+    destinations = set(mirror_dir.glob("*.md"))
+    destinations.update(
+        wiki_dir / path
+        for path in pages or {}
+        if path.startswith("converted-agents/") and "/" not in path[len("converted-agents/") :]
+    )
     results: list[MirrorResult] = []
-    for dest in sorted(mirror_dir.glob("*.md")):
+    for dest in sorted(destinations):
         slug = dest.stem
         source = agents_dir / f"{slug}.md"
         if source.is_file():
@@ -319,7 +322,7 @@ def prune_orphans(
             )
             continue
         try:
-            dest.unlink()
+            replace_agent_body(wiki_dir, slug, None)
             results.append(
                 MirrorResult(
                     slug=slug,

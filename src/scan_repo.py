@@ -978,8 +978,7 @@ def main():
         help=(
             "After scanning, run the resolver and print recommended "
             "skills / agents / MCP servers to stderr. Requires an "
-            "existing ~/.claude/skill-wiki graph (run "
-            "`python -m ctx.core.wiki.wiki_graphify` first). "
+            "installed recommendation graph (run `ctx-init --graph` first). "
             "Default: scan only, no recommendations."
         ),
     )
@@ -995,10 +994,15 @@ def main():
     # Ensure the output parent directory exists — users commonly pass
     # --output .ctx/stack.json without pre-creating .ctx/. Without this
     # the open() below raises FileNotFoundError.
-    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-
-    with open(args.output, "w", encoding="utf-8") as f:
-        json.dump(profile, f, indent=2)
+    output_path = Path(args.output)
+    try:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with output_path.open("w", encoding="utf-8") as f:
+            json.dump(profile, f, indent=2)
+    except OSError as exc:
+        detail = exc.strerror or str(exc)
+        print(f"Error: cannot write profile to {output_path}: {detail}", file=sys.stderr)
+        sys.exit(1)
 
     # Summary to stdout
     total = (

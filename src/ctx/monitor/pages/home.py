@@ -61,6 +61,15 @@ def render_home(
         "</tr>"
         for row in reversed(recent_audit)
     )
+    runtime_status = (
+        "<p role='alert'>" + html.escape(str(runtime_summary["error"])) + "</p>"
+        if runtime_summary.get("error")
+        else (
+            f"<div style='font-size:1.6rem; font-weight:600;'>{format_count(runtime_summary['validations_total'])}</div>"
+            f"<span class='muted' style='font-size:0.75rem;'>{format_count(runtime_summary['validation_failures'])} failed / "
+            f"{format_count(runtime_summary['open_escalations_total'])} open escalations</span>"
+        )
+    )
 
     body = (
         "<h1>ctx monitor</h1>"
@@ -90,10 +99,8 @@ def render_home(
         f"<span class='muted' style='font-size:0.75rem;'>{format_count(graph_stats['edges'])} edges</span>"
         " &middot; <a href='/graph'>explore &rarr;</a></div>"
         + "<div class='card'><div class='muted' style='font-size:0.8rem;'>Runtime checks</div>"
-        f"<div style='font-size:1.6rem; font-weight:600;'>{format_count(runtime_summary['validations_total'])}</div>"
-        f"<span class='muted' style='font-size:0.75rem;'>{format_count(runtime_summary['validation_failures'])} failed / "
-        f"{format_count(runtime_summary['open_escalations_total'])} open escalations</span>"
-        " / <a href='/runtime'>view -></a></div>"
+        + runtime_status
+        + " / <a href='/runtime'>view -></a></div>"
         + "<div class='card'><div class='muted' style='font-size:0.8rem;'>Audit events</div>"
         f"<div style='font-size:1.6rem; font-weight:600;'>{format_count(audit_lines)}</div>"
         "<a href='/logs'>view &rarr;</a> &middot; <a href='/events'>live &rarr;</a></div>"

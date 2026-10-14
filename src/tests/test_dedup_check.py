@@ -268,6 +268,48 @@ def test_render_markdown_caps_at_top_n() -> None:
     assert len(headers) == 10, f"expected 10 finding headers, got {len(headers)}"
 
 
+def test_render_markdown_gives_actionable_duplicate_resolution_advice() -> None:
+    first = dc.EntityRef(
+        node_id="skill:first",
+        type="skill",
+        slug="first",
+        path=Path("/wiki/first.md"),
+        description="First implementation",
+        tags=("python",),
+    )
+    second = dc.EntityRef(
+        node_id="skill:second",
+        type="skill",
+        slug="second",
+        path=Path("/wiki/second.md"),
+        description="Second implementation",
+        tags=("python",),
+    )
+    report = dc.DedupReport(
+        threshold=0.85,
+        model_id="fixture",
+        total_entities=2,
+        pairs_evaluated=1,
+        findings=[
+            dc.DedupPair(
+                a=first,
+                b=second,
+                similarity=0.99,
+                shared_tags=("python",),
+            )
+        ],
+    )
+
+    markdown = dc.render_markdown(report)
+
+    assert "Do not auto-drop" in markdown
+    assert "add to `.dedup-allowlist.txt`" in markdown
+    assert "merge/remove one" in markdown
+    assert "PR that explains why" in markdown
+    assert "`/wiki/first.md`" in markdown
+    assert "`/wiki/second.md`" in markdown
+
+
 def test_incremental_skips_unchanged_pairs(tmp_path: Path) -> None:
     """First run: full pass, state saved. Second run with same hashes:
     every prior finding carries forward without recomputation, and only

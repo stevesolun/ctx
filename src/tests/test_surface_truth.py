@@ -27,8 +27,6 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 README = REPO_ROOT / "README.md"
 DOCS = REPO_ROOT / "docs"
 MKDOCS = REPO_ROOT / "mkdocs.yml"
-CLI_FIT = REPO_ROOT / "src" / "ctx" / "cli" / "fit.py"
-
 #: The two surfaces that describe `--apply` and `--pr` to a user about to run them.
 WRITE_SURFACES = ("README.md", "docs/index.md")
 
@@ -113,14 +111,6 @@ def _write_section(surface: str) -> tuple[str, str]:
     return _flat(section[:split_at]), _flat(section[split_at:])
 
 
-def _handle_apply_source() -> str:
-    """The body of the CLI handler that prints the post-write advice."""
-
-    source = CLI_FIT.read_text(encoding="utf-8")
-    body = source.split("def _handle_apply(", 1)[1]
-    return body.split("\ndef ", 1)[0]
-
-
 # ---------------------------------------------------------------------------
 # The single line most people read about this project.
 # ---------------------------------------------------------------------------
@@ -136,12 +126,12 @@ def test_pypi_description_names_the_shipped_product() -> None:
 
     description = _pyproject()["project"]["description"]
 
-    assert "CTX Fit" in description, (
+    assert "CTX" in description and "your own knowledge graph" in description, (
         "the PyPI summary does not name the product; it is the one line most "
         f"users will ever read about this project. Got: {description!r}"
     )
     assert "Amazon-style catalog" not in description
-    assert "recommendation layer" not in description
+    assert "Empty by default" in description
 
 
 def test_mkdocs_site_description_names_the_shipped_product() -> None:
@@ -150,8 +140,9 @@ def test_mkdocs_site_description_names_the_shipped_product() -> None:
     config = yaml.load(MKDOCS.read_text(encoding="utf-8"), Loader=_NavLoader)
     description = config["site_description"]
 
-    assert "CTX Fit" in description, f"docs site description omits the product: {description!r}"
-    assert "recommendation layer" not in description
+    assert "CTX" in description, f"docs site description omits the product: {description!r}"
+    assert "your own knowledge graph" in _flat(description)
+    assert "Empty by default" in description
 
 
 # ---------------------------------------------------------------------------
@@ -159,16 +150,21 @@ def test_mkdocs_site_description_names_the_shipped_product() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_docs_front_door_leads_with_ctx_fit() -> None:
-    """docs/index.md is the site's home page and led with the old product."""
+def test_docs_front_door_leads_with_user_owned_knowledge() -> None:
+    """The default product is empty knowledge infrastructure, not Fit."""
 
     text = (DOCS / "index.md").read_text(encoding="utf-8")
     heading = next(line for line in text.splitlines() if line.startswith("# "))
 
-    assert "CTX Fit" in heading, f"docs home page headline is not about the product: {heading!r}"
+    assert "CTX" in heading and "user-owned knowledge" in heading
 
     lead = text.split("## ", 1)[0]
-    assert "ctx fit" in lead.lower(), "the docs home page never names the command"
+    assert "empty, local, and offline" in lead
+    assert "ctx recommend" in lead
+    assert "bundled filesystem MCP" in _flat(text)
+    assert "Node.js with `npx` for the workspace-filesystem MCP" not in _flat(text)
+    assert "Every council run honors" not in text
+    assert "The consuming host must enforce" in text
 
 
 def test_release_front_doors_describe_1_0_21_without_old_install_claims() -> None:
@@ -233,6 +229,31 @@ def test_some_nav_page_documents_the_product() -> None:
     assert naming, "no page in the mkdocs nav mentions `ctx fit`"
 
 
+def test_host_attachment_recipes_do_not_claim_unverified_interoperability() -> None:
+    """Named-host examples must say what was and was not exercised.
+
+    CTX can prove its own stdio server locally. That is not evidence that every
+    named host still accepts a copied configuration shape or exposes the tools
+    without a host-native configuration and handshake check.
+    """
+
+    page = (DOCS / "harness" / "attaching-to-hosts.md").read_text(encoding="utf-8")
+    flat = _flat(page)
+
+    assert "version-dependent configuration examples" in flat
+    assert "not external-host interoperability evidence" in flat
+    assert "Claude Code, Cline, Continue, Goose, and OpenHands" in flat
+    assert "appear to Claude on the next turn" not in flat
+    for proof in (
+        "accepts and lists the configuration",
+        "starts `ctx-mcp-server`",
+        "`initialize`",
+        "`tools/list`",
+        "one read-only `tools/call`",
+    ):
+        assert proof in flat, f"host-native verification omits {proof!r}"
+
+
 # ---------------------------------------------------------------------------
 # `--apply` and `--pr` write different things, and the docs said otherwise.
 # ---------------------------------------------------------------------------
@@ -274,10 +295,10 @@ def _observed_apply_outcomes(workspace: Path) -> dict[str, dict[str, object]]:
     rather than against a remembered fact. `--apply` writes the CTX-owned
     `.ctx/fit-configuration.json` sidecar, whose action depends on whether an
     owned manifest already exists. A `create` lands untracked, where `git diff`
-    and `git checkout` -- the pair the CLI still prints unconditionally -- do
-    nothing and fail respectively. If `--apply` ever starts staging what it
-    writes, this dictionary changes and the doc assertions fail rather than
-    quietly describing the old behaviour.
+    shows nothing and `git checkout` fails; the CLI and docs now distinguish
+    that case from a tracked modification. If `--apply` ever starts staging
+    what it writes, this dictionary changes and the doc assertions fail rather
+    than quietly describing the old behaviour.
     """
 
     from ctx.fit.apply import apply_plan, plan_apply
@@ -453,27 +474,6 @@ def test_apply_no_git_claim_is_scoped_to_the_write(surface: str) -> None:
     )
 
 
-def test_docs_qualify_the_undo_line_that_ctx_fit_prints_after_a_write() -> None:
-    """A reader who trusts the tool's own closing line is stuck on a create.
-
-    The claim this pins is about `src/ctx/cli/fit.py`, which this lane does not
-    own, so it is asserted against that file rather than restated. If the CLI
-    starts branching on the artifact action, the caveat becomes wrong and this
-    test turns red so it is deleted rather than left to rot.
-    """
-
-    handler = _handle_apply_source()
-    unconditional = "git checkout" in handler and "untracked" not in handler
-
-    assert unconditional, "the CLI now qualifies its undo advice; remove the docs caveat test"
-    for surface in WRITE_SURFACES:
-        apply_half, _ = _write_section(surface)
-        assert "cannot recover an untracked file" in apply_half, (
-            f"{surface} does not qualify the unconditional `git checkout` advice "
-            "for a newly created sidecar"
-        )
-
-
 @pytest.mark.parametrize("surface", WRITE_SURFACES)
 def test_pr_gate_probes_are_not_claimed_away(surface: str) -> None:
     """ "Exactly those commands and nothing else" was false by six subprocesses.
@@ -605,22 +605,32 @@ def test_readme_does_not_promise_a_harness_dry_run_without_a_slug() -> None:
     )
 
 
-def test_readme_cli_table_does_not_file_bare_ctx_under_recommendations() -> None:
-    """Bare `ctx` runs the Fit profile, not the recommendation surface."""
+def test_readme_cli_table_distinguishes_guidance_recommendations_and_fit() -> None:
+    """Bare ctx offers guidance; recommendations and Fit are explicit."""
 
     readme = README.read_text(encoding="utf-8")
     assert "## CLI Reference" in readme
     table = readme[readme.index("## CLI Reference") :]
-    row = next(
-        (line for line in table.splitlines() if line.startswith("| Profile a repository")),
-        "",
-    )
+    rows = table.splitlines()
+    assert any("Show setup and command guidance" in row and "`ctx`" in row for row in rows)
+    assert any("Suggest tools" in row and "ctx recommend" in row for row in rows)
+    assert any("optional evaluator" in row and "ctx fit" in row for row in rows)
 
-    assert row, (
-        "the CLI table has no row for profiling a repository. Bare `ctx` runs "
-        "`ctx fit`; the table used to file it under the recommendation surface "
-        "and send readers to the entity-onboarding guide."
-    )
-    assert "`ctx`" in row and "ctx fit" in row, (
-        f"the CLI table no longer says that bare `ctx` is `ctx fit`: {row!r}"
-    )
+
+@pytest.mark.parametrize(
+    "surface",
+    (
+        "README.md",
+        "docs/index.md",
+        "docs/entity-onboarding.md",
+        "docs/knowledge-graph.md",
+        "docs/harness/attaching-to-hosts.md",
+    ),
+)
+def test_user_owned_front_doors_do_not_promise_a_bundled_corpus(surface: str) -> None:
+    text = _flat((REPO_ROOT / surface).read_text(encoding="utf-8")).lower()
+    assert "empty" in text
+    assert "explicit approval" in text
+    assert "68,494" not in text
+    assert "79,958" not in text
+    assert "ctx-python-testing" not in text

@@ -98,7 +98,7 @@ def test_ctx_has_version() -> None:
 #: The advertised command surface, and the harness commands that still work but
 #: are deliberately not advertised. Mirrors ctx.cli.run; asserted from the
 #: outside, through the CLI, so a change to either has to be intentional.
-_PRODUCT_SURFACE: tuple[str, ...] = ("fit", "doctor", "advanced")
+_PRODUCT_SURFACE: tuple[str, ...] = ("recommend", "fit", "doctor", "advanced")
 _UNADVERTISED_COMMANDS: tuple[str, ...] = ("run", "resume", "sessions")
 
 
@@ -139,7 +139,7 @@ def test_python_m_ctx_delegates_to_console_cli() -> None:
 
 
 def test_python_m_ctx_advertises_exactly_the_product_surface() -> None:
-    """The surface is {fit, doctor, advanced} -- nothing more, nothing less."""
+    """Recommendation is primary; Fit and harness utilities remain explicit."""
     usage = _run_module("-m", "ctx", "--help").stdout.splitlines()[0]
 
     for command in _PRODUCT_SURFACE:
@@ -210,8 +210,8 @@ def test_pyproject_declares_all_subpackages() -> None:
     )
 
 
-def test_runtime_availability_json_is_declared_as_package_data() -> None:
-    """The truthful JSON resource must survive source-to-wheel packaging."""
+def test_package_data_keeps_infrastructure_without_bundled_tool_catalogs() -> None:
+    """No wildcard can accidentally republish retired executable tool data."""
     try:
         import tomllib  # py 3.11+
     except ImportError:
@@ -222,9 +222,14 @@ def test_runtime_availability_json_is_declared_as_package_data() -> None:
         data = tomllib.load(fh)
 
     package_data = set(data["tool"]["setuptools"]["package-data"]["ctx"])
-    assert "assets/*.json" in package_data
-    assert (root / "src" / "ctx" / "assets" / "runtime-availability.json").is_file()
+    assert package_data == {
+        "config.json",
+        "skill-registry.json",
+        "assets/*.js",
+        "assets/*.css",
+    }
     for name in (
+        "runtime-availability.json",
         "benefit-eligible-catalog-v1.json",
         "release-install-skill-material-v1.json",
         "release-load-skill-material-v1.json",
@@ -232,7 +237,11 @@ def test_runtime_availability_json_is_declared_as_package_data() -> None:
         "reviewed-benefit-profiles-v2.json",
         "reviewed-net-benefit-policy-v1.json",
     ):
-        assert (root / "src" / "ctx" / "assets" / name).is_file()
+        assert not (root / "src" / "ctx" / "assets" / name).exists()
+
+    manifest = (root / "MANIFEST.in").read_text(encoding="utf-8")
+    for excluded in ("src/tests", "imported-skills", "graph", "benchmarks", ".agents"):
+        assert f"prune {excluded}" in manifest
 
 
 def test_flat_console_scripts_are_packaged() -> None:

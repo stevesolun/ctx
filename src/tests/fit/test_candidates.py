@@ -4,10 +4,10 @@ import hashlib
 import json
 import os
 from dataclasses import dataclass, replace
-from importlib import resources
 from pathlib import Path
 
 import pytest
+from tests.release_catalog_fixture import RELEASE_CATALOG_FIXTURE_ROOT
 
 from ctx.engine.planner import BoundedCapabilityPlanner, CapabilityCandidate
 from ctx.fit.candidates import (
@@ -23,6 +23,8 @@ from ctx.fit.candidates import (
     render_candidate_user_context,
 )
 from ctx.fit.profile import build_fit_profile
+
+pytestmark = pytest.mark.usefixtures("historical_fit_catalog")
 
 
 def _digest(value: str) -> str:
@@ -327,7 +329,7 @@ def test_generated_candidates_bind_the_exact_material_the_agent_will_receive(
     assert material.content_sha256 == _digest(material.content)
     assert material.content_bytes == len(material.content.encode("utf-8"))
     catalog = json.loads(
-        (resources.files("ctx.assets") / "runtime-availability.json").read_text("utf-8")
+        (RELEASE_CATALOG_FIXTURE_ROOT / "runtime-availability.json").read_text("utf-8")
     )
     entry = next(item for item in catalog["entries"] if item["id"] == material.capability_id)
     canonical_entry = json.dumps(entry, ensure_ascii=False, separators=(",", ":"), sort_keys=True)

@@ -60,7 +60,8 @@ Notes:
 1. Reload Claude Code (the hook registration is read at session start).
 2. Edit a tracked file, e.g. `~/.claude/CLAUDE.md`.
 3. Watch `~/.claude/backups/` — a new folder named
-   `<timestamp>__edit-claude-md` should appear within a second.
+   `<timestamp>_edit-claude.md` should appear within a second under the default
+   naming format. The timestamp includes microseconds.
 4. Edit the same file again with identical content — no new folder
    appears (SHA is unchanged).
 
@@ -122,8 +123,9 @@ python -m backup_mirror snapshot-if-changed --reason manual-check
 python -m backup_mirror create --reason pre-upgrade
 ```
 
-Both land under `~/.claude/backups/<timestamp>__<reason>/` and write a
-`manifest.json` that records the reason alongside every file's SHA-256.
+Both land under `~/.claude/backups/<timestamp>_<reason>/` with the default
+naming format. Their `manifest.json` records the reason once at the top level
+and records each captured file's SHA-256 in its entry.
 
 ## Watchdog — snapshot on changes outside a Claude session
 

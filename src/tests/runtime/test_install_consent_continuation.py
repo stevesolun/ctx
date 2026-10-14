@@ -30,6 +30,9 @@ from ctx.runtime.prompt_capability_manager import reconcile_prompt_capabilities
 from ctx.runtime.release_skill_layout import open_workspace_release_skill_runtime_layout
 
 
+pytestmark = pytest.mark.usefixtures("historical_release_catalog")
+
+
 NOW = datetime(2026, 8, 2, 12, 30, tzinfo=UTC)
 KEY = b"continuation-test-only-human-authenticator-key"
 PRINCIPAL_DIGEST = hashlib.sha256(b"authenticated-human").hexdigest()

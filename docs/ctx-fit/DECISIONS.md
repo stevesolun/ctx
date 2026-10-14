@@ -8,6 +8,43 @@ Status values: `ACCEPTED` · `SUPERSEDED` · `PROPOSED`
 
 ---
 
+## ADR-017 — Ship user-owned knowledge infrastructure, not a tool corpus · `ACCEPTED`
+
+**Evidence.** On 2026-10-12 the owner explicitly requested removal of downloaded
+skills, agents and MCP data while preserving graph/wiki structure and one
+engine that recommends relevant tools during work in Codex, Claude Code and
+other hosts. Users and organizations supply their own knowledge. This is a
+new product mandate, not an inference from the old audit.
+
+**Decision.** CTX's primary product is a host-neutral, event-driven recommender
+over user-owned graph/wiki knowledge. Fresh setup is empty, local and offline;
+zero useful recommendations is valid. CLI, MCP and native hook adapters share
+the recommendation policy and a total cap of five. No bundled tool bodies,
+fallback corpus, automatic CTX catalog hydration or owned-dataset publication
+belongs in the default distribution. Preserve schema, authoring, import,
+indexing, query and consent infrastructure. Graph metadata is untrusted data,
+not installation or execution permission. Savings require measured evidence.
+
+**Approval policy.** The owner explicitly chose "Suggest tools; install only
+after explicit approval" in the same turn. The default recommendation path
+must not execute installation or unload, even if an older configuration
+contains a per-kind automatic-install preference.
+
+**Supersession.** This supersedes ADR-001's Fit-primary product choice,
+ADR-006's exclusion of user graph production/curation, and ADR-010's exclusion
+of the lifecycle from the primary product. ADR-014 still defines the optional
+Fit evaluator, not the default product. Preserve ADR-003/004/005/008/009/013/016
+and all safety, verification, cost-honesty and recoverability constraints.
+This ADR does not claim that general automatic provisioning or all external
+host integrations have already been implemented or verified.
+
+**Delivery.** Follow `BRING_YOUR_OWN_PLAN.md`. Preserve audit fixes and history;
+remove only classified product corpus data, not mixed personal tool homes or
+existing remote historical releases. Replace obsolete corpus-specific tests
+with empty-state/user-data contracts rather than weakening safety gates.
+
+---
+
 ## ADR-016 — The repository verifier is an explicit trust boundary · `ACCEPTED`
 
 **Context.** ADR-005 makes the repository's own command authoritative, but did
@@ -18,7 +55,8 @@ launcher trusted, and once by reading the secret from the launcher's live frame.
 Both programs exited before the assertion and still produced `verified`.
 
 **Decision.** CTX Fit executes the selected repository command unchanged and
-uses its exit status for Python, JavaScript/TypeScript, Go, and Rust. A trial is
+uses its exit status; current discovery coverage is documented in the
+[user guide](../index.md). A trial is
 verified only after the original commit passes, reverting the source makes the
 same command fail, the agent changes only declared source paths, protected tests
 remain byte-for-byte unchanged, and the same command exits zero after the
@@ -183,9 +221,9 @@ ARCHIVE or DELETE.
 
 ## ADR-003 — Recommendation is deterministic, never LLM-selected · `ACCEPTED`
 
-**Decision.** The winner is chosen by documented policy: exclude below
-verification threshold, exclude critical failures, build the Pareto frontier,
-select the default by written rule. An LLM may *explain* a result; it may never
+**Decision.** The winner is chosen by the deterministic policy in
+[ADR-014](DECISIONS.md).
+An LLM may *explain* a result; it may never
 *decide* one.
 
 **Rationale.** The product's only asset is trustworthy evidence. A model

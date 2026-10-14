@@ -52,6 +52,10 @@ _CAPABILITY_DIRS: tuple[tuple[str, str], ...] = (
     (".agents/skills", "skills"),
 )
 
+_C_SOURCE_SUFFIXES = frozenset({".c"})
+_CPP_SOURCE_SUFFIXES = frozenset({".cc", ".cpp", ".cxx"})
+_CPP_HEADER_SUFFIXES = frozenset({".hh", ".hpp", ".hxx"})
+
 
 @dataclass(frozen=True, slots=True)
 class ExistingAiConfig:
@@ -155,6 +159,77 @@ def _detect_existing_ai_config(root: Path) -> ExistingAiConfig:
     )
 
 
+def _add_c_family_languages(stack: dict[str, Any], signals: dict[str, list[Any]]) -> None:
+    """Complete the legacy stack profile with C and C++ file evidence.
+
+    The shared scanner does not yet name either language. Fit still has to
+    profile repositories it can verify through a Makefile, so this small bridge
+    uses the scanner's already-bounded file inventory rather than walking the
+    repository a second time. Conventional C and C++ header suffixes count with
+    their respective language. A plain ``.h`` is attributed to the only source
+    family present, counted as C for a header-only library, and left ambiguous
+    in a genuinely mixed-source tree.
+    """
+
+    extensions = [extension for _path, extension in signals.get("files", [])]
+    languages = stack.setdefault("languages", [])
+    if not isinstance(languages, list):
+        return
+    existing = {
+        item.get("name")
+        for item in languages
+        if isinstance(item, dict) and isinstance(item.get("name"), str)
+    }
+    c_sources = sum(extension in _C_SOURCE_SUFFIXES for extension in extensions)
+    cpp_sources = sum(extension in _CPP_SOURCE_SUFFIXES for extension in extensions)
+    cpp_headers = sum(extension in _CPP_HEADER_SUFFIXES for extension in extensions)
+    plain_headers = extensions.count(".h")
+    # A plain .h can serve either language. Attribute it to the only source
+    # family present; for a genuinely mixed tree, leave the ambiguous headers
+    # out of both counts rather than double-counting them. A header-only .h
+    # library follows the conventional C classification.
+    if c_sources and not cpp_sources:
+        c_headers, cpp_plain_headers = plain_headers, 0
+    elif cpp_sources and not c_sources:
+        c_headers, cpp_plain_headers = 0, plain_headers
+    elif not c_sources and not cpp_sources:
+        c_headers, cpp_plain_headers = plain_headers, 0
+    else:
+        c_headers = cpp_plain_headers = 0
+    family_counts = (
+        ("c", c_sources + c_headers),
+        ("cpp", cpp_sources + cpp_headers + cpp_plain_headers),
+    )
+
+    for name, count in family_counts:
+        if name in existing:
+            continue
+        if count:
+            languages.append(
+                {
+                    "name": name,
+                    "confidence": 0.8,
+                    "evidence": [f"{count} files with matching extensions"],
+                }
+            )
+
+    def _file_count(item: object) -> int:
+        if not isinstance(item, dict):
+            return 0
+        evidence = item.get("evidence")
+        if not isinstance(evidence, list) or not evidence or not isinstance(evidence[0], str):
+            return 0
+        first = evidence[0].partition(" ")[0]
+        return int(first) if first.isdigit() else 0
+
+    languages.sort(
+        key=lambda item: (
+            -_file_count(item),
+            str(item.get("name", "")) if isinstance(item, dict) else "",
+        )
+    )
+
+
 def _dimensions(verification: VerificationInventory) -> tuple[OptimizationDimension, ...]:
     """Report which axes are honestly evaluable given today's execution rig.
 
@@ -225,6 +300,7 @@ def build_fit_profile(
     else:
         signals = scan_repo.scan_directory(str(root), max_depth=max_depth)
         stack = scan_repo.detect_stack(str(root), signals)
+        _add_c_family_languages(stack, signals)
         # The legacy scanner stamps wall-clock time and an absolute path into
         # its result. A Fit profile must be reproducible: identical inputs have
         # to serialize identically, or provenance comparisons between runs are

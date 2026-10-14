@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 import stat
@@ -132,8 +133,10 @@ def _write_bound_manifest(design_import: DesignImportFixture) -> None:
         json.dumps(design_import.manifest),
         encoding="utf-8",
     )
+    source_record = importer.DESIGNDOTMD_SOURCE
+    assert source_record is not None
     importer.DESIGNDOTMD_SOURCE = replace(
-        importer.DESIGNDOTMD_SOURCE,
+        source_record,
         manifest_sha256=canonical_ingestion_manifest_sha256(design_import.manifest),
     )
 
@@ -163,6 +166,53 @@ def _hardlink_or_skip(link: Path, target: Path) -> None:
         os.link(target, link)
     except (NotImplementedError, OSError) as exc:
         pytest.skip(f"hard links unavailable: {exc}")
+
+
+def test_import_does_not_resolve_a_retired_default_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    def forbidden_lookup(_name: str) -> ExternalSourceRecord:
+        pytest.fail("importing a maintenance helper must not resolve a bundled source")
+
+    monkeypatch.setattr(source_registry, "get_external_source", forbidden_lookup)
+    spec = importlib.util.spec_from_file_location("isolated_design_importer", importer.__file__)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module.DESIGNDOTMD_SOURCE is None
+
+
+@pytest.mark.parametrize("mode", ["--dry-run", "--install"])
+def test_absent_reviewed_source_fails_before_manifest_reads_or_writes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    mode: str,
+) -> None:
+    monkeypatch.setattr(importer, "DESIGNDOTMD_SOURCE", None)
+    monkeypatch.setattr(source_registry, "BUILTIN_EXTERNAL_SOURCES", ())
+    monkeypatch.setattr(
+        importer, "load_manifest", lambda: pytest.fail("source authority must precede corpus reads")
+    )
+    target = tmp_path / "skills"
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(monkeypatch, mode, "--target", str(target))
+    assert exc_info.value.code == 1
+    assert "No reviewed source record is configured" in capsys.readouterr().err
+    assert not target.exists()
+
+
+def test_direct_deploy_without_reviewed_source_fails_before_source_read(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(importer, "DESIGNDOTMD_SOURCE", None)
+    monkeypatch.setattr(source_registry, "BUILTIN_EXTERNAL_SOURCES", ())
+    monkeypatch.setattr(
+        importer, "_read_source_text", lambda *a, **kw: pytest.fail("unreviewed corpus read")
+    )
+    target = tmp_path / "skills"
+    with pytest.raises(ValueError, match="No reviewed source record is configured"):
+        importer.deploy_entry({}, {}, target, dry_run=False)
+    assert not target.exists()
 
 
 def test_dry_run_reports_pending_install_without_writing(
@@ -658,28 +708,32 @@ def test_install_quotes_the_corpus_plain_description_shape(
     ) in content
 
 
-def test_checked_in_unknown_license_corpus_fails_closed_without_writing(
-    tmp_path: Path,
+def test_unbound_unknown_license_corpus_fails_closed_without_reading_or_writing(
+    design_import: DesignImportFixture,
+    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    manifest = importer.load_manifest()
-    entries = manifest["entries"]
-    assert entries
-
-    for entry in entries:
-        source = importer.IMPORT_ROOT / entry["source_path"]
-        match = importer._FM_OPEN_RE.match(source.read_text(encoding="utf-8"))
-        assert match is not None
-        try:
-            yaml.safe_load(match.group(1))
-        except yaml.YAMLError as exc:
-            mark = getattr(exc, "problem_mark", None)
-            assert mark is not None
-            failed_line = match.group(1).splitlines()[mark.line]
-            assert failed_line.startswith("description:")
-            assert ": " in failed_line.removeprefix("description:")
-
-    target = tmp_path / "real-corpus-dry-run"
+    manifest = design_import.manifest
+    manifest.update(license="unknown", license_url=None, license_evidence_sha256=None)
+    source_record = importer.DESIGNDOTMD_SOURCE
+    assert source_record is not None
+    monkeypatch.setattr(
+        importer,
+        "DESIGNDOTMD_SOURCE",
+        replace(
+            source_record,
+            license="unknown",
+            license_url=None,
+            license_evidence_sha256=None,
+            license_evidence_path=None,
+            manifest_sha256=None,
+            permission_status="unknown",
+        ),
+    )
+    monkeypatch.setattr(
+        importer, "_read_source_text", lambda *a, **kw: pytest.fail("unbound corpus read")
+    )
+    target = design_import.target
     with pytest.raises(SystemExit) as exc_info:
         importer._preflight_manifest(manifest, target)
 
@@ -1227,8 +1281,10 @@ def test_symlink_beneath_resolved_target_is_rejected(
     assert not (real_skill_dir / "SKILL.md").exists()
 
 
-def test_atomic_replacement_preserves_existing_destination_mode(
+@pytest.mark.parametrize("existing_mode", [0o751, 0o640, 0o666, 0o777])
+def test_atomic_replacement_preserves_safe_destination_permissions(
     design_import: DesignImportFixture,
+    existing_mode: int,
 ) -> None:
     skill, _ = importer.deploy_entry(
         design_import.entry,
@@ -1236,7 +1292,7 @@ def test_atomic_replacement_preserves_existing_destination_mode(
         design_import.target,
         dry_run=False,
     )
-    skill.chmod(0o751)
+    skill.chmod(existing_mode)
     _write_source(
         design_import,
         SOURCE_TEXT.replace("Keep this body unchanged.", "Updated while preserving mode."),
@@ -1249,13 +1305,15 @@ def test_atomic_replacement_preserves_existing_destination_mode(
         dry_run=False,
     )
 
-    assert stat.S_IMODE(skill.stat().st_mode) == 0o751
+    assert stat.S_IMODE(skill.stat().st_mode) == existing_mode & ~stat.S_IWOTH
 
 
-def test_new_destination_mode_respects_process_umask(
+@pytest.mark.parametrize("process_umask", [0o000, 0o027])
+def test_new_destination_is_owner_only_even_with_permissive_umask(
     design_import: DesignImportFixture,
+    process_umask: int,
 ) -> None:
-    previous_umask = os.umask(0o027)
+    previous_umask = os.umask(process_umask)
     try:
         skill, _ = importer.deploy_entry(
             design_import.entry,
@@ -1266,7 +1324,7 @@ def test_new_destination_mode_respects_process_umask(
     finally:
         os.umask(previous_umask)
 
-    assert stat.S_IMODE(skill.stat().st_mode) == 0o640
+    assert stat.S_IMODE(skill.stat().st_mode) == 0o600
 
 
 def test_manifest_tags_type_error_names_entry_and_received_type(

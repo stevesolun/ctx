@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
@@ -2143,6 +2144,34 @@ def test_activation_lease_context_releases_after_loop_failure() -> None:
     assert applied[1].use == ("agent:reviewer",)
     assert applied[2].unload == ("agent:reviewer",)
     assert leases.active_context() == ()
+
+
+def test_activation_lease_cancellation_releases_only_cancelled_owner() -> None:
+    leases = loopflow.ActivationLeaseRegistry()
+    applied: list[loopflow.ActivationLeaseActions] = []
+    leases.sync(
+        "session.other",
+        desired=["skill:shared", "mcp-server:filesystem"],
+        permissions={"skills", "mcps"},
+        apply=applied.append,
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        with leases.lease(
+            "session.cancelled",
+            desired=["skill:shared", "agent:reviewer"],
+            permissions={"skills", "agents"},
+            apply=applied.append,
+            used=["agent:reviewer"],
+        ):
+            raise asyncio.CancelledError()
+
+    assert leases.active_context() == ("mcp-server:filesystem", "skill:shared")
+    cancellation_release = applied[-1]
+    assert cancellation_release.keep == ("skill:shared",)
+    assert cancellation_release.unload == ("agent:reviewer",)
+    final_release = leases.release("session.other", apply=applied.append)
+    assert final_release.unload == ("mcp-server:filesystem", "skill:shared")
 
 
 def test_activation_lease_context_rejects_duplicate_live_id() -> None:

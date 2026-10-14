@@ -1,0 +1,560 @@
+{
+  "scope": "DOC-NAV-010 through DOC-NAV-017 and PKG-002; bounded safe example evidence, not a feature tracker",
+  "source_hashes": {
+    "docs/toolbox/behavior-miner.md": "d5cbd1290f31dc726161e9e7a13381f536330bb21497737779d6f32500f07a7f",
+    "docs/toolbox/configuration.md": "4418a91361dd206cbbb78a9f89dd33d5b63d762edc4f4e7f8287584c6d105843",
+    "docs/toolbox/council-runner.md": "8cd86b270e459132311a432997616723d124d5f4cdc14f5f5496b5e2d704287d",
+    "docs/toolbox/hooks.md": "3d9f7add670bbe53c7d67a637cd8ce0ee47b4942e3912a08bb41998f29e3e1ba",
+    "docs/toolbox/index.md": "35b88e7a27b40cc5700155a01b4fe9a486c2f39f2fdfc0fafbad71c9f24c004a",
+    "docs/toolbox/intent-interview.md": "ee9123d40a33e1945376fa86da14b7406891474da0cca2b3f3edb638746fb46d",
+    "docs/toolbox/starters.md": "fb6b60d8cabb0e8bcb060c7a02bd2f7692d8492d0f5283658d21d9373463d216",
+    "docs/toolbox/verdicts.md": "c4d64701782dcb68bf02f0b2c50d97009876e74c4bd443f358b641fa470387fc",
+    "src/toolbox.py": "31621ad14c09e5d92ece32f48fc805fbb90149410d4f26a00853457c12f26112",
+    "src/toolbox_config.py": "ce7651bc1f563265f0fe234473bbb09a3340fc75b05ca09d4d018ab50ee51d69",
+    "src/toolbox_hooks.py": "352df7e6e74c9448913a0e818b78d438d09083067d934040e6923c56109bc36c",
+    "src/toolbox_verdict.py": "0036333ccfae1cc2979219f1695c8bfb96f07bb1afd0b276c4da6ce34e960d38",
+    "src/council_runner.py": "4dabab824c31235c2487808e1d86477a4a0c466c09eae28edeccb0ab8499b1d2",
+    "src/intent_interview.py": "6a47834e78996f1fbe319389f7a2cdbc5b93aaf9e5b59b6fa793d0461ef9bdd4",
+    "src/behavior_miner.py": "1b5a4add11fd552f30a580de7dca5e49fc418abdcb8cf7ba86120d27361e0ac6"
+  },
+  "additional_assertions": [
+    "The exact minimal YAML declaration validates and emits the active review plan.",
+    "A same-name repository toolbox replaces the complete global toolbox; missing post/budget values use defaults."
+  ],
+  "results": [
+    {
+      "example": "toolbox starter fixture setup",
+      "argv": [
+        "python",
+        "-m",
+        "toolbox",
+        "init"
+      ],
+      "exit_code": 0,
+      "stdout": "Seeded 5 starter toolbox(es): ship-it, security-sweep, refactor-safety, docs-review, fresh-repo-init\nConfig written to <fixture>/state/toolboxes.json\n",
+      "stderr": "",
+      "isolation": "actual CLI parser/main with only user-data paths relocated to a disposable fixture; no provider/agent execution"
+    },
+    {
+      "example": "configuration editing tools",
+      "argv": [
+        "python",
+        "-m",
+        "toolbox",
+        "list"
+      ],
+      "exit_code": 0,
+      "stdout": "NAME             ACTIVE  PRE  POST  DESCRIPTION\ndocs-review        -       1     4  Documentation pass: accuracy, completeness, clarity, and API parity\nfresh-repo-init    -       0     3  New-repo bootstrap: run the intent interview, scaffold plan, pick initial toolbox\nrefactor-safety    -       2     5  Graph-informed refactor review with regression and dead-code checks\nsecurity-sweep     -       0     5  Full-repo security audit with blocking guardrail on HIGH findings\nship-it            -       0     7  Professional council of 7 experts for end-of-feature review\n",
+      "stderr": "",
+      "isolation": "actual CLI parser/main with only user-data paths relocated to a disposable fixture; no provider/agent execution"
+    },
+    {
+      "example": "configuration editing tools",
+      "argv": [
+        "python",
+        "-m",
+        "toolbox",
+        "show",
+        "ship-it"
+      ],
+      "exit_code": 0,
+      "stdout": "{\n  \"name\": \"ship-it\",\n  \"description\": \"Professional council of 7 experts for end-of-feature review\",\n  \"pre\": [],\n  \"post\": [\n    \"code-reviewer\",\n    \"security-reviewer\",\n    \"architect-review\",\n    \"test-automator\",\n    \"performance-engineer\",\n    \"accessibility-tester\",\n    \"docs-lookup\"\n  ],\n  \"scope\": {\n    \"projects\": [\n      \"*\"\n    ],\n    \"signals\": [\n      \"python\",\n      \"typescript\",\n      \"rust\",\n      \"go\",\n      \"java\"\n    ],\n    \"analysis\": \"dynamic\"\n  },\n  \"trigger\": {\n    \"slash\": true,\n    \"pre_commit\": true,\n    \"session_end\": true,\n    \"file_save\": null\n  },\n  \"budget\": {\n    \"max_tokens\": 200000,\n    \"max_seconds\": 420\n  },\n  \"dedup\": {\n    \"window_seconds\": 600,\n    \"policy\": \"fresh\"\n  },\n  \"guardrail\": false\n}\n",
+      "stderr": "",
+      "isolation": "actual CLI parser/main with only user-data paths relocated to a disposable fixture; no provider/agent execution"
+    },
+    {
+      "example": "configuration editing tools",
+      "argv": [
+        "python",
+        "-m",
+        "toolbox",
+        "activate",
+        "ship-it"
+      ],
+      "exit_code": 0,
+      "stdout": "Activated: ship-it\n",
+      "stderr": "",
+      "isolation": "actual CLI parser/main with only user-data paths relocated to a disposable fixture; no provider/agent execution"
+    },
+    {
+      "example": "configuration editing tools",
+      "argv": [
+        "python",
+        "-m",
+        "toolbox",
+        "validate"
+      ],
+      "exit_code": 0,
+      "stdout": "global (<fixture>/state/toolboxes.json): 5 toolbox(es)\nrepo   (<fixture>/repo/.toolbox.yaml): 0 toolbox(es) (absent)\n",
+      "stderr": "",
+      "isolation": "actual CLI parser/main with only user-data paths relocated to a disposable fixture; no provider/agent execution"
+    },
+    {
+      "example": "configuration original export example",
+      "argv": [
+        "python",
+        "-m",
+        "toolbox",
+        "export"
+      ],
+      "exit_code": 2,
+      "stdout": "",
+      "stderr": "usage: toolbox export [-h] name\ntoolbox export: error: the following arguments are required: name\n",
+      "isolation": "actual CLI parser/main with only user-data paths relocated to a disposable fixture; no provider/agent execution",
+      "semantic_result": "documentation defect: export requires a toolbox name"
+    },
+    {
+      "example": "configuration corrected named export",
+      "argv": [
+        "python",
+        "-m",
+        "toolbox",
+        "export",
+        "ship-it"
+      ],
+      "exit_code": 0,
+      "stdout": "version: 1\ntoolboxes:\n  ship-it:\n    description: Professional council of 7 experts for end-of-feature review\n    pre: []\n    post:\n    - code-reviewer\n    - security-reviewer\n    - architect-review\n    - test-automator\n    - performance-engineer\n    - accessibility-tester\n    - docs-lookup\n    scope:\n      projects:\n      - '*'\n      signals:\n      - python\n      - typescript\n      - rust\n      - go\n      - java\n      analysis: dynamic\n    trigger:\n      slash: true\n      pre_commit: true\n      session_end: true\n      file_save: null\n    budget:\n      max_tokens: 200000\n      max_seconds: 420\n    dedup:\n      window_seconds: 600\n      policy: fresh\n    guardrail: false\n",
+      "stderr": "",
+      "isolation": "actual CLI parser/main with only user-data paths relocated to a disposable fixture; no provider/agent execution"
+    },
+    {
+      "example": "configuration import",
+      "argv": [
+        "python",
+        "-m",
+        "toolbox",
+        "import",
+        "<fixture>/repo/my-toolboxes.yaml"
+      ],
+      "exit_code": 0,
+      "stdout": "Imported 0 toolbox(es): (none)\n",
+      "stderr": "Skip ship-it: already exists (use --force to overwrite).\n",
+      "isolation": "actual CLI parser/main with only user-data paths relocated to a disposable fixture; no provider/agent execution"
+    },
+    {
+      "example": "overview manual trigger",
+      "argv": [
+        "python",
+        "-m",
+        "toolbox",
+        "run",
+        "--event",
+        "pre-commit"
+      ],
+      "exit_code": 0,
+      "stdout": "{\"trigger\": \"pre-commit\", \"toolbox\": \"ship-it\", \"plan_file\": \"<fixture>/state/toolbox-runs/1c5b42b242c6a122.json\", \"agents\": [\"code-reviewer\", \"security-reviewer\", \"architect-review\", \"test-automator\", \"performance-engineer\", \"accessibility-tester\", \"docs-lookup\"], \"files\": [], \"source\": \"fresh\", \"guardrail\": false}\n",
+      "stderr": "",
+      "isolation": "actual CLI parser/main with only user-data paths relocated to a disposable fixture; no provider/agent execution"
+    },
+    {
+      "example": "overview exact declaration validates",
+      "argv": [
+        "python",
+        "-m",
+        "toolbox",
+        "validate"
+      ],
+      "exit_code": 0,
+      "stdout": "global (<fixture>/state/toolboxes.json): 5 toolbox(es)\nrepo   (<fixture>/repo/.toolbox.yaml): 1 toolbox(es) (exists)\n",
+      "stderr": "",
+      "isolation": "actual CLI parser/main with only user-data paths relocated to a disposable fixture; no provider/agent execution"
+    },
+    {
+      "example": "overview exact active declaration emits review plan",
+      "argv": [
+        "python",
+        "-m",
+        "toolbox",
+        "run",
+        "--event",
+        "pre-commit"
+      ],
+      "exit_code": 0,
+      "stdout": "{\"trigger\": \"pre-commit\", \"toolbox\": \"review\", \"plan_file\": \"<fixture>/state/toolbox-runs/6ea1dc30b4ea1cce.json\", \"agents\": [\"code-reviewer\", \"security-reviewer\"], \"files\": [], \"source\": \"fresh\", \"guardrail\": true}\n{\"trigger\": \"pre-commit\", \"toolbox\": \"ship-it\", \"plan_file\": \"<fixture>/state/toolbox-runs/1c5b42b242c6a122.json\", \"agents\": [\"code-reviewer\", \"security-reviewer\", \"architect-review\", \"test-automator\", \"performance-engineer\", \"accessibility-tester\", \"docs-lookup\"], \"files\": [], \"source\": \"fresh\", \"guardrail\": false}\n",
+      "stderr": "",
+      "isolation": "actual CLI parser/main with only user-data paths relocated to a disposable fixture; no provider/agent execution"
+    },
+    {
+      "example": "council dry-run",
+      "argv": [
+        "python",
+        "-m",
+        "council_runner",
+        "plan",
+        "--toolbox",
+        "ship-it",
+        "--dry-run"
+      ],
+      "exit_code": 0,
+      "stdout": "{\n  \"toolbox\": \"ship-it\",\n  \"agents\": [\n    \"code-reviewer\",\n    \"security-reviewer\",\n    \"architect-review\",\n    \"test-automator\",\n    \"performance-engineer\",\n    \"accessibility-tester\",\n    \"docs-lookup\"\n  ],\n  \"files\": [],\n  \"scope_mode\": \"dynamic:full\",\n  \"budget_tokens\": 200000,\n  \"budget_seconds\": 420,\n  \"guardrail\": false,\n  \"created_at\": 1790757071.791957,\n  \"plan_hash\": \"1c5b42b242c6a122\",\n  \"source\": \"fresh\"\n}\n",
+      "stderr": "",
+      "isolation": "actual CLI parser/main with only user-data paths relocated to a disposable fixture; no provider/agent execution"
+    },
+    {
+      "example": "council persist plan",
+      "argv": [
+        "python",
+        "-m",
+        "council_runner",
+        "plan",
+        "--toolbox",
+        "ship-it"
+      ],
+      "exit_code": 0,
+      "stdout": "{\n  \"toolbox\": \"ship-it\",\n  \"agents\": [\n    \"code-reviewer\",\n    \"security-reviewer\",\n    \"architect-review\",\n    \"test-automator\",\n    \"performance-engineer\",\n    \"accessibility-tester\",\n    \"docs-lookup\"\n  ],\n  \"files\": [],\n  \"scope_mode\": \"dynamic:full\",\n  \"budget_tokens\": 200000,\n  \"budget_seconds\": 420,\n  \"guardrail\": false,\n  \"created_at\": 1790757071.822046,\n  \"plan_hash\": \"1c5b42b242c6a122\",\n  \"source\": \"fresh\"\n}\n",
+      "stderr": "",
+      "isolation": "actual CLI parser/main with only user-data paths relocated to a disposable fixture; no provider/agent execution"
+    },
+    {
+      "example": "council history",
+      "argv": [
+        "python",
+        "-m",
+        "council_runner",
+        "history",
+        "--limit",
+        "10"
+      ],
+      "exit_code": 0,
+      "stdout": "[\n  {\n    \"toolbox\": \"ship-it\",\n    \"agents\": [\n      \"code-reviewer\",\n      \"security-reviewer\",\n      \"architect-review\",\n      \"test-automator\",\n      \"performance-engineer\",\n      \"accessibility-tester\",\n      \"docs-lookup\"\n    ],\n    \"files\": [],\n    \"scope_mode\": \"dynamic:full\",\n    \"budget_tokens\": 200000,\n    \"budget_seconds\": 420,\n    \"guardrail\": false,\n    \"created_at\": 1790757071.822046,\n    \"plan_hash\": \"1c5b42b242c6a122\",\n    \"source\": \"fresh\"\n  },\n  {\n    \"toolbox\": \"review\",\n    \"agents\": [\n      \"code-reviewer\",\n      \"security-reviewer\"\n    ],\n    \"files\": [],\n    \"scope_mode\": \"diff\",\n    \"budget_tokens\": 150000,\n    \"budget_seconds\": 300,\n    \"guardrail\": true,\n    \"created_at\": 1790757071.73474,\n    \"plan_hash\": \"6ea1dc30b4ea1cce\",\n    \"source\": \"fresh\"\n  }\n]\n",
+      "stderr": "",
+      "isolation": "actual CLI parser/main with only user-data paths relocated to a disposable fixture; no provider/agent execution"
+    },
+    {
+      "example": "council purge disposable recent plans",
+      "argv": [
+        "python",
+        "-m",
+        "council_runner",
+        "purge",
+        "--older-than-days",
+        "30"
+      ],
+      "exit_code": 0,
+      "stdout": "Purged 0 run(s) older than 30d\n",
+      "stderr": "",
+      "isolation": "actual CLI parser/main with only user-data paths relocated to a disposable fixture; no provider/agent execution"
+    },
+    {
+      "example": "behavior miner CLI",
+      "argv": [
+        "python",
+        "-m",
+        "behavior_miner",
+        "profile"
+      ],
+      "exit_code": 0,
+      "stdout": "{\n  \"total_intent_events\": 0,\n  \"total_commits\": 0,\n  \"co_invocation_pairs\": [],\n  \"skill_cadence\": [],\n  \"file_types\": [],\n  \"commit_types\": [],\n  \"suggestions\": [],\n  \"generated_at\": 1790757071.838437\n}\n",
+      "stderr": "",
+      "isolation": "actual CLI parser/main with only user-data paths relocated to a disposable fixture; no provider/agent execution"
+    },
+    {
+      "example": "behavior miner CLI",
+      "argv": [
+        "python",
+        "-m",
+        "behavior_miner",
+        "profile",
+        "--save"
+      ],
+      "exit_code": 0,
+      "stdout": "{\n  \"total_intent_events\": 0,\n  \"total_commits\": 0,\n  \"co_invocation_pairs\": [],\n  \"skill_cadence\": [],\n  \"file_types\": [],\n  \"commit_types\": [],\n  \"suggestions\": [],\n  \"generated_at\": 1790757071.852463\n}\n",
+      "stderr": "",
+      "isolation": "actual CLI parser/main with only user-data paths relocated to a disposable fixture; no provider/agent execution"
+    },
+    {
+      "example": "behavior miner CLI",
+      "argv": [
+        "python",
+        "-m",
+        "behavior_miner",
+        "suggest",
+        "--limit",
+        "5"
+      ],
+      "exit_code": 0,
+      "stdout": "[toolbox] no behaviour yet — keep working, suggestions will appear.\n",
+      "stderr": "",
+      "isolation": "actual CLI parser/main with only user-data paths relocated to a disposable fixture; no provider/agent execution"
+    },
+    {
+      "example": "behavior miner CLI",
+      "argv": [
+        "python",
+        "-m",
+        "behavior_miner",
+        "suggest",
+        "--save"
+      ],
+      "exit_code": 0,
+      "stdout": "[toolbox] no behaviour yet — keep working, suggestions will appear.\n",
+      "stderr": "",
+      "isolation": "actual CLI parser/main with only user-data paths relocated to a disposable fixture; no provider/agent execution"
+    },
+    {
+      "example": "intent detect",
+      "argv": [
+        "python",
+        "-m",
+        "intent_interview",
+        "detect"
+      ],
+      "exit_code": 0,
+      "stdout": "{\n  \"repo_root\": \"<fixture>/repo\",\n  \"is_git_repo\": false,\n  \"commit_count\": 0,\n  \"tracked_file_count\": 1,\n  \"top_languages\": [],\n  \"has_toolbox_config\": true,\n  \"existing_active\": [\n    \"ship-it\"\n  ],\n  \"detected_markers\": []\n}\n",
+      "stderr": "",
+      "isolation": "actual CLI parser/main with only user-data paths relocated to a disposable fixture; no provider/agent execution"
+    },
+    {
+      "example": "intent preset blank",
+      "argv": [
+        "python",
+        "-m",
+        "intent_interview",
+        "init",
+        "--preset",
+        "blank",
+        "--apply"
+      ],
+      "exit_code": 0,
+      "stdout": "{\n  \"state\": {\n    \"repo_root\": \"<fixture>/repo\",\n    \"is_git_repo\": false,\n    \"commit_count\": 0,\n    \"tracked_file_count\": 1,\n    \"top_languages\": [],\n    \"has_toolbox_config\": true,\n    \"existing_active\": [\n      \"ship-it\"\n    ],\n    \"detected_markers\": []\n  },\n  \"result\": {\n    \"activated\": [\n      \"ship-it\",\n      \"security-sweep\",\n      \"fresh-repo-init\"\n    ],\n    \"accepted_suggestions\": [],\n    \"skipped\": false,\n    \"notes\": []\n  },\n  \"applied\": true,\n  \"config_path\": \"<fixture>/state/toolboxes.json\"\n}\n",
+      "stderr": "",
+      "isolation": "actual CLI parser/main with only user-data paths relocated to a disposable fixture; no provider/agent execution"
+    },
+    {
+      "example": "intent preset existing",
+      "argv": [
+        "python",
+        "-m",
+        "intent_interview",
+        "init",
+        "--preset",
+        "existing",
+        "--apply"
+      ],
+      "exit_code": 0,
+      "stdout": "{\n  \"state\": {\n    \"repo_root\": \"<fixture>/repo\",\n    \"is_git_repo\": false,\n    \"commit_count\": 0,\n    \"tracked_file_count\": 1,\n    \"top_languages\": [],\n    \"has_toolbox_config\": true,\n    \"existing_active\": [\n      \"ship-it\",\n      \"security-sweep\",\n      \"fresh-repo-init\"\n    ],\n    \"detected_markers\": []\n  },\n  \"result\": {\n    \"activated\": [\n      \"ship-it\",\n      \"refactor-safety\"\n    ],\n    \"accepted_suggestions\": [],\n    \"skipped\": false,\n    \"notes\": []\n  },\n  \"applied\": true,\n  \"config_path\": \"<fixture>/state/toolboxes.json\"\n}\n",
+      "stderr": "",
+      "isolation": "actual CLI parser/main with only user-data paths relocated to a disposable fixture; no provider/agent execution"
+    },
+    {
+      "example": "intent preset docs-heavy",
+      "argv": [
+        "python",
+        "-m",
+        "intent_interview",
+        "init",
+        "--preset",
+        "docs-heavy",
+        "--apply"
+      ],
+      "exit_code": 0,
+      "stdout": "{\n  \"state\": {\n    \"repo_root\": \"<fixture>/repo\",\n    \"is_git_repo\": false,\n    \"commit_count\": 0,\n    \"tracked_file_count\": 1,\n    \"top_languages\": [],\n    \"has_toolbox_config\": true,\n    \"existing_active\": [\n      \"ship-it\",\n      \"security-sweep\",\n      \"fresh-repo-init\",\n      \"refactor-safety\"\n    ],\n    \"detected_markers\": []\n  },\n  \"result\": {\n    \"activated\": [\n      \"docs-review\"\n    ],\n    \"accepted_suggestions\": [],\n    \"skipped\": false,\n    \"notes\": []\n  },\n  \"applied\": true,\n  \"config_path\": \"<fixture>/state/toolboxes.json\"\n}\n",
+      "stderr": "",
+      "isolation": "actual CLI parser/main with only user-data paths relocated to a disposable fixture; no provider/agent execution"
+    },
+    {
+      "example": "intent preset security-first",
+      "argv": [
+        "python",
+        "-m",
+        "intent_interview",
+        "init",
+        "--preset",
+        "security-first",
+        "--apply"
+      ],
+      "exit_code": 0,
+      "stdout": "{\n  \"state\": {\n    \"repo_root\": \"<fixture>/repo\",\n    \"is_git_repo\": false,\n    \"commit_count\": 0,\n    \"tracked_file_count\": 1,\n    \"top_languages\": [],\n    \"has_toolbox_config\": true,\n    \"existing_active\": [\n      \"ship-it\",\n      \"security-sweep\",\n      \"fresh-repo-init\",\n      \"refactor-safety\",\n      \"docs-review\"\n    ],\n    \"detected_markers\": []\n  },\n  \"result\": {\n    \"activated\": [\n      \"security-sweep\"\n    ],\n    \"accepted_suggestions\": [],\n    \"skipped\": false,\n    \"notes\": []\n  },\n  \"applied\": true,\n  \"config_path\": \"<fixture>/state/toolboxes.json\"\n}\n",
+      "stderr": "",
+      "isolation": "actual CLI parser/main with only user-data paths relocated to a disposable fixture; no provider/agent execution"
+    },
+    {
+      "example": "intent structured apply",
+      "argv": [
+        "python",
+        "-m",
+        "intent_interview",
+        "init",
+        "--non-interactive",
+        "--starters",
+        "ship-it,security-sweep",
+        "--suggestions",
+        "1,2",
+        "--analysis",
+        "dynamic",
+        "--apply"
+      ],
+      "exit_code": 0,
+      "stdout": "{\n  \"state\": {\n    \"repo_root\": \"<fixture>/repo\",\n    \"is_git_repo\": false,\n    \"commit_count\": 0,\n    \"tracked_file_count\": 1,\n    \"top_languages\": [],\n    \"has_toolbox_config\": true,\n    \"existing_active\": [\n      \"ship-it\",\n      \"security-sweep\",\n      \"fresh-repo-init\",\n      \"refactor-safety\",\n      \"docs-review\"\n    ],\n    \"detected_markers\": []\n  },\n  \"result\": {\n    \"activated\": [\n      \"ship-it\",\n      \"security-sweep\"\n    ],\n    \"accepted_suggestions\": [],\n    \"skipped\": false,\n    \"notes\": []\n  },\n  \"applied\": true,\n  \"config_path\": \"<fixture>/state/toolboxes.json\"\n}\n",
+      "stderr": "",
+      "isolation": "actual CLI parser/main with only user-data paths relocated to a disposable fixture; no provider/agent execution"
+    },
+    {
+      "example": "intent interactive skip",
+      "argv": [
+        "python",
+        "-m",
+        "intent_interview",
+        "init"
+      ],
+      "exit_code": 0,
+      "stdout": "[toolbox] Intent interview — type 'skip' on any prompt to abort.\n  repo: <fixture>/repo\n  state: blank (is_git=False, commits=0)\n\n> Which starter toolboxes should be activated? Comma-separated list or blank to skip.\n    ship-it: ship-it (already active)\n    security-sweep: security-sweep (already active)\n    refactor-safety: refactor-safety (already active)\n    docs-review: docs-review (already active)\n    fresh-repo-init: fresh-repo-init (already active)\n  (default: ship-it,security-sweep)\nanswer> {\n  \"state\": {\n    \"repo_root\": \"<fixture>/repo\",\n    \"is_git_repo\": false,\n    \"commit_count\": 0,\n    \"tracked_file_count\": 1,\n    \"top_languages\": [],\n    \"has_toolbox_config\": true,\n    \"existing_active\": [\n      \"ship-it\",\n      \"security-sweep\",\n      \"fresh-repo-init\",\n      \"refactor-safety\",\n      \"docs-review\"\n    ],\n    \"detected_markers\": []\n  },\n  \"result\": {\n    \"activated\": [],\n    \"accepted_suggestions\": [],\n    \"skipped\": true,\n    \"notes\": [\n      \"user typed 'skip' at question 'starters'\"\n    ]\n  },\n  \"applied\": false\n}\n",
+      "stderr": "",
+      "isolation": "actual CLI parser/main with only user-data paths relocated to a disposable fixture; no provider/agent execution"
+    },
+    {
+      "example": "verdict original unquoted evidence example",
+      "argv": [
+        "python",
+        "-m",
+        "toolbox_verdict",
+        "record",
+        "--plan-hash",
+        "abc123",
+        "--level",
+        "HIGH",
+        "--title",
+        "SQL injection in users.py",
+        "--agent",
+        "security-reviewer",
+        "--evidence",
+        "src/users.py:42:unescaped",
+        "input",
+        "--rationale",
+        "req.form values flow into raw SQL"
+      ],
+      "exit_code": 0,
+      "stdout": "{\n  \"plan_hash\": \"abc123\",\n  \"level\": \"HIGH\",\n  \"summary\": \"1 finding(s): 1 high\",\n  \"findings\": [\n    {\n      \"id\": \"79f1b2bfa09a\",\n      \"level\": \"HIGH\",\n      \"title\": \"SQL injection in users.py\",\n      \"agent\": \"security-reviewer\",\n      \"evidence\": [\n        {\n          \"file\": \"src/users.py\",\n          \"line\": 42,\n          \"note\": \"unescaped\"\n        },\n        {\n          \"file\": \"input\",\n          \"line\": null,\n          \"note\": \"\"\n        }\n      ],\n      \"rationale\": \"req.form values flow into raw SQL\",\n      \"created_at\": 1790757071.977432\n    }\n  ],\n  \"created_at\": 1790757071.9774358,\n  \"updated_at\": 1790757071.9774358\n}\n",
+      "stderr": "",
+      "isolation": "actual CLI parser/main with only user-data paths relocated to a disposable fixture; no provider/agent execution",
+      "semantic_result": "documentation defect: intended single evidence note split into two evidence records"
+    },
+    {
+      "example": "verdict corrected quoted evidence and stable id",
+      "argv": [
+        "python",
+        "-m",
+        "toolbox_verdict",
+        "record",
+        "--plan-hash",
+        "fixed123",
+        "--id",
+        "users-sql-injection",
+        "--level",
+        "HIGH",
+        "--title",
+        "SQL injection in users.py",
+        "--agent",
+        "security-reviewer",
+        "--evidence",
+        "src/users.py:42:unescaped input",
+        "--rationale",
+        "req.form values flow into raw SQL"
+      ],
+      "exit_code": 0,
+      "stdout": "{\n  \"plan_hash\": \"fixed123\",\n  \"level\": \"HIGH\",\n  \"summary\": \"1 finding(s): 1 high\",\n  \"findings\": [\n    {\n      \"id\": \"users-sql-injection\",\n      \"level\": \"HIGH\",\n      \"title\": \"SQL injection in users.py\",\n      \"agent\": \"security-reviewer\",\n      \"evidence\": [\n        {\n          \"file\": \"src/users.py\",\n          \"line\": 42,\n          \"note\": \"unescaped input\"\n        }\n      ],\n      \"rationale\": \"req.form values flow into raw SQL\",\n      \"created_at\": 1790757071.978875\n    }\n  ],\n  \"created_at\": 1790757071.9788759,\n  \"updated_at\": 1790757071.9788759\n}\n",
+      "stderr": "",
+      "isolation": "actual CLI parser/main with only user-data paths relocated to a disposable fixture; no provider/agent execution"
+    },
+    {
+      "example": "verdict view/history/clear",
+      "argv": [
+        "python",
+        "-m",
+        "toolbox_verdict",
+        "show",
+        "--plan-hash",
+        "fixed123"
+      ],
+      "exit_code": 0,
+      "stdout": "[verdict] plan=fixed123  level=HIGH  1 finding(s): 1 high\n  - [HIGH] SQL injection in users.py  (agent: security-reviewer)\n      why: req.form values flow into raw SQL\n      evidence: src/users.py:42 — unescaped input\n",
+      "stderr": "",
+      "isolation": "actual CLI parser/main with only user-data paths relocated to a disposable fixture; no provider/agent execution"
+    },
+    {
+      "example": "verdict view/history/clear",
+      "argv": [
+        "python",
+        "-m",
+        "toolbox_verdict",
+        "show",
+        "--plan-hash",
+        "fixed123",
+        "--json"
+      ],
+      "exit_code": 0,
+      "stdout": "{\n  \"plan_hash\": \"fixed123\",\n  \"level\": \"HIGH\",\n  \"summary\": \"1 finding(s): 1 high\",\n  \"findings\": [\n    {\n      \"id\": \"users-sql-injection\",\n      \"level\": \"HIGH\",\n      \"title\": \"SQL injection in users.py\",\n      \"agent\": \"security-reviewer\",\n      \"evidence\": [\n        {\n          \"file\": \"src/users.py\",\n          \"line\": 42,\n          \"note\": \"unescaped input\"\n        }\n      ],\n      \"rationale\": \"req.form values flow into raw SQL\",\n      \"created_at\": 1790757071.978875\n    }\n  ],\n  \"created_at\": 1790757071.9788759,\n  \"updated_at\": 1790757071.9788759\n}\n",
+      "stderr": "",
+      "isolation": "actual CLI parser/main with only user-data paths relocated to a disposable fixture; no provider/agent execution"
+    },
+    {
+      "example": "verdict view/history/clear",
+      "argv": [
+        "python",
+        "-m",
+        "toolbox_verdict",
+        "retro",
+        "--limit",
+        "10"
+      ],
+      "exit_code": 0,
+      "stdout": "[retro] 2 recent verdict(s):\n  - fixed123  HIGH      BLOCK  1 finding(s): 1 high\n  - abc123  HIGH      BLOCK  1 finding(s): 1 high\n",
+      "stderr": "",
+      "isolation": "actual CLI parser/main with only user-data paths relocated to a disposable fixture; no provider/agent execution"
+    },
+    {
+      "example": "verdict view/history/clear",
+      "argv": [
+        "python",
+        "-m",
+        "toolbox_verdict",
+        "retro",
+        "--min-level",
+        "HIGH"
+      ],
+      "exit_code": 0,
+      "stdout": "[retro] 2 recent verdict(s):\n  - fixed123  HIGH      BLOCK  1 finding(s): 1 high\n  - abc123  HIGH      BLOCK  1 finding(s): 1 high\n",
+      "stderr": "",
+      "isolation": "actual CLI parser/main with only user-data paths relocated to a disposable fixture; no provider/agent execution"
+    },
+    {
+      "example": "verdict view/history/clear",
+      "argv": [
+        "python",
+        "-m",
+        "toolbox_verdict",
+        "explain",
+        "--plan-hash",
+        "fixed123"
+      ],
+      "exit_code": 0,
+      "stdout": "[verdict] plan=fixed123  level=HIGH  1 finding(s): 1 high\n  - [HIGH] SQL injection in users.py  (agent: security-reviewer)\n      why: req.form values flow into raw SQL\n      evidence: src/users.py:42 — unescaped input\n",
+      "stderr": "",
+      "isolation": "actual CLI parser/main with only user-data paths relocated to a disposable fixture; no provider/agent execution"
+    },
+    {
+      "example": "verdict view/history/clear",
+      "argv": [
+        "python",
+        "-m",
+        "toolbox_verdict",
+        "clear",
+        "--plan-hash",
+        "fixed123",
+        "--id",
+        "users-sql-injection"
+      ],
+      "exit_code": 0,
+      "stdout": "{\n  \"plan_hash\": \"fixed123\",\n  \"level\": \"LOW\",\n  \"summary\": \"No findings.\",\n  \"findings\": [],\n  \"created_at\": 1790757071.9788759,\n  \"updated_at\": 1790757071.9911969\n}\n",
+      "stderr": "",
+      "isolation": "actual CLI parser/main with only user-data paths relocated to a disposable fixture; no provider/agent execution"
+    }
+  ],
+  "not_claimed": [
+    "external host agent dispatch",
+    "paid model execution",
+    "installed Git hook behavior",
+    "a new verdict generated automatically during the hook call"
+  ],
+  "retention_note": "2026-09-30 dirty-working-tree local execution; disposable absolute paths redacted. Not a final-tree story pass. Portable retained script rerun successfully at evidence handoff."
+}

@@ -1,10 +1,23 @@
 from __future__ import annotations
 
 import json
+import threading
 from collections.abc import Iterator
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from networkx import Graph
+from networkx.readwrite import node_link_data
 
+import ctx_config
+from ctx import dashboard_docs
+from ctx.monitor import testing as mt
+from ctx.monitor.services import graph as graph_service
+from ctx.monitor.services import kpi as kpi_service
+from ctx.monitor.services import sidecars as sidecar_service
+from ctx.monitor.services import status as status_service
+from ctx.monitor.services import wiki as wiki_service
 from scripts import dashboard_smoke as smoke
 
 
@@ -105,3 +118,86 @@ def test_emit_jsonl_outputs_structured_rows() -> None:
         "reason": "ok",
         "bytes": 50,
     }
+
+
+def test_main_smokes_a_real_isolated_monitor_with_warm_thresholds(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    claude = tmp_path / ".claude"
+    graph_dir = claude / "skill-wiki" / "graphify-out"
+    github_page = claude / "skill-wiki" / "entities" / "mcp-servers" / "g" / "github.md"
+    sidecars = claude / "skill-quality"
+    graph_dir.mkdir(parents=True)
+    github_page.parent.mkdir(parents=True)
+    sidecars.mkdir(parents=True)
+    github_page.write_text(
+        "---\ntitle: GitHub\ntype: mcp-server\ndescription: Repository tools.\n---\n"
+        "# GitHub\n\nRepository tools.\n",
+        encoding="utf-8",
+    )
+    (sidecars / "sample.json").write_text(
+        json.dumps({"slug": "sample", "grade": "A", "raw_score": 0.9}),
+        encoding="utf-8",
+    )
+    graph = Graph()
+    graph.add_node(
+        "mcp-server:github",
+        label="GitHub",
+        type="mcp-server",
+        tags=["git", "repository"],
+    )
+    (graph_dir / "graph.json").write_text(
+        json.dumps(node_link_data(graph, edges="edges")),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(mt, "claude_dir", lambda: claude)
+    monkeypatch.setattr(mt, "runtime_lifecycle_path", lambda: claude / "runtime-events.jsonl")
+    monkeypatch.setattr(mt, "dashboard_graph_index_archives", lambda: [])
+    monkeypatch.setattr(
+        ctx_config,
+        "cfg",
+        SimpleNamespace(skills_dir=sidecars, agents_dir=sidecars),
+    )
+    monkeypatch.setattr(
+        status_service,
+        "_telemetry_config",
+        lambda: {"path": str(claude / "telemetry" / "events.jsonl")},
+    )
+    graph_service.reset_caches()
+    sidecar_service.reset_caches()
+    kpi_service.reset_cache()
+    wiki_service.reset_caches()
+    dashboard_docs.reset_docs_render_cache()
+
+    server = mt.make_monitor_server("127.0.0.1", 0)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        exit_code = smoke.main(
+            [
+                "--base-url",
+                f"http://127.0.0.1:{server.server_port}",
+                "--timeout",
+                "10",
+                "--warm",
+                "--jsonl",
+                "--fail-on-slow",
+                "graph-api-warm=5",
+                "--fail-on-slow",
+                "kpi-warm=5",
+            ]
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+    rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert exit_code == 0
+    assert len(rows) == len(smoke.DEFAULT_CHECKS) + len(smoke.WARM_CHECKS)
+    assert all(row["status"] == 200 and row["ok"] for row in rows)
+    assert all(row["elapsed"] >= 0 for row in rows)
+    assert {row["name"] for row in rows} >= {"graph-api-cold", "graph-api-warm", "kpi-warm"}

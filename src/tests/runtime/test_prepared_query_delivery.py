@@ -24,6 +24,9 @@ from ctx.runtime.query_decision import QueryHostDescriptor
 from ctx.runtime.query_session import prepare_query_delivery
 
 
+pytestmark = pytest.mark.usefixtures("historical_release_catalog")
+
+
 def _delivery(tmp_path: Path) -> PreparedQueryDelivery:
     result = prepare_query_delivery(
         host=QueryHostDescriptor.codex("activate"),

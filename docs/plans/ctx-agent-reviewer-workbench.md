@@ -180,8 +180,6 @@ Inputs:
 - Current branch and diff.
 - `qa/feature_status.csv`.
 - `qa/bug_smoke_status.csv`.
-- `docs/qa/feature-user-story-status.csv`.
-- `docs/qa/dashboard-user-story-status.csv`.
 - Local-fast timing evidence in `.gate/local-fast.json` when available.
 - CI/no-mistakes evidence only when intentionally run.
 

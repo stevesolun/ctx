@@ -97,11 +97,17 @@ def test_threat_model_records_critical_unimplemented_boundaries() -> None:
 
 
 def test_threat_model_records_provenance_and_ephemeral_wiki_contracts() -> None:
-    threat_model = _read("docs/threat-model.md")
+    threat_model = " ".join(_read("docs/threat-model.md").split())
 
     assert "binds the complete canonical" in threat_model
     assert "Permission evidence must be a digest-verified checked-in file" in threat_model
-    assert "inherited Design.md corpus remains blocked" in threat_model
+    assert "the default registry is empty" in threat_model
+    assert "missing evidence fails closed" in threat_model
+    assert (
+        "Design.md maintenance importer requires an explicitly reviewed source record, "
+        "legal evidence, body digests, and a registered full-manifest binding"
+    ) in threat_model
+    assert "Its former source record and corpus are no longer distributed" in threat_model
     assert "raw `ctx__wiki_get` call and result to one" in threat_model
     assert "blocks compaction while raw wiki" in threat_model
     assert "model independently quotes or summarizes" in threat_model

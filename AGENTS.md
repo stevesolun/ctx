@@ -2,6 +2,16 @@
 
 ## The product
 
+**Current mandate (2026-10-12, ADR-017):** CTX ships a host-neutral
+recommendation engine with an empty, user-owned knowledge graph/wiki. Users
+and organizations supply their own skills, agents and MCP records. Native
+host events and MCP/CLI clients use shared bounded recommendation policy;
+similarity never grants installation or execution permission. No downloaded
+tool corpus, fallback skills or implicit catalog download belongs in the
+default product. Read `docs/ctx-fit/BRING_YOUR_OWN_PLAN.md` for the standing
+contract and acceptance plan. The following Fit behavior is preserved as an
+optional evaluator, not the primary product definition.
+
 CTX Fit finds the cheapest AI coding setup that reliably works on a given
 repository, and produces the winning configuration as a reviewable change.
 
@@ -9,8 +19,9 @@ The winner is chosen by a lexicographic rule, not a score: filter candidates on
 a reliability floor, then minimize attributable cost, then tie-break toward
 simplicity. "Keep your current setup" is a valid and expected answer.
 
-`ctx` is the human command and `ctx fit` is the product; older harness commands
-live under `ctx advanced`. `ctx-mcp-server` is the machine contract name. A few
+`ctx` is the human command; `ctx recommend` is the advisory entry point and
+`ctx fit` is the optional evaluator. Older harness commands live under
+`ctx advanced`. `ctx-mcp-server` is the machine contract name. A few
 maintenance console scripts (`ctx-init`, `ctx-scan-repo`, `ctx-source-registry`,
 `ctx-telemetry-*`) still ship — ADR-001's collapse to two entry points is the
 destination, not yet the state.
@@ -19,12 +30,18 @@ destination, not yet the state.
 ctx fit                      # free, local, read-only: profile + readiness
 ctx fit --dry-run            # what a full evaluation would involve
 ctx fit --test --budget 10   # evaluate candidates; spending requires both flags
-ctx fit --apply              # write the winning configuration
-ctx fit --pr                 # print a PR body and branch name; commits nothing
 ```
+
+For evaluation-and-write commands, confirmation, and recovery, see the
+[`--apply` / `--pr` guide](docs/index.md#-apply-and-pr-are-different-writes).
 
 ## Where the code lives
 
+- `src/ctx/adapters/generic/ctx_core_tools.py` — shared user graph/wiki
+  recommendation policy, used by API, CLI, MCP and native hook projections.
+- `src/ctx/runtime/user_recommendations.py` and `src/ctx/adapters/query_hook_io.py`
+  — bounded advisory host-event projection; never install, execute or unload.
+- `src/ctx_init.py` — empty/offline bootstrap and explicit user archive import.
 - `src/ctx/cli/fit.py` — the `ctx fit` subcommand: argument surface, human and
   `--json` rendering, apply/PR handling. Registered from `src/ctx/cli/run.py`,
   which is the `ctx` console-script entry point (`ctx = "ctx.cli.run:main"`).
@@ -70,6 +87,11 @@ core premise and it applies to work on the product too.
 
 ## Settled decisions — do not re-litigate
 
+ADR-017 records the owner's new direction and supersedes the primary-product
+portions of ADR-001/006/010/014 below. Do not restore bundled data or Fit-primary
+behavior merely to satisfy an obsolete contract; update that contract with
+explicit evidence. All unrelated safety and verification requirements remain.
+
 `docs/ctx-fit/DECISIONS.md` is the decision log. Each ADR is recorded once with
 its evidence; reopening one requires new evidence, recorded there. The ones that
 most often get argued from first principles again:
@@ -90,8 +112,8 @@ most often get argued from first principles again:
   comparison is out of scope and the report must say so.
 - **ADR-010** — the event-sourced consent/activation lifecycle is out of scope
   for CTX Fit. It still exists under `src/ctx/runtime/`; it is not the product.
-- **ADR-009** — the PyPI distribution stays `claude-ctx`. The product is named
-  CTX Fit; users type `ctx`.
+- **ADR-009** — the PyPI distribution stays `claude-ctx`; users type `ctx`.
+  ADR-017 supersedes Fit as the primary product name and experience.
 
 Where a planning document under `docs/ctx-fit/` and the code disagree, the code
 and its tests are the ground truth.
@@ -99,7 +121,7 @@ and its tests are the ground truth.
 ## Live working state
 
 `docs/ctx-fit/STATE.md` is the canonical operational checkpoint for active,
-long-running CTX Fit work. At the start of each resumed run, read it after this
+long-running CTX work, including ADR-017. At the start of each resumed run, read it after this
 file and the decision log, then reconcile it with the actual branch, working
 tree, tests, and active agents. Update it after a meaningful repair, new
 blocker, verification result, handoff, commit, merge, or release action. Never

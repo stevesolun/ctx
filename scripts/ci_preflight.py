@@ -32,6 +32,8 @@ PUBLIC_DOCS_TRACKER_TESTS = (
 PROFILE_CHOICES = ("smoke", "pr", "full")
 
 
+# Explicit legacy-artifact validation remains available to maintainers. These
+# counts are not the shipped product and must never drive default CI or stats.
 GRAPH_VALIDATE_ARGS = (
     "src/validate_graph_artifacts.py",
     "--graph-dir",
@@ -71,6 +73,14 @@ GRAPH_VALIDATE_ARGS = (
     "180",
     "--max-stage-lines",
     "40",
+)
+
+GRAPH_CONTRACT_TESTS = (
+    "src/tests/test_graph_release_manifest.py",
+    "src/tests/test_validate_graph_artifacts.py",
+    "src/tests/test_graph_packs.py",
+    "src/tests/test_graph_json_integrity.py",
+    "src/tests/test_byo_distribution.py",
 )
 
 
@@ -197,20 +207,6 @@ def select_checks(
                     Check("mypy", (python, "-m", "mypy", "src")),
                     Check("pip check", (python, "-m", "pip", "check")),
                     Check(
-                        "hydrate benchmark catalog",
-                        (
-                            python,
-                            "scripts/graph_release_manifest.py",
-                            "hydrate",
-                            "--manifest",
-                            "graph/release-artifacts.json",
-                            "--repo-root",
-                            ".",
-                            "--artifact",
-                            "graph/wiki-graph-runtime.tar.gz",
-                        ),
-                    ),
-                    Check(
                         "unit-linux equivalent",
                         (
                             python,
@@ -294,22 +290,13 @@ def select_checks(
             )
         )
 
-    if not smoke_profile and flags["graph_artifact_changed"]:
+    if not smoke_profile and (flags["graph_artifact_changed"] or flags["similarity_changed"]):
         checks.append(
             Check(
-                "hydrate graph release assets",
-                (
-                    python,
-                    "scripts/graph_release_manifest.py",
-                    "hydrate",
-                    "--manifest",
-                    "graph/release-artifacts.json",
-                    "--repo-root",
-                    ".",
-                ),
+                "graph infrastructure contract",
+                (python, "-m", "pytest", "-q", "--no-cov", *GRAPH_CONTRACT_TESTS),
             )
         )
-        checks.append(Check("graph artifact validation", (python, *GRAPH_VALIDATE_ARGS)))
 
     if not smoke_profile and source_required and flags["similarity_changed"]:
         checks.append(

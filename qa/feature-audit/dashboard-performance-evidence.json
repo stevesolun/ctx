@@ -1,0 +1,35 @@
+{
+  "branch": "codex/full-feature-audit",
+  "commit": "8c6ecc1c6a48ebe088d55d363dc2a0dc7ec1750a",
+  "reproduce": "PYTHONPATH=. .venv/bin/python qa/feature-audit/dashboard_performance_repro.py",
+  "fixture": {
+    "graph_archive": "graph/wiki-graph-runtime.tar.gz",
+    "graph_archive_bytes": 110283462,
+    "graph_archive_sha256": "d4a39836aab5f558b546842580b2e20c523b9a9ab901ed681f84c09b5c4d6515",
+    "graph_declared_nodes": 79958,
+    "graph_declared_edges": 1778069,
+    "extracted_index_bytes": 106090496,
+    "kpi_sidecars": 10000,
+    "kpi_source": "synthetic bounded JSON sidecars; not full-catalog latency"
+  },
+  "thresholds_seconds": {
+    "graph_first_extraction": 5,
+    "graph_warm": 1,
+    "kpi_api_bounded_cold": 3,
+    "kpi_page_and_api_warm": 3
+  },
+  "measurements_seconds": {
+    "graph_cold_first_request": 1.078883,
+    "graph_warm_request": 0.00161,
+    "kpi_api_cold": 0.800286,
+    "kpi_api_warm": 0.026832,
+    "kpi_page_warm": 0.024651
+  },
+  "smoke": {
+    "command_shape": "smoke.main --warm --jsonl with 1s graph/wiki-detail and 3s KPI thresholds",
+    "checks": 24,
+    "exit_code": 0,
+    "failed": []
+  },
+  "retention_note": "Historical dirty-tree local evidence; disposable absolute paths redacted. Not a final-tree story pass."
+}

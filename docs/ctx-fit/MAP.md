@@ -8,7 +8,10 @@ or question that owns it.
 Companion documents: [`CURRENT_STATE.md`](CURRENT_STATE.md) (audited facts),
 [`IMPLEMENTATION_TRACKER.md`](IMPLEMENTATION_TRACKER.md) (execution ledger).
 
-Status: charted 2026-08-09, after the Milestone 0 audit.
+Status: historical snapshot charted 2026-08-09, after the Milestone 0 audit.
+Its open questions and Fit-primary destination are not current work orders.
+Use [ADR-017](DECISIONS.md), [the standing plan](BRING_YOUR_OWN_PLAN.md), and
+[the live checkpoint](STATE.md) for current scope and delivery state.
 
 ## Destination
 
@@ -89,7 +92,7 @@ that must be serialized; `research` means an independent read-only lane.
 | Q4 | Is harness comparison in scope for V1? | coordinator | Q1 | **Resolved → D9** (single harness, from evidence) |
 | Q5 | How are a repository's own verification commands discovered and trusted? | research | — | Open; research lane in flight |
 | Q6 | What confidence statement is defensible at small task counts and single trials? | research | Q3 | Open |
-| Q7 | What multi-objective / Pareto selection rule is used, and how is it explained? | research | Q2, Q6 | Open |
+| Q7 | Which deterministic selection rule is used? | research | Q2, Q6 | Resolved in [ADR-014](DECISIONS.md) |
 | Q8 | Where does `ctx fit` live, and what is the versioned result schema? | coordinator | — | **Placement resolved → D10**; result schema still open |
 | Q9 | Verification depends on a Codex-managed macOS sandbox. What happens without it? | research | — | Open; research lane in flight |
 | Q10 | How is a dollar budget enforced *before* spend, and how does the run fail safely? | coordinator | Q2 | Open; mechanism decided in D11, thresholds not yet designed |

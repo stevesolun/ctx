@@ -6,7 +6,8 @@ sidecars, and verify the data flows into the wiki and the knowledge graph.
 ## What it does
 
 Every installed skill and agent gets a continuous quality score in
-`[0.0, 1.0]` plus an A/B/C/D/F letter grade, derived from four signals:
+`[0.0, 1.0]` plus an A/B/C/D/F letter grade, derived from four signals.
+The table shows skill weights; agent weights differ as described below:
 
 | Signal    | Weight | What it measures                                      |
 | --------- | -----: | ----------------------------------------------------- |
@@ -22,12 +23,17 @@ Two hard floors override the weighted sum:
   the score-to-grade mapping function alone.  A score of 0.0 maps to **D**.
 - **`never_loaded_stale`** — no load events ever → grade capped at **D**.
 
-The score is mirrored to three on-disk sinks so every consumer sees the
-same number:
+The score is persisted to a canonical sidecar and, when a matching loose wiki
+page exists, mirrored into that page:
 
 1. `~/.claude/skill-quality/<slug>.json` — canonical machine-readable form.
-2. Wiki entity frontmatter — `quality_score`, `quality_grade`, `quality_updated_at`.
-3. Wiki body — a `## Quality` block between `<!-- quality:begin -->` markers.
+2. Loose wiki entity frontmatter — `quality_score`, `quality_grade`, `quality_updated_at`.
+3. Loose wiki body — a `## Quality` block between `<!-- quality:begin -->` markers.
+
+The scorer does not publish wiki-pack overlays. With [active wiki packs](entity-onboarding.md#add-records-you-own),
+these loose-page updates do not change the authoritative packed page. The
+sidecar remains current, and the graph consumes it through the separate path
+below.
 
 The knowledge-graph node attribute is a **separate consumer path**, not a
 write path from `persist_quality`: `wiki_graphify` reads the sidecar JSON
@@ -39,7 +45,7 @@ node on its next build.
 The hook runs once per session-end. It reads `skill-events.jsonl` since
 its last run, collects every slug that appeared, and calls
 `skill_quality.py recompute --slugs <comma-list>` — so scoring is
-incremental (touched skills only), not a full 2,000-page sweep.
+incremental (touched skills only), not a full-catalog sweep.
 
 Edit `~/.claude/settings.json` and add, replacing `<REPO>` with the
 absolute path to this checkout:
@@ -52,7 +58,7 @@ absolute path to this checkout:
         "hooks": [
           {
             "type": "command",
-            "command": "python <REPO>/hooks/quality_on_session_end.py"
+            "command": "python \"<REPO>/hooks/quality_on_session_end.py\""
           }
         ]
       }
@@ -75,8 +81,9 @@ python -m skill_quality recompute --all
 ```
 
 This walks `~/.claude/skills/*/SKILL.md` and `~/.claude/agents/*.md`,
-scores each, and writes the three on-disk sinks. Expect ~15–30s depending on
-corpus size and disk.
+scores each, and writes the three on-disk sinks where a matching loose wiki page is
+available. Runtime depends on corpus size, graph inputs and disk; measure it
+on the target installation rather than assuming a fixed duration.
 
 ## CLI reference
 
@@ -97,14 +104,15 @@ python -m skill_quality explain python-testing
 python -m skill_quality list --grade D
 ```
 
-All verbs accept `--json` for piping into other tools.
+`recompute`, `show`, and `list` accept `--json` for piping into other tools.
+`explain` is the human-readable evidence view and does not accept `--json`.
 
 ## Graph integration
 
 `wiki_graphify.py` reads the sidecar directory automatically and
-attaches `quality_score` and `quality_grade` to every matching node. The
-Obsidian graph view can then color nodes by grade — configure the
-`quality_grade` property in Obsidian's graph settings.
+attaches `quality_score` and `quality_grade` to every matching node. Consumers
+of the exported graph can use those attributes for grade-based display. This
+does not configure a separate application's graph view automatically.
 
 Nodes without a sidecar get `quality_score: null` and `quality_grade:
 null` so downstream consumers can always read the attribute safely.
@@ -144,9 +152,10 @@ on bad values, catching typos before they pollute sidecars.
 
 ### Why two weight vectors
 
-Skills and agents differ in how they're invoked. Skills are loaded
-automatically by the router, so **telemetry** (load counts, recency) is
-the strongest post-install quality signal — hence 0.40 weight.
+The legacy quality weights distinguish skills and agents by their expected
+usage patterns. Skill **telemetry** (load counts, recency) receives the strongest
+post-install weight, 0.40. The current router only suggests tools; a host must
+supply actual usage events for these signals to describe real activity.
 
 Agents are invoked via the Agent tool, deliberately and rarely. A
 seldom-used agent isn't stale, it's specialized. The agent weights
@@ -168,5 +177,6 @@ reason.
   `persist_quality` is idempotent via the HTML-comment markers. If it
   does, delete both blocks and rerun `recompute`; the first pass will
   re-emit exactly one.
-- **Graph view shows no color.** Run `python -m ctx.core.wiki.wiki_graphify
-  --graph-only` to rebuild; it reads sidecars fresh on every build.
+- **Exported graph lacks current grades.** Run `python -m ctx.core.wiki.wiki_graphify
+  --graph-only` to rebuild; it reads sidecars fresh on every build. Display
+  colors still depend on the graph viewer consuming those attributes.

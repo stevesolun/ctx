@@ -1,14 +1,24 @@
 # Starter toolboxes
 
-Five presets ship in `docs/toolbox/templates/`. `toolbox init` activates
-them into `~/.claude/toolboxes.json`; you can then override any field per-repo
-in `.toolbox.yaml`.
+The five JSON files in `docs/toolbox/templates/` are optional configuration
+examples, not installed presets or supplied agents. `python -m toolbox init`
+creates an empty configuration and preserves existing user definitions.
+It adds and activates no tools.
+
+Adapt an example to tools you actually own, wrap it under a `toolboxes` mapping
+in your own version-1 configuration, and import that file explicitly. Only then
+use `python -m toolbox activate NAME` for an existing definition. Per-repository
+definitions in `.toolbox.yaml` replace the complete same-name global toolbox,
+not individual fields.
+
+The agent lists below describe intended host execution. The shipped planner
+only emits plans; it does not invoke those agents or enforce their budgets.
 
 ## ship-it
 
 > **Professional council of 7 experts for end-of-feature review.**
 
-Runs `code-reviewer`, `security-reviewer`, `architect-review`,
+The example references `code-reviewer`, `security-reviewer`, `architect-review`,
 `test-automator`, `performance-engineer`, `accessibility-tester`, and
 `docs-lookup` against the dynamic review scope.
 
@@ -26,7 +36,7 @@ one pass.
 
 > **Full-repo security audit with blocking guardrail on HIGH findings.**
 
-Runs `security-reviewer`, `security-auditor`, `penetration-tester`,
+The example references `security-reviewer`, `security-auditor`, `penetration-tester`,
 `compliance-auditor`, and `threat-detection-engineer` against the entire repo.
 
 - **Triggers**: slash, pre-commit, file-save on `**/auth/**`.
@@ -41,7 +51,7 @@ Expensive; not a per-commit hook.
 
 > **Graph-informed refactor review with regression and dead-code checks.**
 
-Runs `architect-review`, `refactor-cleaner`, `code-reviewer`,
+The example references `architect-review`, `refactor-cleaner`, `code-reviewer`,
 `test-automator`, and `dependency-manager` against graph-blast scope.
 
 - **Triggers**: slash, session-end.
@@ -56,7 +66,7 @@ breakage, missing test updates.
 
 > **Documentation pass: accuracy, completeness, clarity, and API parity.**
 
-Runs `technical-writer`, `docs-architect`, `api-documenter`, and
+The example references `technical-writer`, `docs-architect`, `api-documenter`, and
 `tutorial-engineer` against docs diffs.
 
 - **Triggers**: slash, file-save on `**/*.md`.
@@ -70,28 +80,27 @@ Best for: docs-heavy branches and README updates.
 
 > **New-repo bootstrap: run the intent interview, scaffold plan, pick initial toolbox.**
 
-Invokes `intent_interview` in interactive mode, then activates whichever
-starters the user selects.
+Declares an intent-interview bootstrap task for a host to invoke. To perform
+the interview directly, run `python -m intent_interview init`; activation
+requires `--apply`.
 
 - **Triggers**: slash only.
 - **Scope**: `diff`.
 - **Budget**: 100 k tokens / 300 seconds.
 
-Best for: `git init` followed by `toolbox init`.
+Best for: bootstrapping a newly initialized repository.
 
 ## Activation
 
 ```bash
-# Pick starters interactively
-python -m intent_interview init
+# Create an empty configuration; then import your reviewed definitions
+python -m toolbox init
+python -m toolbox import ./my-toolboxes.yaml
 
-# Non-interactive preset
-python -m intent_interview init --preset existing --apply
-python -m intent_interview init --preset docs-heavy --apply
-python -m intent_interview init --preset security-first --apply
-
-# Activate a specific starter directly
+# Only if your imported configuration defines ship-it
 python -m toolbox activate ship-it
 ```
 
-See [Intent interview](intent-interview.md) for the full flow.
+The historical [Intent interview](intent-interview.md) presets reference these
+names. That guide documents when explicit application can read the checkout's
+templates and when imported definitions are required.

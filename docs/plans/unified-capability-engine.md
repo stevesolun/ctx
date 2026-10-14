@@ -1,5 +1,12 @@
 # Unified CTX Capability Engine
 
+> Historical plan, superseded by
+> [ADR-017](../ctx-fit/DECISIONS.md).
+> Its automatic-install and activation design is not the current product
+> contract. Current CTX suggests at most five tools from user-owned knowledge;
+> installation requires explicit approval in a separate user/host workflow.
+> See the [standing contract](../ctx-fit/BRING_YOUR_OWN_PLAN.md).
+
 This is the internal execution plan for replacing CTX's fragmented recommendation
 and lifecycle paths with one host-neutral capability engine. It is intentionally
 kept under `docs/plans/`, outside the public documentation navigation.

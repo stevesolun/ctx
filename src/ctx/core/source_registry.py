@@ -13,6 +13,7 @@ from ipaddress import IPv6Address
 import json
 import re
 import secrets
+import sys
 import unicodedata
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path, PurePosixPath
@@ -159,221 +160,7 @@ class ExternalSourceRecord:
         return {key: value for key, value in asdict(self).items() if value is not None}
 
 
-BUILTIN_EXTERNAL_SOURCES: tuple[ExternalSourceRecord, ...] = (
-    ExternalSourceRecord(
-        name="mattpocock-skills",
-        url="https://github.com/mattpocock/skills",
-        revision="e74f0061bb67222181640effa98c675bdb2fdaa7",
-        license="MIT",
-        source_kind="skill-suite",
-        import_mode="full",
-        permission_status="license",
-        license_url=(
-            "https://github.com/mattpocock/skills/blob/"
-            "e74f0061bb67222181640effa98c675bdb2fdaa7/LICENSE"
-        ),
-        license_evidence_sha256=(
-            "0e7ac423bf2c6e223b7c5b156f8cf72da49d748e56a1641402c31f22ad07dbb5"
-        ),
-        license_evidence_path="imported-skills/mattpocock/LICENSE",
-        redistribution_obligations=(
-            "retain-copyright-notice",
-            "retain-license-notice",
-        ),
-        notice_reference=(
-            "https://github.com/mattpocock/skills/blob/"
-            "e74f0061bb67222181640effa98c675bdb2fdaa7/LICENSE"
-        ),
-    ),
-    ExternalSourceRecord(
-        name="academic-research-skills",
-        url="https://github.com/Imbad0202/academic-research-skills",
-        revision="153203d129b1d0e83dd65ab96340048257cd45b2",
-        license="CC-BY-NC-4.0",
-        source_kind="skill-suite",
-        import_mode="metadata-only",
-        permission_status="license",
-        license_url=(
-            "https://github.com/Imbad0202/academic-research-skills/blob/"
-            "153203d129b1d0e83dd65ab96340048257cd45b2/LICENSE"
-        ),
-        redistribution_obligations=(
-            "Do not redistribute full bodies under this registry record.",
-            "Preserve source and declared noncommercial-license links in metadata.",
-        ),
-        notice_reference=(
-            "https://github.com/Imbad0202/academic-research-skills/blob/"
-            "153203d129b1d0e83dd65ab96340048257cd45b2/LICENSE"
-        ),
-        notes="Full-body import requires explicit noncommercial-license permission.",
-    ),
-    ExternalSourceRecord(
-        name="agents-md",
-        url="https://github.com/agentsmd/agents.md",
-        revision="d1ac7f063d20e70015ed6732664049ae4ba9d74e",
-        license="MIT",
-        source_kind="knowledge-protocol",
-        import_mode="metadata-only",
-        permission_status="license",
-        license_url=(
-            "https://github.com/agentsmd/agents.md/blob/"
-            "d1ac7f063d20e70015ed6732664049ae4ba9d74e/LICENSE"
-        ),
-        redistribution_obligations=(
-            "Limit this registry record to metadata and external links.",
-            "Retain source and declared-license links in derived metadata.",
-        ),
-        notice_reference=(
-            "https://github.com/agentsmd/agents.md/blob/"
-            "d1ac7f063d20e70015ed6732664049ae4ba9d74e/LICENSE"
-        ),
-    ),
-    ExternalSourceRecord(
-        name="lat-md",
-        url="https://github.com/1st1/lat.md",
-        revision="bf8d95ca7ece6e1a9e4a325eddb51ddd5db038b0",
-        license="MIT",
-        source_kind="knowledge-protocol",
-        import_mode="metadata-only",
-        permission_status="license",
-        license_url=(
-            "https://github.com/1st1/lat.md/blob/bf8d95ca7ece6e1a9e4a325eddb51ddd5db038b0/LICENSE"
-        ),
-        redistribution_obligations=(
-            "Limit this registry record to metadata and external links.",
-            "Retain source and declared-license links in derived metadata.",
-        ),
-        notice_reference=(
-            "https://github.com/1st1/lat.md/blob/bf8d95ca7ece6e1a9e4a325eddb51ddd5db038b0/LICENSE"
-        ),
-    ),
-    ExternalSourceRecord(
-        name="optillm",
-        url="https://github.com/algorithmicsuperintelligence/optillm",
-        revision="df018d64db96d07fdd338d71a35fc567f9d50c7b",
-        license="Apache-2.0",
-        source_kind="harness",
-        import_mode="metadata-only",
-        permission_status="license",
-        license_url=(
-            "https://github.com/algorithmicsuperintelligence/optillm/blob/"
-            "df018d64db96d07fdd338d71a35fc567f9d50c7b/LICENSE"
-        ),
-        redistribution_obligations=(
-            "Limit this registry record to metadata and external links.",
-            "Retain source and declared-license links in derived metadata.",
-        ),
-        notice_reference=(
-            "https://github.com/algorithmicsuperintelligence/optillm/blob/"
-            "df018d64db96d07fdd338d71a35fc567f9d50c7b/LICENSE"
-        ),
-    ),
-    ExternalSourceRecord(
-        name="julius-caveman",
-        url="https://github.com/JuliusBrussee/caveman",
-        revision="63a91ecadbf4c4719a4602a5abb00883f9966034",
-        license="MIT",
-        source_kind="skill-suite",
-        import_mode="full",
-        permission_status="license",
-        license_url=(
-            "https://github.com/JuliusBrussee/caveman/blob/"
-            "63a91ecadbf4c4719a4602a5abb00883f9966034/LICENSE"
-        ),
-        license_evidence_sha256=(
-            "5eb826cd03151bcc7cce3f80d40e87733237fedfc6c36d6908aca5fd650a0bdb"
-        ),
-        license_evidence_path="imported-skills/julius-caveman/LICENSE",
-        redistribution_obligations=(
-            "retain-copyright-notice",
-            "retain-license-notice",
-        ),
-        notice_reference=(
-            "https://github.com/JuliusBrussee/caveman/blob/"
-            "63a91ecadbf4c4719a4602a5abb00883f9966034/LICENSE"
-        ),
-    ),
-    ExternalSourceRecord(
-        name="strix",
-        url="https://github.com/usestrix/strix",
-        revision="15c95718e600897a2a532a613a1c8fa6b712b144",
-        license="Apache-2.0",
-        source_kind="skill-suite",
-        import_mode="full",
-        permission_status="license",
-        license_url=(
-            "https://github.com/usestrix/strix/blob/"
-            "15c95718e600897a2a532a613a1c8fa6b712b144/LICENSE"
-        ),
-        license_evidence_sha256=(
-            "7db9697134251e314bd8d39257fe170c98b3e2ad9b2ed67e97acaf9613e7b9e3"
-        ),
-        license_evidence_path="imported-skills/strix/LICENSE",
-        redistribution_obligations=(
-            "include-upstream-notice",
-            "mark-modifications",
-            "preserve-attribution",
-            "retain-license-notice",
-        ),
-        notice_reference=(
-            "https://github.com/usestrix/strix/blob/"
-            "15c95718e600897a2a532a613a1c8fa6b712b144/LICENSE"
-        ),
-    ),
-    ExternalSourceRecord(
-        name="no-mistakes",
-        url="https://github.com/kunchenguid/no-mistakes",
-        revision="unverified-snapshot",
-        license="MIT",
-        source_kind="workflow-reference",
-        import_mode="metadata-only",
-        permission_status="license",
-        license_url="https://github.com/kunchenguid/no-mistakes/blob/main/LICENSE",
-        redistribution_obligations=(
-            "Limit this registry record to metadata and external links.",
-            "Do not infer permission to redistribute upstream bodies from this record.",
-        ),
-        notice_reference="https://github.com/kunchenguid/no-mistakes/blob/main/LICENSE",
-        notes="The checked-in ctx integration guide is not recorded as a verbatim upstream body.",
-    ),
-    ExternalSourceRecord(
-        name="designdotmd",
-        url="https://designdotmd.directory",
-        revision="2026-04-27",
-        license="unknown",
-        source_kind="design-catalog",
-        import_mode="metadata-only",
-        permission_status="unknown",
-        redistribution_obligations=(
-            "Do not redistribute source bodies until permission and legal review are recorded.",
-            "Limit use to metadata and external links while license status is unresolved.",
-        ),
-        notice_reference="https://designdotmd.directory",
-        notes=(
-            "No explicit license found; full-body ingestion is blocked. Existing mirrored "
-            "bodies require quarantine or permission before redistribution."
-        ),
-    ),
-    ExternalSourceRecord(
-        name="skills-sh",
-        url="https://skills.sh",
-        revision="2026-05-18",
-        license="unknown",
-        source_kind="external-catalog",
-        import_mode="metadata-only",
-        permission_status="unknown",
-        redistribution_obligations=(
-            "Do not redistribute source bodies without per-entity license provenance.",
-            "Limit this catalog record to metadata and external links.",
-        ),
-        notice_reference="https://skills.sh",
-        notes=(
-            "Catalog metadata only; this record does not authorize redistribution "
-            "of per-repository skill bodies. Existing body artifacts require per-entity "
-            "provenance before redistribution."
-        ),
-    ),
-)
+BUILTIN_EXTERNAL_SOURCES: tuple[ExternalSourceRecord, ...] = ()
 
 
 def _string(value: object, field: str) -> str:
@@ -1153,16 +940,22 @@ def load_source_registry(path: Path) -> list[ExternalSourceRecord]:
     raw = json.loads(path.read_text(encoding="utf-8"))
     records_raw: Iterable[Any]
     if isinstance(raw, dict):
-        records_raw = raw.get("sources", [])
+        if "sources" not in raw:
+            raise ValueError("source registry object must contain a sources list")
+        records_raw = raw["sources"]
     else:
         records_raw = raw
     if not isinstance(records_raw, list):
         raise ValueError("source registry must be a list or an object with a sources list")
-    records = [ExternalSourceRecord.from_mapping(item) for item in records_raw]
+    records: list[ExternalSourceRecord] = []
+    for index, item in enumerate(records_raw):
+        if not isinstance(item, Mapping):
+            raise ValueError(f"source registry item {index} must be an object")
+        records.append(ExternalSourceRecord.from_mapping(dict(item)))
     return list(validate_source_registry(records))
 
 
-def main(argv: list[str] | None = None) -> None:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Validate ctx external source import policy.")
     parser.add_argument("--registry", type=Path, help="Optional JSON registry path.")
     output = parser.add_mutually_exclusive_group()
@@ -1170,10 +963,17 @@ def main(argv: list[str] | None = None) -> None:
     output.add_argument("--notice", action="store_true", help="Emit the generated notice.")
     args = parser.parse_args(argv)
 
-    records = (
-        load_source_registry(args.registry) if args.registry else list(BUILTIN_EXTERNAL_SOURCES)
-    )
-    records = list(validate_source_registry(records))
+    try:
+        records = (
+            load_source_registry(args.registry) if args.registry else list(BUILTIN_EXTERNAL_SOURCES)
+        )
+        records = list(validate_source_registry(records))
+    except (OSError, ValueError) as exc:
+        if args.json:
+            print(json.dumps({"error": str(exc), "failed": 1}, sort_keys=True))
+        else:
+            print(f"Source registry validation failed: {exc}", file=sys.stderr)
+        return 1
 
     if args.json:
         print(json.dumps({"sources": [record.to_dict() for record in records]}, indent=2))
@@ -1181,7 +981,8 @@ def main(argv: list[str] | None = None) -> None:
         print(render_third_party_notice(records), end="")
     else:
         print(f"Validated {len(records)} external source record(s).")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

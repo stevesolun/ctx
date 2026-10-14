@@ -94,10 +94,22 @@ def synthetic_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "agent:code-reviewer", label="code-reviewer", type="agent", tags=["python", "review"]
     )
     G.add_node(
+        "mcp-server:filesystem",
+        label="filesystem",
+        type="mcp-server",
+        tags=["filesystem"],
+    )
+    G.add_node(
         "harness:fastapi-pro",
         label="fastapi-pro",
         type="harness",
         tags=["python", "api", "harness"],
+    )
+    G.add_node(
+        "harness:repo-harness",
+        label="repo-harness",
+        type="harness",
+        tags=["repository", "harness"],
     )
     for i in range(8):
         G.add_node(
@@ -105,6 +117,18 @@ def synthetic_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         )
     G.add_edge("skill:python-patterns", "skill:fastapi-pro", weight=0.8, shared_tags=["python"])
     G.add_edge("skill:python-patterns", "agent:code-reviewer", weight=0.6, shared_tags=["python"])
+    G.add_edge(
+        "agent:code-reviewer",
+        "mcp-server:filesystem",
+        weight=0.5,
+        shared_tags=["review"],
+    )
+    G.add_edge(
+        "harness:repo-harness",
+        "mcp-server:filesystem",
+        weight=0.7,
+        shared_tags=["repository"],
+    )
     (wiki / "graphify-out").mkdir()
     (wiki / "graphify-out" / "graph.json").write_text(
         json.dumps(nx.node_link_data(G, edges="edges")),
@@ -413,6 +437,27 @@ class TestApiTelemetry:
         assert event["payload"]["otel.status_code"] == "ERROR"
         assert event["payload"]["error.type"] == "structured_error"
 
+    def test_graph_seed_and_wiki_slug_telemetry_hash_private_values(
+        self,
+        synthetic_home: Path,
+        captured_api_events: list[dict[str, Any]],
+    ) -> None:
+        private_seed = "private-acme-graph-seed"
+        private_slug = "private-acme-wiki-slug"
+
+        assert ctx.graph_query([private_seed]) == []
+        graph_event = captured_api_events[-1]
+        assert graph_event["event_name"] == "ctx.api.graph_query"
+        assert graph_event["payload"]["ctx.seeds.count"] == 1
+        assert graph_event["payload"]["ctx.seeds.hash"].startswith("sha256:")
+        assert private_seed not in json.dumps(graph_event)
+
+        assert ctx.wiki_get(private_slug) is None
+        wiki_event = captured_api_events[-1]
+        assert wiki_event["event_name"] == "ctx.api.wiki_get"
+        assert wiki_event["payload"]["ctx.slug.hash"].startswith("sha256:")
+        assert private_slug not in json.dumps(wiki_event)
+
     def test_list_all_entities_emits_result_count_without_slugs(
         self,
         synthetic_home: Path,
@@ -450,9 +495,63 @@ class TestGraphQuery:
     def test_empty_seeds_returns_empty(self, synthetic_home: Path) -> None:
         assert ctx.graph_query([]) == []
 
+    def test_recommend_related_structured_error_returns_empty_without_leak(
+        self,
+        synthetic_home: Path,
+        captured_api_events: list[dict[str, Any]],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        private_error = "private graph backend detail"
+        toolbox = ctx.api._default_toolbox
+        assert toolbox is not None
+
+        monkeypatch.setattr(
+            toolbox,
+            "dispatch",
+            lambda call: json.dumps(
+                {"error": private_error, "results": [{"name": "must-not-leak"}]}
+            ),
+        )
+
+        result = ctx.recommend_related(["skill:python-patterns"])
+
+        assert result == []
+        event = captured_api_events[-1]
+        assert event["event_name"] == "ctx.api.recommend_related"
+        assert event["outcome"] == "error"
+        assert event["error_kind"] == "structured_error"
+        assert private_error not in json.dumps(event)
+        assert "must-not-leak" not in json.dumps(result)
+
     def test_top_n_clamp_propagates(self, synthetic_home: Path) -> None:
         results = ctx.graph_query(["python-patterns"], top_n=1)
         assert len(results) <= 1
+
+    @pytest.mark.parametrize(
+        ("seed", "expected_neighbors"),
+        [
+            ("python-patterns", {("skill", "fastapi-pro"), ("agent", "code-reviewer")}),
+            (
+                "code-reviewer",
+                {("skill", "python-patterns"), ("mcp-server", "filesystem")},
+            ),
+            (
+                "filesystem",
+                {("agent", "code-reviewer"), ("harness", "repo-harness")},
+            ),
+            ("repo-harness", {("mcp-server", "filesystem")}),
+        ],
+    )
+    def test_all_graph_entity_types_are_valid_seeds_with_top_n_bound(
+        self,
+        synthetic_home: Path,
+        seed: str,
+        expected_neighbors: set[tuple[str, str]],
+    ) -> None:
+        results = ctx.graph_query([seed], max_hops=1, top_n=10)
+
+        assert {(row["type"], row["name"]) for row in results} == expected_neighbors
+        assert len(ctx.graph_query([seed], max_hops=1, top_n=1)) == 1
 
 
 class TestWikiSearch:

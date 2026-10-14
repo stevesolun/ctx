@@ -24,6 +24,10 @@ from ctx.runtime.release_material import (
 )
 
 
+# Legacy release integrity is tested with explicit project-owned fixture bytes.
+pytestmark = pytest.mark.usefixtures("historical_release_catalog")
+
+
 @dataclass
 class _HostPolicy:
     host_policy_snapshot_digest: str = "a" * 64
@@ -135,6 +139,16 @@ def test_release_factory_rejects_packaged_asset_substitution(
 def test_release_catalog_value_cannot_be_reconstructed_by_callers() -> None:
     with pytest.raises(TypeError, match="release factory"):
         ReleasePinnedQueryCatalog()
+
+
+def test_explicit_fixture_keeps_resource_name_and_byte_bounds() -> None:
+    with pytest.raises(ReleaseCatalogError, match="undeclared package resource"):
+        production_catalog_module._read_resource("untrusted.json", maximum_bytes=100)
+    with pytest.raises(ReleaseCatalogError, match="exceeds its byte bound"):
+        production_catalog_module._read_resource(
+            RELEASE_LOAD_SKILL_MATERIAL_RESOURCE,
+            maximum_bytes=1,
+        )
 
 
 @dataclass

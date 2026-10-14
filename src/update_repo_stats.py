@@ -5,13 +5,10 @@ update_repo_stats.py -- Patch README/docs numbers from authoritative sources.
 Run by the pre-commit hook so README/docs badges and inline counts never drift
 from reality. Reads only committed files and a live pytest collection.
 
-Sources of truth:
-  - graph/release-artifacts.json          -> exact release asset identities
-  - graph/wiki-graph-stats.json           -> graph/report/entity counts
-  - scripts/ci_preflight.py GRAPH_VALIDATE_ARGS -> exact release fallback
-  - graph/communities.json               -> current community export
-  - graph/skills-sh-catalog.json.gz      -> hydrated skill body counts
-  - pytest --collect-only -q             -> test inventory count
+Public documentation only reflects the engine's test inventory. CTX ships no
+tool catalog; personal knowledge and historical release counts are never
+sources for public updates. Legacy pure rendering/archive-inspection helpers
+remain available to explicitly invoked maintenance tools and their tests.
 
 Usage:
   python src/update_repo_stats.py          # patch README/docs in place
@@ -150,8 +147,8 @@ def _release_manifest_artifact_identity(path: str) -> tuple[str, int] | None:
 def _read_graph_artifact_stats() -> dict[str, int | None] | None:
     """Read the shipped graph stats sidecar after checking artifact identity.
 
-    A gzip tarball has no central index. Counting its members on every README,
-    docs, or GitHub About check is too slow for normal local/CI feedback, so
+    A gzip tarball has no central index. Counting its members on every README
+    or docs check is too slow for normal local/CI feedback, so
     releases ship a small sidecar tied to the artifact size and promotion hash.
     """
     graph_dir = REPO_ROOT / "graph"
@@ -506,74 +503,28 @@ def _read_graph_from_tarball() -> dict[str, int | None] | None:
 
 
 def read_graph_stats() -> dict:
-    """Return {nodes, edges, skills, agents, communities} from authoritative sources.
+    """The distributed engine contains no user knowledge (ADR-017).
 
-    Priority:
-      1. ``graph/wiki-graph-stats.json`` — the checked sidecar for the
-         shipped graph artifact. This keeps docs/About updates fast while
-         still tying counts to the release manifest's exact hash and size.
-      2. ``graph/wiki-graph.tar.gz`` — the release-manifest-pinned tarball
-         when it has been hydrated locally. Canonical but slow to enumerate.
-      3. ``scripts/ci_preflight.py`` graph contract counts — fallback
-         when a source checkout has not hydrated the release tarball.
-      4. ``~/.claude/skill-wiki/graphify-out/graph.json`` — the user's
-         live wiki. Used only when the tarball isn't present (e.g. a
-         bare clone without the release asset hydrated).
-
-    Without this priority the pre-commit hook can silently publish stale
-    contract numbers or whatever the user last re-graphified instead of
-    the artifact that users actually receive.
+    Never inspect personal homes, old release sidecars or downloaded archives
+    when updating public documentation. Zero is a valid inventory, not missing
+    data that should trigger a historical-catalog fallback.
     """
-    artifact_stats = _read_graph_artifact_stats()
-    if artifact_stats is not None:
-        return artifact_stats
-
-    tarball_stats = _read_graph_from_tarball()
-    if tarball_stats is not None:
-        return tarball_stats
-
-    contract_stats = _read_graph_contract_stats()
-    if contract_stats is not None:
-        return contract_stats
-
-    home = Path.home()
-    graph_json = home / ".claude/skill-wiki/graphify-out/graph.json"
-    communities_repo = REPO_ROOT / "graph/communities.json"
-
-    stats: dict[str, int | None] = {
-        "nodes": None,
-        "edges": None,
-        "skills": None,
-        "agents": None,
-        "mcps": None,
-        "harnesses": None,
-        "communities": None,
+    return {
+        key: 0
+        for key in (
+            "nodes",
+            "edges",
+            "skills",
+            "agents",
+            "mcps",
+            "harnesses",
+            "communities",
+            "semantic_edges",
+            "skills_sh_entries",
+            "skills_sh_bodies",
+            *_GRAPH_DERIVED_STATS,
+        )
     }
-
-    if graph_json.exists():
-        g = json.loads(graph_json.read_text(encoding="utf-8"))
-        stats["nodes"] = len(g.get("nodes", []))
-        edges_key = next((k for k in ("edges", "links") if k in g), None)
-        if edges_key:
-            stats["edges"] = len(g[edges_key])
-        type_counts: dict[str, int] = {}
-        for n in g.get("nodes", []):
-            t = n.get("type", "?")
-            type_counts[t] = type_counts.get(t, 0) + 1
-        stats["skills"] = type_counts.get("skill")
-        stats["agents"] = type_counts.get("agent")
-        stats["mcps"] = type_counts.get("mcp-server")
-        stats["harnesses"] = type_counts.get("harness")
-
-    if communities_repo.exists():
-        c = json.loads(communities_repo.read_text(encoding="utf-8"))
-        if isinstance(c, dict):
-            stats["communities"] = c.get("total_communities") or len(c.get("communities", []))
-        elif isinstance(c, list):
-            stats["communities"] = len(c)
-
-    stats.update(_read_skills_sh_catalog_stats())
-    return stats
 
 
 def _pytest_collect(interpreter: str) -> int | None:
@@ -757,12 +708,9 @@ def read_test_count(*, live: bool | None = None) -> int | None:
     return static
 
 
-def read_converted_count() -> int | None:
-    """Count converted micro-skill pipelines in wiki."""
-    conv_dir = Path.home() / ".claude/skill-wiki/converted"
-    if not conv_dir.exists():
-        return None
-    return sum(1 for p in conv_dir.iterdir() if p.is_dir())
+def read_converted_count() -> int:
+    """No converted tool bodies are shipped; never inspect personal knowledge."""
+    return 0
 
 
 def format_edges(n: int) -> str:
@@ -1465,22 +1413,11 @@ def build_docs_replacements(
     return reps
 
 
-def build_github_about_description(stats: Mapping[str, int | None]) -> str:
-    """Return the GitHub/HF one-line repo description from graph stats."""
-    nodes = int(stats.get("nodes") or 0)
-    skills = int(stats.get("skills") or 0)
-    agents = int(stats.get("agents") or 0)
-    mcps = int(stats.get("mcps") or 0)
-    harnesses = int(stats.get("harnesses") or 0)
-    if not all((nodes, skills, agents, mcps, harnesses)):
-        raise ValueError("missing graph stats for GitHub About description")
+def build_github_about_description() -> str:
+    """Return the stable one-line software product description."""
     return (
-        "Not an Amazon-style catalog or marketplace. ctx is a recommendation "
-        "layer: bring your org tools or use the shipped graph to load the "
-        "right skills, agents, MCPs, and harnesses only for the current dev "
-        "window, cutting token bills and local compute waste: "
-        f"{nodes:,}-node LLM-wiki graph, {skills:,} skills, "
-        f"{agents:,} agents, {mcps:,} MCPs, {harnesses:,} harnesses."
+        "CTX recommends relevant skills, agents and MCP tools from your own knowledge "
+        "graph while you work. Empty by default; your tools, your control."
     )
 
 
@@ -1497,8 +1434,8 @@ def read_github_about_description(repo: str = _GITHUB_REPO) -> str:
 
 
 def sync_github_about(*, check_only: bool = False, repo: str = _GITHUB_REPO) -> int:
-    """Check or update GitHub About so it matches README/docs graph stats."""
-    expected = build_github_about_description(read_graph_stats())
+    """Check or update GitHub About so it matches the stable product summary."""
+    expected = build_github_about_description()
     current = read_github_about_description(repo)
     if current == expected:
         print("GitHub About description is up to date.")
@@ -1534,11 +1471,27 @@ def _target_label(target: Path) -> Path:
 
 
 def patch_readme(check_only: bool = False) -> int:
-    stats = read_graph_stats()
-    tests = read_test_count(live=True)
-    converted = read_converted_count()
+    # Catalog pages describe user-owned schema, not a generated vendor catalog.
+    # Never rewrite them from local knowledge, a release cache or old counts.
+    stats: dict[str, int | None] = {
+        key: None
+        for key in ("nodes", "edges", "skills", "agents", "mcps", "harnesses", "communities")
+    }
+    targets = tuple(
+        target
+        for target in (README, DOCS_INDEX, DOCS_KNOWLEDGE_GRAPH, DOCS_CATALOG, DOCS_SKILL_ROUTER)
+        if _target_is_under_repo(target) and target.is_file()
+    )
+    inventory_marker = re.compile(
+        r"badge/Tests-[0-9]+_|[\d,]+\s+(?:tests collected|test inventory|pytest tests)"
+    )
+    has_inventory = any(
+        inventory_marker.search(target.read_text(encoding="utf-8")) for target in targets
+    )
+    tests = read_test_count(live=True) if has_inventory else None
+    converted = None
 
-    missing = [k for k, v in stats.items() if v is None] + (["tests"] if tests is None else [])
+    missing = ["tests"] if has_inventory and tests is None else []
     if missing:
         print(
             f"warning: could not resolve {missing}; those fields will be left untouched",
@@ -1546,15 +1499,7 @@ def patch_readme(check_only: bool = False) -> int:
         )
 
     changes: list[tuple[Path, str, str]] = []
-    for target in (
-        README,
-        DOCS_INDEX,
-        DOCS_KNOWLEDGE_GRAPH,
-        DOCS_CATALOG,
-        DOCS_SKILL_ROUTER,
-    ):
-        if not _target_is_under_repo(target) or not target.exists():
-            continue
+    for target in targets:
         replacements = (
             build_replacements(stats, tests, converted)
             if target == README
@@ -1620,7 +1565,7 @@ def main() -> None:
     parser.add_argument("--github-repo", default=_GITHUB_REPO, help="GitHub repo owner/name")
     args = parser.parse_args()
     if args.print_github_description:
-        print(build_github_about_description(read_graph_stats()))
+        print(build_github_about_description())
         return
     if args.check_github_about:
         sys.exit(sync_github_about(check_only=True, repo=args.github_repo))

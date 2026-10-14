@@ -46,10 +46,24 @@ from ctx_config import cfg
 REPO_ROOT = Path(__file__).resolve().parent.parent
 IMPORT_ROOT = REPO_ROOT / "imported-skills" / "designdotmd"
 MANIFEST_PATH = IMPORT_ROOT / "MANIFEST.json"
-DESIGNDOTMD_SOURCE = get_external_source("designdotmd")
+DESIGNDOTMD_SOURCE: ExternalSourceRecord | None = None
 
 _SAFE_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
+
+
+def _reviewed_source() -> ExternalSourceRecord:
+    """Resolve explicit import authority only when this maintenance helper runs."""
+    if DESIGNDOTMD_SOURCE is not None:
+        return DESIGNDOTMD_SOURCE
+    try:
+        return get_external_source("designdotmd")
+    except KeyError:
+        raise ValueError(
+            "No reviewed source record is configured for designdotmd; "
+            "supply an explicitly reviewed ExternalSourceRecord before importing. "
+            "CTX does not bundle this source or its corpus."
+        ) from None
 
 
 def load_manifest() -> dict:
@@ -487,12 +501,12 @@ def _atomic_write_text(parent_fd: int, destination_name: str, content: str) -> N
     fd = os.open(
         temp_name,
         os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
-        0o666 if existing_mode is None else existing_mode,
+        0o600,
         dir_fd=parent_fd,
     )
     try:
         if existing_mode is not None:
-            os.fchmod(fd, existing_mode)
+            os.fchmod(fd, existing_mode & ~stat.S_IWOTH)
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             fd = -1
             handle.write(content)
@@ -591,7 +605,7 @@ def _install_if_changed(
 
 def _prepare_entry(entry: dict, manifest: dict, target_dir: Path) -> tuple[Path, Path, str]:
     source_record: ExternalSourceRecord = validate_ingestion_manifest(
-        DESIGNDOTMD_SOURCE,
+        _reviewed_source(),
         manifest,
         import_mode="full-body",
     )
@@ -735,6 +749,11 @@ def main() -> None:
         parser.error("--install and --dry-run cannot be combined")
     if not args.install and not args.dry_run:
         parser.error("Pass either --install or --dry-run")
+
+    try:
+        _reviewed_source()
+    except ValueError as exc:
+        _fail(str(exc))
 
     try:
         manifest = load_manifest()

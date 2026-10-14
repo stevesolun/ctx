@@ -21,8 +21,8 @@ Design choices:
   unless ``apply_result`` is called explicitly. This keeps dry-runs safe.
 - Suggestions come from the persisted BehaviorProfile (if any). The
   interviewer *surfaces* them but never auto-accepts \u2014 the user chooses.
-- Starter templates are discovered via the existing toolbox.py loader so
-  there is exactly one source of truth for what "fresh-repo-init" offers.
+- Package and source-checkout template behavior is documented in
+  docs/toolbox/intent-interview.md; toolbox init does not seed definitions.
 
 CLI:
   python intent_interview.py detect                   # print RepoState
@@ -533,7 +533,7 @@ def preset_answers(preset: str) -> dict[str, str]:
 # \u2500\u2500 Apply to ToolboxSet \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 
 
-# Where starter JSON lives \u2014 same path toolbox.py uses.
+# Optional checkout templates are not included in the installed package.
 _TEMPLATES_DIR = Path(__file__).parent.parent / "docs" / "toolbox" / "templates"
 
 

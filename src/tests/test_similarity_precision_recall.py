@@ -43,8 +43,10 @@ model (~100MB on first run). Skip in fast CI with ``-m 'not integration'``.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -59,6 +61,7 @@ from corpus_cache import CorpusCache  # noqa: E402
 from cosine_ranker import CosineRanker  # noqa: E402
 from ctx_config import cfg  # noqa: E402
 from intake_gate import compose_corpus_text, run_intake_gate  # noqa: E402
+from scripts import tune_similarity_thresholds  # noqa: E402
 
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "similarity"
@@ -307,3 +310,68 @@ def test_fixture_schema_integrity():
             assert "description:" in p.b_md
             assert "## " in p.a_md
             assert "## " in p.b_md
+
+
+def test_threshold_grid_command_prints_deterministic_metrics_without_mutating_inputs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    fixture_dir = tmp_path / "similarity-fixtures"
+    fixture_dir.mkdir()
+    fixture_names = ("near_duplicates.jsonl", "distinct_pairs.jsonl", "adversarial.jsonl")
+    for name in fixture_names:
+        shutil.copy2(FIXTURE_DIR / name, fixture_dir / name)
+    before = {
+        name: hashlib.sha256((fixture_dir / name).read_bytes()).hexdigest()
+        for name in fixture_names
+    }
+    monkeypatch.setattr(tune_similarity_thresholds, "FIXTURE_DIR", fixture_dir)
+    monkeypatch.setattr(
+        tune_similarity_thresholds.cfg,
+        "build_intake_embedder",
+        lambda: object(),
+    )
+    controlled_scores = {
+        "near_duplicate": 0.92,
+        "distinct": 0.60,
+        "adversarial": 0.80,
+    }
+    monkeypatch.setattr(
+        tune_similarity_thresholds,
+        "_score",
+        lambda pair, _embedder, _root: controlled_scores[pair.label],
+    )
+
+    assert tune_similarity_thresholds.main([]) == 0
+
+    output = capsys.readouterr().out
+    threshold_labels = [
+        "0.50",
+        "0.55",
+        "0.60",
+        "0.65",
+        "0.70",
+        "0.75",
+        "0.80",
+        "0.82",
+        "0.85",
+        "0.88",
+        "0.90",
+        "0.93",
+    ]
+    rows = [
+        line.split()
+        for line in output.splitlines()
+        if line.strip() and line.split()[0] in threshold_labels
+    ]
+    assert [row[0] for row in rows] == threshold_labels
+    by_threshold = {row[0]: row[1:] for row in rows}
+    assert by_threshold["0.50"] == ["1.000", "0.429", "0.600", "30", "0", "40"]
+    assert by_threshold["0.82"] == ["1.000", "1.000", "1.000", "30", "0", "0"]
+    assert by_threshold["0.93"] == ["0.000", "0.000", "0.000", "0", "30", "0"]
+    after = {
+        name: hashlib.sha256((fixture_dir / name).read_bytes()).hexdigest()
+        for name in fixture_names
+    }
+    assert after == before

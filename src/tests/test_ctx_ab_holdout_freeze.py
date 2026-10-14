@@ -14,6 +14,21 @@ import pytest
 from scripts import ctx_ab_benchmark as benchmark
 from scripts import ctx_ab_exposure_ledger as exposure_ledger
 from scripts import ctx_ab_holdout_freeze as freezer
+from tests.release_catalog_fixture import (
+    historical_benchmark_artifacts as historical_benchmark_artifacts,
+)
+
+
+@pytest.fixture
+def historical_holdout_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+    historical_benchmark_artifacts: tuple[Path, Path],
+) -> None:
+    """Opt-in only for the old frozen-protocol integrity tests."""
+
+    archive, availability = historical_benchmark_artifacts
+    monkeypatch.setattr(benchmark, "PRODUCTION_CATALOG_ARCHIVE", archive)
+    monkeypatch.setattr(benchmark, "PRODUCTION_RUNTIME_AVAILABILITY", availability)
 
 
 PROTOCOL_ID = "production-graph-holdout-v2"
@@ -563,6 +578,7 @@ def _freeze(
     )
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_schedule_is_deterministic_complete_balanced_and_runner_compatible() -> None:
     documents = _fixture_documents()
     assert documents["protocol"]["execution_inputs"]["acquisition_protocol_sha256"] is None
@@ -622,6 +638,7 @@ def test_schedule_is_deterministic_complete_balanced_and_runner_compatible() -> 
     assert len(validated.assignments) == 30
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_freeze_binds_all_inputs_and_emits_runner_ready_private_outputs(
     tmp_path: Path,
 ) -> None:
@@ -951,6 +968,7 @@ def _set(document: str, *path: str, value: object) -> Mutation:
         ),
     ],
 )
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_freeze_rejects_tampered_missing_duplicate_extra_or_stale_inputs(
     tmp_path: Path,
     label: str,
@@ -966,6 +984,7 @@ def test_freeze_rejects_tampered_missing_duplicate_extra_or_stale_inputs(
 
 
 @pytest.mark.parametrize("output_name", ["schedule_path", "output_path"])
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_freeze_rejects_stale_outputs(tmp_path: Path, output_name: str) -> None:
     _, paths = _fixture_paths(tmp_path)
     paths[output_name].write_text("stale", encoding="utf-8")
@@ -976,6 +995,7 @@ def test_freeze_rejects_stale_outputs(tmp_path: Path, output_name: str) -> None:
     assert paths[output_name].read_text(encoding="utf-8") == "stale"
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_freeze_authenticates_acquisition_bytes_before_downstream_inputs(
     tmp_path: Path,
 ) -> None:
@@ -994,6 +1014,7 @@ def test_freeze_authenticates_acquisition_bytes_before_downstream_inputs(
     assert not paths["output_path"].exists()
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_freeze_rejects_noncanonical_acquisition_protocol_bytes(
     tmp_path: Path,
 ) -> None:
@@ -1012,6 +1033,7 @@ def test_freeze_rejects_noncanonical_acquisition_protocol_bytes(
     assert not paths["output_path"].exists()
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_freeze_rejects_invalid_acquisition_protocol_digest_shape(
     tmp_path: Path,
 ) -> None:
@@ -1040,6 +1062,7 @@ def test_freeze_rejects_invalid_acquisition_protocol_digest_shape(
         "tree-mismatch",
     ],
 )
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_freeze_rejects_untrusted_source_map_or_bundle(
     tmp_path: Path,
     kind: str,
@@ -1088,6 +1111,7 @@ def test_freeze_rejects_untrusted_source_map_or_bundle(
 
 
 @pytest.mark.parametrize("kind", ["symlink", "hardlink", "duplicate-path"])
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_freeze_rejects_source_bundle_aliases(
     tmp_path: Path,
     kind: str,
@@ -1113,6 +1137,7 @@ def test_freeze_rejects_source_bundle_aliases(
     assert not paths["output_path"].exists()
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_freeze_rejects_selection_intersecting_authenticated_exposure(
     tmp_path: Path,
 ) -> None:
@@ -1142,6 +1167,7 @@ def test_freeze_rejects_selection_intersecting_authenticated_exposure(
     assert not paths["output_path"].exists()
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_freeze_rejects_empty_authenticated_exposure_ledger(
     tmp_path: Path,
 ) -> None:
@@ -1164,6 +1190,7 @@ def test_freeze_rejects_empty_authenticated_exposure_ledger(
     assert not paths["output_path"].exists()
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_freeze_rejects_source_bundle_replaced_after_materialization(
     tmp_path: Path,
 ) -> None:
@@ -1200,6 +1227,7 @@ def test_freeze_rejects_source_bundle_replaced_after_materialization(
 
 
 @pytest.mark.parametrize("kind", ["missing", "tampered", "symlink", "hardlink"])
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_freeze_rejects_missing_tampered_or_aliased_exposure_ledger(
     tmp_path: Path,
     kind: str,
@@ -1224,6 +1252,7 @@ def test_freeze_rejects_missing_tampered_or_aliased_exposure_ledger(
     assert not paths["output_path"].exists()
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_cli_requires_expected_acquisition_protocol_digest(
     tmp_path: Path,
 ) -> None:
@@ -1261,6 +1290,7 @@ def test_cli_requires_expected_acquisition_protocol_digest(
     assert not paths["output_path"].exists()
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_freeze_rejects_non_private_symlink_hardlink_and_missing_inputs(
     tmp_path: Path,
 ) -> None:
@@ -1287,6 +1317,7 @@ def test_freeze_rejects_non_private_symlink_hardlink_and_missing_inputs(
         assert not paths["output_path"].exists()
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_freeze_rejects_invalid_timestamp_and_aliasing_paths(tmp_path: Path) -> None:
     _, paths = _fixture_paths(tmp_path)
     with pytest.raises(freezer.FreezeError, match="timestamp"):
@@ -1301,6 +1332,7 @@ def test_freeze_rejects_invalid_timestamp_and_aliasing_paths(tmp_path: Path) -> 
         _freeze(paths)
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_freeze_rejects_noncanonical_duplicate_and_nonfinite_json(
     tmp_path: Path,
 ) -> None:
@@ -1334,6 +1366,7 @@ def test_freeze_rejects_noncanonical_duplicate_and_nonfinite_json(
         assert not paths["output_path"].exists()
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_output_install_failure_rolls_back_private_schedule(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

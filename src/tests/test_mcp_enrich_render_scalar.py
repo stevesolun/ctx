@@ -19,6 +19,7 @@ injection vector should be shut at the writer).
 
 from __future__ import annotations
 
+import copy
 import sys
 from pathlib import Path
 
@@ -384,6 +385,46 @@ class TestRenderScalar:
                 sleep_seconds=0,
                 report_progress=False,
             )
+
+    def test_enrich_entities_flushes_at_positive_cadence_and_final_state(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        wiki = tmp_path / "wiki"
+        slugs = ["flush-a", "flush-b", "flush-c"]
+        for slug in slugs:
+            _write_pulsemcp_entity(wiki, slug)
+
+        class Source:
+            def fetch_details(self, slug, *, refresh=False):  # noqa: ARG002, ANN001, ANN201
+                return {"github_url": f"https://github.com/example/{slug}"}
+
+        snapshots: list[dict] = []
+        monkeypatch.setitem(_me.SOURCES, "pulsemcp", Source())
+        monkeypatch.setattr(
+            _me,
+            "save_checkpoint",
+            lambda _wiki, checkpoint: snapshots.append(copy.deepcopy(checkpoint)),
+        )
+        checkpoint = _me.load_checkpoint(wiki, "pulsemcp")
+        entities = [wiki / "entities" / "mcp-servers" / slug[0] / f"{slug}.md" for slug in slugs]
+
+        _me.enrich_entities(
+            entities,
+            source_name="pulsemcp",
+            wiki_path=wiki,
+            checkpoint=checkpoint,
+            flush_every=2,
+            sleep_seconds=0,
+            report_progress=False,
+        )
+
+        assert len(snapshots) == 2
+        assert snapshots[0]["total_seen"] == 2
+        assert set(snapshots[0]["processed"]) == {"flush-a", "flush-b"}
+        assert snapshots[1]["total_seen"] == 3
+        assert set(snapshots[1]["processed"]) == set(slugs)
 
     def test_dry_run_fetch_failure_exits_nonzero_without_checkpoint(self, tmp_path, monkeypatch):
         wiki = tmp_path / "wiki"

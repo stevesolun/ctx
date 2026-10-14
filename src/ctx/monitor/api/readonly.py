@@ -225,7 +225,8 @@ def handle_readonly_route(
     if name == "api_sidecars":
         return ReadOnlyApiResponse(deps.sidecar_page_payload(query))
     if name == "api_runtime":
-        return ReadOnlyApiResponse(deps.runtime_lifecycle_summary())
+        summary = deps.runtime_lifecycle_summary()
+        return ReadOnlyApiResponse(summary, status=503 if summary.get("error") else 200)
     if name == "api_skillspector":
         return ReadOnlyApiResponse(deps.skillspector_audit_payload(query))
     if name == "api_config":

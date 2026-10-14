@@ -23,8 +23,10 @@ Memory files live under:
 ~/.claude/projects/<slug>/memory/*.md
 ```
 
-The module recursively scans that tree. You can override the root with
-`--memory-root` (useful for tests or multi-project setups).
+The default scan root is `~/.claude/projects`, and the module recursively
+examines every Markdown file below it, not only directories named `memory`.
+Use `--memory-root` to restrict the scan to one project's memory directory
+(also useful for isolated tests).
 
 ## What counts as a reference
 

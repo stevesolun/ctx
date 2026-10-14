@@ -9,13 +9,16 @@ entrypoint yet; this is release infrastructure.
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import shlex
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -292,8 +295,9 @@ def write_fake_claude_cli(fake_modules: Path) -> Path:
         "    },\n"
         "    'PostToolUse': {\n"
         "        'hook_event_name': 'PostToolUse',\n"
-        "        'tool_name': 'Bash',\n"
-        "        'tool_input': {'command': 'pip install fastapi pytest'},\n"
+        "        'session_id': 'clean-host-fake-claude',\n"
+        "        'tool_name': 'Write',\n"
+        "        'tool_input': {'file_path': 'app/main.py'},\n"
         "    },\n"
         "    'Stop': {\n"
         "        'hook_event_name': 'Stop',\n"
@@ -477,6 +481,90 @@ def _prepare_dirs(paths: ContractPaths) -> None:
         path.mkdir(parents=True, exist_ok=True)
 
 
+def _dashboard_request(port: int, path: str) -> tuple[int, str, bytes]:
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+    try:
+        connection.request("GET", path)
+        response = connection.getresponse()
+        return response.status, response.headers.get_content_type(), response.read()
+    finally:
+        connection.close()
+
+
+def _run_installed_dashboard_smoke(
+    *,
+    python_bin: Path,
+    cwd: Path,
+    env: Mapping[str, str],
+    forbidden_text: Sequence[str],
+) -> None:
+    with socket.socket() as port_socket:
+        port_socket.bind(("127.0.0.1", 0))
+        port = int(port_socket.getsockname()[1])
+
+    process = subprocess.Popen(
+        [
+            str(python_bin),
+            "-m",
+            "ctx_monitor",
+            "serve",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+        ],
+        cwd=cwd,
+        env=dict(env),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                stdout, stderr = process.communicate()
+                raise AssertionError(
+                    "installed dashboard exited before serving: "
+                    f"stdout={stdout!r} stderr={stderr!r}"
+                )
+            try:
+                if _dashboard_request(port, "/api/status.json")[0] == 200:
+                    break
+            except (ConnectionError, OSError, http.client.HTTPException):
+                time.sleep(0.1)
+        else:
+            raise AssertionError("installed dashboard did not become ready within 15 seconds")
+
+        for path, content_type, json_type, markers in (
+            ("/", "text/html", None, ("ctx",)),
+            ("/status", "text/html", None, ("Status", "Telemetry health")),
+            ("/api/status.json", "application/json", dict, ()),
+            ("/api/sessions.json", "application/json", list, ()),
+        ):
+            status, actual_type, body = _dashboard_request(port, path)
+            text = body.decode("utf-8", "replace")
+            if status != 200 or actual_type != content_type:
+                raise AssertionError(
+                    f"installed dashboard {path} returned {status} {actual_type!r}"
+                )
+            if json_type is not None and not isinstance(json.loads(text), json_type):
+                raise AssertionError(f"installed dashboard {path} returned the wrong JSON shape")
+            if any(marker.casefold() not in text.casefold() for marker in markers):
+                raise AssertionError(f"installed dashboard {path} omitted expected content")
+            leaked = [value for value in forbidden_text if value and value in text]
+            if leaked:
+                raise AssertionError(f"installed dashboard {path} exposed host paths: {leaked}")
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        try:
+            process.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate()
+
+
 def _assert_fake_claude_hook_output(stdout: str) -> str:
     try:
         result = json.loads(stdout)
@@ -492,9 +580,7 @@ def _assert_fake_claude_hook_output(stdout: str) -> str:
     )
     for expected in (
         "ctx.adapters.claude_code.query_handler",
-        "ctx.adapters.claude_code.hooks.context_monitor",
         "skill_add_detector",
-        "ctx.adapters.claude_code.hooks.bundle_orchestrator",
         "usage_tracker",
         "ctx.adapters.claude_code.hooks.lifecycle_hooks",
     ):
@@ -525,15 +611,77 @@ def _assert_prompt_context_output(result: object, *, host: str) -> str:
     outputs = [
         str(row.get("stdout", "")) for row in result.get("commands", []) if isinstance(row, dict)
     ]
-    context_outputs = [output for output in outputs if "# ctx Python Testing" in output]
+    context_outputs = []
+    for output in outputs:
+        try:
+            envelope = json.loads(output)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(envelope, dict):
+            continue
+        specific = envelope.get("hookSpecificOutput")
+        if not isinstance(specific, dict) or specific.get("hookEventName") != "UserPromptSubmit":
+            continue
+        context = specific.get("additionalContext")
+        if not isinstance(context, str) or "CTX suggestions only" not in context:
+            continue
+        if "approval required" not in str(envelope.get("systemMessage")):
+            raise AssertionError(f"fake {host} suggestions omitted approval notice")
+        try:
+            rows = json.loads(context.rsplit("\n", 1)[1])
+        except (json.JSONDecodeError, IndexError) as exc:
+            raise AssertionError(f"fake {host} suggestions are not bounded metadata") from exc
+        _assert_user_recommendations(rows, host=host)
+        context_outputs.append(output)
     if len(context_outputs) != 1:
         raise AssertionError(
-            f"fake {host} hook smoke expected one authenticated canary context, "
+            f"fake {host} hook smoke expected one user-graph suggestion envelope, "
             f"got {len(context_outputs)}"
         )
-    if '"hookEventName":"UserPromptSubmit"' not in context_outputs[0]:
-        raise AssertionError(f"fake {host} canary output is not a prompt-hook envelope")
     return context_outputs[0]
+
+
+def _assert_user_recommendations(rows: object, *, host: str) -> None:
+    expected = {f"{kind}:user-python-{kind}" for kind in ("skill", "agent", "mcp-server")}
+    if (
+        not isinstance(rows, list)
+        or len(rows) != 3
+        or any(not isinstance(row, dict) for row in rows)
+        or {row.get("id") for row in rows} != expected
+    ):
+        raise AssertionError(f"{host} did not recommend the three user-owned tools: {rows!r}")
+
+
+def _assert_empty_knowledge(wiki: Path) -> None:
+    if not (wiki / "SCHEMA.md").is_file():
+        raise AssertionError("fresh knowledge workspace lacks its schema")
+    graph = json.loads((wiki / "graphify-out" / "graph.json").read_text(encoding="utf-8"))
+    if graph.get("nodes") != [] or graph.get("edges") != []:
+        raise AssertionError("fresh knowledge graph is not empty")
+    if any((wiki / "entities").rglob("*.md")):
+        raise AssertionError("fresh knowledge workspace contains seeded tools")
+
+
+def _write_user_graph(wiki: Path) -> None:
+    """Synthetic customer metadata for isolated tests, never a packaged catalog."""
+    directory = wiki / "graphify-out"
+    directory.mkdir(parents=True)
+    nodes = [
+        {
+            "id": f"{kind}:user-python-{kind}",
+            "label": f"user-python-{kind}",
+            "type": kind,
+            "tags": ["python", "tests"],
+            "status": "available",
+        }
+        for kind in ("skill", "agent", "mcp-server")
+    ]
+    (directory / "graph.json").write_text(
+        json.dumps(
+            {"directed": False, "multigraph": False, "graph": {}, "nodes": nodes, "edges": []}
+        ),
+        encoding="utf-8",
+    )
 
 
 def _quote_command(parts: Sequence[str | Path]) -> str:
@@ -790,6 +938,13 @@ def run_contract(
     py = venv_python(paths.venv)
     runner.run([str(py), "-m", "pip", "install", str(wheel)], cwd=project_root, env=env)
 
+    _run_installed_dashboard_smoke(
+        python_bin=py,
+        cwd=paths.tiny_repo,
+        env=isolated_env(paths),
+        forbidden_text=(str(Path.home()), str(project_root)),
+    )
+
     run_env = isolated_env(paths, extra_pythonpath=paths.fake_modules)
     ctx_init = venv_script(paths.venv, "ctx-init")
     ctx_scan_repo = venv_script(paths.venv, "ctx-scan-repo")
@@ -808,13 +963,29 @@ def run_contract(
         raise AssertionError("ctx-init --hooks did not write isolated settings.json")
     if not codex_hooks.exists():
         raise AssertionError("ctx-init --codex-hooks did not write isolated hooks.json")
+    _assert_empty_knowledge(claude_dir / "skill-wiki")
+    empty_result = runner.run(
+        [str(ctx), "recommend", "Fix the Python tests", "--json"],
+        cwd=paths.tiny_repo,
+        env=run_env,
+    )
+    if json.loads(empty_result.stdout).get("results") != []:
+        raise AssertionError("empty installed workspace returned recommendations")
+    user_wiki = paths.root / "user-wiki"
+    _write_user_graph(user_wiki)
     hook_env = dict(run_env)
     hook_env.update(
         {
-            "CTX_ENGINE_MODE": "activate",
+            "CTX_WIKI_DIR": str(user_wiki),
             "CTX_QUERY_DELIVERY_ROOT": str(paths.root / "query-delivery"),
         }
     )
+    user_result = runner.run(
+        [str(ctx), "recommend", "Fix the Python tests", "--json"],
+        cwd=paths.tiny_repo,
+        env=hook_env,
+    )
+    _assert_user_recommendations(json.loads(user_result.stdout).get("results"), host="CLI")
     fake_claude_result = runner.run(
         [
             str(py),
@@ -876,7 +1047,7 @@ def run_contract(
     # ModuleNotFoundError, so an exit-code check alone proved nothing. This
     # block is what would have caught ctx.fit being absent from the wheel.
     for surface, surface_argv, needle in (
-        ("bare ctx", [str(ctx)], "AI agent readiness"),
+        ("bare ctx", [str(ctx)], "ctx recommend"),
         ("ctx fit", [str(ctx), "fit", str(paths.tiny_repo)], "Repository:"),
         ("ctx doctor", [str(ctx), "doctor"], "CTX Fit diagnostics"),
     ):

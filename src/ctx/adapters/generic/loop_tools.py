@@ -40,7 +40,8 @@ def provision_skills(
     manual: list[dict[str, str]] = []
     failed: list[dict[str, str]] = []
 
-    for row in rows:
+    install_limit = min(max(top_k, 0), 5)
+    for row in rows[:install_limit]:
         if not isinstance(row, dict):
             continue
         slug = str(row.get("skill_id") or row.get("name") or "").strip()

@@ -468,24 +468,15 @@ def test_wiki_page_cache_reloads_when_wiki_pack_overlay_changes(tmp_path: Path) 
     assert second["results"][0]["slug"] == "pack-skill"
 
 
-def test_wiki_page_cache_reloads_for_attested_runtime_availability_page(
+def test_wiki_page_cache_reloads_for_user_authored_page_without_bundled_pages(
     tmp_path: Path,
 ) -> None:
     from ctx.core.wiki.wiki_query import _runtime_availability_page_specs
 
     wiki = tmp_path / "wiki"
-    write_wiki_base_pack(
-        pack_dir=wiki / "wiki-packs" / "base-export-1",
-        pack_id="base-export-1",
-        base_export_id="wiki-export-1",
-        pages={"entities/skills/pack-only.md": "# Pack only\n"},
-    )
-    spec = next(
-        spec
-        for spec in _runtime_availability_page_specs()
-        if spec.entity_type == "skill" and "nullable" in spec.content
-    )
-    source = wiki.joinpath(*spec.source_relpath.split("/"))
+    assert _runtime_availability_page_specs() == ()
+    source = wiki / "entities" / "skills" / "user-defined.md"
+    content = "---\nname: user-defined\ntype: skill\ntags: [nullable]\n---\nNullable values.\n"
     toolbox = CtxCoreToolbox(wiki_dir=wiki, graph_path=tmp_path / "missing.json")
 
     before = json.loads(
@@ -498,7 +489,7 @@ def test_wiki_page_cache_reloads_for_attested_runtime_availability_page(
         )
     )
     source.parent.mkdir(parents=True)
-    source.write_text(spec.content, encoding="utf-8")
+    source.write_text(content, encoding="utf-8")
     after_install = json.loads(
         toolbox.dispatch(
             ToolCall(
@@ -508,7 +499,9 @@ def test_wiki_page_cache_reloads_for_attested_runtime_availability_page(
             )
         )
     )
-    source.write_text(spec.content.replace("nullable", "nullablx"), encoding="utf-8")
+    source.write_text(
+        content.replace("nullable", "nullablx").replace("Nullable", "Nullablx"), encoding="utf-8"
+    )
     after_tamper = json.loads(
         toolbox.dispatch(
             ToolCall(
@@ -520,7 +513,7 @@ def test_wiki_page_cache_reloads_for_attested_runtime_availability_page(
     )
 
     assert before["results"] == []
-    assert [row["slug"] for row in after_install["results"]] == [spec.slug]
+    assert [row["slug"] for row in after_install["results"]] == ["user-defined"]
     assert after_tamper["results"] == []
 
 
@@ -579,6 +572,14 @@ class TestToolDefinitions:
     def test_recommend_requires_query(self, toolbox: CtxCoreToolbox) -> None:
         td = next(d for d in toolbox.tool_definitions() if d.name == "ctx__recommend_bundle")
         assert td.parameters["required"] == ["query"]
+
+    def test_unavailable_schema_describes_advisory_eligibility(
+        self, toolbox: CtxCoreToolbox
+    ) -> None:
+        td = next(d for d in toolbox.tool_definitions() if d.name == "ctx__recommend_bundle")
+        description = td.parameters["properties"]["include_unavailable"]["description"]
+        assert "remain eligible regardless" in description
+        assert "never authorize installation" in description
 
     def test_graph_query_requires_seeds(self, toolbox: CtxCoreToolbox) -> None:
         td = next(d for d in toolbox.tool_definitions() if d.name == "ctx__graph_query")
@@ -2015,7 +2016,7 @@ class TestRecommendBundle:
             "skill:remote-security",
             label="remote-security",
             type="skill",
-            tags=["security"],
+            tags=["security", "openai"],
             status="available",
             source_catalog="skill-index",
             install_command="ctx-skill-install remote-security",
@@ -3002,7 +3003,7 @@ class TestRecommendBundle:
         assert "skill:ctx-python-testing" in {row["id"] for row in result["results"]}
         assert result["context_policy"]["load"] == ["skill:ctx-python-testing"]
 
-    def test_local_no_key_filters_do_not_starve_runtime_recommendations(
+    def test_credential_filters_do_not_starve_local_recommendations(
         self,
         tmp_path: Path,
     ) -> None:
@@ -3013,7 +3014,7 @@ class TestRecommendBundle:
                 f"skill:{slug}",
                 label=slug,
                 type="skill",
-                tags=["python", "testing"],
+                tags=["python", "testing", "openai"],
                 status="available",
                 source_catalog="skill-index",
                 install_command=f"ctx-skill-install {slug}",
@@ -3384,7 +3385,7 @@ class TestRecommendBundle:
                 ToolCall(id="c1", name="ctx__recommend_bundle", arguments={"query": "python"})
             )
         )
-        assert "error" in result
+        assert result["status"] == "empty-knowledge"
         assert result["results"] == []
 
 
@@ -3431,6 +3432,106 @@ class TestGraphQuery:
         assert reviewer["selection_state"] == "suggested_related"
         assert reviewer["related_to"] == ["python-patterns"]
         assert "python-patterns" in reviewer["reason"]
+
+    def test_related_keeps_actionable_uninstalled_rows_and_excludes_unavailable_rows(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        graph = nx.Graph()
+        graph.add_node("skill:seed", label="seed", type="skill", tags=["python"])
+        graph.add_node(
+            "agent:local-reviewer",
+            label="local-reviewer",
+            type="agent",
+            tags=["python", "review"],
+        )
+        graph.add_node(
+            "skill:installable-helper",
+            label="installable-helper",
+            type="skill",
+            tags=["python"],
+            status="available",
+            source_catalog="skill-index",
+            install_command="ctx-skill-install installable-helper",
+        )
+        graph.add_node(
+            "skill:a-status-only-helper",
+            label="a-status-only-helper",
+            type="skill",
+            tags=["python"],
+            status="available",
+        )
+        missing_reviewers = [f"agent:missing-reviewer-{index}" for index in range(7)]
+        for node_id in missing_reviewers:
+            graph.add_node(
+                node_id,
+                label=node_id.removeprefix("agent:"),
+                type="agent",
+                tags=["python", "review"],
+            )
+        graph.add_node(
+            "agent:deprecated-reviewer",
+            label="deprecated-reviewer",
+            type="agent",
+            tags=["python", "review"],
+            status="deprecated",
+        )
+        graph.add_node(
+            "agent:rejected-reviewer",
+            label="rejected-reviewer",
+            type="agent",
+            tags=["python", "review"],
+        )
+        for neighbor in (
+            "agent:local-reviewer",
+            "skill:installable-helper",
+            "skill:a-status-only-helper",
+            "agent:deprecated-reviewer",
+            "agent:rejected-reviewer",
+            *missing_reviewers,
+        ):
+            graph.add_edge("skill:seed", neighbor, weight=1.0, shared_tags=["python"])
+
+        graph_path = tmp_path / "graph.json"
+        graph_path.write_text(
+            json.dumps(nx.node_link_data(graph, edges="edges")),
+            encoding="utf-8",
+        )
+        wiki = tmp_path / "wiki"
+        agents = wiki / "entities" / "agents"
+        agents.mkdir(parents=True)
+        for slug in ("local-reviewer", "deprecated-reviewer", "rejected-reviewer"):
+            (agents / f"{slug}.md").write_text(
+                f"---\nname: {slug}\ntype: agent\n---\n# {slug}\n",
+                encoding="utf-8",
+            )
+        toolbox = CtxCoreToolbox(wiki_dir=wiki, graph_path=graph_path)
+
+        related = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="availability-boundary",
+                    name="ctx__recommend_related",
+                    arguments={
+                        "selected": ["skill:seed"],
+                        "rejected": ["agent:rejected-reviewer"],
+                        "max_hops": 1,
+                        "top_n": 3,
+                    },
+                )
+            )
+        )
+
+        rows = {row["id"]: row for row in related["results"]}
+        assert set(rows) == {"agent:local-reviewer", "skill:installable-helper"}
+        assert rows["agent:local-reviewer"]["installable"] is True
+        assert rows["agent:local-reviewer"]["load_status"] == "local-wiki"
+        assert rows["skill:installable-helper"]["installable"] is False
+        assert rows["skill:installable-helper"]["load_status"] == "external-install-required"
+        assert rows["skill:installable-helper"]["install_command"] == (
+            "ctx-skill-install installable-helper"
+        )
+        assert all(row["reason"] for row in rows.values())
 
     def test_missing_seeds(self, toolbox: CtxCoreToolbox) -> None:
         result = json.loads(

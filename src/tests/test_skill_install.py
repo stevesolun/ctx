@@ -19,6 +19,7 @@ from ctx.adapters.claude_code.install import agent_install
 from ctx.adapters.claude_code.install import install_utils
 from ctx.adapters.claude_code.install import skill_install
 from ctx.adapters.claude_code.install.skillspector_scan import run_skillspector_scan
+from ctx.core.quality import skillspector_service
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
 
@@ -79,6 +80,42 @@ def _symlink_to(target: Path, link: Path, *, target_is_directory: bool) -> None:
         link.symlink_to(target, target_is_directory=target_is_directory)
     except (OSError, NotImplementedError) as exc:
         pytest.skip(f"symlinks unavailable in this environment: {exc}")
+
+
+@pytest.mark.parametrize(
+    ("scanner_exit", "expected_status", "expected_cli_exit"),
+    [(0, "passed", 0), (1, "findings", 1), (7, "error", 1)],
+)
+def test_skillspector_service_cli_maps_controlled_scanner_statuses(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    scanner_exit: int,
+    expected_status: str,
+    expected_cli_exit: int,
+) -> None:
+    scanner = tmp_path / f"skillspector-{scanner_exit}"
+    scanner.write_text(
+        (
+            f"#!{sys.executable}\n"
+            "print('controlled scanner output')\n"
+            f"raise SystemExit({scanner_exit})\n"
+        ),
+        encoding="utf-8",
+    )
+    scanner.chmod(0o755)
+    target = tmp_path / "candidate"
+    target.mkdir()
+    (target / "SKILL.md").write_text("# Candidate\n", encoding="utf-8")
+
+    cli_exit = skillspector_service.main(
+        [str(target), "--skillspector-bin", str(scanner), "--json"]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert cli_exit == expected_cli_exit
+    assert payload["status"] == expected_status
+    assert payload["exit_code"] == scanner_exit
+    assert payload["output"] == "controlled scanner output"
 
 
 # ── _pick_source ─────────────────────────────────────────────────────────────
@@ -214,6 +251,36 @@ class TestInstallSkill:
         # Entity status flipped.
         entity = wiki_dir / "entities" / "skills" / "s.md"
         assert "status: installed" in entity.read_text(encoding="utf-8")
+
+    def test_public_install_emits_real_load_event_only_after_success(
+        self,
+        wiki_dir: Path,
+        skills_dir: Path,
+        isolated_manifest: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import skill_telemetry
+
+        events_path = tmp_path / "telemetry" / "skill-events.jsonl"
+        monkeypatch.setattr(skill_telemetry, "DEFAULT_EVENTS_PATH", events_path)
+        _seed_skill(wiki_dir, "telemetry-skill")
+
+        installed = skill_install.install_skill(
+            "telemetry-skill",
+            wiki_dir=wiki_dir,
+            skills_dir=skills_dir,
+        )
+        refused = skill_install.install_skill(
+            "../refused",
+            wiki_dir=wiki_dir,
+            skills_dir=skills_dir,
+        )
+
+        events = list(skill_telemetry.read_events(events_path, trusted_root=tmp_path))
+        assert installed.status == "installed"
+        assert refused.status == "failed"
+        assert [(event.event, event.skill) for event in events] == [("load", "telemetry-skill")]
 
     def test_security_scan_output_is_attached_to_install_result(
         self,

@@ -2,7 +2,8 @@
 
 [`src/council_runner.py`](https://github.com/stevesolun/ctx/blob/main/src/council_runner.py)
 is the planner that turns a toolbox declaration into a concrete `RunPlan`
-the hook system can execute.
+for a host integration to execute. Neither this module nor the shipped hook
+emitter invokes agents.
 
 ## Responsibilities
 
@@ -71,5 +72,5 @@ CLI remains deterministic and cheap.
 
 ## Related
 
-- [Hooks & triggers](hooks.md) — how a plan gets executed.
+- [Hooks & triggers](hooks.md) — how plans are emitted and existing verdicts checked.
 - [Verdicts & guardrails](verdicts.md) — what the council leaves behind.

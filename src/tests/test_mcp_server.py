@@ -257,12 +257,34 @@ class TestInitialize:
     def test_tools_capability_declared(self) -> None:
         frames = _drive(_encode_request(1, "initialize", {}))
         result = frames[0]["result"]
-        assert "tools" in result["capabilities"]
+        assert result["capabilities"] == {"tools": {}}
 
     def test_state_flag_set(self) -> None:
         state = _ServerState()
         _handle_initialize(state, {})
         assert state.initialized is True
+
+    @pytest.mark.parametrize(
+        ("offered", "expected"),
+        [
+            ("2025-11-25", "2025-11-25"),
+            ("2024-11-05", "2024-11-05"),
+            ("2026-07-28", "2025-11-25"),
+            (None, "2025-11-25"),
+        ],
+    )
+    def test_negotiates_only_supported_legacy_versions(
+        self,
+        offered: str | None,
+        expected: str,
+    ) -> None:
+        params = {"protocolVersion": offered} if offered is not None else {}
+        state = _ServerState()
+
+        result = _handle_initialize(state, params)
+
+        assert result["protocolVersion"] == expected
+        assert state.negotiated_protocol_version == expected
 
 
 # ── Notifications ───────────────────────────────────────────────────────────
@@ -306,6 +328,13 @@ class TestNotifications:
         # emit a response for it.
         frames = _drive(_encode_notification("initialize", {}))
         assert frames == []
+
+
+class TestPing:
+    def test_ping_request_returns_empty_result(self) -> None:
+        frames = _drive(_encode_request("ping-1", "ping"))
+
+        assert frames == [{"jsonrpc": "2.0", "id": "ping-1", "result": {}}]
 
 
 # ── tools/list ──────────────────────────────────────────────────────────────
@@ -753,6 +782,27 @@ def test_package_reexports_load_server_lazily() -> None:
     assert completed.stderr == ""
 
 
+def test_cli_rejects_unknown_allowed_tool_before_server_start() -> None:
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "ctx.mcp_server.server",
+            "--allow-tools",
+            "ctx__wiki_get,ctx__not_a_tool",
+        ],
+        input=b"",
+        capture_output=True,
+        check=False,
+        timeout=10,
+    )
+
+    assert completed.returncode == 2
+    stderr = completed.stderr.decode("utf-8", errors="replace")
+    assert "unknown --allow-tools value" in stderr
+    assert "ctx__not_a_tool" in stderr
+
+
 @pytest.mark.parametrize("entrypoint", ["module", "console"])
 def test_module_and_console_handshakes_have_current_version_and_clean_stderr(
     entrypoint: str,
@@ -884,9 +934,10 @@ class TestRoundTripWithH2Client:
 
 
 class TestProtocolTables:
-    def test_handlers_has_three_entries(self) -> None:
+    def test_handlers_cover_legacy_requests(self) -> None:
         assert set(_HANDLERS.keys()) == {
             "initialize",
+            "ping",
             "tools/list",
             "tools/call",
         }

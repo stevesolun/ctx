@@ -65,9 +65,10 @@ that file.
 
 ## Example payload
 
-This excerpt is from the live adapter against the current ctx catalog. Exact
-recommendation names can change as the graph changes, but the contract shape is
-stable.
+This is an illustrative contract excerpt, not the exact output of either
+command above. Recommendation names depend on the local catalog, filters and
+selection state. Selected or rejected entities are excluded from returned
+recommendation rows.
 
 ```json
 {
@@ -131,7 +132,6 @@ stable.
       {"name": "loop-operator", "type": "agent"}
     ],
     "mcps": [
-      {"name": "local-ollama-file-operations", "type": "mcp-server"},
       {"name": "multi-model-advisor-ollama", "type": "mcp-server"}
     ],
     "harnesses": [
@@ -260,9 +260,8 @@ coordinator) and keep LoopFlow in control of physical tool changes.
 The adapter fails closed:
 
 - `--permissions skills` only returns skill recommendations.
-- Goals that imply local files, `feature_implementation`, no API keys, or a
-  clear programming language overfetch and then hide non-local, credentialed,
-  generic-planning, or wrong-language capability and related rows.
+- Goal context filters capability and related rows as described in the
+  [LoopFlow integration contract](attaching-to-hosts.md#4-loopflow-and-agent-loop-adapter-path).
 - `--permissions mcps` returns MCP server recommendations and exposes only
   read-only ctx MCP tools: recommendation, graph query, and wiki lookup.
 - Lifecycle MCP tools such as load, mark-used, validation, escalation, unload,

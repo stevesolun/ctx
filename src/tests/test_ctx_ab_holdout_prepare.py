@@ -18,6 +18,7 @@ from scripts import ctx_ab_benchmark as benchmark
 from scripts import ctx_ab_holdout as holdout
 from scripts import ctx_ab_holdout_freeze as freezer
 from scripts import ctx_ab_holdout_prepare as prepare
+from tests.release_catalog_fixture import RELEASE_CATALOG_FIXTURE_ROOT
 
 
 REVISION = "a" * 40
@@ -349,16 +350,17 @@ def test_protocol_generation_changes_seed_and_selects_disjoint_candidate_slots(
     )
 
 
-def test_built_protocol_satisfies_real_freezer_acquisition_contract() -> None:
+def test_built_protocol_satisfies_real_freezer_acquisition_contract(tmp_path: Path) -> None:
+    # This contract authenticates bytes, not a distributed production corpus.
+    catalog = _private_file(tmp_path / "catalog.bin", b"synthetic-test-catalog")
+    availability = RELEASE_CATALOG_FIXTURE_ROOT / "runtime-availability.json"
     product_inputs = {
         "benchmark_script_sha256": _sha256(Path(benchmark.__file__).read_bytes()),
-        "catalog_archive_sha256": _sha256(benchmark.PRODUCTION_CATALOG_ARCHIVE.read_bytes()),
+        "catalog_archive_sha256": _sha256(catalog.read_bytes()),
         "codex_binary_sha256": "a" * 64,
         "provider_config_sha256": benchmark.codex_provider_config_sha256("openai"),
         "revision": REVISION,
-        "runtime_availability_sha256": _sha256(
-            benchmark.PRODUCTION_RUNTIME_AVAILABILITY.read_bytes()
-        ),
+        "runtime_availability_sha256": _sha256(availability.read_bytes()),
     }
     if "origin_url" in freezer.PRODUCT_INPUT_KEYS:
         product_inputs.update(
@@ -379,7 +381,14 @@ def test_built_protocol_satisfies_real_freezer_acquisition_contract() -> None:
         exposure_ledger_sha256="d" * 64 if supports_exposure else None,
     )
 
-    assert freezer.validate_acquisition_protocol(protocol) == PINS
+    assert (
+        freezer.validate_acquisition_protocol(
+            protocol,
+            catalog_archive_path=catalog,
+            runtime_availability_path=availability,
+        )
+        == PINS
+    )
 
 
 def test_repository_state_rejects_dirty_worktree(

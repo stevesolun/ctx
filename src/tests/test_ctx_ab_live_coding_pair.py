@@ -10,12 +10,29 @@ from typing import Any
 import pytest
 
 from scripts import ctx_ab_benchmark as benchmark
+from tests.release_catalog_fixture import (
+    RELEASE_CATALOG_FIXTURE_ROOT,
+    historical_release_catalog as historical_release_catalog,
+)
 
 # Same constraint as the deterministic pair: this drives the LiteLLM runtime
 # through a loopback, so it cannot run without it. litellm is in the `harness`
 # extra, not `[dev]`, and CI's unit lane installs only `[dev]`. Guarded at the
 # module so an absent optional dependency reads as a skip, not 16 failures.
 pytest.importorskip("litellm")
+
+
+pytestmark = pytest.mark.usefixtures("historical_benchmark_catalog")
+
+
+@pytest.fixture
+def historical_benchmark_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+    historical_release_catalog: None,
+) -> None:
+    """Keep the legacy benchmark evidence bound to explicit test-owned bytes."""
+
+    monkeypatch.setattr(benchmark, "_RELEASE_CATALOG_ASSET_ROOT", RELEASE_CATALOG_FIXTURE_ROOT)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -39,7 +56,7 @@ def _contract(
         output=output,
         cache_root=cache_root,
         model=MODEL,
-        api_key_env=API_KEY_ENV,
+        provider_key_env_name=API_KEY_ENV,
         timeout=900,
         max_iterations=1,
         max_tokens=max_tokens,
@@ -396,7 +413,7 @@ def test_live_coding_pair_approval_binds_actual_runtime_arguments(tmp_path: Path
             output=output,
             cache_root=cache_root,
             model=MODEL,
-            api_key_env=API_KEY_ENV,
+            provider_key_env_name=API_KEY_ENV,
             timeout=900,
             max_iterations=1,
             max_tokens=2_049,
@@ -461,6 +478,7 @@ def test_live_coding_pair_cli_approves_plan_without_executing_provider(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    monkeypatch.setenv(API_KEY_ENV, "provider-secret-not-for-plan")
     output = tmp_path / "pair-output"
     cache_root = tmp_path / "cache"
     scenario = benchmark.load_scenarios(SCENARIOS)[0]
@@ -477,7 +495,10 @@ def test_live_coding_pair_cli_approves_plan_without_executing_provider(
     argv.extend(["--live-coding-pair-approval-sha256", approval])
     assert benchmark.main(argv) == 0
 
-    report = json.loads(capsys.readouterr().out)
+    output_text = capsys.readouterr().out
+    assert "provider-secret-not-for-plan" not in output_text
+    report = json.loads(output_text)
+    assert report["pair_contract"]["provider"]["api_key_environment"] == API_KEY_ENV
     assert report["schema"] == "ctx.live-coding-pair-approval-v1"
     assert report["approval_digest"] == approval
     assert report["execution_enabled"] is False
@@ -943,7 +964,7 @@ def test_live_coding_pair_runner_rejects_output_created_after_approval(
         ("max_iterations", 2, "requires --max-iterations 1"),
         ("max_tokens", None, "requires a positive --max-tokens"),
         ("base_url", "https://example.invalid/v1", "rejects custom provider routes"),
-        ("api_key_env", None, "requires --api-key-env"),
+        ("provider_key_env_name", None, "requires --api-key-env"),
         ("output", None, "requires an explicit --output path"),
         ("dry_run", True, "contract gate, not list/dry-run"),
     ],

@@ -23,14 +23,11 @@ installed separately. This is the dependency set CI installs in
 `-e` is for local work).
 
 `git config core.hooksPath .githooks` enables `.githooks/pre-commit`, which
-re-runs `src/update_repo_stats.py` and re-stages the refreshed `README.md`,
-`docs/index.md`, `docs/knowledge-graph.md`, and `docs/catalog.md` whenever a
-commit touches `src/tests/*.py` or the other stat sources. The `repo stats`
-check in `scripts/ci_preflight.py` is unconditional — it runs on every profile
-— and it fails when those files are stale. Since the no-test policy pushes
-nearly every PR to add or change tests, and changing the test count changes the
-README inventory badge, skipping the hook means fixing the badge by hand on
-almost every PR.
+runs the cheap public-stats check for relevant changes. CTX ships empty
+knowledge infrastructure: the updater must not read a personal wiki, hydrate
+a retired graph, or recreate corpus-count badges. It updates a test-inventory
+marker only when one is explicitly present; the current front doors have none.
+The preflight `repo stats` check is still unconditional.
 
 ## Running tests
 
@@ -56,10 +53,12 @@ developer machine, measured back to back on the same checkout:
 | the CI selection above | 4m41s |
 | `pytest -q` | 11m57s |
 
-The marker filter is not what makes the first one fast: it deselects only 14 of
-the 8,524 collected tests. The speedup is `-n auto`, which fans the suite
-across cores via pytest-xdist (already in the `dev` extra). `--dist=loadfile`
-keeps all tests from one file on one worker.
+The timings above are a historical measurement, not a performance guarantee.
+The marker filter excludes only the opt-in browser and integration lanes; the
+main speedup is `-n auto`, which fans the remaining suite across cores via
+pytest-xdist (already in the `dev` extra). `--dist=loadfile` keeps all tests
+from one file on one worker. Avoid recording collected or deselected totals
+here because every test-only change makes those numbers stale.
 
 ```bash
 pytest -q -m integration              # embedding precision/recall tests
@@ -92,9 +91,12 @@ release metadata update.
 
 ## Design decisions
 
-CTX Fit has a decision log. Before proposing a change to how Fit works, read it
-— sixteen ADRs (ADR-001 through ADR-016) are `ACCEPTED`, and they are not
-open for re-litigation without new evidence.
+CTX has a decision log. Read it before changing product behavior. ADR-017
+records the user-owned knowledge mandate and supersedes the earlier Fit-primary
+and shipped-corpus direction. The older decisions remain historical evidence;
+their safety, consent, cost-honesty, and verification boundaries still apply
+unless the newer decision explicitly supersedes them. Fit is now an optional
+evaluator, not the default product.
 
 - [`docs/ctx-fit/DECISIONS.md`](docs/ctx-fit/DECISIONS.md) — the ADRs
   themselves, each recorded once with its evidence.
@@ -129,13 +131,12 @@ the changed surface. Local-fast and preflight remain the first pass.
 
 ## Documentation changes
 
-Public docs surfaces are release-tracked in the canonical
-`qa/feature_status.csv` tracker, with supporting rows in
-`docs/qa/feature-user-story-status.csv` and
-`docs/qa/dashboard-user-story-status.csv`. If you add, remove, or move a
+Public docs surfaces are release-tracked only in `qa/feature_status.csv`.
+The former status CSVs under `docs/qa/` are non-authoritative pointers; do not
+add status or evidence there. If you add, remove, or move a
 `.md` entry under `mkdocs.yml` `nav`, or change linked public assets under
 `docs/assets/javascripts/`, `docs/services/`, or `docs/toolbox/templates/`,
-update the relevant supporting row and canonical row with the exact path in
+update the relevant canonical row with the exact path in
 `entrypoint_or_route` and run:
 
 ```bash
@@ -175,18 +176,18 @@ then `/tmp/ctx-verify-venv/bin`; the first owner-only venv containing
 `pytest`, `ruff`, and `mypy` wins and is exposed as
 `CTX_NO_MISTAKES_PYTHON_BIN_RESOLVED`.
 
-Codex executable discovery first accepts a valid
-`CTX_NO_MISTAKES_REAL_CODEX`. When that variable is unset, it checks
-`CTX_NO_MISTAKES_CODEX_RESOURCES/codex`, the colon-separated candidates in
-`CTX_NO_MISTAKES_CODEX_APP_PATHS`, then `codex` on `PATH`. When the app-path
-variable is unset, its candidates default to system `Codex.app`, system
-`ChatGPT.app`, user `Codex.app`, then user `ChatGPT.app`. An explicitly empty
-app-path value disables those app candidates. An invalid explicit executable
-fails closed with exit 127. A resource override is validated as an executable
-source only when `CTX_NO_MISTAKES_REAL_CODEX` is unset; when both are set and
-the executable is valid, the resource directory is prepended to `PATH` without
-separate validation. Invalid app candidates are skipped before the `PATH`
-fallback.
+Codex executable discovery validates non-empty executable and resource overrides.
+`CTX_NO_MISTAKES_REAL_CODEX` must name a runnable executable, and
+`CTX_NO_MISTAKES_CODEX_RESOURCES` must contain a runnable `codex`, even when
+both are set; either invalid override fails closed with exit 127. A valid
+explicit executable takes precedence, while the separately validated resource
+directory is prepended to `PATH`. Otherwise discovery checks the resource
+override, the colon-separated candidates in `CTX_NO_MISTAKES_CODEX_APP_PATHS`,
+then `codex` on `PATH`. When the app-path variable is unset, its candidates
+cover current nested `CodexCLI.app` executables and legacy resource executables
+in system and user `Codex.app` and `ChatGPT.app` bundles. An explicitly empty
+app-path value disables those app candidates. Invalid app candidates are
+skipped before the `PATH` fallback.
 
 The repo disables review-stage no-mistakes auto-fixes (`auto_fix.review: 0`) so
 review findings stay human-approved; rebase, test, document, lint, and CI stages
@@ -198,12 +199,13 @@ PyPI publishes must run from a version tag that matches `pyproject.toml`; manual
 PyPI workflow dispatch is disabled. The tagged commit must be the exact current
 `main` head and the latest canonical `Tests` workflow for that exact SHA must be
 a successful `main` push run. The publish workflow verifies those facts before
-building. `graph/release-artifacts.json` names the exact GitHub release or graph
-cache release that owns the five graph assets and binds every asset to its
-path, byte size, and SHA-256. The full and runtime archives are deliberately
-not tracked in Git. CI downloads only those two manifest-declared archives,
-validates the three small tracked assets against the same manifest, and has no
-Git LFS fallback.
+building. Build and inspect the wheel and source distribution for engine,
+configuration, and UI infrastructure only. Downloaded tool bodies, populated
+catalogs, graph archives, and test fixtures must not enter either artifact.
+CI does not hydrate historical graph releases and software publishing does not
+upload a CTX-owned graph dataset. Keep package identity, hashes, attestations,
+clean-install checks, and exact-head publication guards. Explicit user imports
+remain separately reviewed operations; they are not release prerequisites.
 
 ## Commit conventions
 

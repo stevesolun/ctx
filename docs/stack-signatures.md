@@ -1,10 +1,26 @@
 # Stack Signatures Reference
 
-> Maps file patterns and config markers to stack identifiers.
-> The scanner uses this to classify what a repo contains.
-> Organized by detection category. Each entry: pattern -> stack identifier + confidence.
+The implemented scanner contract lives in `src/scan_repo.py::detect_stack` and
+is pinned by `src/tests/test_scan_repo.py`. The current implementation detects:
 
-## Table of Contents
+- languages from `.py`, `.ts`/`.tsx`, `.js`/`.jsx`, `.rs`, `.go`, `.java`,
+  `.kt`, `.rb`, `.swift`, `.cs`, and `.php` files; confidence starts at `0.8`
+  and selected manifests or lockfiles add `0.1` each, capped at `1.0`;
+- Python/JavaScript dependencies for the web, AI/ML, payments, validation, and
+  data-store identifiers enumerated directly in `detect_stack`;
+- the exact framework, infrastructure, test, build, documentation, MCP, and
+  Claude Code filenames enumerated in that function; and
+- Terraform files plus Kubernetes, GitHub Actions, and monorepo directory or
+  manifest signals handled explicitly by that function.
+
+The tables below are a **coverage catalog**, not the executable scanner table.
+Rows that are not present in `detect_stack` are proposed coverage only, and
+some implemented confidence values differ from the catalog. Do not use this
+page to claim that a signal is detected; use the scanner JSON or the source and
+tests above. When a catalog row is implemented, add a behavior test before
+describing it as current behavior.
+
+## Coverage catalog
 1. [Languages](#languages)
 2. [Web Frameworks](#web-frameworks)
 3. [AI/ML Frameworks](#aiml-frameworks)

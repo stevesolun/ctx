@@ -558,7 +558,11 @@ def test_main_writes_wiki_base_pack_after_page_updates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from ctx.core.wiki import wiki_graphify
-    from ctx.core.wiki.wiki_packs import discover_wiki_pack_manifests, load_merged_wiki_pages
+    from ctx.core.wiki.wiki_packs import (
+        discover_wiki_pack_manifests,
+        load_merged_wiki_pages,
+        write_active_wiki_overlay_pack,
+    )
 
     wiki = tmp_path / "wiki"
     skill_pages = wiki / "entities" / "skills"
@@ -601,7 +605,9 @@ def test_main_writes_wiki_base_pack_after_page_updates(
         assert "[[entities/skills/b]]" in pages["entities/skills/a.md"]
         assert any(path.startswith("concepts/community-") for path in pages)
 
-        (skill_pages / "a.md").write_text("# a v2\n", encoding="utf-8")
+        write_active_wiki_overlay_pack(
+            packs_dir=wiki / "wiki-packs", pages={"entities/skills/a.md": "# a v2\n"}
+        )
         wiki_graphify.main()
         pages = load_merged_wiki_pages(wiki / "wiki-packs")
     finally:

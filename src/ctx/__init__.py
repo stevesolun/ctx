@@ -1,17 +1,15 @@
-"""CTX Fit plus the established ctx integration and recommendation APIs.
+"""CTX: relevant tool suggestions over user-owned graph and wiki knowledge.
 
-The primary product surface profiles a repository, evaluates a bounded set of
-AI coding capability configurations with repository-native verification, and
-materializes the cheapest configuration that reliably works::
+CTX ships the engine and infrastructure, not a populated tool catalog.
+Initialize an empty local wiki, add your own records, and ask about a task::
 
-    ctx fit
-    ctx fit --dry-run
-    ctx fit --test --budget 10
-    ctx fit --apply
+    ctx-init --model-mode skip
+    ctx recommend "review the API changes" --json
 
-Version 1.0.21 compares capability configurations within one coding-agent
-harness; it does not claim a cross-harness benchmark. The compatibility
-surfaces below remain available for direct integration:
+Native prompt hooks, CLI, MCP, and Python use the shared recommendation engine.
+Suggestions do not grant installation, activation, or unload permission.
+CTX Fit remains an optional evaluator invoked explicitly with ``ctx fit``.
+The integration surfaces below remain available:
 
   1. **MCP server** — attach from any MCP host (Claude Code, Claude
      Agent SDK, Cline, Goose, OpenHands, custom):
@@ -42,7 +40,7 @@ Package layout:
       .generic       - model-agnostic harness (LiteLLM, MCP, loop,
                        session, compaction, ctx-core tools)
       .loopflow      - LoopFlow/custom agent-loop recommendation adapter
-    ctx.cli        - user-facing CLI entrypoints (`ctx run` et al.)
+    ctx.cli        - recommendation, optional Fit, and harness CLI entrypoints
     ctx.mcp_server - the standalone MCP server (H8)
     ctx.api        - blessed public Python API for custom harnesses
     ctx.utils      - low-level primitives (safe names, atomic IO)

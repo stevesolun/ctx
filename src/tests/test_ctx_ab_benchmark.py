@@ -23,6 +23,9 @@ import pytest
 import yaml
 
 from ctx.adapters.generic.adaptive_runtime import secure_skill_reads_available
+from tests.release_catalog_fixture import (
+    historical_benchmark_artifacts as historical_benchmark_artifacts,
+)
 
 if TYPE_CHECKING:
     from scripts.ctx_ab_benchmark import CatalogSnapshot
@@ -35,6 +38,20 @@ assert SPEC is not None and SPEC.loader is not None
 benchmark = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = benchmark
 SPEC.loader.exec_module(benchmark)
+
+
+@pytest.fixture
+def historical_holdout_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+    historical_benchmark_artifacts: tuple[Path, Path],
+) -> None:
+    """Bind only opted-in historical holdout tests to explicit synthetic inputs."""
+
+    archive, availability = historical_benchmark_artifacts
+    monkeypatch.setattr(benchmark, "PRODUCTION_CATALOG_ARCHIVE", archive)
+    monkeypatch.setattr(benchmark, "PRODUCTION_RUNTIME_AVAILABILITY", availability)
+
+
 CODEX_RUNTIME_CONTRACT = {
     "arms": ["baseline", "ctx-light"],
     "model_auto_compact_token_limit": 200_000,
@@ -3899,20 +3916,23 @@ def test_invalid_treatment_fails_before_workspace_or_codex(
     assert not (tmp_path / "output").exists()
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_official_arm_mismatch_fails_before_workspace_or_codex(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    holdout_root = tmp_path / "holdout"
-    holdout_root.mkdir()
-    holdout, _ = _official_holdout_fixture(holdout_root)
-    scenario = holdout.scenarios[0]
-
     def side_effect_forbidden(*_args: object, **_kwargs: object) -> object:
         raise AssertionError("arm mismatch must fail before external work")
 
     monkeypatch.setattr(benchmark, "prepare_official_workspace", side_effect_forbidden)
     monkeypatch.setattr(benchmark, "run_process", side_effect_forbidden)
+    # Early arm rejection does not depend on the host's installed packages.
+    monkeypatch.setattr(benchmark, "python_dependencies_sha256", lambda _python: "0" * 64)
+
+    holdout_root = tmp_path / "holdout"
+    holdout_root.mkdir()
+    holdout, _ = _official_holdout_fixture(holdout_root)
+    scenario = holdout.scenarios[0]
 
     with pytest.raises(ValueError, match="arm does not match"):
         benchmark.run_trial(
@@ -6144,6 +6164,17 @@ def test_production_ctx_run_subprocess_compares_both_arms_with_local_provider(
 
     shim_dir = tmp_path / "provider-shim"
     shim_dir.mkdir()
+    # This exercises child CLI/provider/lifecycle wiring, not selection latency.
+    # Keep real selection with its explicit semantic-test budget; the production
+    # 50 ms boundary is covered by test_selector_default_deadline_is_checked_after_file_read.
+    (shim_dir / "sitecustomize.py").write_text(
+        "from functools import partial\n"
+        "from ctx.adapters.generic import adaptive_runtime\n\n"
+        "adaptive_runtime.select_installed_skill = partial(\n"
+        "    adaptive_runtime.select_installed_skill, selection_timeout_ms=5_000\n"
+        ")\n",
+        encoding="utf-8",
+    )
     (shim_dir / "litellm.py").write_text(
         """
 import json
@@ -7524,6 +7555,7 @@ def test_official_campaign_state_is_shared_by_independent_clones(
         )
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_origin_main_drift_fails_pre_arm_identity_check(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -7554,6 +7586,7 @@ def test_origin_main_drift_fails_pre_arm_identity_check(
         benchmark.validate_official_repository_identity(holdout)
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_dirty_worktree_fails_pre_arm_identity_check(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -7621,6 +7654,7 @@ def test_repository_state_ignores_ambient_git_repository_redirects(
     assert state["tracked_diff_sha256"] != hashlib.sha256(b"").hexdigest()
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_execution_frozen_holdout_authenticates_all_inputs_and_balanced_schedule(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -7673,6 +7707,7 @@ def test_execution_frozen_holdout_authenticates_all_inputs_and_balanced_schedule
     assert holdout.origin_main_revision == "a" * 40
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_execution_frozen_holdout_rejects_selection_repository_map_replay(
     tmp_path: Path,
 ) -> None:
@@ -7737,6 +7772,7 @@ def test_execution_frozen_holdout_rejects_selection_repository_map_replay(
     assert not (state_root / "assignment-consumption" / f"{forged_assignment_sha256}.json").exists()
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_official_catalog_requires_the_frozen_cold_cache_contract(tmp_path: Path) -> None:
     holdout, _ = _official_holdout_fixture(tmp_path)
     cold = benchmark.CatalogSnapshot(tmp_path / "cold", {}, cache_hit=False)
@@ -7747,6 +7783,7 @@ def test_official_catalog_requires_the_frozen_cold_cache_contract(tmp_path: Path
         benchmark.validate_official_catalog_cache_contract(holdout, warm)
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_execution_frozen_holdout_loads_from_documented_module_mode(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -7759,6 +7796,7 @@ def test_execution_frozen_holdout_loads_from_documented_module_mode(
     assert len(holdout.scenarios) == 10
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_execution_frozen_holdout_rejects_codex_or_provider_identity_drift(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -7796,6 +7834,7 @@ def test_execution_frozen_holdout_rejects_codex_or_provider_identity_drift(
         )
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_runtime_reauthentication_rejects_mid_campaign_codex_drift(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -7824,6 +7863,7 @@ def test_runtime_reauthentication_rejects_mid_campaign_codex_drift(
         benchmark.validate_holdout_execution_conditions(holdout, **conditions)
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_runtime_reauthentication_rejects_python_dependency_drift(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -7845,6 +7885,7 @@ def test_runtime_reauthentication_rejects_python_dependency_drift(
         )
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_execution_frozen_holdout_requires_python_dependency_identity(
     tmp_path: Path,
 ) -> None:
@@ -7880,6 +7921,7 @@ def test_execution_frozen_holdout_requires_python_dependency_identity(
     assert holdout.execution_conditions["python"]["dependencies_sha256"]
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_execution_frozen_holdout_rejects_authenticated_runtime_arm_mismatch(
     tmp_path: Path,
 ) -> None:
@@ -7945,6 +7987,7 @@ def test_python_dependency_identity_is_canonical_and_fail_closed(
         ("arbitrary", "acquisition protocol identity"),
     ],
 )
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_execution_frozen_holdout_rejects_invalid_acquisition_provenance(
     tmp_path: Path,
     mutation: str,
@@ -7979,6 +8022,7 @@ def test_execution_frozen_holdout_rejects_invalid_acquisition_provenance(
     assert holdout.acquisition_protocol_sha256 != "9" * 64
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_execution_frozen_holdout_rejects_rehashed_claim_gate_drift(
     tmp_path: Path,
 ) -> None:
@@ -8014,6 +8058,7 @@ def test_execution_frozen_holdout_rejects_rehashed_claim_gate_drift(
         )
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_execution_frozen_holdout_rejects_noncanonical_acquisition_digest(
     tmp_path: Path,
 ) -> None:
@@ -8047,6 +8092,7 @@ def test_execution_frozen_holdout_rejects_noncanonical_acquisition_digest(
         )
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_execution_frozen_holdout_rejects_mutated_materialization_input(
     tmp_path: Path,
 ) -> None:
@@ -8069,6 +8115,7 @@ def test_execution_frozen_holdout_rejects_mutated_materialization_input(
         )
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_execution_frozen_holdout_rejects_incomplete_evaluator_closure(
     tmp_path: Path,
 ) -> None:
@@ -8203,6 +8250,7 @@ def _official_result_rows(
     "artifact",
     ["protocol", "selection", "scenario_pack", "collision", "controls"],
 )
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_official_verdict_rejects_post_attestation_artifact_drift(
     tmp_path: Path,
     artifact: str,
@@ -8233,11 +8281,17 @@ def test_official_verdict_rejects_post_attestation_artifact_drift(
     assert not (output / "public-summary.json").exists()
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_authenticated_freeze_drives_all_thirty_pairs_and_sixty_arms(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    historical_benchmark_artifacts: tuple[Path, Path],
 ) -> None:
     monkeypatch.setattr(benchmark.sys, "platform", "darwin")
+    archive, _availability = historical_benchmark_artifacts
+    # This dispatcher test uses explicit test-owned bytes, not release downloads.
+    # The real manifest/hydration boundary is exercised independently above.
+    monkeypatch.setattr(benchmark, "hydrate_production_catalog_archive", lambda: archive)
     holdout, paths = _official_holdout_fixture(tmp_path)
     result_by_key = {
         (row["scenario"], row["trial"], row["arm"]): dict(row)
@@ -8524,6 +8578,7 @@ def test_authenticated_freeze_drives_all_thirty_pairs_and_sixty_arms(
     assert (state_root / "protocol-consumption" / f"{holdout.protocol_sha256}.json").is_file()
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_confirmatory_dual_model_failure_is_valid_honest_negative(
     tmp_path: Path,
 ) -> None:
@@ -8583,6 +8638,7 @@ def _updated_official_rows(
     return updated
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_official_claim_rejects_time_only_improvement(tmp_path: Path) -> None:
     holdout, _ = _official_holdout_fixture(tmp_path)
     rows = _updated_official_rows(
@@ -8619,6 +8675,7 @@ def test_official_claim_rejects_time_only_improvement(tmp_path: Path) -> None:
     assert report["product_benefit_verdict"] == "not_beneficial"
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_official_claim_requires_delivery_in_all_ten_repositories(tmp_path: Path) -> None:
     holdout, _ = _official_holdout_fixture(tmp_path)
     first_scenario = holdout.scenarios[0].id
@@ -8675,6 +8732,7 @@ def test_official_claim_requires_delivery_in_all_ten_repositories(tmp_path: Path
     assert report["product_benefit_verdict"] == "not_beneficial"
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_confirmatory_rejects_unknown_delegated_agent_tokens(tmp_path: Path) -> None:
     holdout, _ = _official_holdout_fixture(tmp_path)
     rows = _official_result_rows(
@@ -8728,6 +8786,7 @@ def test_entity_activity_claims_only_observed_lifecycle_transitions() -> None:
     }
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_official_verifier_is_the_scored_quality_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -8804,6 +8863,7 @@ def test_official_development_timing_includes_ctx_catalog_but_excludes_evaluator
     assert baseline["development_seconds"] == 10.0
 
 
+@pytest.mark.usefixtures("historical_holdout_artifacts")
 def test_official_verifier_boundary_classifies_unexpected_failures_as_evaluator(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

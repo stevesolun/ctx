@@ -3,8 +3,13 @@ from __future__ import annotations
 from dataclasses import asdict
 from email.message import Message
 from io import BytesIO
+import hashlib
 import json
+import os
+import runpy
 import stat
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +55,39 @@ def _redirect_real_event_telemetry(
 
     monkeypatch.setattr(telemetry, "_config_get", config_get)
     monkeypatch.setattr(telemetry, "record_event", record_event)
+
+
+def test_safe_examples_never_access_default_home_salt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    caller_home = tmp_path / "caller-home"
+    caller_home.mkdir()
+    default_salt = caller_home / ".ctx" / "telemetry" / "hash-salt"
+    monkeypatch.setenv("HOME", str(caller_home))
+    monkeypatch.delenv("CTX_TELEMETRY_HASH_SALT", raising=False)
+    monkeypatch.setattr(
+        telemetry,
+        "_config_get",
+        lambda key, default: (
+            {"privacy": {"hash_salt_path": str(default_salt)}} if key == "telemetry" else default
+        ),
+    )
+
+    def reject_salt_access(path: Path) -> Any:
+        pytest.fail(f"safe examples accessed filesystem salt: {path}")
+
+    monkeypatch.setattr(telemetry, "_read_or_create_hash_salt", reject_salt_access)
+    monkeypatch.setattr(telemetry, "_read_hash_salt_identity", reject_salt_access)
+    monkeypatch.setattr(telemetry, "record_event", record_event)
+    helper = Path(__file__).resolve().parents[2] / "qa/feature-audit/safe_examples.py"
+    runpy.run_path(str(helper), run_name="__main__")
+
+    result = json.loads(capsys.readouterr().out)
+    assert result["telemetry_preview_attempted"] == 2
+    assert result["telemetry_exported"] == result["telemetry_replayed"] == 2
+    assert list(caller_home.iterdir()) == []
 
 
 def test_record_event_writes_local_redacted_envelope(tmp_path: Path) -> None:
@@ -104,6 +142,53 @@ def test_record_event_writes_local_redacted_envelope(tmp_path: Path) -> None:
     assert got[0].trace_id == event.trace_id
     assert got[0].span_id == event.span_id
     assert got[0].ctx_version == event.ctx_version
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_sanitize_payload_enforces_default_key_limit(nested: bool) -> None:
+    boundary = {f"metric{i}": i for i in range(40)}
+    payload = {"nested": boundary} if nested else boundary
+    assert telemetry.sanitize_payload(payload, config={}) == payload
+    boundary["metric40"] = 40
+    with pytest.raises(ValueError, match="41 keys; max 40"):
+        telemetry.sanitize_payload(payload, config={})
+
+
+def test_sanitize_payload_enforces_string_collection_and_depth_boundaries() -> None:
+    sanitized = telemetry.sanitize_payload(
+        {
+            "exact": "a" * 1024,
+            "long": "b" * 1025,
+            "items": list(range(1025)),
+            "nested": {"level2": {"level3": {"scalar": "visible", "level4": {"x": 1}}}},
+        },
+        config={},
+    )
+    assert sanitized["exact"] == "a" * 1024
+    assert sanitized["long"] == "b" * 1024 + "...[truncated]"
+    assert sanitized["items"] == list(range(1024))
+    assert sanitized["nested"] == {"level2": {"level3": {"scalar": "visible", "level4": "'dict'"}}}
+
+
+def test_sanitize_payload_applies_custom_limits_to_nested_values() -> None:
+    config = {"limits": {"max_payload_keys": 2, "max_payload_value_chars": 3}}
+    assert telemetry.sanitize_payload(
+        {"nested": {"a": "abcd", "b": [0, 1, 2, 3]}}, config=config
+    ) == {"nested": {"a": "abc...[truncated]", "b": [0, 1, 2]}}
+    with pytest.raises(ValueError, match="3 keys; max 2"):
+        telemetry.sanitize_payload({"nested": {"a": 1, "b": 2, "c": 3}}, config=config)
+
+
+def test_sanitize_payload_bounds_and_redacts_non_json_value_representation() -> None:
+    class Diagnostic:
+        def __repr__(self) -> str:
+            return "sk-ABCDEFGHIJKLMNOPQRSTUVWX " + "x" * 2000
+
+    sanitized = telemetry.sanitize_payload({"diagnostic": Diagnostic()}, config={})
+    value = sanitized["diagnostic"]
+    assert "sk-ABCDEFGHIJKLMNOPQRSTUVWX" not in value
+    assert "[redacted]" in value
+    assert len(value) == 1024 + len("...[truncated]")
 
 
 def test_sanitize_payload_hashes_common_path_key_shapes() -> None:
@@ -879,6 +964,200 @@ def test_telemetry_export_cli_rejects_unknown_privacy_mode(
     payload = json.loads(capsys.readouterr().out)
     assert payload["failed"] == 1
     assert "telemetry.mode must be one of" in payload["error"]
+
+
+def test_telemetry_export_cli_dry_run_is_read_only_in_fresh_home(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {**os.environ, "HOME": str(home)}
+    env.pop("CTX_TELEMETRY_HASH_SALT", None)
+
+    completed = subprocess.run(
+        [sys.executable, "-m", "ctx.cli.telemetry", "--dry-run", "--json"],
+        cwd=tmp_path,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=30,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    summary = json.loads(completed.stdout)
+    assert summary["status"] == "noop"
+    assert summary["attempted"] == 0
+    assert summary["exported"] == 0
+    assert summary["failed"] == 0
+    assert summary["dry_run"] is True
+    assert summary["destination_hash"].startswith("sha256:")
+    assert list(home.iterdir()) == []
+
+
+@pytest.mark.parametrize("signal", ["events", "metrics", "traces"])
+@pytest.mark.parametrize(
+    "global_salt", ["existing_file", "missing_file", "unavailable", "inline", "absent"]
+)
+@pytest.mark.parametrize(
+    "partial_privacy", ["absent", "empty_bytes", "global_config", "unavailable_local"]
+)
+def test_partial_config_export_preview_preserves_checkpoint_and_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    signal: str,
+    global_salt: str,
+    partial_privacy: str,
+) -> None:
+    salt_path = tmp_path / "identity" / "hash-salt"
+    global_privacy: dict[str, Any] = {}
+    if global_salt in {"existing_file", "missing_file", "unavailable"}:
+        global_privacy["hash_salt_path"] = str(salt_path)
+    if global_salt == "existing_file":
+        salt_path.parent.mkdir()
+        salt_path.write_text("global-tenant\n", encoding="utf-8")
+    elif global_salt == "inline":
+        global_privacy["hash_salt"] = "global-tenant"
+    elif global_salt == "unavailable":
+        salt_path.parent.write_text("not a directory", encoding="utf-8")
+    monkeypatch.delenv("CTX_TELEMETRY_HASH_SALT", raising=False)
+    for name in (
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    global_config: dict[str, Any] = {"privacy": global_privacy}
+    monkeypatch.setattr(
+        telemetry,
+        "_config_get",
+        lambda key, default: global_config if key == "telemetry" else default,
+    )
+    path = tmp_path / f"{signal}.jsonl"
+    record_config: dict[str, Any] = {"privacy": {"hash_salt": "fixture-salt"}}
+    if signal == "metrics":
+        record_config["metrics"] = {"enabled": True}
+        assert (
+            record_counter(
+                "ctx.api.requests",
+                path=path,
+                trusted_root=tmp_path,
+                config=record_config,
+            )
+            is not None
+        )
+    else:
+        assert (
+            record_event(
+                "ctx.api.recommend_bundle",
+                source="ctx-api",
+                path=path,
+                trusted_root=tmp_path,
+                config=record_config,
+            )
+            is not None
+        )
+    otlp_signal = "logs" if signal == "events" else signal
+    export_config = {
+        "enabled": True,
+        "sink": "otlp_http",
+        "span_maturity_seconds": 0,
+        "otlp": {"endpoint": f"http://127.0.0.1:4318/v1/{otlp_signal}"},
+    }
+    signal_config = {"enabled": True, "path": str(path), "export": export_config}
+    configured: dict[str, Any] = signal_config if signal == "events" else {signal: signal_config}
+    if partial_privacy == "empty_bytes":
+        configured["privacy"] = {"hash_salt": b""}
+    elif partial_privacy == "global_config":
+        global_config.update(configured)
+    elif partial_privacy == "unavailable_local":
+        local_salt_parent = tmp_path / "local-identity"
+        local_salt_parent.write_text("not a directory", encoding="utf-8")
+        configured["privacy"] = {"hash_salt_path": str(local_salt_parent / "hash-salt")}
+    config = None if partial_privacy == "global_config" else configured
+
+    def run_export(
+        *, preview: bool = False
+    ) -> telemetry.ExportResult | telemetry.MetricExportResult:
+        if signal == "metrics":
+            metric_exporter = (
+                telemetry.preview_metrics_export if preview else telemetry.export_metrics
+            )
+            return metric_exporter(path, trusted_root=tmp_path, config=config)
+        if signal == "events":
+            exporter = telemetry.preview_export if preview else telemetry.export_events
+        else:
+            exporter = telemetry.preview_traces_export if preview else telemetry.export_traces
+        return exporter(path, trusted_root=tmp_path, config=config)
+
+    calls: list[dict[str, Any]] = []
+
+    def fake_post_otlp_http(payload: dict[str, Any], settings: dict[str, Any]) -> None:
+        calls.append(payload)
+
+    def reject_salt_creation(path: Path) -> str:
+        pytest.fail(f"preview attempted salt creation: {path}")
+
+    def snapshot() -> dict[Path, tuple[int, int, bytes | None]]:
+        return {
+            item.relative_to(tmp_path): (
+                stat.S_IMODE(item.stat().st_mode),
+                item.stat().st_mtime_ns,
+                item.read_bytes() if item.is_file() else None,
+            )
+            for item in [tmp_path, *tmp_path.rglob("*")]
+        }
+
+    monkeypatch.setattr(telemetry, "_post_otlp_http", fake_post_otlp_http)
+    before = snapshot()
+    with monkeypatch.context() as readonly:
+        readonly.setattr(telemetry, "_read_or_create_hash_salt", reject_salt_creation)
+        pending = run_export(preview=True)
+    assert snapshot() == before
+    assert pending.attempted == 1
+    assert pending.status == "ok"
+    assert pending.exported == 0
+    assert calls == []
+
+    exported = run_export()
+    assert exported.exported == 1
+    assert exported.status == "ok"
+    assert exported.checkpoint_advanced is True
+    assert exported.checkpoint_path is not None
+    assert Path(exported.checkpoint_path).is_file()
+    if global_salt != "missing_file":
+        assert pending.destination_hash == exported.destination_hash
+    if global_salt in {"unavailable", "absent"}:
+        checkpoint = json.loads(Path(exported.checkpoint_path).read_text(encoding="utf-8"))
+        assert (
+            checkpoint["source_path_hash"]
+            == "sha256:"
+            + hashlib.sha256(b"ctx.telemetry.v1\x00" + str(path).encode("utf-8")).hexdigest()
+        )
+        destination = f"otlp_http:http://127.0.0.1:4318/v1/{otlp_signal}"
+        if signal == "metrics":
+            destination = f"metrics:{destination}"
+        assert (
+            checkpoint["destination_hash"]
+            == "sha256:"
+            + hashlib.sha256(b"ctx.telemetry.v1\x00" + destination.encode("utf-8")).hexdigest()
+        )
+    assert len(calls) == 1
+    if global_salt == "missing_file":
+        assert salt_path.is_file()
+
+    before = snapshot()
+    with monkeypatch.context() as readonly:
+        readonly.setattr(telemetry, "_read_or_create_hash_salt", reject_salt_creation)
+        drained = run_export(preview=True)
+    assert snapshot() == before
+    assert drained.attempted == 0
+    assert drained.exported == 0
+    assert drained.status == "noop"
+    assert drained.checkpoint_found is True
+    assert drained.checkpoint_advanced is False
+    assert drained.destination_hash == exported.destination_hash
+    assert len(calls) == 1
 
 
 def test_export_events_posts_otlp_http_payload(

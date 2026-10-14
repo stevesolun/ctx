@@ -19,7 +19,7 @@ Routes:
     /graph                      Built-in graph explorer + popular seeds
     /graph?slug=<slug>&type=... Focus graph view on a specific entity
     /recommend                  Select ctx recommendations + related rows
-    /manage                     Search/edit/delete/import catalog entities
+    /manage                     Search/create/edit/delete catalog entities
     /harness                    Manual harness setup for user-owned LLMs
     /docs                       Local docs index + public docs handoff
     /config                     Editable ctx config with defaults fallback
@@ -997,7 +997,7 @@ def _render_home() -> str:
         graph_stats=_graph_stats(),
         runtime_summary=_runtime_lifecycle_summary(),
         audit_lines=_count_audit_lines(audit_path),
-        recent_audit=_read_jsonl(audit_path, limit=10),
+        recent_audit=_runtime_service.project_public_records(_read_jsonl(audit_path, limit=10)),
         layout=_layout,
         format_count=_format_count,
     )

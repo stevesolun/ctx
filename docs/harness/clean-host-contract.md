@@ -14,10 +14,17 @@ contract stabilizes.
 - The source tree can build a wheel.
 - The built wheel installs into a clean virtualenv.
 - Console-script entrypoints execute from the installed wheel.
-- `ctx-init --hooks` writes Claude settings only under an isolated temp home.
-- A deterministic fake Claude host reads the generated settings and executes
-  the installed PostToolUse and Stop hook commands without calling Anthropic
-  APIs.
+- The installed wheel starts its monitor on loopback under the isolated temp
+  home, and bounded HTTP checks cover `/`, `/status`, `/api/status.json`, and
+  `/api/sessions.json` without exposing the caller's home or checkout path.
+- `ctx-init --hooks --codex-hooks` writes both hosts' hook configuration under an
+  isolated temp home, creates the wiki schema and an empty graph, and leaves
+  `ctx recommend` with zero results.
+- A synthetic user graph supplies one skill, one agent and one MCP record.
+  The installed CLI returns all three, and deterministic fake Claude and
+  Codex hosts produce byte-identical advisory prompt-hook envelopes with an
+  approval notice. The fake Claude host also executes the installed
+  PostToolUse and Stop commands without calling Anthropic APIs.
 - With `--run-live-claude`, a real Claude Code host can be exercised behind an
   explicit quota acknowledgement, non-spending preflights, and a hard budget
   cap. Hook execution is verified through a JSONL sentinel written by injected
@@ -31,13 +38,13 @@ contract stabilizes.
 
 ## What It Skips
 
-- It does not run `ctx-init --graph` by default; even the fast runtime graph
-  install downloads or extracts a large release artifact, so it stays in
-  dedicated public-install smoke tests.
+- It does not fetch a tool corpus or exercise user archive imports. Its
+  populated graph is synthetic local metadata, not an imported tool collection.
 - It does not execute hooks inside a live Claude Code process by default. The
   live host path is opt-in because it can consume Anthropic or provider quota.
 - It does not connect to a real third-party MCP server.
-- It does not browser-test the monitor dashboard.
+- The default monitor check is HTTP-only. It does not launch a browser or run
+  the dashboard's JavaScript interactions; those remain in the browser lane.
 - It does not simulate process kills or power loss during writes.
 
 Those checks stay intentionally manual or opt-in until they are stable enough
@@ -89,6 +96,8 @@ CI uses the default fake-host path and does not spend model quota.
 
 - Wheel build failure: inspect package metadata and `pyproject.toml`.
 - Install failure: inspect dependency constraints and `pip check` output.
+- Monitor failure: inspect the installed `python -m ctx_monitor serve` output,
+  loopback routing, and the isolated temp-home paths.
 - `ctx-init` failure: inspect packaged entrypoints and hook module paths.
 - Fake Claude hook-smoke failure: inspect generated `settings.json`, packaged
   hook module paths, and whether PostToolUse/Stop hook schemas changed.

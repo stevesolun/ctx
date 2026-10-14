@@ -438,12 +438,42 @@ def _graph_dir_source_metadata(graph_dir: Path) -> dict[str, str]:
         return {
             "ctx_graph_store_source": "graph.json",
             "ctx_graph_store_fingerprint": sha256_file(graph_json),
+            **_graph_export_source_metadata(graph_dir),
             **overlay_metadata,
         }
     return {
         "ctx_graph_store_source": "missing",
         "ctx_graph_store_fingerprint": "",
         **overlay_metadata,
+    }
+
+
+def _graph_export_source_metadata(graph_dir: Path) -> dict[str, str]:
+    """Bind the store to the authority files consulted by the JSON graph loader."""
+    from ctx.core.graph.graph_packs import sha256_file
+
+    manifest = graph_dir / "graph-export-manifest.json"
+    if not manifest.is_file():
+        return {"ctx_graph_store_export_authority": "absent"}
+    fingerprint = sha256_file(manifest)
+    companions: dict[str, bool] = {}
+    try:
+        # A malformed manifest still contributes its digest, invalidating a
+        # previously valid store so rebuilding uses the loader's empty result.
+        if manifest.stat().st_size <= 1024 * 1024:
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            artifacts = payload.get("artifacts") if isinstance(payload, dict) else None
+            if isinstance(artifacts, dict):
+                for key in ("delta", "communities", "report"):
+                    name = artifacts.get(key)
+                    if isinstance(name, str) and name not in {"", ".", ".."}:
+                        companions[key] = manifest.with_name(name).is_file()
+    except (OSError, UnicodeError, ValueError):
+        companions = {}
+    return {
+        "ctx_graph_store_export_authority": _fingerprint_payload(
+            {"manifest_sha256": fingerprint, "companions": companions}
+        )
     }
 
 

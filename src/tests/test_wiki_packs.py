@@ -10,6 +10,7 @@ from ctx.core.wiki.wiki_packs import (
     WikiPackManifestError,
     compact_wiki_packs,
     discover_wiki_pack_manifests,
+    load_merged_wiki_pack_state,
     load_merged_wiki_pages,
     promote_wiki_pack_set,
     read_wiki_pack_manifest,
@@ -178,6 +179,81 @@ def test_discover_wiki_pack_manifests_rejects_parent_mismatch(tmp_path: Path) ->
 
     with pytest.raises(WikiPackManifestError, match="parent_export_id"):
         discover_wiki_pack_manifests(packs_dir)
+
+
+@pytest.mark.parametrize("created_at", [None, "9999-12-31T23:59:59Z", "legacy-date"])
+def test_active_overlay_appends_after_existing_order_for_updates_and_tombstones(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, created_at: str | None
+) -> None:
+    packs_dir = tmp_path / "wiki-packs"
+    paths = (
+        "converted/tool/SKILL.md",
+        "converted/tool/references/detail.md",
+        "converted-agents/tool.md",
+        "entities/skills/tool.md",
+    )
+    write_wiki_base_pack(
+        pack_dir=packs_dir / "base",
+        pack_id="base",
+        base_export_id="export",
+        pages={path: "# Base\n" for path in paths},
+    )
+    write_wiki_overlay_pack(
+        pack_dir=packs_dir / "zz-imported",
+        pack_id="zz-imported",
+        base_export_id="export",
+        parent_export_id="export",
+        pages={path: "# Imported\n" for path in paths},
+        tombstones=[],
+        created_at=created_at,
+    )
+    monkeypatch.setattr(wiki_packs, "_active_overlay_pack_id", lambda *_args: "overlay-fixed")
+
+    for index in range(12):
+        pages = {path: f"# Revision {index}\n" for path in paths} if index % 3 != 1 else {}
+        tombstones = [] if pages else list(paths)
+        manifest = write_active_wiki_overlay_pack(
+            packs_dir=packs_dir,
+            pages=pages,
+            tombstones=tombstones,
+            created_at="2000-01-01T00:00:00+00:00" if index % 2 else None,
+        )
+        assert manifest is not None
+        assert discover_wiki_pack_manifests(packs_dir)[-1].manifest == manifest
+        state = load_merged_wiki_pack_state(packs_dir)
+        assert state.pages == pages
+        assert state.tombstones == frozenset(tombstones)
+
+
+@pytest.mark.parametrize("sequence", [True, -1, "1", 1.5, None])
+def test_active_overlay_rejects_malformed_order_without_writes(
+    tmp_path: Path, sequence: object
+) -> None:
+    packs_dir = tmp_path / "wiki-packs"
+    write_wiki_base_pack(
+        pack_dir=packs_dir / "base",
+        pack_id="base",
+        base_export_id="export",
+        pages={"index.md": "# Base\n"},
+    )
+    write_wiki_overlay_pack(
+        pack_dir=packs_dir / "overlay",
+        pack_id="overlay",
+        base_export_id="export",
+        parent_export_id="export",
+        pages={"index.md": "# Overlay\n"},
+        tombstones=[],
+    )
+    manifest_path = packs_dir / "overlay" / "wiki-pack-manifest.json"
+    payload = json.loads(manifest_path.read_text())
+    payload["append_sequence"] = sequence
+    manifest_path.write_text(json.dumps(payload))
+    before = {path: path.read_bytes() for path in packs_dir.rglob("*") if path.is_file()}
+
+    with pytest.raises(WikiPackManifestError, match="append_sequence"):
+        write_active_wiki_overlay_pack(packs_dir=packs_dir, pages={"index.md": "# Update\n"})
+
+    assert {path: path.read_bytes() for path in packs_dir.rglob("*") if path.is_file()} == before
 
 
 def test_wiki_pack_writer_rejects_unsafe_page_paths(tmp_path: Path) -> None:

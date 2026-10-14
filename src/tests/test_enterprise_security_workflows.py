@@ -227,6 +227,43 @@ def test_xdist_experiment_matrix_covers_supported_posix_hosts() -> None:
     }
 
 
+def test_xdist_experiment_is_opt_in_and_reports_timing_and_exit_status() -> None:
+    workflow = _load_yaml(XDIST_WORKFLOW)
+    assert _triggers(workflow) == {
+        "workflow_dispatch": None,
+        "pull_request": {"branches": ["main"], "paths": [str(XDIST_WORKFLOW)]},
+    }
+    script = _step(workflow, "xdist", "Run xdist experiment")["run"]
+    assert 'echo "- Exit code: $status"' in script
+    assert 'echo "- Elapsed seconds: $elapsed"' in script
+    assert '} >> "$GITHUB_STEP_SUMMARY"' in script
+    assert script.rstrip().endswith('exit "$status"')
+
+
+def test_m5_accelerator_is_manual_user_runner_with_pr_gate_and_evidence() -> None:
+    workflow = _load_yaml(Path(".github/workflows/m5-local-fast.yml"))
+    assert _triggers(workflow) == {"workflow_dispatch": None}
+    job = workflow["jobs"]["local-fast"]
+    assert job["runs-on"] == ["self-hosted", "macOS", "ARM64", "ctx-m5"]
+    setup = _step(workflow, "local-fast", "Set up local Python 3.12 venv")["run"]
+    assert "/opt/homebrew/opt/python@3.12/bin/python3.12 -m venv .venv" in setup
+    assert _step(workflow, "local-fast", "Run local-fast on M5")["run"].strip() == (
+        "python scripts/local_fast_gate.py --profile pr --summary-json .gate/m5-local-fast.json"
+    )
+    upload = _step(workflow, "local-fast", "Upload timing evidence")
+    assert upload["if"] == "always()"
+    assert upload["with"]["path"] == ".gate/m5-local-fast.json"
+    assert upload["with"]["include-hidden-files"] is True
+
+
+def test_retired_huggingface_publication_has_no_credential_or_publication_steps() -> None:
+    assert not Path(".github/workflows/huggingface-sync.yml").exists()
+    for workflow in Path(".github/workflows").glob("*.yml"):
+        script = workflow.read_text(encoding="utf-8")
+        assert "Stevesolun/ctx" not in script
+        assert "sync_huggingface.py" not in script
+
+
 def test_runtime_requirements_include_future_non_dev_extras(tmp_path: Path) -> None:
     manifest = tmp_path / "pyproject.toml"
     _write_manifest(

@@ -6,8 +6,8 @@ name: Publish to PyPI
 # https://pypi.org/manage/account/publishing/.
 #
 # Also deployable on demand to TestPyPI via workflow_dispatch. Production
-# PyPI publishes must use a version tag push so graph release assets are
-# uploaded before the wheel is published.
+# PyPI publishes must use a version tag push after the exact main commit passes
+# verification. CTX ships software and schemas, not a maintained tool corpus.
 
 on:
   push:
@@ -37,8 +37,6 @@ jobs:
     permissions:
       actions: read
       contents: read
-    outputs:
-      graph_assets_available: ${{ steps.resolve_graph_assets.outcome == 'success' }}
     steps:
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -141,8 +139,8 @@ jobs:
 
           if event == "workflow_dispatch" and target_repository == "pypi":
               raise SystemExit(
-                  "Manual PyPI publish is disabled; push a version tag so "
-                  "graph release assets are uploaded before publishing"
+                  "Manual PyPI publish is disabled; push a version tag from "
+                  "the exact verified main commit"
               )
           if event == "workflow_dispatch" and target_repository == "testpypi":
               print(f"manual TestPyPI publish allowed from {ref_type}:{ref_name}")
@@ -205,37 +203,16 @@ jobs:
         env:
           INPUT_REPOSITORY: ${{ github.event.inputs.repository || 'pypi' }}
 
-      - name: Resolve release graph artifacts from exact release manifest
-        id: resolve_graph_assets
+      - name: Validate graph infrastructure with synthetic fixtures
         run: |
-          python scripts/graph_release_manifest.py hydrate --manifest graph/release-artifacts.json
-
-      - name: Validate release graph artifacts
-        if: steps.resolve_graph_assets.outcome == 'success'
-        run: |
-          python src/validate_graph_artifacts.py \
-            --graph-dir graph \
-            --deep \
-            --min-nodes 79000 \
-            --min-edges 1700000 \
-            --min-skills-sh-nodes 67000 \
-            --min-semantic-edges 1000000 \
-            --expected-nodes 79958 \
-            --expected-edges 1778069 \
-            --expected-semantic-edges 1088763 \
-            --expected-harness-nodes 207 \
-            --expected-skills-sh-nodes 67028 \
-            --expected-skills-sh-catalog-entries 67024 \
-            --expected-skills-sh-converted 67024 \
-            --expected-skill-pages 68494 \
-            --expected-agent-pages 467 \
-            --expected-mcp-pages 10790 \
-            --expected-harness-pages 207 \
-            --line-threshold 180 \
-            --max-stage-lines 40
+          python -m pytest -q --no-cov \
+            src/tests/test_graph_release_manifest.py \
+            src/tests/test_validate_graph_artifacts.py \
+            src/tests/test_graph_packs.py \
+            src/tests/test_graph_json_integrity.py \
+            src/tests/test_byo_distribution.py
 
       - name: Validate README and docs stats
-        if: steps.resolve_graph_assets.outcome == 'success'
         run: python src/update_repo_stats.py --check
 
       - name: Static gates
@@ -305,10 +282,33 @@ jobs:
 
           with tarfile.open(sdist, "r:gz") as tf:
               names = set(tf.getnames())
-          forbidden = ("/src/tests/", "/.claude/", "/.a5c/")
-          leaked = sorted(name for name in names if any(part in name for part in forbidden))
-          if leaked:
-              raise SystemExit("sdist contains local/test artifacts:\n" + "\n".join(leaked[:20]))
+          forbidden = (
+              "/src/tests/", "/tests/", "/.claude/", "/.agents/", "/.a5c/",
+              "/imported-skills/",
+          )
+          retired_assets = {
+              "benefit-eligible-catalog-v1.json", "license-evidence.json",
+              "release-install-skill-material-v1.json", "release-load-skill-material-v1.json",
+              "release-query-catalog-root-v1.json", "reviewed-benefit-profiles-v2.json",
+              "reviewed-net-benefit-policy-v1.json", "runtime-availability.json",
+          }
+          graph_payloads = {
+              "wiki-graph.tar.gz", "wiki-graph-runtime.tar.gz", "skills-sh-catalog.json.gz",
+              "communities.json", "entity-overlays.jsonl", "wiki-graph-stats.json",
+              "release-artifacts.json",
+          }
+          for label, members in (("wheel", wheel_names), ("sdist", names)):
+              leaked = sorted(
+                  name for name in members
+                  if any(part in "/" + name for part in forbidden)
+                  or any(("/" + name).endswith("/ctx/assets/" + asset) for asset in retired_assets)
+                  or any(("/" + name).endswith("/graph/" + asset) for asset in graph_payloads)
+              )
+              if leaked:
+                  raise SystemExit(
+                      f"{label} contains forbidden tool corpus/local/test artifacts:\n"
+                      + "\n".join(leaked[:20])
+                  )
           print(f"checked distribution contents: {wheel.name}, {sdist.name}")
           PY
 
@@ -516,19 +516,6 @@ jobs:
           path: release-sbom/claude-ctx.cdx.json
           if-no-files-found: error
 
-      - name: Upload graph artifact bundle
-        if: steps.resolve_graph_assets.outcome == 'success'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: graph-release-assets
-          path: |
-            graph/release-artifacts.json
-            graph/wiki-graph.tar.gz
-            graph/wiki-graph-runtime.tar.gz
-            graph/skills-sh-catalog.json.gz
-            graph/communities.json
-            graph/entity-overlays.jsonl
-
   attest:
     name: Attest release artifacts
     needs: build
@@ -553,13 +540,6 @@ jobs:
           name: release-sbom
           path: release-sbom
 
-      - name: Download graph artifact bundle
-        if: needs.build.outputs.graph_assets_available == 'true'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: graph-release-assets
-          path: graph-release-assets
-
       - name: Validate exact distribution manifest
         run: python scripts/build_reproducible_dist.py --check-output dist
 
@@ -571,18 +551,6 @@ jobs:
             dist/packages/*.tar.gz
             release-sbom/*.json
 
-      - name: Attest graph release provenance
-        if: needs.build.outputs.graph_assets_available == 'true'
-        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
-        with:
-          subject-path: |
-            graph-release-assets/release-artifacts.json
-            graph-release-assets/wiki-graph.tar.gz
-            graph-release-assets/wiki-graph-runtime.tar.gz
-            graph-release-assets/skills-sh-catalog.json.gz
-            graph-release-assets/communities.json
-            graph-release-assets/entity-overlays.jsonl
-
       - name: Attest release SBOM
         uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
         with:
@@ -592,11 +560,11 @@ jobs:
           sbom-path: release-sbom/claude-ctx.cdx.json
 
   release-assets:
-    name: Upload graph and SBOM release assets
+    name: Upload software SBOM release asset
     needs:
       - build
       - attest
-    if: github.event_name == 'push' && needs.build.outputs.graph_assets_available == 'true'
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -606,12 +574,6 @@ jobs:
         with:
           lfs: false
           persist-credentials: false
-
-      - name: Download graph artifact bundle
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: graph-release-assets
-          path: graph-release-assets
 
       - name: Download release SBOM
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -656,7 +618,7 @@ jobs:
           print(f"using CHANGELOG.md section for {version} as GitHub release notes")
           PY
 
-      - name: Upload graph assets and SBOM to GitHub release
+      - name: Upload SBOM to GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ github.ref_name }}
@@ -675,12 +637,6 @@ jobs:
           fi
           gh release upload "$TAG_NAME" \
             --repo "$GITHUB_REPOSITORY" \
-            graph-release-assets/release-artifacts.json \
-            graph-release-assets/wiki-graph.tar.gz \
-            graph-release-assets/wiki-graph-runtime.tar.gz \
-            graph-release-assets/skills-sh-catalog.json.gz \
-            graph-release-assets/communities.json \
-            graph-release-assets/entity-overlays.jsonl \
             release-sbom/claude-ctx.cdx.json \
             --clobber
 

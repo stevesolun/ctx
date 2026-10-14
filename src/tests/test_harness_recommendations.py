@@ -521,7 +521,7 @@ def test_ctx_init_prints_harness_install_handoff_for_custom_model(
             "model_mode": "custom",
             "model": "openai/gpt-5.5",
             "model_provider": "openai",
-            "api_key_env": "",
+            "provider_key_env_name": "",
             "base_url": None,
             "goal": "build an openai python agent graph with checkpointing",
             "force": True,

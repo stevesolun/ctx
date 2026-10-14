@@ -31,6 +31,9 @@ from ctx.runtime.release_skill_layout import (
 )
 
 
+pytestmark = pytest.mark.usefixtures("historical_release_catalog")
+
+
 NOW = datetime(2026, 8, 2, 12, 30, tzinfo=UTC)
 TARGET_SHA256 = "c87c65b5b09f48e27c683fb5ada9d8bc377d6d72d7742ce7aac3c2d3d97ac441"
 RELEVANT_PROMPT = "repair nested Python context manager state restoration"

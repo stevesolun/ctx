@@ -20,6 +20,9 @@ from ctx.runtime.release_skill_layout import open_workspace_release_skill_runtim
 from ctx.runtime.release_skill_lifecycle import activate_installed_release_skill
 
 
+pytestmark = pytest.mark.usefixtures("historical_release_catalog")
+
+
 NOW = datetime(2026, 8, 2, 12, 30, tzinfo=UTC)
 OCCURRED_AT = "2026-08-02T12:00:00Z"
 STATE_PROTOCOLS_SHA256 = "c87c65b5b09f48e27c683fb5ada9d8bc377d6d72d7742ce7aac3c2d3d97ac441"

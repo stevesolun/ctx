@@ -36,8 +36,10 @@ One JSON line per matching toolbox, on stdout:
 }
 ```
 
-Claude Code's hook handler reads these lines and dispatches each agent
-against the listed files.
+A host handler can read these lines and dispatch agents against the listed
+files. This repository's hook emitter only creates the plan and prints the
+line: automatic agent dispatch, skill loading and budget enforcement require
+an additional host integration.
 
 ## Exit codes
 
@@ -47,12 +49,14 @@ against the listed files.
 | `1` | Unknown trigger or config error |
 | `2` | `pre-commit` + `guardrail=true` + verdict level is HIGH/CRITICAL |
 
-The `2` exit from `pre-commit` is what actually blocks `git commit`.
+The emitter checks an existing verdict for the matching plan; it does not run
+a council or wait for a new verdict. Exit `2` blocks `git commit` only when a
+Git hook or host wrapper propagates it.
 
 ## Installation
 
-`pip install claude-ctx` exposes `python -m toolbox` on PATH; wire it into
-`.githooks/pre-commit` directly:
+The installed distribution supplies the `toolbox` Python module. A minimal
+`.githooks/pre-commit` can emit plans and enforce already recorded verdicts:
 
 ```bash
 # .githooks/pre-commit
@@ -60,13 +64,16 @@ The `2` exit from `pre-commit` is what actually blocks `git commit`.
 python -m toolbox run --event pre-commit
 ```
 
-Then `git config core.hooksPath .githooks`.
+Make the hook executable, then run `git config core.hooksPath .githooks`.
+This configuration alone does not dispatch a new council review.
 
 ## file-save path matching
 
 `file-save` triggers honor the `trigger.file_save` glob. Without a
-`--path` arg the event matches nothing (there's no file to test). This is
-intentional: file-save toolboxes must be path-scoped.
+file-path argument the event matches nothing (there's no file to test).
+Use `python -m toolbox run --event file-save --file-path PATH`, or
+`python -m toolbox_hooks file-save --path PATH`. File-save toolboxes must be
+path-scoped.
 
 ## session-end digest
 

@@ -328,6 +328,45 @@ def test_cli_builds_graph_store_from_graph_dir(tmp_path: Path) -> None:
     assert graph_store_stats(db_path) == {"nodes": 3, "edges": 2}
 
 
+@pytest.mark.parametrize("change", ["invalid-manifest", "missing-manifest", "missing-companion"])
+def test_store_freshness_tracks_manifest_authority_and_companion_presence(tmp_path, change):
+    graph_dir = tmp_path / "graph"
+    graph_dir.mkdir()
+    graph = _sample_graph()
+    graph.graph["export_id"] = "fixture-export"
+    (graph_dir / "graph.json").write_text(json.dumps(nx.node_link_data(graph, edges="edges")))
+    artifact_names = {
+        "delta": "custom-delta.json",
+        "communities": "groups.json",
+        "report": "report.md",
+    }
+    for name in artifact_names.values():
+        (graph_dir / name).write_text("{}")
+    manifest = graph_dir / "graph-export-manifest.json"
+    manifest_body = json.dumps({"export_id": "fixture-export", "artifacts": artifact_names})
+    manifest.write_text(manifest_body)
+    db_path = tmp_path / "index.sqlite3"
+    ensure_graph_store(graph_dir, db_path)
+    assert graph_store_stats(db_path)["nodes"] == 3
+    assert graph_store_is_fresh(db_path, graph_dir)
+
+    if change == "invalid-manifest":
+        manifest.write_text("not JSON")
+    elif change == "missing-manifest":
+        manifest.unlink()
+    else:
+        (graph_dir / "groups.json").unlink()
+    assert not graph_store_is_fresh(db_path, graph_dir)
+    ensure_graph_store(graph_dir, db_path)
+    assert graph_store_stats(db_path)["nodes"] == 0
+
+    manifest.write_text(manifest_body)
+    (graph_dir / "groups.json").write_text("{}")
+    assert not graph_store_is_fresh(db_path, graph_dir)
+    ensure_graph_store(graph_dir, db_path)
+    assert graph_store_stats(db_path)["nodes"] == 3
+
+
 def test_cli_validates_fresh_graph_store(tmp_path: Path) -> None:
     graph_dir = tmp_path / "graphify-out"
     graph_dir.mkdir()

@@ -1,0 +1,2 @@
+artifact_kind,canonical_tracker,authority,notes
+generated-view-pointer,qa/feature_status.csv,false,"User-behavior views must be generated from qa/feature_status.csv; this file carries no independently authored status or evidence."

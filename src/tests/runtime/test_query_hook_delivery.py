@@ -12,9 +12,11 @@ import sqlite3
 import sys
 import tempfile
 import threading
+import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from multiprocessing.connection import Connection
 from pathlib import Path
 from typing import Any
 
@@ -45,12 +47,16 @@ from ctx.runtime.query_delivery import (
     SensitiveQueryInput,
     _SQLiteQueryDeliveryLedger,
 )
+from tests.release_catalog_fixture import historical_catalog_resources
 
 
-pytestmark = pytest.mark.skipif(
-    not attempt_storage.query_attempt_pool_supported(),
-    reason="POSIX descriptor-relative query attempt contracts",
-)
+pytestmark = [
+    pytest.mark.skipif(
+        not attempt_storage.query_attempt_pool_supported(),
+        reason="POSIX descriptor-relative query attempt contracts",
+    ),
+    pytest.mark.usefixtures("historical_release_catalog"),
+]
 
 
 def _digest(value: str) -> str:
@@ -239,6 +245,7 @@ def _process_request(workspace: Path) -> SensitiveQueryInput:
     )
 
 
+@historical_catalog_resources()
 def _multiprocess_abstention_worker(
     state_root: str,
     workspace: str,
@@ -272,6 +279,7 @@ def _crash_after_production_decision_factory(**kwargs: Any) -> CommittedQueryDec
     os._exit(76)
 
 
+@historical_catalog_resources()
 def _production_crash_worker(state_root: str, workspace: str) -> None:
     controller = QueryDeliveryController._for_testing(
         host=QueryHostDescriptor.codex(),
@@ -338,6 +346,51 @@ def _crash_unique_session_worker(
         )
     )
     os._exit(72)
+
+
+def _concurrent_crash_session_worker(
+    state_root: str,
+    workspace: str,
+    native_session_id: str,
+    worker_index: int,
+    start: Any,
+    result: Connection,
+) -> None:
+    def crash_factory(**_kwargs: object) -> CommittedQueryDecision:
+        # Pipe.send is synchronous; os._exit would lose a Queue feeder's message.
+        result.send(("crash", worker_index))
+        os._exit(73)
+
+    try:
+        controller = QueryDeliveryController._for_testing(
+            host=QueryHostDescriptor.codex(),
+            mode="recommend",
+            state_root=Path(state_root),
+            decision_factory=crash_factory,
+            environment={},
+            lock_timeout_seconds=10.0,
+        )
+        result.send(("ready", worker_index))
+        if not start.wait(timeout=60):
+            result.send(("start-timeout", worker_index))
+            os._exit(74)
+        report = controller.issue(
+            SensitiveQueryInput(
+                native_session_id=native_session_id,
+                logical_prompt_id="concurrent-crash-turn",
+                workspace=Path(workspace),
+                prompt="Synthetic concurrent crash prompt must not be persisted",
+                language="python",
+            )
+        )
+        result.send(("returned", worker_index, report.status, report.emission_permit is not None))
+    except Exception as error:
+        try:
+            result.send(("error", worker_index, type(error).__name__))
+        finally:
+            os._exit(74)
+    finally:
+        result.close()
 
 
 def _crash_after_terminal_worker(state_root: str, workspace: str) -> None:
@@ -715,7 +768,7 @@ def test_query_delivery_attempt_storage_has_a_fixed_global_bound(tmp_path: Path)
     assert lock_names <= {f"query-attempt-stripe-{index}.lock" for index in range(8)}
 
 
-def test_unique_session_crash_storm_cannot_expand_the_attempt_namespace(
+def test_sequential_unique_session_crashes_cannot_expand_the_attempt_namespace(
     tmp_path: Path,
 ) -> None:
     workspace = tmp_path / "workspace"
@@ -731,9 +784,11 @@ def test_unique_session_crash_storm_cannot_expand_the_attempt_namespace(
         )
         for session_id in session_ids
     ]
+    # Reach every injected crash before starting the next session. Concurrent
+    # ledger access may legitimately fail closed before the crash factory runs;
+    # this test measures the namespace left by crashes, not delivery availability.
     for process in processes:
         process.start()
-    for process in processes:
         process.join(timeout=30)
         assert process.exitcode == 73
 
@@ -767,6 +822,125 @@ def test_unique_session_crash_storm_cannot_expand_the_attempt_namespace(
         )
         assert report.status == "issued"
     assert _attempt_children(state_root) == ()
+
+
+def test_concurrent_unique_session_crashes_preserve_bounds_and_recovery(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "synthetic-private-crash-workspace"
+    workspace.mkdir()
+    state_root = tmp_path / "state"
+    context = multiprocessing.get_context("spawn")
+    start = context.Event()
+    session_ids = [f"synthetic-concurrent-crash-session-{index}" for index in range(16)]
+    channels = [context.Pipe(duplex=False) for _index in session_ids]
+    processes = [
+        context.Process(
+            target=_concurrent_crash_session_worker,
+            args=(str(state_root), str(workspace), session_id, index, start, channels[index][1]),
+        )
+        for index, session_id in enumerate(session_ids)
+    ]
+    try:
+        for process, (_reader, writer) in zip(processes, channels, strict=True):
+            process.start()
+            writer.close()
+        ready_deadline = time.monotonic() + 30
+        for index, (reader, _writer) in enumerate(channels):
+            assert reader.poll(max(0.0, ready_deadline - time.monotonic())), ("not-ready", index)
+            assert reader.recv() == ("ready", index)
+        # All imports/controllers are ready, but no child has initialized runtime
+        # state. Gate here, never inside a factory holding one of eight stripes.
+        assert not state_root.exists()
+        start.set()
+        finished_deadline = time.monotonic() + 60
+        for process in processes:
+            process.join(timeout=max(0.0, finished_deadline - time.monotonic()))
+
+        crashes = 0
+        failed_closed = 0
+        for index, (process, (reader, _writer)) in enumerate(zip(processes, channels, strict=True)):
+            assert process.exitcode is not None, ("unfinished", index)
+            assert reader.poll(timeout=1), ("missing-outcome", index, process.exitcode)
+            outcome = reader.recv()
+            if process.exitcode == 73:
+                assert outcome == ("crash", index)
+                crashes += 1
+            else:
+                assert process.exitcode == 0, (index, process.exitcode, outcome)
+                assert outcome == ("returned", index, "failed", False)
+                failed_closed += 1
+        assert crashes + failed_closed == 16
+        assert crashes > 0, ("no-crash-reached", crashes, failed_closed)
+    finally:
+        for process in processes:
+            if process.pid is not None and process.is_alive():
+                process.terminate()
+        for process in processes:
+            if process.pid is not None:
+                process.join(timeout=5)
+                if process.is_alive():
+                    process.kill()
+                    process.join(timeout=5)
+                if process.exitcode is not None:
+                    process.close()
+        for reader, writer in channels:
+            reader.close()
+            writer.close()
+
+    children = _attempt_children(state_root)
+    assert len(children) <= 8
+    assert {path.name for path in children} <= {
+        *(f"slot-{index}" for index in range(8)),
+        *(f"slot-{index}-quarantine" for index in range(8)),
+    }
+    lock_names = {path.name for path in (state_root / "query-delivery-locks-v1").iterdir()}
+    assert len(lock_names) <= 8
+    assert lock_names <= {f"query-attempt-stripe-{index}.lock" for index in range(8)}
+    database = state_root / "query-delivery-v1.sqlite3"
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM query_delivery_terminals").fetchone() == (
+            0,
+        )
+
+    def assert_private_state() -> None:
+        persisted = b"\n".join(
+            path.read_bytes() for path in state_root.rglob("*") if path.is_file()
+        )
+        for value in (
+            *session_ids,
+            "concurrent-crash-turn",
+            "Synthetic concurrent crash prompt must not be persisted",
+            workspace.name,
+            str(workspace),
+        ):
+            assert value.encode() not in persisted
+
+    assert_private_state()
+    controller = QueryDeliveryController._for_testing(
+        host=QueryHostDescriptor.codex(),
+        mode="recommend",
+        state_root=state_root,
+        decision_factory=_process_reviewed_factory,
+        environment={},
+        lock_timeout_seconds=10.0,
+    )
+    for session_id in session_ids:
+        request = SensitiveQueryInput(
+            native_session_id=session_id,
+            logical_prompt_id="concurrent-crash-turn",
+            workspace=workspace,
+            prompt="Synthetic concurrent crash prompt must not be persisted",
+            language="python",
+        )
+        report = controller.issue(request)
+        assert report.status == "issued"
+        assert report.emission_permit is not None
+        repeated = controller.issue(request)
+        assert repeated.status == "already-terminal"
+        assert repeated.emission_permit is None
+    assert _attempt_children(state_root) == ()
+    assert_private_state()
 
 
 def test_existing_terminal_reclaims_same_stripe_residue_without_replanning(

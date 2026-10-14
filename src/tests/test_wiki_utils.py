@@ -153,6 +153,19 @@ Body"""
         result = parse_frontmatter(text)
         assert result["tags"] == ["python", "testing", "automation"]
 
+    @pytest.mark.parametrize(
+        "field",
+        [
+            "commands: [\"'/path with spaces/python' setup.py\"]",
+            "commands:\n  - \"'/path with spaces/python' setup.py\"",
+            "commands:\n  - \"'/path with spaces/python'\n    setup.py\"",
+        ],
+    )
+    def test_command_list_preserves_inner_shell_quotes(self, field: str) -> None:
+        assert parse_frontmatter(f"---\n{field}\n---\nBody")["commands"] == [
+            "'/path with spaces/python' setup.py"
+        ]
+
     def test_multiline_yaml_list_continuations_are_joined(self) -> None:
         """Wrapped YAML list items stay attached to the previous item."""
         text = """---

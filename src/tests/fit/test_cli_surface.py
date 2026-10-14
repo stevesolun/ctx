@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 import re
 import subprocess
 import sys
@@ -10,19 +12,43 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
-ADVERTISED = ("fit", "doctor", "advanced")
+ADVERTISED = ("recommend", "fit", "doctor", "advanced")
 HIDDEN_BUT_WORKING = ("run", "resume", "sessions")
 
 
 def _ctx(*args: str) -> subprocess.CompletedProcess[str]:
+    # A gate checkout may share a Python environment installed editable from
+    # another tree. Exercise this source tree, not that editable installation.
+    environment = {**os.environ, "PYTHONPATH": str(ROOT / "src")}
     return subprocess.run(
         [sys.executable, "-m", "ctx", *args],
         cwd=ROOT,
+        env=environment,
         capture_output=True,
         text=True,
         timeout=60,
         check=False,
     )
+
+
+@pytest.mark.parametrize("foreign_path", [False, True])
+def test_subprocess_imports_this_checkout_regardless_of_inherited_pythonpath(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, foreign_path: bool
+) -> None:
+    if foreign_path:
+        package = tmp_path / "ctx"
+        package.mkdir()
+        (package / "__init__.py").write_text("", encoding="utf-8")
+        (package / "__main__.py").write_text("print('foreign checkout')\n", encoding="utf-8")
+        monkeypatch.setenv("PYTHONPATH", str(tmp_path))
+    else:
+        monkeypatch.delenv("PYTHONPATH", raising=False)
+
+    result = _ctx("--help")
+
+    assert result.returncode == 0
+    assert "recommend" in result.stdout.splitlines()[0]
+    assert "foreign checkout" not in result.stdout
 
 
 def test_help_advertises_only_the_product_surface() -> None:
@@ -129,14 +155,49 @@ def test_advanced_namespace_reaches_the_same_command(command: str) -> None:
     assert f"usage: ctx {command}" in result.stdout
 
 
-def test_bare_ctx_runs_the_product_rather_than_erroring() -> None:
-    """Typing the one command must do something useful, not print an error."""
+def test_bare_ctx_guides_user_owned_setup_without_running_fit() -> None:
+    """The default product is user-owned recommendations, not paid evaluation."""
 
     result = _ctx()
 
     assert result.returncode == 0
-    assert "Repository:" in result.stdout
-    assert "AI agent readiness" in result.stdout
+    assert "ctx recommend" in result.stdout
+    assert "Start empty with ctx-init" in result.stdout
+    assert "AI agent readiness" not in result.stdout
+
+
+def test_apply_help_distinguishes_git_tracked_files_from_untracked_files() -> None:
+    """Git cannot restore bytes that were never recorded in its index."""
+
+    result = _ctx("fit", "--help")
+    help_text = " ".join(result.stdout.split())
+
+    assert result.returncode == 0
+    assert "restore tracked files" in help_text
+    assert "remove newly created untracked files" in help_text
+    assert "cannot restore an overwritten untracked file" in help_text
+    assert "discard with `git checkout`" not in help_text
+
+
+@pytest.mark.parametrize("budget", ("nan", "inf", "-inf", "-1"))
+def test_non_finite_or_negative_budget_is_rejected_before_json_planning(budget: str) -> None:
+    result = _ctx("fit", ".", "--json", f"--budget={budget}")
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "--budget must be a finite, non-negative number" in result.stderr
+
+
+def test_json_budget_output_is_strictly_parseable_json() -> None:
+    result = _ctx("fit", ".", "--json", "--budget", "1")
+
+    assert result.returncode == 0
+
+    def reject_non_json_number(token: str) -> None:
+        pytest.fail(f"non-JSON numeric constant emitted: {token}")
+
+    payload = json.loads(result.stdout, parse_constant=reject_non_json_number)
+    assert payload["plan"]["budget_usd"] == 1.0
 
 
 def test_doctor_reports_why_a_real_run_is_not_possible() -> None:

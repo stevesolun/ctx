@@ -3279,6 +3279,91 @@ class TestRunCommand:
 
 
 class TestSessionsCommand:
+    def test_advanced_commands_match_historical_results_and_persisted_state(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        def exercise(prefix: list[str], sessions_dir: Path) -> dict[str, Any]:
+            fake_litellm._calls.clear()
+            run_exit = main(
+                [
+                    *prefix,
+                    "run",
+                    "--model",
+                    "ollama/x",
+                    "--task",
+                    "initial task",
+                    "--sessions-dir",
+                    str(sessions_dir),
+                    "--session-id",
+                    "alias-parity",
+                    "--no-ctx-tools",
+                    "--quiet",
+                ]
+            )
+            run_output = capsys.readouterr()
+            run_calls = _provider_call_bytes(fake_litellm._calls)
+
+            fake_litellm._calls.clear()
+            resume_exit = main(
+                [
+                    *prefix,
+                    "resume",
+                    "alias-parity",
+                    "--task",
+                    "follow-up task",
+                    "--sessions-dir",
+                    str(sessions_dir),
+                    "--quiet",
+                ]
+            )
+            resume_output = capsys.readouterr()
+            resume_calls = _provider_call_bytes(fake_litellm._calls)
+            state = load_session("alias-parity", sessions_dir=sessions_dir)
+
+            sessions_exit = main(
+                [*prefix, "sessions", "--sessions-dir", str(sessions_dir), "--json"]
+            )
+            sessions_output = capsys.readouterr()
+            detail_exit = main(
+                [
+                    *prefix,
+                    "sessions",
+                    "alias-parity",
+                    "--sessions-dir",
+                    str(sessions_dir),
+                    "--json",
+                ]
+            )
+            detail_output = capsys.readouterr()
+            detail = json.loads(detail_output.out)
+            detail["path"] = Path(detail["path"]).name
+            detail["metadata"].pop("initial_trace_id", None)
+            state_metadata = dict(state.metadata)
+            state_metadata.pop("initial_trace_id", None)
+
+            return {
+                "run": (run_exit, run_output, run_calls),
+                "resume": (resume_exit, resume_output, resume_calls),
+                "sessions": (sessions_exit, json.loads(sessions_output.out)),
+                "detail": (detail_exit, detail),
+                "state": {
+                    "messages": state.messages,
+                    "metadata": state_metadata,
+                    "stopped": state.stopped,
+                    "stop_reason": state.stop_reason,
+                    "event_count": state.event_count,
+                    "usage": state.usage,
+                },
+            }
+
+        historical = exercise([], tmp_path / "historical")
+        advanced = exercise(["advanced"], tmp_path / "advanced")
+
+        assert advanced == historical
+
     def test_detail_missing_session_returns_error(
         self,
         tmp_path: Path,

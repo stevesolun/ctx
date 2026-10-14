@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts import overlay_wiki_entities
 from scripts.overlay_wiki_entities import _entity_page, _skill_replacements, overlay_entities
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -127,6 +128,71 @@ def test_overlay_entities_preserves_existing_graph_and_adds_selected_pages(tmp_p
             ("new-skill",),
         ).fetchone() == ("skill:new-skill",)
     assert json.loads(root_communities.read_text())["export_id"] == stats.export_id
+
+
+def test_overlay_staged_tar_validation_failure_preserves_original(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_wiki = tmp_path / "wiki"
+    (source_wiki / "graphify-out").mkdir(parents=True)
+    (source_wiki / "entities" / "skills").mkdir(parents=True)
+    (source_wiki / "entities" / "skills" / "new-skill.md").write_text(
+        "# New skill\n",
+        encoding="utf-8",
+    )
+    (source_wiki / "graphify-out" / "graph.json").write_text(
+        json.dumps(
+            {
+                "graph": {"export_id": "source"},
+                "nodes": [{"id": "skill:new-skill", "type": "skill"}],
+                "edges": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    tarball = tmp_path / "wiki-graph.tar.gz"
+    with tarfile.open(tarball, "w:gz") as tf:
+        _add_text(
+            tf,
+            "./graphify-out/graph.json",
+            json.dumps(
+                {
+                    "graph": {"export_id": "old"},
+                    "nodes": [],
+                    "edges": [],
+                }
+            ),
+        )
+        _add_text(
+            tf,
+            "./graphify-out/communities.json",
+            json.dumps({"export_id": "old", "communities": {}, "total_communities": 0}),
+        )
+    original = tarball.read_bytes()
+    staged = tarball.with_name(f"{tarball.name}.staged")
+
+    def reject_staged(candidate: Path) -> None:
+        assert candidate == staged
+        assert candidate.is_file()
+        raise ValueError("forced staged-tar validation failure")
+
+    monkeypatch.setattr(overlay_wiki_entities, "_validate_tarball", reject_staged)
+
+    with pytest.raises(ValueError, match="forced staged-tar validation failure"):
+        overlay_entities(
+            source_wiki=source_wiki,
+            tarball=tarball,
+            entity_ids=["skill:new-skill"],
+            now=datetime(2026, 5, 13, tzinfo=timezone.utc),
+        )
+
+    assert tarball.read_bytes() == original
+    assert staged.is_file()
+    assert not tarball.with_name(f"{tarball.name}.promotion.json").exists()
+    with tarfile.open(tarball, "r:gz") as tf:
+        assert _read_json(tf, "./graphify-out/graph.json")["graph"]["export_id"] == "old"
 
 
 def test_script_direct_invocation_help_works() -> None:

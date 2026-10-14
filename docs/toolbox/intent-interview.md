@@ -1,10 +1,16 @@
 # Intent interview
 
+This optional compatibility utility has historical named presets. In an
+installed package, initialize and import your own toolbox definitions first.
+When run from a source checkout, explicit `--apply` can fill missing selected
+definitions from `docs/toolbox/templates/`; existing definitions are preserved.
+Those templates declare tool names and do not supply or install agents/skills.
+
 [`src/intent_interview.py`](https://github.com/stevesolun/ctx/blob/main/src/intent_interview.py)
 bootstraps your toolbox set via a short, skippable interview.
 
-The slash command `/toolbox init` is a thin wrapper; see
-[`.claude/commands/toolbox-init.md`](https://github.com/stevesolun/ctx/blob/main/.claude/commands/toolbox-init.md).
+Use `python -m intent_interview init`. A host may define a slash-command
+wrapper, but this repository does not ship `.claude/commands/toolbox-init.md`.
 
 ## Flow
 
@@ -90,5 +96,5 @@ python -m intent_interview init \
 
 ## Related
 
-- [Starter toolboxes](starters.md) — the five bundles the interview can activate.
+- [Starter toolboxes](starters.md) — optional examples for your own definitions.
 - [Behavior miner](behavior-miner.md) — source of the suggestions the interview offers.

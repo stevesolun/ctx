@@ -1211,6 +1211,34 @@ def test_validate_runtime_graph_archive_rejects_host_path_graph_pack_node_id(
         )
 
 
+def test_deep_release_validation_rejects_host_path_retained_in_full_graph_pack(
+    tmp_path: Path,
+) -> None:
+    _write_catalog(
+        tmp_path,
+        converted_path="converted/skills-sh-example-skill/SKILL.md",
+    )
+    graph = nx.Graph()
+    graph.add_node("/Users/steves/private", type="skill")
+    pack_root = tmp_path / "graph-pack-source-export-test"
+    write_base_pack(
+        pack_dir=pack_root / "base-export-test",
+        pack_id="base-export-test",
+        base_export_id="export-test",
+        config_hash="config-sha",
+        model_id="bge-small-en-v1.5",
+        graph=graph,
+    )
+    _write_archive(tmp_path, graph_pack_dir=pack_root)
+
+    with pytest.raises(GraphArtifactError, match="host path"):
+        validate_graph_artifacts(
+            tmp_path,
+            deep=True,
+            expected_harnesses={"langgraph"},
+        )
+
+
 def test_validate_graph_artifacts_rejects_original_backup_members(tmp_path: Path) -> None:
     _write_catalog(
         tmp_path,
@@ -1640,43 +1668,18 @@ def test_scan_graph_json_ignores_node_level_export_id() -> None:
 
 
 def test_graph_only_workflow_uses_preflight_graph_contract() -> None:
+    from scripts.ci_preflight import GRAPH_CONTRACT_TESTS
+
     workflow = yaml.safe_load(Path(".github/workflows/test.yml").read_text(encoding="utf-8"))
     steps = workflow["jobs"]["graph-check"]["steps"]
     validate_step = next(
-        step for step in steps if step.get("name") == "Validate shipped graph artifacts"
+        step
+        for step in steps
+        if step.get("name") == "Validate graph infrastructure with synthetic fixtures"
     )
-    command = " ".join(
-        line.rstrip("\\").strip() for line in validate_step["run"].splitlines() if line.strip()
-    )
-    argv = command.split()
-
-    script_index = argv.index("src/validate_graph_artifacts.py")
-    args = argv[script_index + 1 :]
-    parsed: dict[str, str | bool] = {}
-    i = 0
-    while i < len(args):
-        flag = args[i]
-        if i + 1 >= len(args) or args[i + 1].startswith("--"):
-            parsed[flag] = True
-            i += 1
-        else:
-            parsed[flag] = args[i + 1]
-            i += 2
-
-    assert argv[: script_index + 1] == ["python", "src/validate_graph_artifacts.py"]
-    expected: dict[str, str | bool] = {}
-    expected_args = GRAPH_VALIDATE_ARGS[1:]
-    i = 0
-    while i < len(expected_args):
-        flag = expected_args[i]
-        if i + 1 >= len(expected_args) or expected_args[i + 1].startswith("--"):
-            expected[flag] = True
-            i += 1
-        else:
-            expected[flag] = expected_args[i + 1]
-            i += 2
-
-    assert parsed == expected
+    argv = validate_step["run"].replace("\\\n", " ").split()
+    assert argv[:5] == ["python", "-m", "pytest", "-q", "--no-cov"]
+    assert tuple(argv[5:]) == GRAPH_CONTRACT_TESTS
 
 
 def test_validator_default_floors_match_preflight_contract() -> None:
@@ -1697,20 +1700,7 @@ def test_validator_default_floors_match_preflight_contract() -> None:
     assert values["--min-semantic-edges"] == str(DEFAULT_MIN_SEMANTIC_EDGES)
 
 
-def test_graph_only_workflow_uses_exact_release_manifest_resolver() -> None:
-    workflow = yaml.safe_load(Path(".github/workflows/test.yml").read_text(encoding="utf-8"))
-    steps = workflow["jobs"]["graph-check"]["steps"]
-    resolve_step = next(
-        step
-        for step in steps
-        if step.get("name") == "Resolve graph artifacts from exact release manifest"
-    )
-    validate_step = next(
-        step for step in steps if step.get("name") == "Validate shipped graph artifacts"
-    )
-    names = [step.get("name") for step in steps]
-
-    assert resolve_step["run"].strip() == (
-        "python scripts/graph_release_manifest.py hydrate --manifest graph/release-artifacts.json"
-    )
-    assert names.index(resolve_step["name"]) < names.index(validate_step["name"])
+def test_graph_only_workflow_never_downloads_retired_corpus() -> None:
+    workflow = Path(".github/workflows/test.yml").read_text(encoding="utf-8")
+    assert "graph_release_manifest.py hydrate" not in workflow
+    assert "Validate graph infrastructure with synthetic fixtures" in workflow

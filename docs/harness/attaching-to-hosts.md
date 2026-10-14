@@ -1,30 +1,103 @@
-# Attaching ctx to any LLM host
+# Connect CTX to your host
 
-`ctx` ships four integration surfaces. Pick based on what your host
-already supports:
+CTX is a recommendation engine over your own knowledge graph and wiki.
+A fresh setup is empty. The same engine serves the CLI, MCP, Python, and native
+host hooks; CTX does not download a tool catalog or run a separate paid LLM to
+make suggestions.
 
-| Your host | Use |
-|---|---|
-| MCP-native (Claude Code, Claude Agent SDK, Cline, Goose, OpenHands, Continue) | **MCP server** — no Python, just spawn `ctx-mcp-server` |
-| Anything that isn't MCP-native but runs Python | **Python library** — `from ctx import recommend_bundle, ...` |
-| "I just want to run an agent and get recommendations" | **`ctx run` CLI** — our built-in harness |
-| LoopFlow or another loop that already owns plan/act/observe | **LoopFlow adapter** — `python -m ctx.adapters.loopflow` before planning |
+| Host integration | Use |
+| --- | --- |
+| Codex or Claude Code with compatible hook support | Native event hooks for advisory prompt context |
+| A host that accepts a stdio MCP server | `ctx-mcp-server` with a read-only tool allowlist |
+| Custom Python loop | `from ctx import recommend_bundle` |
+| Any host that can call a local process | `ctx recommend "current task" --json` |
+| Existing plan/act/observe loop | `python -m ctx.adapters.loopflow` |
 
-All four paths consume the **same** knowledge graph, llm-wiki, and
-quality scoring inputs. Output shape and grouping can differ by host
-surface; the transport and permission contract decide what each loop sees.
+Use an absolute `CTX_WIKI_DIR` consistently in the host's environment and your
+shell to select private knowledge. The compatibility default remains
+`~/.claude/skill-wiki/`. The name of that directory does not restrict the engine
+to Claude Code.
+
+## Native prompt hooks
+
+Initialize only the adapter you intend to use:
+
+```bash
+ctx-init --hooks --model-mode skip
+ctx-init --codex-hooks --model-mode skip
+```
+
+The first configures Claude Code hooks; the second configures Codex hooks.
+They modify host configuration, so inspect the generated settings and complete
+the host's trust approval or restart where required. The Python package alone
+does not start monitoring every task.
+
+Supported prompt events supply the current task to the shared engine. Hooks
+return at most five mixed suggestions, and empty knowledge or no useful match
+produces no injected recommendation. There is no paid model call or polling
+daemon in this path. Do not assume every host/version supplies the same events.
+
+Prompt hooks emit a short `systemMessage` for visible suggestions and
+`additionalContext` telling the agent to offer tools for explicit approval.
+Claude Code's `additionalContext` alone is model-facing, not a user message.
+The host still controls rendering and whether an agent acts on a suggestion.
+Verify the current host behavior in
+an isolated profile using its [Codex](https://learn.chatgpt.com/docs/hooks) or
+[Claude Code](https://code.claude.com/docs/en/hooks) hook documentation.
+
+The product suggests tools; **installation requires explicit approval**.
+Native recommendation hooks do not install, activate, or unload them. Previously
+saved automatic-install preferences do not authorize execution through this
+suggestion-only path. Actual host loading and usage must be observed separately;
+delivery alone is not proof of use.
+
+Local hook subprocess tests prove CTX's adapter behavior, not actual acceptance
+by an installed Codex or Claude Code release. Record that host's version,
+registered configuration, delivered event, visible/model context, and absence of
+unexpected writes before claiming live integration.
+
+PostToolUse events can trigger a language-specific suggestion when the host
+supplies an explicit `file_path`, `path`, or `filename`. CTX reads the filename
+suffix, not source bodies, transcripts, tool output, or shell commands. A bounded
+local digest-only cache suppresses repeated identical shortlists. Shell or patch
+events without file-path metadata do not provide this signal; this is not
+universal observation of every tool call.
 
 ---
 
 ## 1. MCP server path
 
-Install ctx with the harness extras:
+Install the base package (MCP recommendations do not need a model provider):
 
 ```bash
-pip install "claude-ctx[harness]"
+pip install claude-ctx
 ```
 
 This puts `ctx-mcp-server` on your PATH. Then wire it into your host:
+
+### Evidence boundary for named hosts
+
+The blocks below are **version-dependent configuration examples**, **not
+external-host interoperability evidence**. CTX's clean-host tests exercise
+installed package entrypoints; local protocol tests exercise `ctx-mcp-server`
+directly. They do not establish that a
+particular release of Claude Code, Cline, Continue, Goose, and OpenHands accepts
+the shown configuration or exposes CTX tools. The Claude Agent SDK dictionary
+shape was checked against its upstream type definition, but no SDK host was
+launched.
+
+Before relying on any named-host recipe, use that host's current documentation
+and an isolated profile to verify that the host:
+
+1. accepts and lists the configuration;
+2. starts `ctx-mcp-server` without a shell wrapper;
+3. completes `initialize` and `tools/list`; and
+4. completes one read-only `tools/call`, such as `ctx__wiki_search`, before you
+   grant any lifecycle write tools.
+
+Those checks need no paid model call when the host provides an MCP diagnostic.
+If the host can exercise MCP only through an agent turn, interoperability stays
+unverified until the host owner deliberately runs that external acceptance.
 
 ### Claude Code
 
@@ -32,36 +105,42 @@ This puts `ctx-mcp-server` on your PATH. Then wire it into your host:
 claude mcp add ctx-wiki -- ctx-mcp-server
 ```
 
-The tools `ctx__recommend_bundle`, `ctx__recommend_related`,
-`ctx__graph_query`, `ctx__wiki_search`, and `ctx__wiki_get` appear to
-Claude on the next turn, alongside runtime lifecycle tools such as
-`ctx__load_entity`, `ctx__mark_entity_used`, and `ctx__session_state`.
-Ask "What skills help with FastAPI auth?" and it will call them.
+Treat this as a configuration recipe, not proof that the tools loaded. Perform
+the host-native checks above. A successful `tools/list` should include read-only
+tools such as `ctx__recommend_bundle`, `ctx__recommend_related`,
+`ctx__graph_query`, `ctx__wiki_search`, and `ctx__wiki_get`; a server started
+without a restrictive allowlist also advertises runtime lifecycle tools such as
+`ctx__load_entity`, `ctx__mark_entity_used`, and `ctx__session_state`. Tool
+choice remains the host's decision.
 
 For permissioned adapters that should expose only read/query tools, start the
 same server with `--allow-tools` and `--entity-types`. For example,
 `ctx-mcp-server --allow-tools ctx__recommend_bundle,ctx__wiki_search,ctx__wiki_get --entity-types skill,mcp-server`
 limits tool discovery and read results to the named tools and entity types.
+Unknown `--allow-tools` names are a startup error; check spelling rather than
+expecting an unknown name to be ignored.
 
 ### Claude Agent SDK (Python)
 
 ```python
-from anthropic import Anthropic
-from claude_agent_sdk import ClaudeAgentOptions, McpServerConfig
+from claude_agent_sdk import ClaudeAgentOptions
 
 options = ClaudeAgentOptions(
     mcp_servers={
-        "ctx-wiki": McpServerConfig(
-            command="ctx-mcp-server",
-        ),
+        "ctx-wiki": {"type": "stdio", "command": "ctx-mcp-server"},
     },
 )
 ```
 
+Install the host SDK separately. Its [MCP configuration type](https://github.com/anthropics/claude-agent-sdk-python/blob/main/src/claude_agent_sdk/types.py)
+is a union of dictionary shapes, not a `McpServerConfig(...)` constructor.
+Creating these options does not launch a host or verify a live tool call.
+
 ### Cline / Continue.dev
 
-Add to your MCP server config (`~/.config/cline/mcp.json` or the
-Continue equivalent):
+The exact config location and schema are host-version dependent. Consult the
+installed host's current documentation; the following shape is an example, not
+a verified import into either host:
 
 ```json
 {
@@ -75,7 +154,8 @@ Continue equivalent):
 
 ### Goose
 
-`~/.config/goose/config.yaml`:
+Consult the installed Goose version's documentation before using this example
+shape; it was not imported into a Goose runtime during CTX verification:
 
 ```yaml
 extensions:
@@ -86,7 +166,9 @@ extensions:
 
 ### OpenHands
 
-OpenHands' runtime config:
+Consult the installed OpenHands version's documentation before using this
+example shape; it was not imported into an OpenHands runtime during CTX
+verification:
 
 ```json
 {
@@ -100,11 +182,24 @@ OpenHands' runtime config:
 
 ### Any MCP-speaking harness
 
-The server reads JSON-RPC 2.0 on stdin, writes on stdout, speaks
-MCP protocol version `2024-11-05`. Any client that does the standard
-`initialize` handshake + `tools/list` + `tools/call` flow works.
+The server reads JSON-RPC 2.0 on stdin and writes on stdout. It implements the
+legacy MCP revisions `2025-11-25` and `2024-11-05`. During `initialize`, it
+echoes either supported version when offered; if the version is omitted or is
+not supported, it negotiates the newest implemented fallback, `2025-11-25`.
+It does **not** claim the `2026-07-28` protocol semantics, so a newer host must
+accept the negotiated legacy revision. The standard `initialize` →
+`tools/list` → `tools/call` flow is supported, and a JSON-RPC `ping` request
+receives an empty successful result. Ping notifications are also accepted
+without a response.
 
 ### Live MCP compatibility gate
+
+CTX's MCP client accepts the same legacy revisions listed above. The server's
+`initialize` result must explicitly select a supported revision; a missing,
+non-string, or unsupported `protocolVersion` stops startup before tool discovery.
+The client also validates JSON-RPC response envelopes and the object/array
+shapes used by `tools/list` and `tools/call`, reporting invalid shapes as
+`McpServerError`.
 
 The regular test suite never starts arbitrary third-party MCP servers.
 Those commands run as local subprocesses and can read files, use the
@@ -192,16 +287,30 @@ def on_user_turn(query: str):
         inject_into_context(page["body"])
 ```
 
-The first call to any of these lazy-loads the graph + wiki once;
-subsequent calls are O(walk) cheap. Safe to call from inside your
-own while-loop on every turn. `recommend_bundle()` accepts
+The API lazily creates a shared toolbox. Individual operations use their
+graph/wiki readers and caches; first-load cost and later query cost depend on
+the artifact, index freshness, and operation. Measure these on your target
+corpus before putting them on a latency-sensitive path. `recommend_bundle()` accepts
 `selected`, `rejected`, `active_context`, and `baseline_context` to keep
 already-present context out of new load suggestions. It also accepts
-`local_code_task`, `no_api_keys`, `language`, `include_baseline_context`, and
-`include_unavailable` when a local/no-key coding loop needs stricter filtering.
+`local_code_task`, `no_api_keys`, and `language` to filter generic planning,
+credential-dependent, or wrong-language suggestions. `include_baseline_context`
+opts baseline tools back in. Relevant tools without local material remain
+eligible; `include_unavailable` is retained for compatibility and no longer
+changes that policy.
 Returned rows include availability metadata (`installable`, `load_status`, and
 `source_path`) so hosts can distinguish local wiki entries from manual or
 external-install rows.
+
+In the user configuration, `resolver.recommendation_top_k` sets the default
+and ceiling for the mixed shortlist; `resolver.recommendation_min_normalized_score`
+drops weak graph matches. These tune advisory selection, not execution permission.
+The default values live in `src/ctx/config.json` and are validated by `ctx_config`.
+
+`recommend_related()` returns only rows that are locally installable or have a
+non-empty `install_command`; an `available` status alone is insufficient.
+It applies this filter before the requested `top_n` limit, so fewer results
+may remain when graph neighbors have no usable installation path.
 
 Advanced: build a `CtxCoreToolbox` directly if you need to point at
 a non-default wiki/graph path:
@@ -221,6 +330,13 @@ for td in toolbox.tool_definitions():
 ---
 
 ## 3. `ctx run` CLI path
+
+This optional harness is exposed as `ctx advanced run`; the older `ctx run`
+spelling remains a compatibility alias. Its default toolbox queries user-owned
+knowledge. The historical `--ctx-engine-mode shadow` and `recommend` modes
+use a retired authenticated release-catalog path and fail closed without those
+assets; they are not the current recommendation product or a reason to restore
+the old corpus.
 
 If you don't have your own loop yet:
 
@@ -357,7 +473,10 @@ use skills: security-review, code-review
 Only local wiki skill rows are named in `loopflow.use_skills`. Catalog skills
 remain under `capabilities.skills` with `status: available`,
 `load_status: external-install-required`, and `install_command` metadata when
-the current context allows non-local recommendations.
+present. The legacy LoopFlow adapter additionally excludes skills without
+locally loadable material from capability and related rows for local-code or
+no-key tasks. That extra availability filter applies to skills; agents and MCP
+records still use the shared [context filters](#2-python-library-path).
 
 When the LoopFlow run uses its own LLM rather than a hosted Claude Code
 session, grant harnesses and pass the model profile:
@@ -377,6 +496,13 @@ python -m ctx.adapters.loopflow \
 Other harness matching hints use the same names as the install flow:
 `--harness-autonomy`, `--harness-verify`, `--harness-attach-mode`, and
 `--api-key-env`.
+
+For `ctx-init` custom-model onboarding, `--api-key-env` takes a variable name,
+not its secret value: 1–128 ASCII characters, starting with a letter or `_`,
+followed by letters, digits, or `_`. A blank wizard answer supports local/no-key
+models. CTX validates an explicit name before displaying the wizard and validates
+the wizard answer before continuing. An invalid name exits with status `1`
+without printing it or writing consent, model-profile, or configuration files.
 
 Generic agent loops can import the same adapter directly:
 
@@ -452,32 +578,36 @@ python -m harness_install --recommend \
 |---|---|
 | Your host already speaks MCP | 1 (MCP server) — zero Python code on your side |
 | You want the alive-skill system inside your existing Python loop | 2 (library) |
-| You're comparing models and need a harness | 3 (CLI) |
+| You want to run one model in the legacy built-in agent loop | 3 (CLI) |
 | No catalog harness fits your model/goal | generated custom harness plan |
 | You're building an IDE extension | 1 if the IDE speaks MCP (most do), else 2 |
 | You're building a DSL runner or agent loop | 4 (LoopFlow adapter) |
 
-All four paths share `~/.claude/skill-wiki/` as the source-of-truth
-corpus, so your recommendations are consistent regardless of the
-integration you pick.
+All integrations select the same user-owned wiki via `CTX_WIKI_DIR` or the
+compatibility default. They share ranking policy, not execution authority.
+There is no shipped corpus to use as a fallback.
 
 ---
 
 ## Skill lifecycle
 
-Recommendations go up and down based on use automatically. `ctx`
-tracks:
+The legacy quality scorer can incorporate locally recorded use when a hook or
+an explicit recompute refreshes its sidecars. Its four deterministic signals are:
 
 - **How recently a skill was invoked** (`telemetry_signal`).
-- **How broadly it's used across the graph** (`graph_signal`).
-- **Whether new skills are being added** (`intake_signal`).
+- **Graph connectivity** (`graph_signal`).
+- **Whether the current body passes structural intake checks** (`intake_signal`).
+- **Recorded routing selections** (`routing_signal`).
 
-Skills that fall below a quality floor get demoted to `stale` status
-and de-ranked from future recommendations. This logic lives in
-`ctx.core.quality.quality_signals` and runs identically whether
-you're on the MCP path, library path, or `ctx run` CLI.
+`ctx.core.quality.quality_signals` contains pure signal calculations, not a
+background lifecycle worker. `skill_quality` computes and persists grades;
+`ctx_lifecycle` separately proposes or applies watch/demote/archive transitions
+under its confirmation policy. A read-only MCP or Python recommendation call
+does not by itself run those lifecycle transitions. See
+[lifecycle and dashboard](../skill-lifecycle-and-dashboard.md) for the operator
+commands and [quality installation](../skill-quality-install.md) for hook setup.
 
-To inspect lifecycle state for a specific skill:
+To inspect the last persisted quality score and its evidence for a skill:
 
 ```bash
 python -m skill_quality explain fastapi-pro

@@ -1,16 +1,17 @@
 # CTX Fit — Current State Audit (snapshot of 2026-08-09)
 
 > **This is a dated snapshot, not a description of the repository today.** It
-> records what CTX contained on 2026-08-09, before CTX Fit was built, and it
-> has not been updated since. Many rows below marked **Absent** or `MISSING`
+> records what CTX contained on 2026-08-09, before CTX Fit was built; its audit
+> findings remain historical. Many rows below marked **Absent** or `MISSING`
 > have shipped: readiness, candidate generation, experiment planning, execution,
-> verification states, recommendation, apply, and pull-request preparation all
+> verification states, recommendation, apply, and pull-request creation all
 > live in `src/ctx/fit/` with tests in `src/tests/fit/`. Row 14 in particular —
-> "Prepare a GitHub PR" — shipped as *preparation only*: `ctx fit --pr` prints
-> a PR body and a suggested branch name. CTX Fit runs no git *write* commands: it reads history to derive tasks, but creates no branch, commits nothing, pushes nothing and never merges, so
-> it creates no branch, commits nothing and never merges. Read the code and
-> `git log --oneline -- src/ctx/fit` for the current state; read this document
-> for the reasoning that shaped it.
+> "Prepare a GitHub PR" — was absent in this snapshot; the current
+> [user guide's apply and PR contract](../index.md)
+> supersedes that row. The current product contract is
+> [Bring your own knowledge](BRING_YOUR_OWN_PLAN.md), and the live operational
+> checkpoint is [STATE.md](STATE.md). Read this document for the historical
+> reasoning, not current product or delivery status.
 
 Milestone 0 deliverable. This document recorded what CTX already had, what had
 to change, and what was genuinely absent, so that CTX Fit was built as an

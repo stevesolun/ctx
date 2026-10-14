@@ -46,6 +46,9 @@ from ctx.runtime.workspace_identity import capture_workspace_identity
 from tests.engine import test_engine_install_coordinator as install_support
 
 
+pytestmark = pytest.mark.usefixtures("historical_release_catalog")
+
+
 TARGET_ID = "skill:ctx-python-state-protocols"
 TARGET_SHA256 = "c87c65b5b09f48e27c683fb5ada9d8bc377d6d72d7742ce7aac3c2d3d97ac441"
 BEFORE_EXPIRY = datetime(2026, 8, 2, 12, 30, tzinfo=UTC)

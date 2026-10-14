@@ -1,12 +1,11 @@
 # Dashboard (`python -m ctx_monitor`)
 
-!!! info "This is the recommendation surface, not CTX Fit"
+!!! info "Your local knowledge and activity"
 
-    The product is **CTX Fit** (`ctx fit`) — see the [home page](index.md).
-    This dashboard predates it and shows none of it: `ctx fit` writes nothing
-    under `~/.claude` and reports its results on stdout. Everything below is
-    the local skill/agent/MCP wiki, the knowledge graph, and this machine's
-    session history.
+    CTX starts empty; this dashboard displays your own skill/agent/MCP wiki,
+    knowledge graph, and this machine's session history. It shows no CTX Fit
+    results: the optional `ctx fit` utility reports on stdout and writes nothing
+    under `~/.claude` on a plain profile run. See the [home page](index.md).
 
 Local HTTP dashboard for ctx's currently supported live observables:
 loaded skills, agents, MCP servers, and installed harness records; session timelines; the
@@ -38,14 +37,20 @@ load/unload POSTs reject harnesses with the exact dry-run command to use.
 Quality scoring is shown for sidecar-backed skills, agents, and MCP servers.
 The `/recommend` page exposes the browser selectable recommendation flow:
 query, top-k, selected and rejected IDs, select-all/select-none helpers,
-TLDR/reason text, and related suggestions for partially selected bundles. The
-CLI/API expose additional active-context, baseline-context, availability,
-local/no-key, and language controls for host loops.
+TLDR/reason text, and related suggestions for partially selected bundles. See
+the [host integration guide](harness/attaching-to-hosts.md#2-python-library-path)
+for CLI/API filtering controls and advisory availability policy.
 Generic/API/local harnesses that call ctx-core validation tools write to
 the runtime lifecycle ledger. The dashboard exposes that ledger at
 `/runtime` and as JSON at `/api/runtime.json`, including validation and
 escalation state, tool-selection totals, selected-vs-system source counts, token
 usage totals, attribution counts, and recent per-tool usage rows.
+
+If the runtime ledger cannot be read because of an I/O or UTF-8 error, the home
+page and `/runtime` show an unavailable-history alert. `/api/runtime.json`
+returns HTTP 503 with `path` and `error` fields instead of activity totals.
+Check the ledger's permissions and encoding; a missing ledger is still treated
+as empty history.
 
 ### Smoke-test the dashboard
 
@@ -69,7 +74,7 @@ python scripts/dashboard_smoke.py --warm \
 ### Check queue and artifact state - `/status`
 
 The status tab shows the durable wiki/graph maintenance queue and the
-generated graph/wiki artifacts that ctx can ship or consume. It reports:
+generated graph/wiki artifacts from your own knowledge. It reports:
 
 - queue DB availability and job counts by state (`pending`, `running`,
   `succeeded`, `failed`, `cancelled`)
@@ -93,14 +98,12 @@ generated graph/wiki artifacts that ctx can ship or consume. It reports:
 
 #### Catalog badge links
 
-The README entity badges open the public `/catalog/` launcher so they never
-point at a dead `127.0.0.1` URL from GitHub, PyPI, or Hugging Face. The public
-page provides search, autocomplete suggestions, and tile cards that deep-link
-into the local dashboard. To open the full live searchable tile catalog, install
-the full wiki pages and start the local dashboard:
+The public [catalog page](catalog.md) explains the empty, user-owned catalog
+and links to local browsing. Author or import your own records through
+[entity onboarding](entity-onboarding.md), then start the local dashboard:
 
 ```bash
-ctx-init --graph --graph-install-mode full --model-mode skip
+ctx-init --model-mode skip
 python -m ctx_monitor serve
 ```
 
@@ -114,11 +117,10 @@ Then use:
 The local catalog includes search, browser autocomplete suggestions, type
 filters, tile cards, and click-through detail pages for each entity.
 
-The wiki tab requires full wiki markdown content from
-`ctx-init --graph --graph-install-mode full`, installed wiki packs, or
-local/private wiki entities. The default runtime graph install powers
-recommendations and graph stats but does not expand every entity page. When
-entity pages exist, the wiki tab is a filterable card grid over a
+The wiki tab reads user-authored Markdown, explicitly imported wiki packs, or
+other local/private wiki entities. Initialization creates an empty structure;
+it does not download pages or a recommendation graph. When entity pages exist,
+the wiki tab is a filterable card grid over a
 deterministic, bounded dashboard sample: up to 500 pages per
 dashboard-supported entity type. If `~/.claude/skill-wiki/wiki-packs/` is
 installed, the dashboard reads the merged base+overlay pack state first: pack
@@ -194,9 +196,8 @@ tables:
 2. **Grade distribution** — A/B/C/D/F count and share.
 3. **Lifecycle tiers** — counts for `active`, `watch`, `demote`,
    `archive`.
-4. **Hard floors active** — which override reasons are currently
-   pinning entities to F (`never_loaded_stale`, `intake_fail`, etc.)
-   and how many entities each one catches.
+4. **Hard floors active** — which score overrides are active and how many
+   entities each one catches; see the [scoring rules](skill-quality-install.md#what-it-does).
 5. **By category** — per-category count, average score, and full
    A/B/C/D/F mix. This is the row most useful for "where are my D/F
    skills concentrated?"
@@ -235,15 +236,15 @@ per-process monitor token injected into the rendered page.
 |---|---|
 | `/` | Home: seven stat cards (loaded, sidecars, wiki entities, graph nodes, runtime checks, audit events, sessions), grade distribution pills, recent sessions table, recent audit events |
 | `/loaded` | **Currently-loaded skills, agents, MCP servers, and installed harness records** from `~/.claude/skill-manifest.json` plus `~/.claude/harness-installs/*.json`; skill/agent/MCP rows expose supported live actions |
-| `/skills` | Every sidecar as a filterable **card grid**: left sidebar (search by slug, grade checkboxes, skill/agent/MCP toggle, hide-floored), card shows grade pill + raw score + links to sidecar/wiki/graph |
+| `/skills` | Sidecars as a filterable, paginated **card grid**: left sidebar (search by slug, grade checkboxes, skill/agent/MCP toggle, hide-floored), card shows grade pill + raw score + links to sidecar/wiki/graph |
 | `/skillspector` | SkillSpector audit tab for ctx-run static scan results over skill bodies, with status, severity, tag, graph-family, query, and limit filters plus a link to `/api/skillspector.json` |
-| `/skill/<slug>` | Full sidecar breakdown: four-signal score (telemetry · intake · graph · routing), hard-floor reason, computed_at timestamp, per-skill audit timeline |
+| `/skill/<slug>` | Sidecar summary (grade, raw score, type, optional hard floor), a bounded raw-JSON preview, and the latest 100 matching audit rows |
 | `/wiki` | **Wiki entity index** - bounded card-grid sample of up to 500 pages per dashboard-supported entity type, merging installed wiki-pack pages with local-only entity files not shadowed by a pack page or tombstone. Includes sharded MCP server pages and flat harness pages. Left sidebar: text search over the visible sample (slug, description, tag), skill/agent/MCP/harness checkboxes. |
-| `/wiki/<slug>?type=<entity>` | Dashboard-supported wiki entity page rendered from the merged pack/local source: markdown body + full frontmatter table + grade banner + deep links to sidecar and graph-neighborhood views. The optional `type` query disambiguates duplicate slugs such as `langgraph`; omitted types are inferred from frontmatter or path when possible. |
+| `/wiki/<slug>?type=<entity>` | Dashboard-supported wiki entity page rendered from the merged pack/local source: bounded markdown preview + bounded frontmatter table + grade banner + deep links to sidecar and graph-neighborhood views. The optional `type` query disambiguates duplicate slugs such as `langgraph`; omitted types are inferred from frontmatter or path when possible. |
 | `/graph` | **Graph explorer landing page** - node/edge count header, a "Popular seed slugs" block (18 highest-degree skill/agent/MCP/harness entities as clickable chips), search box for any skill/agent/MCP/harness slug, and the built-in graph list panel. Clicking a seed chip navigates to `/graph?slug=<slug>&type=<entity>`. |
 | `/graph?slug=<slug>&type=<entity>` | **Built-in** 1-hop neighborhood around the target skill/agent/MCP/harness slug. Entity pills identify skill, agent, MCP server, and harness rows. Tap any node to navigate to that entity's typed wiki page. Type and tag filters run client-side. |
 | `/recommend` | Selectable recommendation page: query and top-k controls, repeated selected/rejected ID inputs, select-all/select-none helpers, recommendation state, TLDR/reason text, and graph-backed related suggestions for partial selections. Advanced active/baseline context and local/no-key filters are CLI/API controls. |
-| `/manage` | Search, inspect, edit, delete, and manually import skill/agent/MCP/harness wiki entities through the same safe-name and mutation-token checks as live load/unload. Manual skill upserts run the required static SkillSpector gate before the wiki page is written or queued for graph refresh. |
+| `/manage` | Search, inspect, manually enter, edit, and delete skill/agent/MCP/harness wiki entities through the same safe-name and mutation-token checks as live load/unload. The page has no file-upload/import flow. Manual skill upserts run the required static SkillSpector gate before the wiki page is written or queued for graph refresh. |
 | `/harness` | Harness Setup wizard for non-Claude/custom API/local model users: collects model, goals, tool needs, safety constraints, and shows the harness recommendation/install path. |
 | `/docs` | Local repo docs rendered inside the dashboard with MkDocs-like tabs, sidebar table of contents, in-dashboard search, and source links. |
 | `/config` | Effective ctx config with defaults, required markers, field explanations, and editable user overrides where supported. |
@@ -251,7 +252,7 @@ per-process monitor token injected into the rendered page.
 | `/kpi` | **KPI dashboard** — total entity count with subject breakdown, grade distribution pills, two-column tables for grade counts and lifecycle tiers (active · watch · demote · archive), hard-floor reasons with counts, **By category** table (count · avg score · A/B/C/D/F mix per category), **Top demotion candidates** (active/watch entries graded D or F, sorted by consecutive-D streak desc then score asc), and the **Archived** list. Same shape as `python -m kpi_dashboard render` but HTML |
 | `/runtime` | Generic harness runtime ledger from `CTX_RUNTIME_LIFECYCLE_DIR` or `~/.ctx/runtime/events.jsonl`: validation totals, failed/error checks, tool-selection totals, active selected loads, user/system/host source split, token totals, exact/estimated/unavailable attribution counts, recent tool usage rows, and open escalations. Grouped token history is available in `/api/runtime.json`. |
 | `/sessions` | Index of every session (audit + skill-events), first/last seen, counts of skills loaded/unloaded, agents loaded/unloaded, MCPs loaded/unloaded, and lifecycle transitions |
-| `/session/<id>` | Per-session audit timeline showing the load → score_updated → unload triad with timestamps |
+| `/session/<id>` | Per-session audit and load/unload timelines |
 | `/logs` | Last 500 audit events in a filterable table (client-side filter on event name, subject, session id) |
 | `/events` | Live SSE stream of new audit events |
 
@@ -343,28 +344,22 @@ Cards sorted by `(grade, -raw_score)` so high-scoring A's come first.
 
 ### On `/skill/<slug>`
 
-The full four-signal breakdown from the sidecar:
+The page renders the sidecar's grade, raw score, subject type, optional hard
+floor, and a raw JSON preview capped at 4,000 characters. When present, the
+preview's `signals` and `weights` fields contain the four-signal breakdown.
+See the [quality scorer guide](skill-quality-install.md#what-it-does) for signal
+definitions, weights, and hard-floor behavior. The sidecar's stored `weights`
+map records the weights used for that result.
 
-| Signal | Weight (default) | What it measures |
-|---|---:|---|
-| **Telemetry** | 0.40 | Load frequency + recency from `skill-events.jsonl`. Rewards skills that are actually used. |
-| **Intake** | 0.20 | Structural health: frontmatter fields present, H1 present, minimum body length, description length. Zero if `intake_fail` floor is active. |
-| **Graph** | 0.25 | Connectivity in the knowledge graph: degree, average edge weight, community size |
-| **Routing** | 0.15 | Router hit rate from `~/.claude/router-trace.jsonl`: how often this skill was among the top-K recommendations when surfaced |
-
-The final score is `sum(weight[i] * signal[i])`. A hard floor
-(`never_loaded_stale`, `intake_fail`) can override the score to
-force an F grade regardless of other signals.
-
-The skill detail page also shows the audit timeline for this slug
-specifically: every `skill.loaded`, `skill.unloaded`,
-`skill.score_updated` row with its session_id, so you can trace
-exactly why the score changed when it did.
+The detail page also shows up to the latest 100 matching audit rows for the
+typed slug, with timestamp, event, and actor. Use `/session/<id>` when you need
+the session-scoped audit and load/unload timelines.
 
 ### On `/session/<id>`
 
-The per-session view lets you watch a skill's lifecycle inside one
-session:
+The per-session view shows separate audit and load/unload timelines for the
+requested session. A session can contain any subset of lifecycle events; for
+example, its audit timeline might include:
 
 ```
 skill.loaded        fastapi-pro       session-abc  @ 10:23:05
@@ -372,11 +367,15 @@ skill.score_updated fastapi-pro       session-abc  @ 10:31:47   grade C->B
 skill.unloaded      fastapi-pro       session-abc  @ 11:04:02
 ```
 
-The `load → score_updated → unload` triad is the canonical
-observability proof that ctx's telemetry pipeline is live.
-
 ## Security
 
+- **Public session identifiers**. Home, session, and runtime views and their
+  session/runtime JSON summaries replace secret-shaped session IDs with stable
+  `session-public-...` aliases. Follow the returned alias to `/session/<id>`;
+  ordinary IDs remain unchanged unless they use that reserved prefix. These
+  views also redact recognized secrets in subject/tool fields and nested
+  `meta`/`metadata` values. This response projection does not rewrite local
+  logs or make arbitrary local data safe to share.
 - **Binds to 127.0.0.1 by default**. Use
   `python -m ctx_monitor serve --host 0.0.0.0 --allow-non-loopback` only if you
   actually want LAN-visible read-only access. The startup output prints a

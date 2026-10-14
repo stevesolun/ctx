@@ -17,6 +17,9 @@
 [Unit]
 Description=Claude ~/.claude backup watchdog (ctx)
 After=default.target
+# Give up after three starts within one minute.
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
 Type=simple
@@ -26,8 +29,6 @@ ExecStart=/usr/bin/python3 ${CTX_REPO}/src/backup_mirror.py watchdog --interval 
 # Crash-recover: back off 5s between restarts, give up after 3 fast crashes.
 Restart=on-failure
 RestartSec=5
-StartLimitIntervalSec=60
-StartLimitBurst=3
 # Least-privilege: the watchdog only needs to read ~/.claude and write
 # ~/.claude/backups. No network. No privilege escalation.
 NoNewPrivileges=yes

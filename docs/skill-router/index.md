@@ -1,22 +1,22 @@
 # Skill router
 
-!!! info "Part of the recommendation surface, not CTX Fit"
+!!! info "Recommendations from your own knowledge"
 
-    The product is **CTX Fit** (`ctx fit`): it finds the cheapest AI coding
-    setup that reliably works on a repository. See the [home page](../index.md).
-    This page documents the older graph-backed recommendation layer, which
-    still ships and is what the published PyPI release installs.
+    CTX ships the engine and empty wiki/graph structure, not a tool catalog.
+    This page describes repository routing over user-supplied records.
+    The optional `ctx fit` evaluator is separate. See the [home page](../index.md).
 
 
-The skill router decides which skills, agents, and MCP servers are useful for
-the active repository and current development task. Harnesses are recommended in
-the custom-model onboarding flow or loop adapters; after a harness is attached,
-the same capped skills/agents/MCP recommendation layer can be used by that host.
+The skill router suggests skills, agents, and MCP servers relevant to the
+current development task, using records you or your organization supply.
+CLI, MCP, Python, and connected native hosts share the recommendation policy.
+Harness onboarding remains a separate advanced workflow.
 
 ## Problem
 
 Every loaded skill, agent, and MCP server costs tokens, attention, and tool
-surface area. Most sessions need a small top-scored bundle from the 68,494 skills, 467 agents, and 10,790 MCP servers in the shipped graph, not the whole inventory.
+surface area. A session can benefit from a small relevant subset of your own
+knowledge. An empty wiki or a task with no useful match can return no suggestions.
 Loading too much:
 
 - wastes context on irrelevant instructions,
@@ -28,31 +28,44 @@ Loading too much:
 
 ```text
 ctx/
-|-- src/scan_repo.py                         # Repo scanner -> stack profile
-|-- src/ctx/core/resolve/resolve_skills.py   # Profile -> load/unload manifest
-|-- src/ctx/core/resolve/recommendations.py  # Shared recommendation engine
-|-- src/ctx/adapters/                        # Host adapters + generic tools
-`-- graph/wiki-graph-runtime.tar.gz          # Shipped graph/wiki runtime
+|-- src/ctx/adapters/generic/ctx_core_tools.py # Shared graph/wiki recommendations
+|-- src/ctx/runtime/user_recommendations.py   # Advisory native-host projection
+|-- src/ctx/core/wiki/                       # User wiki authoring and indexing
+`-- src/scan_repo.py                         # Optional repository stack scan
 ```
 
 ## Flow
 
-1. `ctx-scan-repo --repo . --recommend` scans the repository and produces stack signals.
-2. The shared resolver scores graph/wiki entities by tags, categories, semantic
-   edges, usage, quality, and configured gates.
-3. The resolver returns a capped manifest: what to load, what to unload, and why.
-4. The user confirms load/unload changes unless they configured automatic mode.
-5. Usage and quality signals are recorded so future recommendations improve.
+1. Initialize an empty local wiki with `ctx-init --model-mode skip`, then
+   [author or import your own records](../entity-onboarding.md).
+2. Ask `ctx recommend "review a Python API"`, call `ctx__recommend_bundle`
+   through MCP, or use a connected native host's prompt events.
+3. The shared engine applies the
+   [context and availability policy](../harness/attaching-to-hosts.md#2-python-library-path)
+   to return a bounded mixed shortlist. An empty result is valid.
+4. The host presents the bounded suggestions. Native hooks expose only bounded
+   identifiers, matching tags, and availability. Graph content is untrusted
+   data and grants no installation, execution, activation, or unload authority.
+5. Install a selected tool only after explicit approval through a separate
+   user/host workflow. Saved legacy preapproval settings do not authorize the
+   recommendation path to act. Unload and uninstall require separate permission.
 
-The same recommender is used by the CLI, MCP/library tools, Claude Code hooks,
-LoopFlow/agent-loop adapter, and attached harness hosts. Entry points should
-differ only in transport and confirmation UX, not in ranking logic.
+Default setup is local and offline, with no bundled corpus or implicit catalog
+download. Recommendations do not call a paid model or claim measured savings.
+
+## Advanced compatibility workflows
+
+`ctx-scan-repo --repo . --recommend` derives repository stack signals and offers
+a scanner-specific view of the local recommendations. The separate
+`ctx.core.resolve.resolve_skills` module can produce a proposed load/unload
+manifest for older integrations. Neither output executes those actions. These
+compatibility workflows are separate from the normal task-query flow above.
 
 ## Reference Pages
 
-- [Stack signatures](../stack-signatures.md) - file/config patterns used to
-  identify stack signals.
-- [Skill-stack matrix](../skill-stack-matrix.md) - stack-to-capability mapping
-  used as scanner evidence.
-- [Entity source registry](../marketplace-registry.md) - skill, GitHub,
-  MCP, harness, and local sources plus update rules.
+- [Stack signatures](../stack-signatures.md) - implemented scanner boundary
+  and proposed detection coverage.
+- [Skill-stack matrix](../skill-stack-matrix.md) - implemented resolver boundary
+  and proposed stack-to-capability mappings.
+- [Entity source surfaces](../marketplace-registry.md) - discovery inputs,
+  ingestion validation, and explicit update rules.

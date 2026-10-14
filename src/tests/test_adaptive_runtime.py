@@ -18,6 +18,7 @@ from ctx.adapters.generic.adaptive_runtime import (
     default_skill_roots,
     select_installed_skill,
 )
+from ctx.adapters.generic import adaptive_runtime
 from ctx.adapters.generic.loop import run_loop
 from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
 from ctx.adapters.generic.providers import (
@@ -62,6 +63,47 @@ _SECURE_DIRFD_READS = (
     hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY") and os.open in os.supports_dir_fd
 )
 _SEMANTIC_SELECTION_TIMEOUT_MS = 5_000
+
+
+@pytest.mark.skipif(not _SECURE_DIRFD_READS, reason="secure dir_fd reads unavailable")
+@pytest.mark.parametrize("skill_count", [128, 129])
+def test_selector_default_file_budget_accepts_boundary_and_abstains_over_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, skill_count: int
+) -> None:
+    root = tmp_path / "skills"
+    for index in range(skill_count):
+        _write_skill(root, f"bounded-{index:03}", f"Use when 'bounded {index:03}' is requested.")
+    monkeypatch.setattr(adaptive_runtime.time, "perf_counter", lambda: 0.0)
+    selected = select_installed_skill("Use bounded-000", skill_roots=[root])
+    if skill_count == 128:
+        assert selected is not None
+        assert selected.name == "bounded-000"
+    else:
+        assert selected is None
+
+
+@pytest.mark.skipif(not _SECURE_DIRFD_READS, reason="secure dir_fd reads unavailable")
+@pytest.mark.parametrize("elapsed", [0.050, 0.050001])
+def test_selector_default_deadline_is_checked_after_file_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, elapsed: float
+) -> None:
+    root = tmp_path / "skills"
+    _write_skill(root, "bounded", "Use when 'bounded' is requested.")
+    clock = [0.0]
+    monkeypatch.setattr(adaptive_runtime.time, "perf_counter", lambda: clock[0])
+    real_read = adaptive_runtime._read_verified_skill
+    reads: list[Path] = []
+
+    def read_then_advance(path: Path, **kwargs: Any) -> tuple[str, str] | None:
+        result = real_read(path, **kwargs)
+        reads.append(path)
+        clock[0] = elapsed
+        return result
+
+    monkeypatch.setattr(adaptive_runtime, "_read_verified_skill", read_then_advance)
+    selected = select_installed_skill("Use bounded", skill_roots=[root])
+    assert len(reads) == 1
+    assert (selected is not None) is (elapsed <= 0.050)
 
 
 @pytest.mark.skipif(not _SECURE_DIRFD_READS, reason="secure dir_fd reads unavailable")
