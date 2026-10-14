@@ -11,6 +11,30 @@
 
 ## Checkpoint
 
+### Test-phase mechanical formatting repair — 2026-10-14 (Asia/Jerusalem)
+
+- Started clean at `58274412bc82405393d626258f1195d0a52effd8` in the active
+  delivery worktree for `codex/bring-your-own-knowledge`, PR #288. The supplied
+  preflight log stopped at Ruff formatting, naming only
+  `src/ctx/core/wiki/wiki_packs.py` and
+  `src/tests/test_inject_hooks_security.py`; it did not report a pytest failure.
+- Manually wrapped the overlong `append_sequence` validation exception and
+  reflowed the hook-command count assertion inside outer parentheses. These
+  are expression-layout changes only; R1/R2/R3 behavior, assertions and earlier
+  evidence are retained.
+- Using `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD/src" python -m pytest -q
+  --no-cov -p no:cacheprovider`, ran exactly these selectors before and after:
+  `src/tests/test_wiki_packs.py::test_active_overlay_rejects_malformed_order_without_writes`
+  and
+  `src/tests/test_inject_hooks_security.py::TestStrictLockedUpdate::test_upgrade_replaces_generated_legacy_monitor_and_is_idempotent`.
+  Baseline and final invocations exited zero: **17 passed in 0.78s before** and
+  **17 passed in 1.81s after** the mechanical repair.
+- The current test-phase rules explicitly prohibit formatters, linters and
+  static analysis. Therefore the exact Ruff failure was neither reproduced nor
+  reverified here, and formatting remains **not verified**. No broad suite or
+  pipeline command ran. The outer executor owns formatting confirmation,
+  authoritative preflight and delivery; keep PR #288 open and unmerged.
+
 ### Review-phase overlay, hook and setup repairs — 2026-10-14 (Asia/Jerusalem)
 
 - Started clean at `cfcc0328a93f0b872984433d9c3dbcf8619dcacf` in the active

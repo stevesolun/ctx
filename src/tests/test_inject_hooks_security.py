@@ -437,9 +437,9 @@ class TestStrictLockedUpdate:
         assert monitor not in handlers
         assert orchestrator not in handlers
         commands = [handler["command"] for handler in handlers]
-        assert commands.count(
-            inject_hooks._module_cmd("ctx.adapters.claude_code.query_handler")
-        ) == 1
+        assert (
+            commands.count(inject_hooks._module_cmd("ctx.adapters.claude_code.query_handler")) == 1
+        )
 
     @pytest.mark.parametrize(
         "command",

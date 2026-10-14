@@ -84,7 +84,9 @@ class WikiPackManifest:
         if not self.checksums:
             raise WikiPackManifestError("wiki pack manifest checksums must not be empty")
         if type(self.append_sequence) is not int or self.append_sequence < 0:
-            raise WikiPackManifestError("wiki pack manifest append_sequence must be nonnegative int")
+            raise WikiPackManifestError(
+                "wiki pack manifest append_sequence must be nonnegative int"
+            )
         if self.pack_type == "base" and self.append_sequence:
             raise WikiPackManifestError("base wiki packs must not set append_sequence")
 
