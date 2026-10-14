@@ -375,6 +375,118 @@ class TestStrictLockedUpdate:
             )["UserPromptSubmit"]
         )
 
+    @pytest.mark.parametrize(
+        "interpreter",
+        [
+            "python",
+            "'/old/Python Runtime/bin/python3.11'",
+            "'/old/$literal/bin/python3'",
+            "'/old/[literal]/bin/python3'",
+            '"C:\\Python Runtime\\python.exe"',
+            "/old/bin/pypy3",
+        ],
+    )
+    @pytest.mark.parametrize("flat", [False, True])
+    def test_upgrade_replaces_generated_legacy_monitor_and_is_idempotent(
+        self,
+        tmp_path: Path,
+        interpreter: str,
+        flat: bool,
+    ) -> None:
+        path = tmp_path / "settings.json"
+        monitor = {
+            "type": "command",
+            "command": (
+                f"{interpreter} -m ctx.adapters.claude_code.hooks.context_monitor --from-stdin"
+            ),
+        }
+        orchestrator = {
+            "type": "command",
+            "command": f"{interpreter} -m ctx.adapters.claude_code.hooks.bundle_orchestrator",
+        }
+        user_handler = {"type": "command", "command": "user-hook --keep", "timeout": 17}
+        post_tool = (
+            [monitor, orchestrator, {"matcher": ".*", "hooks": [user_handler]}]
+            if flat
+            else [{"matcher": ".*", "hooks": [monitor, orchestrator, user_handler]}]
+        )
+        pre_tool = [{"matcher": "Read", "hooks": [monitor]}]
+        original = {
+            "model": "user-selected-model",
+            "hooks": {
+                "PostToolUse": post_tool,
+                "PreToolUse": pre_tool,
+            },
+        }
+        path.write_text(json.dumps(original), encoding="utf-8")
+
+        installed = inject_hooks.install_hooks_file(path, str(tmp_path / "ctx"))
+        before = (path.read_bytes(), path.stat().st_mtime_ns)
+        again = inject_hooks.install_hooks_file(path, str(tmp_path / "ctx"))
+
+        assert again == installed
+        assert (path.read_bytes(), path.stat().st_mtime_ns) == before
+        assert installed["model"] == original["model"]
+        assert installed["hooks"]["PreToolUse"] == pre_tool
+        handlers = [
+            handler
+            for group in installed["hooks"]["PostToolUse"]
+            for handler in group["hooks"]
+        ]
+        assert user_handler in handlers
+        assert monitor not in handlers
+        assert orchestrator not in handlers
+        commands = [handler["command"] for handler in handlers]
+        assert commands.count(
+            inject_hooks._module_cmd("ctx.adapters.claude_code.query_handler")
+        ) == 1
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "echo -m {module} --from-stdin",
+            "python -m {module} --from-stdin --user-option",
+            "python -m {module}.extra --from-stdin",
+            "python -m user.monitor --from-stdin",
+            "python -m {module} --from-stdin; echo keep",
+            "python -m {module} --from-stdin&&echo keep",
+            "python -m {module} --from-stdin>keep",
+            "python -m {module} --from-stdin # keep",
+            "env python -m {module} --from-stdin",
+            "python;python -m {module} --from-stdin",
+            "python\n-m {module} --from-stdin",
+            "$(printf python) -m {module} --from-stdin",
+            "/custom/*/python -m {module} --from-stdin",
+            "~/bin/python -m {module} --from-stdin",
+            "/custom/{{one,two}}/python -m {module} --from-stdin",
+            r"custom\python -m {module} --from-stdin",
+            r"'custom\python' -m {module} --from-stdin",
+            "python -m ctx.adapters.claude_code.query_handler --from-stdin",
+        ],
+    )
+    @pytest.mark.parametrize("flat", [False, True])
+    def test_upgrade_preserves_user_commands(
+        self,
+        tmp_path: Path,
+        command: str,
+        flat: bool,
+    ) -> None:
+        path = tmp_path / "settings.json"
+        handler = {
+            "type": "command",
+            "command": command.format(module="ctx.adapters.claude_code.hooks.context_monitor"),
+            "timeout": 23,
+        }
+        group = handler if flat else {"matcher": "Read", "hooks": [handler]}
+        path.write_text(
+            json.dumps({"hooks": {"PostToolUse": [group]}}),
+            encoding="utf-8",
+        )
+
+        installed = inject_hooks.install_hooks_file(path, str(tmp_path / "ctx"))
+
+        assert group in installed["hooks"]["PostToolUse"]
+
     def test_locked_read_modify_write_preserves_concurrent_union(self, tmp_path: Path) -> None:
         from ctx.adapters.hook_config import update_json_object_locked
 

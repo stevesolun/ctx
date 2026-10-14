@@ -2755,6 +2755,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     raw_argv = sys.argv[1:] if argv is None else list(argv)
     args = parser.parse_args(raw_argv)
+    try:
+        _resolve_provider_key_env_name(args.provider_key_env_name, args.model, args.model_provider)
+    except ValueError as exc:
+        print(f"  [warn] {exc}", file=sys.stderr)
+        return 1
     explicit_install_modes = tuple(
         getattr(args, field_name) for field_name in _INSTALL_CONSENT_ARGUMENTS
     )

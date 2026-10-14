@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import stat
 from copy import deepcopy
@@ -241,18 +242,37 @@ def merge_hook_events(existing: JsonObject, new_hooks: JsonObject) -> JsonObject
     return existing
 
 
-def invokes_python_module(command: object, module: str) -> bool:
-    """Recognize a generated ``python -m module`` command across host OSes."""
+def invokes_python_module(
+    command: object,
+    module: str,
+    *,
+    arguments: tuple[str, ...] = (),
+) -> bool:
+    """Recognize a generated Python module command with exact arguments."""
 
     if not isinstance(command, str) or not isinstance(module, str) or not module:
         return False
     for posix in (True, False):
         try:
-            parts = shlex.split(command, posix=posix)
+            lexer = shlex.shlex(command, posix=posix, punctuation_chars=True)
+            lexer.whitespace_split = True
+            lexer.commenters = ""
+            parts = list(lexer)
         except ValueError:
             continue
-        normalized = [part.strip('"') for part in parts]
-        if len(normalized) == 3 and normalized[1:] == ["-m", module]:
+        normalized = parts if posix else [part.strip('"') for part in parts]
+        if not normalized or normalized[1:] != ["-m", module, *arguments]:
+            continue
+        if any(character in command for character in "\r\n$`*?[]{}~") and command != shlex.join(
+            normalized
+        ):
+            continue
+        windows_path = re.match(r"^(?:[A-Za-z]:[\\/]|\\\\)", normalized[0]) is not None
+        if not posix and not windows_path:
+            continue
+        executable_path = normalized[0].replace("\\", "/") if windows_path else normalized[0]
+        executable = executable_path.rsplit("/", 1)[-1]
+        if re.fullmatch(r"(?:python|pypy)(?:\d+(?:\.\d+)*)?(?:\.exe)?", executable, re.I):
             return True
     return False
 
@@ -262,6 +282,7 @@ def remove_python_module_handlers(
     *,
     event_name: str,
     module: str,
+    arguments: tuple[str, ...] = (),
 ) -> JsonObject:
     """Remove prior generated handlers so interpreter/config changes replace them."""
 
@@ -277,7 +298,7 @@ def remove_python_module_handlers(
     retained_groups: list[object] = []
     for raw_group in raw_groups:
         assert isinstance(raw_group, dict)
-        if invokes_python_module(raw_group.get("command"), module):
+        if invokes_python_module(raw_group.get("command"), module, arguments=arguments):
             continue
         raw_handlers = raw_group.get("hooks")
         if raw_handlers is None:
@@ -288,7 +309,7 @@ def remove_python_module_handlers(
             handler
             for handler in raw_handlers
             if isinstance(handler, dict)
-            and not invokes_python_module(handler.get("command"), module)
+            and not invokes_python_module(handler.get("command"), module, arguments=arguments)
         ]
         if retained_handlers:
             raw_group["hooks"] = retained_handlers

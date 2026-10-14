@@ -1796,6 +1796,7 @@ def test_custom_model_rejects_an_invalid_environment_name_without_echoing_it(
     tmp_path: Path,
     monkeypatch,
     capsys,
+    _mock_install_policy_store: dict[str, object],
     env_name: str,
 ) -> None:
     monkeypatch.setattr(ci, "_claude_dir", lambda: tmp_path)
@@ -1806,10 +1807,75 @@ def test_custom_model_rejects_an_invalid_environment_name_without_echoing_it(
         == 1
     )
 
-    assert not (tmp_path / "ctx-model-profile.json").exists()
+    assert not any(tmp_path.iterdir())
+    assert _mock_install_policy_store["writes"] == []
     output = capsys.readouterr()
     assert "environment variable name" in output.err
     assert env_name not in output.out + output.err
+
+
+@pytest.mark.parametrize("model_mode", [None, "skip", "claude-code", "custom"])
+@pytest.mark.parametrize("explicit_consent", [False, True])
+@pytest.mark.parametrize("use_sys_argv", [False, True])
+def test_main_rejects_invalid_environment_names_before_all_setup_side_effects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    _mock_install_policy_store: dict[str, object],
+    model_mode: str | None,
+    explicit_consent: bool,
+    use_sys_argv: bool,
+) -> None:
+    claude = tmp_path / "claude"
+    monkeypatch.setattr(ci, "_claude_dir", lambda: claude)
+
+    def unexpected_setup(*args, **kwargs):
+        pytest.fail("invalid environment name reached setup")
+
+    for function_name in (
+        "ensure_directories",
+        "seed_user_config",
+        "write_knowledge_config",
+        "build_graph",
+        "install_hooks",
+        "install_codex_hook",
+        "write_model_profile",
+        "validate_model_connection",
+    ):
+        monkeypatch.setattr(ci, function_name, unexpected_setup)
+    env_name = "KEY=private-provider-value"
+    argv = [
+        "--api-key-env",
+        env_name,
+        "--hooks",
+        "--codex-hooks",
+        "--graph",
+        "--knowledge-mode",
+        "local",
+        "--validate-model",
+        "--force",
+    ]
+    if model_mode is not None:
+        argv.extend(["--model-mode", model_mode])
+    if model_mode == "custom":
+        argv.extend(["--model", "openai/test"])
+    if explicit_consent:
+        for flag in (
+            "--skill-install-consent",
+            "--agent-install-consent",
+            "--mcp-install-consent",
+        ):
+            argv.extend([flag, "preapproved-auto"])
+    monkeypatch.setattr(sys, "argv", ["ctx-init", *argv])
+
+    assert ci.main(None if use_sys_argv else argv) == 1
+
+    assert not claude.exists()
+    assert _mock_install_policy_store["writes"] == []
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert "environment variable name" in output.err
+    assert env_name not in output.err
 
 
 @pytest.mark.parametrize("supplied_on_cli", [True, False])
@@ -1840,6 +1906,9 @@ def test_wizard_rejects_invalid_environment_names_before_display_or_setup(
     output = capsys.readouterr()
     assert "environment variable name" in output.err
     assert secret not in output.out + output.err + "".join(prompts)
+    if supplied_on_cli:
+        assert not prompts
+        assert output.out == ""
     assert _mock_install_policy_store["writes"] == []
     assert not (tmp_path / "ctx-model-profile.json").exists()
     assert not (tmp_path / "skill-system-config.json").exists()

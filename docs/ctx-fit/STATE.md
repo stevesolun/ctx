@@ -11,6 +11,47 @@
 
 ## Checkpoint
 
+### Review-phase overlay, hook and setup repairs — 2026-10-14 (Asia/Jerusalem)
+
+- Started clean at `cfcc0328a93f0b872984433d9c3dbcf8619dcacf` in the active
+  delivery worktree for `codex/bring-your-own-knowledge`, PR #288. Source and
+  history inspection confirmed all three approved review findings before edits.
+- R1: the shared active wiki overlay writer now assigns a validated monotonic
+  `append_sequence`. Legacy manifests default to zero and retain their existing
+  timestamp/identifier ordering; new active mutations follow the existing packs
+  even with future or opaque timestamps, clock rollback, or identifier
+  collisions. Body, reference, prompt and metadata replacements, tombstones
+  and restoration share this rule. Malformed packs still fail closed. This
+  repairs sequential append precedence; concurrent append serialization was
+  not added or verified.
+- R2: shared hook matching accepts exact expected module arguments, and Claude
+  upgrades remove the previously generated context monitor's `--from-stdin`
+  invocation. Interpreter identity and shell boundaries preserve unrelated
+  commands, extra arguments, expansions and ambiguous relative backslashes.
+  Regression coverage checks flat/nested settings, quoted interpreters, other
+  events and user fields, and repeat-install byte/mtime stability.
+- R3: parsed provider environment names are validated immediately after
+  argument parsing, before consent policy access, wizard display or setup
+  writes. The existing bounded, non-echo validator and interactive revalidation
+  remain. Regressions cover explicit argument lists and `sys.argv`, all model
+  modes, explicit consent flags, and rejection without setup effects.
+- Independent source reviewers accepted the integrated repairs. After all
+  code edits, one focused invocation using `PYTHONDONTWRITEBYTECODE=1
+  PYTHONPATH="$PWD/src" python -m pytest -q --no-cov -p no:cacheprovider` ran
+  `src/tests/test_wiki_packs.py`, `src/tests/test_packed_authoring_updates.py`,
+  `src/tests/test_inject_hooks_security.py`,
+  `src/tests/test_codex_query_hook_install.py`, and `src/tests/test_ctx_init.py`:
+  **269 passed in 72.45 seconds**, exit zero, with one existing tar-extraction
+  deprecation warning. Timestamped-overlay variants also retain transactional
+  authoring, reference retirement and malformed-pack regression coverage.
+- This is focused macOS working-tree evidence. Static checks, broad gates,
+  authoritative preflight, commits, push and exact-head hosted checks remain
+  with the outer executor. No pipeline control, personal host change, merge,
+  tag, publication, paid evaluation or remote LFS action ran in this phase.
+  Keep PR #288 open and unmerged. The empty user-owned advisory contract and
+  approval-only installation remain; real-host UI acceptance, comparative
+  savings and the earlier hosted Linux crash cause remain unverified.
+
 ### Delivery monitor acknowledged; follow-up verification — 2026-10-14 (Asia/Jerusalem)
 
 - Follow-up commit `d2f00a02097db6a376ef9cc26d490a9cf31f316e` passed all

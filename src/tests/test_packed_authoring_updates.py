@@ -20,7 +20,12 @@ from ctx.core.graph import semantic_edges
 from ctx.core.wiki import wiki_bodies
 from ctx.core.wiki import wiki_graphify as wg
 from ctx.core.wiki import wiki_sync
-from ctx.core.wiki.wiki_packs import WikiPackManifestError, load_merged_wiki_pages
+from ctx.core.wiki.wiki_packs import (
+    WikiPackManifestError,
+    discover_wiki_pack_manifests,
+    load_merged_wiki_pages,
+    write_wiki_overlay_pack,
+)
 
 
 def _body(version: str) -> str:
@@ -75,8 +80,8 @@ def _mirror(root: Path, kind: str, *, prune: bool = False, dry_run: bool = False
     return module.mirror_one("author-tool", force=True, **kwargs)
 
 
-@pytest.fixture
-def authoring_wiki(tmp_path, monkeypatch):
+@pytest.fixture(params=[False, True], ids=["base-only", "timestamped-overlay"])
+def authoring_wiki(tmp_path, monkeypatch, request):
     original_wiki = wg.WIKI_DIR
     wiki = tmp_path / "wiki"
     wiki_sync.ensure_wiki(str(wiki))
@@ -113,6 +118,18 @@ def authoring_wiki(tmp_path, monkeypatch):
             ["ctx-wiki-graphify", "--wiki-dir", str(wiki), "--graph-only", "--full"],
         )
         wg.main()
+        if request.param:
+            packs_dir = wiki / "wiki-packs"
+            base = discover_wiki_pack_manifests(packs_dir)[0].manifest
+            write_wiki_overlay_pack(
+                pack_dir=packs_dir / "overlay-z-imported",
+                pack_id="overlay-z-imported",
+                base_export_id=base.base_export_id,
+                parent_export_id=base.base_export_id,
+                pages=load_merged_wiki_pages(packs_dir),
+                tombstones=[],
+                created_at="9999-12-31T23:59:59Z",
+            )
         return captured[-1]
 
     try:

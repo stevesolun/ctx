@@ -278,6 +278,12 @@ def install_hooks_file(settings_path: Path, ctx_dir: str) -> dict:
             "ctx.adapters.claude_code.hooks.bundle_orchestrator",
         ):
             remove_python_module_handlers(settings, event_name="PostToolUse", module=module)
+        remove_python_module_handlers(
+            settings,
+            event_name="PostToolUse",
+            module="ctx.adapters.claude_code.hooks.context_monitor",
+            arguments=("--from-stdin",),
+        )
         _validate_claude_settings(settings)
         cleaned = _remove_stale_hooks(settings)
         return merge_hooks(cleaned, make_hooks(ctx_dir))
