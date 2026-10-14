@@ -11,6 +11,24 @@
 
 ## Checkpoint
 
+### Test-phase formatting correction — 2026-10-14 (Asia/Jerusalem)
+
+- Started clean at detached `439ce44c7f4f6a2c016a327d1d3fab6228f9bfb5`.
+  The supplied authoritative rerun still stopped at Ruff formatting, naming
+  only `src/tests/test_inject_hooks_security.py`; the earlier manual repair
+  was incomplete. The prior assertion layout and `wiki_packs.py` formatting
+  passed according to the supplied rerun evidence.
+- Inspection confirmed the remaining three-line `handlers` comprehension.
+  Applied the exact single-line comprehension from the owner's read-only
+  formatter diff, preserving bracket lines, indentation and all assertions.
+  No product behavior changed; R1/R2/R3 repairs and earlier evidence remain.
+- Verified the exact text change by inspecting the diff. No formatter, linter,
+  static analysis or repeated tests ran, as explicitly requested for this
+  correction. The Ruff failure was not independently reproduced or reverified
+  here; the earlier **17 passed** results are prior-tree evidence only. The
+  outer executor owns formatting/tests and authoritative delivery verification.
+  PR #288 must remain open and unmerged.
+
 ### Test-phase mechanical formatting repair — 2026-10-14 (Asia/Jerusalem)
 
 - Started clean at `58274412bc82405393d626258f1195d0a52effd8` in the active

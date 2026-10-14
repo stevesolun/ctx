@@ -429,9 +429,7 @@ class TestStrictLockedUpdate:
         assert installed["model"] == original["model"]
         assert installed["hooks"]["PreToolUse"] == pre_tool
         handlers = [
-            handler
-            for group in installed["hooks"]["PostToolUse"]
-            for handler in group["hooks"]
+            handler for group in installed["hooks"]["PostToolUse"] for handler in group["hooks"]
         ]
         assert user_handler in handlers
         assert monitor not in handlers
