@@ -11,6 +11,27 @@
 
 ## Checkpoint
 
+### Delivery monitor acknowledged; follow-up verification — 2026-10-14 (Asia/Jerusalem)
+
+- Follow-up commit `d2f00a02097db6a376ef9cc26d490a9cf31f316e` passed all
+  **12 committed fast-gate lanes**: **9,637 tests passed, five skipped,
+  92.16% coverage**, overall 389.07 seconds. Evidence is
+  `.gate/local-fast.json`, whose committed head matches this result.
+- The previous run's already-green PR monitor expired while PR #288 remained
+  open: **ci-1**, file unspecified, **"PR was still open when CI monitoring
+  timed out"**. On October 14 the owner explicitly approved acknowledging
+  this finding, finishing verification and pushing the follow-up while
+  keeping the PR unmerged. `no-mistakes axi respond --step ci --action approve`
+  completed run `01M4RYN291ENH9TCQP59GKY7KM`; no abort, skip, merge or gate
+  bypass occurred. Its `passed` outcome acknowledges the old monitor, not
+  verification of the new follow-up or a repository merge.
+- The final authoritative preflight and hosted checks for the follow-up remain
+  outstanding at this checkpoint. Remote PR head is still `5ca2d97d`; `d2f00a02`
+  is its local descendant and preserves all earlier gate fixes. Only this
+  documentation checkpoint changed after the successful fast gate. Commit it,
+  then validate and push the same branch through the delivery pipeline.
+  Stop at exact-head `checks-passed`; no merge, release tag or PyPI publication.
+
 ### Post-CI security and crash-coverage follow-up — 2026-10-13 (Asia/Jerusalem)
 
 - The first delivery run `01M4RYN291ENH9TCQP59GKY7KM` reached
