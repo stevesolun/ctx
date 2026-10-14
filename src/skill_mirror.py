@@ -2,25 +2,10 @@
 """
 skill_mirror.py -- Mirror locally-installed short skills into the wiki.
 
-Context: `<wiki>/converted/<slug>/SKILL.md` is the canonical source that
-`python -m ctx.adapters.claude_code.install.skill_install` reads from. Long skills (> cfg.line_threshold lines,
-default 180) go through `batch_convert` into a `converted/<slug>/` with
-SKILL.md + references/*.md. Short skills skip the pipeline — their
-content lives ONLY at `~/.claude/skills/<slug>/SKILL.md` on the
-maintainer's machine, NOT in the wiki. That breaks portability:
-  - The shipped `graph/wiki-graph.tar.gz` lists them in `entities/skills/`
-    but the install CLI returns `not-in-wiki` because there's no
-    `converted/<slug>/SKILL.md`.
-  - A fresh-clone user can browse them in the catalog but can't install.
-
-This module scans `~/.claude/skills/<slug>/SKILL.md` and, for every slug
-that has no `<wiki>/converted/<slug>/` dir yet, writes a minimal
-`converted/<slug>/SKILL.md` containing the local body verbatim. Long
-skills with existing `converted/` are left untouched.
-
-The CLI is a one-shot admin operation. `python -m ctx.adapters.claude_code.install.skill_install` stays
-exactly as-is — its `_pick_source` already reads `converted/<slug>/
-SKILL.md` which is now populated for every skill.
+Metadata cards alone do not provide an installable skill body. This explicit
+maintenance command captures user-owned local bodies for later reuse; CTX
+does not ship those bodies. See ``docs/entity-onboarding.md#updates-and-removal``
+for the shared authoring, packed-body authority, and pruning contract.
 
 Usage:
     python -m skill_mirror                     # mirror everything missing
@@ -108,16 +93,16 @@ def mirror_one(
     """Mirror one local short skill's SKILL.md into the wiki.
 
     Behaviour:
-      - `<wiki>/converted/<slug>/` already exists AND not force: return
-        `skipped-existing-pipeline`. The long-skill pipeline owns this
-        dir; we must not overwrite its SKILL.md with the raw body.
+      - Existing converted content is read from active packs when present,
+        otherwise from the loose directory. Without force, an identical body
+        returns `unchanged`; a different body returns
+        `skipped-existing-pipeline` to protect converted material.
       - Local skill body exceeds `line_threshold`: return
         `skipped-too-long`. Those belong in the pipeline, not here.
       - Slug fails `validate_skill_name`: return `skipped-invalid`.
       - `~/.claude/skills/<slug>/SKILL.md` missing: return `not-found`.
-      - Otherwise: write `<wiki>/converted/<slug>/SKILL.md` with the
-        body verbatim. Return `mirrored` (or `unchanged` when the
-        destination already matches byte-for-byte and force is off).
+      - Otherwise: publish the body through `replace_skill_body`, preserving
+        the authority boundary described in the onboarding guide.
     """
     try:
         validate_skill_name(slug)
@@ -233,7 +218,7 @@ def mirror_all(
     force: bool = False,
     dry_run: bool = False,
 ) -> list[MirrorResult]:
-    """Mirror every short local skill that has no wiki converted/ dir."""
+    """Mirror short local skills using one validated comparison snapshot."""
     results: list[MirrorResult] = []
     snapshot = WikiBodySnapshot(wiki_dir)
     for path in _iter_local_skill_dirs(skills_dir):

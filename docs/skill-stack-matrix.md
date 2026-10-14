@@ -41,9 +41,9 @@ Each entry:
 | pptx | (any -- triggered by user request) | 2 | no | graph/wiki or local skill path |
 | xlsx | (any -- triggered by user request) | 2 | no | graph/wiki or local skill path |
 
-> Note: document skills are demand-loaded, not stack-loaded. They activate on user
-> request ("make a presentation") not on repo content. The router keeps them in a
-> "standby" pool -- not loaded into context, but available for instant load.
+> These proposed mappings describe demand-based selection (for example, "make a
+> presentation"), not an implemented standby pool. Supply any such tools in your
+> own knowledge; see the [recommendation flow](skill-router/index.md#flow).
 
 ### Frontend Skills
 

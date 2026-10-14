@@ -40,10 +40,9 @@ ctx/
    [author or import your own records](../entity-onboarding.md).
 2. Ask `ctx recommend "review a Python API"`, call `ctx__recommend_bundle`
    through MCP, or use a connected native host's prompt events.
-3. The shared engine ranks the user graph/wiki with relevance and availability
-   filters. It returns at most five tools total across skills, agents, and MCP
-   servers, including useful tools that are not yet installed. Selected,
-   rejected, and active context can suppress already-considered tools.
+3. The shared engine applies the
+   [context and availability policy](../harness/attaching-to-hosts.md#2-python-library-path)
+   to return a bounded mixed shortlist. An empty result is valid.
 4. The host presents the bounded suggestions. Native hooks expose only bounded
    identifiers, matching tags, and availability. Graph content is untrusted
    data and grants no installation, execution, activation, or unload authority.

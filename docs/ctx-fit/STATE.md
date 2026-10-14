@@ -11,6 +11,67 @@
 
 ## Checkpoint
 
+### Documentation-phase reconciliation — 2026-10-14 (Asia/Jerusalem)
+
+- Reviewed `11b582a7cd4d549f1e83c412e04421bcc9c3fc28` through detached
+  `a6c413086a04509d77f51553ece35ba1e8790a4c`. The preceding test phase's
+  uncommitted checkpoint below was already present and is preserved.
+- Corrected owner documentation for setup name validation, private wiki paths,
+  Fit baseline abstention, clean-host fixture coverage, importer permissions,
+  and source-checkout toolbox templates. Replaced stale recommendation and
+  shipped-corpus prose in secondary guides and documentation comments with
+  pointers to the applicable owners. No executable behavior or tests changed.
+- Re-read the edits against source and reviewed their combined diff, including
+  an independent documentation pass. No unresolved documentation finding
+  remains. No tests, static gates, pipeline controls or delivery actions ran
+  in this phase; earlier evidence retains its stated scope and freshness.
+  The outer executor owns remaining verification and delivery. Keep PR #288
+  open and unmerged; the historical Linux exception remains undiagnosed.
+
+### Empty-wiki repair verified with product evidence — 2026-10-14 (Asia/Jerusalem)
+
+- Started clean at detached `a6c413086a04509d77f51553ece35ba1e8790a4c`.
+  The outer executor supplied successful `scripts/no_mistakes_run.sh test`
+  baseline evidence. Only Wiki copy, its regression assertions and this
+  checkpoint changed since the preceding focused acceptance round; unchanged
+  security/crash suites and broad gates were not repeated in this test phase.
+- With `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD/src" python -m pytest -q
+  --no-cov -p no:cacheprovider`, the exact
+  `src/tests/test_ctx_monitor.py::test_render_wiki_index_empty_when_no_entities`
+  selector passed in 0.56s. A second invocation of
+  `src/tests/test_ctx_monitor.py::test_render_docs_lists_repo_docs` and
+  `src/tests/test_ctx_monitor.py::test_render_docs_falls_back_to_public_docs`
+  passed both checks in 0.46s.
+- Fresh Chromium evidence against the production local monitor HTTP server
+  shows the corrected empty Wiki at desktop and 390px mobile widths, zero
+  entities from `/api/entities/search.json`, no retired archive instruction,
+  and no horizontal mobile overflow. Clicking the exact onboarding link opens
+  `/docs`; its entity-onboarding link exposes authoring instructions and the
+  explicit installation-consent boundary. No browser errors or external
+  requests were observed. The initial capture script assumed an incorrect
+  documentation phrase; after inspecting the actual page, corrected that
+  evidence-only assertion and reran successfully. No product failure remained.
+- Replayed `verify_user_journey.py` against this exact head: empty offline
+  initialization, six synthetic mixed user records, graph indexing with
+  semantic embeddings explicitly disabled, preservation on reinitialization,
+  CLI/API/MCP/Codex-hook/Claude-hook parity at five mixed suggestions, unavailable
+  eligibility, and no-match abstention all passed. Legacy preapproval plus
+  `manage` mode changed no tool, consent or knowledge files. Only local
+  telemetry appended; the Python socket audit guard observed no network
+  attempts. Disposable profiles and the local server were cleaned up.
+- New evidence is under
+  `/var/folders/cj/j956f9v920b8wk3wvd8ms2nh0000gn/T/no-mistakes-evidence/01M4X415NWZ7X3A5ZC4N4807RC/a6c41308-retest/`:
+  desktop/mobile Wiki, local Docs and entity-onboarding screenshots and HTML;
+  `empty-wiki-api.json`, `visual-evidence-summary.json`, `advisory-cli.txt`,
+  `user-journey.txt`, `user-journey.json`, and both reproducible Python probes.
+  Earlier pre-fix evidence remains untouched. Only this checkpoint changed
+  in the worktree; no source/test repair was needed.
+- This is local dashboard and source-process evidence, not actual Codex/Claude
+  UI acceptance, installed-distribution or hosted proof, measured savings, or
+  a diagnosis of the historical Linux exception. No static checks, pipeline
+  control or delivery actions ran. The outer executor owns remaining phases;
+  keep PR #288 open and unmerged.
+
 ### Empty-wiki onboarding repair — 2026-10-14 (Asia/Jerusalem)
 
 - Resumed detached `365f71111219117772f6fe5b45f515436e87ec17` with the

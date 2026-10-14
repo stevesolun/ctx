@@ -112,8 +112,9 @@ and discovered test command alone do not supply representative Fit tasks.
 repository, not to the index, not to any ref.
 
 Fit has no default candidate catalog. Supply a local JSON file with the skill
-material you want to compare; without it, planning reports no candidates and
-evaluation abstains. `--catalog` alone also produces a free plan. For example,
+material you want to compare; without it, planning retains the current-setup
+baseline when reproducible but proposes no new capabilities, and evaluation abstains.
+`--catalog` alone also produces a free plan. For example,
 save this as `my-fit.json`:
 
 ```json

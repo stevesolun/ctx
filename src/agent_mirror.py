@@ -2,20 +2,10 @@
 """
 agent_mirror.py -- Mirror locally-installed agent bodies into the wiki.
 
-Context: ``entities/agents/<slug>.md`` in the wiki is a metadata card —
-title, tags, quality, backlinks — but NOT the agent's prompt body.
-The live body lives at ``~/.claude/agents/<slug>.md`` which is absent
-from the wiki. That breaks portability: a fresh user cloning the repo
-has the card but no agent to install.
-
-This module scans ``~/.claude/agents/*.md``, keeps files that expose a
-Claude-Code agent frontmatter (``name:`` + ``description:``), and
-writes each body verbatim to ``<wiki>/converted-agents/<slug>.md`` —
-a parallel structure to ``<wiki>/converted/<slug>/`` which already
-holds the canonical skill bodies.
-
-The CLI is a one-shot admin operation. ``python -m ctx.adapters.claude_code.install.agent_install`` consumes
-the mirrored files at install time.
+Metadata cards alone do not provide an agent prompt. This explicit maintenance
+command captures user-owned local prompts for later reuse; CTX does not ship
+those prompts. See ``docs/entity-onboarding.md#updates-and-removal`` for the
+shared authoring, packed-body authority, and pruning contract.
 
 Usage:
     python -m agent_mirror                     # mirror everything that changed
@@ -154,10 +144,10 @@ def mirror_one(
     dry_run: bool = False,
     _snapshot: WikiBodySnapshot | None = None,
 ) -> MirrorResult:
-    """Mirror one live agent body into the wiki's converted-agents dir.
+    """Publish one live agent body through the shared wiki body writer.
 
-    Returns an ``unchanged`` result when the destination already has
-    identical content. ``force=True`` rewrites regardless.
+    Compare active packed content when present, otherwise the loose mirror.
+    Identical content returns ``unchanged``; ``force=True`` rewrites it.
     """
     try:
         validate_skill_name(slug)

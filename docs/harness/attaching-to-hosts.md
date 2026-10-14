@@ -302,6 +302,11 @@ Returned rows include availability metadata (`installable`, `load_status`, and
 `source_path`) so hosts can distinguish local wiki entries from manual or
 external-install rows.
 
+In the user configuration, `resolver.recommendation_top_k` sets the default
+and ceiling for the mixed shortlist; `resolver.recommendation_min_normalized_score`
+drops weak graph matches. These tune advisory selection, not execution permission.
+The default values live in `src/ctx/config.json` and are validated by `ctx_config`.
+
 `recommend_related()` returns only rows that are locally installable or have a
 non-empty `install_command`; an `available` status alone is insufficient.
 It applies this filter before the requested `top_n` limit, so fewer results
@@ -491,6 +496,13 @@ python -m ctx.adapters.loopflow \
 Other harness matching hints use the same names as the install flow:
 `--harness-autonomy`, `--harness-verify`, `--harness-attach-mode`, and
 `--api-key-env`.
+
+For `ctx-init` custom-model onboarding, `--api-key-env` takes a variable name,
+not its secret value: 1–128 ASCII characters, starting with a letter or `_`,
+followed by letters, digits, or `_`. A blank wizard answer supports local/no-key
+models. CTX validates an explicit name before displaying the wizard and validates
+the wizard answer before continuing. An invalid name exits with status `1`
+without printing it or writing consent, model-profile, or configuration files.
 
 Generic agent loops can import the same adapter directly:
 

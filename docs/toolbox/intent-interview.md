@@ -1,8 +1,10 @@
 # Intent interview
 
-This optional compatibility utility has historical named presets. CTX no longer
-seeds their definitions or supplies their agents/skills: initialize and import
-your own toolbox definitions first. A preset name is not an installed tool.
+This optional compatibility utility has historical named presets. In an
+installed package, initialize and import your own toolbox definitions first.
+When run from a source checkout, explicit `--apply` can fill missing selected
+definitions from `docs/toolbox/templates/`; existing definitions are preserved.
+Those templates declare tool names and do not supply or install agents/skills.
 
 [`src/intent_interview.py`](https://github.com/stevesolun/ctx/blob/main/src/intent_interview.py)
 bootstraps your toolbox set via a short, skippable interview.

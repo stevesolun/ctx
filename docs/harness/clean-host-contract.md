@@ -17,10 +17,14 @@ contract stabilizes.
 - The installed wheel starts its monitor on loopback under the isolated temp
   home, and bounded HTTP checks cover `/`, `/status`, `/api/status.json`, and
   `/api/sessions.json` without exposing the caller's home or checkout path.
-- `ctx-init --hooks` writes Claude settings only under an isolated temp home.
-- A deterministic fake Claude host reads the generated settings and executes
-  the installed PostToolUse and Stop hook commands without calling Anthropic
-  APIs.
+- `ctx-init --hooks --codex-hooks` writes both hosts' hook configuration under an
+  isolated temp home, creates the wiki schema and an empty graph, and leaves
+  `ctx recommend` with zero results.
+- A synthetic user graph supplies one skill, one agent and one MCP record.
+  The installed CLI returns all three, and deterministic fake Claude and
+  Codex hosts produce byte-identical advisory prompt-hook envelopes with an
+  approval notice. The fake Claude host also executes the installed
+  PostToolUse and Stop commands without calling Anthropic APIs.
 - With `--run-live-claude`, a real Claude Code host can be exercised behind an
   explicit quota acknowledgement, non-spending preflights, and a hard budget
   cap. Hook execution is verified through a JSONL sentinel written by injected
@@ -34,9 +38,8 @@ contract stabilizes.
 
 ## What It Skips
 
-- It does not fetch a tool corpus. `ctx-init --graph` now creates an empty
-  local structure unless a user explicitly supplies an archive source.
-  User archive imports and populated graph behavior need their own fixtures.
+- It does not fetch a tool corpus or exercise user archive imports. Its
+  populated graph is synthetic local metadata, not an imported tool collection.
 - It does not execute hooks inside a live Claude Code process by default. The
   live host path is opt-in because it can consume Anthropic or provider quota.
 - It does not connect to a real third-party MCP server.

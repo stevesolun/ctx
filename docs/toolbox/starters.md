@@ -102,5 +102,5 @@ python -m toolbox activate ship-it
 ```
 
 The historical [Intent interview](intent-interview.md) presets reference these
-names; they do not supply missing tool definitions or capabilities. Review and
-create the named definitions yourself before expecting activation.
+names. That guide documents when explicit application can read the checkout's
+templates and when imported definitions are required.

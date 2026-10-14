@@ -23,8 +23,8 @@ domains. A control in one domain does not make another domain trusted.
 
 ctx aims to:
 
-1. keep recommendations advisory until a user or host explicitly selects an
-   execution path;
+1. keep recommendations advisory, with installation requiring explicit user
+   approval;
 2. make remote harness source revisions reproducible by default;
 3. avoid passing ambient credentials into cataloged harness commands;
 4. keep the monitor local by default and disable remote mutations;
@@ -54,9 +54,11 @@ prove that the referenced code is safe. Graph errors are handled as advisory
 warnings rather than as permission to execute.
 
 A recommendation does not run an `install_command`, clone a repository, launch
-an MCP server, or execute harness setup. Execution begins only through a
-separate installer or runtime operation selected by the user or host. The
-harness installer then has additional explicit gates:
+an MCP server, or execute harness setup. The shared advisory path also does
+not activate or unload tools, and legacy per-kind preapproval does not
+authorize installation through it. Installation requires a separate operation
+with explicit user approval. The harness installer then has additional
+explicit gates:
 
 - local paths and `file://` sources require `--allow-local-source`;
 - a remote source without a full commit SHA requires
@@ -195,6 +197,9 @@ alternate-stream syntax, and case-insensitive collisions.
 The retained Design.md maintenance importer requires an explicitly reviewed
 source record, legal evidence, body digests, and a registered full-manifest
 binding. Its former source record and corpus are no longer distributed.
+When a destination needs writing, the importer replaces it atomically: new
+files use owner-only `0600`, and replacement preserves the existing mode except
+for removing world-write permission.
 
 Metadata can affect ranking, explanations, availability labels, displayed
 links, and later operator decisions. Malicious or inaccurate metadata can
